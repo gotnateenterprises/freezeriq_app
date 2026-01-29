@@ -1,0 +1,195 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@theme {
+  --color-primary: #10b981;
+  --color-secondary: #6366f1;
+}
+
+@layer utilities {
+  .glass-panel {
+    background-color: rgba(255, 255, 255, 0.95);
+    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(24px);
+    border: 1px solid #e2e8f0;
+    /* slate-200 */
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  }
+
+  .dark .glass-panel {
+    background-color: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+  }
+
+  .glass-sidebar {
+    background-color: rgba(255, 255, 255, 0.95);
+    -webkit-backdrop-filter: blur(32px);
+    backdrop-filter: blur(32px);
+    border-right: 1px solid #cbd5e1;
+    /* slate-300 for distinct separation */
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.02);
+  }
+
+  .dark .glass-sidebar {
+    background-color: rgba(15, 23, 42, 0.85);
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .shadow-soft {
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+  }
+
+  .shadow-card {
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
+  }
+
+  .input-modern {
+    background-color: #f8fafc;
+    border: 1px solid transparent;
+    border-radius: 0.75rem;
+    transition: all 0.2s;
+  }
+
+  .dark .input-modern {
+    background-color: #1e293b;
+    color: #f8fafc;
+  }
+
+  /* Robust fallback for all inputs in dark mode */
+  .dark input,
+  .dark select,
+  .dark textarea {
+    color: #f1f5f9;
+    /* Slate 100 */
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .dark input:not([type="checkbox"]):not([type="radio"]),
+  .dark select,
+  .dark textarea {
+    background-color: #0f172a;
+    /* Slate 900 */
+  }
+
+  .input-modern:focus {
+    background-color: #ffffff;
+    border-color: #c7d2fe;
+    box-shadow: 0 0 0 4px rgba(224, 231, 255, 0.5);
+    outline: none;
+  }
+
+  .dark .input-modern:focus {
+    background-color: #0f172a;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.3);
+  }
+
+  /* Robust Dark Mode Overrides (Bypassing Tailwind Utility Engine issues) */
+  .dark .text-adaptive {
+    color: #f1f5f9 !important;
+    /* Slate 100 */
+  }
+
+  .dark .text-adaptive-subtle {
+    color: #94a3b8 !important;
+    /* Slate 400 */
+  }
+
+  .dark .bg-adaptive {
+    background-color: rgba(15, 23, 42, 0.6) !important;
+    /* Slate 900+opacity */
+    border-color: rgba(255, 255, 255, 0.1) !important;
+  }
+}
+
+/* Base Styles */
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+/* Support both system preference and manual .dark class */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Print Styles */
+@media print {
+
+  aside,
+  nav,
+  .sidebar {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background-color: white;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+
+  @page {
+    margin: 0.5cm;
+  }
+
+  /* Recipe Print Sheet Styles */
+  body.printing-recipes>*:not(.recipe-print-sheet) {
+    display: none !important;
+  }
+
+  body.printing-recipes .recipe-print-sheet {
+    display: block !important;
+    padding: 1cm;
+  }
+
+  .recipe-print-sheet {
+    display: none;
+  }
+
+  body.printing-recipes .recipe-print-sheet table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  body.printing-recipes .recipe-print-sheet tr {
+    min-height: 2.5in;
+    page-break-inside: avoid;
+  }
+
+  body.printing-recipes .recipe-print-sheet td,
+  body.printing-recipes .recipe-print-sheet th {
+    border: 2px solid black !important;
+    padding: 12px;
+  }
+}

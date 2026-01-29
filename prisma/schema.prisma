@@ -1,0 +1,393 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// 0. SYSTEM SETTINGS (Key-Value Store)
+// ==========================================
+
+model SystemSetting {
+  key   String @id
+  value String
+  updated_at DateTime @default(now())
+
+  @@map("system_settings")
+}
+
+model Integration {
+  provider      String   @id // 'square', 'qbo'
+  access_token  String
+  refresh_token String?
+  expires_at    DateTime?
+  realm_id      String?  // For QBO Company ID
+  updated_at    DateTime @default(now())
+
+  @@map("integrations")
+}
+
+// ==========================================
+// 1. CORE CULINARY MODULE
+// ==========================================
+
+model Supplier {
+  id            String       @id @default(uuid())
+  name          String
+  contact_email String?
+  logo_url      String?
+  
+  // Extended Details
+  website_url       String?
+  phone_number      String?
+  address           String?
+  billing_address   String?
+  account_number    String?
+  payment_terms     String? // e.g. "Net 30"
+  
+  salesperson_name  String?
+  salesperson_email String?
+  salesperson_phone String?
+
+  ingredients   Ingredient[]
+
+  @@map("suppliers")
+}
+
+model Ingredient {
+  id            String    @id @default(uuid())
+  supplier_id   String?
+  name          String
+  sku           String?
+  cost_per_unit Decimal   @db.Decimal(10, 4)
+  unit          String
+  stock_quantity Decimal  @default(0) @db.Decimal(10, 4)
+
+  // Purchase Logic
+  purchase_unit       String?  // e.g. "Case"
+  purchase_quantity   Decimal? @default(1) @db.Decimal(10, 4) // e.g. 20 (lbs per Case)
+  purchase_cost       Decimal? @db.Decimal(10, 4) // e.g. 50.00 (Price per Case)
+  
+  updated_at    DateTime? @default(now())
+
+  supplier Supplier? @relation(fields: [supplier_id], references: [id])
+  used_in  RecipeItem[]
+
+  @@map("ingredients")
+}
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String
+  parent_id String?
+  
+  parent    Category?  @relation("CategoryHierarchy", fields: [parent_id], references: [id])
+  children  Category[] @relation("CategoryHierarchy")
+  recipes   Recipe[]
+
+  @@map("categories")
+}
+
+enum RecipeType {
+  prep
+  menu_item
+}
+
+model Recipe {
+  id                   String       @id @default(uuid())
+  name                 String
+  sku                  String?      @unique
+  type                 RecipeType
+  base_yield_qty       Decimal      @db.Decimal(10, 2)
+  base_yield_unit      String
+  storage_instructions String?
+  shelf_life_days      Int?
+  
+  category_id          String? // Deprecated: Migrating to M-N
+  // category             Category?    @relation(fields: [category_id], references: [id])
+  categories           Category[]
+  
+  // External Integrations
+  dcg_id               String?      @unique // Date Code Genie ID
+
+  label_text           String?      // Flattened ingredients list for labels
+  allergens            String?      // Comma-separated or serialized allergens
+  instructions         String?      // Recipe preparation instructions
+  macros               String?      // Nutritional information (e.g. "Cals: 500...")
+  
+  // Relations
+  parent_items  RecipeItem[] @relation("ChildRecipe")
+  child_items   RecipeItem[] @relation("ParentRecipe")
+  bundle_contents BundleContent[]
+
+  @@map("recipes")
+}
+
+enum ItemType {
+  ingredient
+  recipe
+}
+
+model RecipeItem {
+  id              String   @id @default(uuid())
+  parent_recipe_id String
+  
+  // Polymorphic Relation: One of these is set, not both
+  child_recipe_id      String?
+  child_ingredient_id  String?
+
+  quantity        Decimal  @db.Decimal(10, 4)
+  unit            String
+
+  // NEW: Sub-Recipe / Batch Sectioning
+  is_sub_recipe   Boolean  @default(false)
+  section_name    String?
+  section_batch   Decimal? @default(1.0) @db.Decimal(10, 2)
+
+  parent_recipe    Recipe      @relation("ParentRecipe", fields: [parent_recipe_id], references: [id])
+  child_recipe     Recipe?     @relation("ChildRecipe", fields: [child_recipe_id], references: [id])
+  child_ingredient Ingredient? @relation(fields: [child_ingredient_id], references: [id])
+
+  @@map("recipe_items")
+}
+
+// ==========================================
+// 2. COMMERCIAL & CATALOG MODULE
+// ==========================================
+
+model Catalog {
+  id         String   @id @default(uuid())
+  name       String
+  start_date DateTime @db.Date
+  end_date   DateTime @db.Date
+  is_active  Boolean  @default(false)
+  bundles    Bundle[]
+
+  @@map("catalogs")
+}
+
+model Bundle {
+  id          String          @id @default(uuid())
+  catalog_id  String?
+  name        String
+  sku         String          @unique
+  description String?
+  price       Decimal?        @db.Decimal(10, 2)
+  serving_tier String         @default("family") // 'single', 'couple', 'family'
+  is_active    Boolean        @default(true)
+  
+  catalog     Catalog?        @relation(fields: [catalog_id], references: [id])
+  contents    BundleContent[]
+  order_items OrderItem[]
+
+  @@map("bundles")
+}
+
+model BundleContent {
+  id        String @id @default(uuid())
+  bundle_id     String
+  recipe_id     String
+  position      Int?
+  quantity      Float @default(1.0)
+  
+  bundle Bundle @relation(fields: [bundle_id], references: [id])
+  recipe Recipe @relation(fields: [recipe_id], references: [id])
+
+  @@map("bundle_contents")
+}
+
+// ==========================================
+// 3. ORDERS & SALES MODULE
+// ==========================================
+
+enum OrgType {
+  fundraiser_org
+  direct_customer
+}
+
+model Organization {
+  id            String  @id @default(uuid())
+  name          String
+  contact_name  String?
+  contact_email String?
+  contact_phone String?
+  type          OrgType @default(fundraiser_org)
+  shipping_address String?
+  notes         String?
+  orders        Order[]
+
+  // CRM Fields
+  external_id   String?   @unique
+  source        String?   @default("Manual")
+  status        String?   @default("Active")
+  tags          String[]  @default([])
+  inactive_reason String?
+
+
+  @@map("organizations")
+}
+
+enum OrderSource {
+  square
+  qbo
+  manual
+  meta
+}
+
+enum OrderStatus {
+  pending
+  production_ready
+  completed
+}
+
+model Order {
+  id              String       @id @default(uuid())
+  external_id     String       @unique
+  source          OrderSource
+  organization_id String?
+  customer_name   String?
+  shipping_address String?
+  delivery_sequence Int?      @default(0)
+  status          OrderStatus  @default(pending)
+  delivery_date   DateTime?    @db.Date
+  created_at      DateTime?    @default(now())
+  total_amount    Decimal      @default(0) @db.Decimal(10, 2)
+
+  organization Organization? @relation(fields: [organization_id], references: [id])
+  items        OrderItem[]
+
+  @@map("orders")
+}
+
+enum VariantSize {
+  serves_2
+  serves_5
+}
+
+model OrderItem {
+  id           String      @id @default(uuid())
+  order_id     String?
+  bundle_id    String?
+  quantity     Int
+  variant_size VariantSize @default(serves_5)
+
+  order  Order?  @relation(fields: [order_id], references: [id])
+  bundle Bundle? @relation(fields: [bundle_id], references: [id])
+
+  @@map("order_items")
+}
+
+// ==========================================
+// 4. PRODUCTION MODULE
+// ==========================================
+
+enum RunStatus {
+  planning
+  active
+  completed
+}
+
+model ProductionRun {
+  id       String        @id @default(uuid())
+  name     String
+  run_date DateTime      @db.Date
+  status   RunStatus     @default(planning)
+  tasks    ProductionTask[]
+
+  @@map("production_runs")
+}
+
+enum TaskStatus {
+  todo
+  in_progress
+  done
+}
+
+model ProductionTask {
+  id                String     @id @default(uuid())
+  production_run_id String?
+  item_id           String
+  item_type         ItemType
+  total_qty_needed  Decimal?   @db.Decimal(10, 2)
+  unit              String?
+  status            TaskStatus @default(todo)
+
+  production_run ProductionRun? @relation(fields: [production_run_id], references: [id])
+
+  @@map("production_tasks")
+}
+
+model Activity {
+  id          String   @id @default(uuid())
+  type        String   // 'comment', 'message', 'lead'
+  source      String   @default("meta")
+  external_id String   @unique
+  content     String
+  customer_name String?
+  customer_id   String?
+  timestamp     DateTime @default(now())
+  metadata      Json?    // For things like Post ID, Message ID details
+  status        String   @default("unread") // unread, read, archived
+
+  @@map("activities")
+}
+
+model AiFeedback {
+  id            String   @id @default(uuid())
+  recipe_name   String
+  recipe_json   Json
+  rating        Int      // 1 for Up, -1 for Down
+  feedback_text String?
+  created_at    DateTime @default(now())
+
+  @@map("ai_feedback")
+}
+
+// ==========================================
+// 5. DELIVERY & PACKAGING MODULE
+// ==========================================
+
+
+model PackagingItem {
+  id                String   @id @default(cuid())
+  name              String   // e.g. "Large Box (12x12)", "Small Box (8x8)"
+  quantity          Int      @default(0)
+  reorderUrl        String?  // Direct link to supplier
+  lowStockThreshold Int      @default(10)
+  
+  // For smart logic: 'large_box', 'small_box', 'tape', 'ice_pack', 'other'
+  type        String   @default("other") 
+  
+  // Relation to Label Templates (Optional default label for this box type)
+  defaultLabelId    String? 
+  defaultLabel      LabelTemplate? @relation("BoxDefaultLabel", fields: [defaultLabelId], references: [id])
+  
+  updatedAt         DateTime @updatedAt
+
+  @@map("packaging_items")
+}
+
+model LabelTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  width       Float    // in inches, e.g. 4.0
+  height      Float    // in inches, e.g. 6.0
+  elements    Json     // Array of Element objects { type, x, y, content, style }
+  isDefault   Boolean  @default(false)
+  
+  // Reverse relation for default link
+  packagingItems PackagingItem[] @relation("BoxDefaultLabel")
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("label_templates")
+}
+
