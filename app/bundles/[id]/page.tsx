@@ -27,7 +27,8 @@ export default async function BundleDetailPage({ params }: { params: Promise<{ i
                         base_yield_qty: Number(c.recipe.base_yield_qty)
                     }
                 })),
-                price: rawBundle.price ? Number(rawBundle.price) : null
+                price: rawBundle.price ? Number(rawBundle.price) : null,
+                stock_on_hand: Number(rawBundle.stock_on_hand)
             };
         }
     }

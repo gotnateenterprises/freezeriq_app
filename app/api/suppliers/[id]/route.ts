@@ -42,7 +42,9 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
                 logo_url: data.logo_url,
                 billing_address: data.billing_address,
                 account_number: data.account_number,
-                payment_terms: data.payment_terms
+                payment_terms: data.payment_terms,
+                portal_type: data.portal_type,
+                search_url_pattern: data.search_url_pattern
             }
         });
 

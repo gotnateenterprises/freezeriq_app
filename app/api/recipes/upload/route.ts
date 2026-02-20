@@ -59,9 +59,42 @@ export async function POST(req: NextRequest) {
                     logs.push(`Restored ${categories.length} categories.`);
                 }
 
-                // B. Restore Ingredients
+                // B. Restore Suppliers (must come before ingredients)
+                if (backup.data?.suppliers && Array.isArray(backup.data.suppliers)) {
+                    for (const sup of backup.data.suppliers) {
+                        await prisma.supplier.upsert({
+                            where: { id: sup.id },
+                            create: {
+                                id: sup.id,
+                                name: sup.name,
+                                contact_email: sup.contact_email,
+                                phone_number: sup.phone_number,
+                                website_url: sup.website_url,
+                                business_id: sup.business_id
+                            },
+                            update: {
+                                name: sup.name,
+                                contact_email: sup.contact_email
+                            }
+                        });
+                    }
+                    logs.push(`Restored ${backup.data.suppliers.length} suppliers.`);
+                }
+
+                // C. Restore Ingredients
                 if (ingredients && Array.isArray(ingredients)) {
                     for (const ing of ingredients) {
+                        // Check if supplier exists before trying to reference it
+                        let validSupplierId = null;
+                        if (ing.supplier_id) {
+                            const supplierExists = await prisma.supplier.findUnique({
+                                where: { id: ing.supplier_id }
+                            });
+                            if (supplierExists) {
+                                validSupplierId = ing.supplier_id;
+                            }
+                        }
+
                         await prisma.ingredient.upsert({
                             where: { id: ing.id },
                             create: {
@@ -69,8 +102,10 @@ export async function POST(req: NextRequest) {
                                 name: ing.name,
                                 cost_per_unit: ing.cost_per_unit,
                                 unit: ing.unit,
-                                stock_quantity: ing.stock_quantity,
-                                supplier_id: ing.supplier_id
+                                stock_quantity: ing.stock_quantity || 0,
+                                supplier_id: validSupplierId, // Only set if supplier exists
+                                business_id: ing.business_id,
+                                needs_review: ing.needs_review ?? true // Default to true if not specified in backup
                             },
                             update: {
                                 name: ing.name,
@@ -82,55 +117,112 @@ export async function POST(req: NextRequest) {
                     logs.push(`Restored ${ingredients.length} ingredients.`);
                 }
 
-                // C. Restore Recipes
-                if (recipes && Array.isArray(recipes)) {
-                    for (const r of recipes) {
-                        // 1. Upsert Recipe
-                        await prisma.recipe.upsert({
-                            where: { id: r.id },
+                // C2. Restore Packaging Items
+                if (backup.data?.packaging_items && Array.isArray(backup.data.packaging_items)) {
+                    for (const item of backup.data.packaging_items) {
+                        await prisma.packagingItem.upsert({
+                            where: { id: item.id },
                             create: {
-                                id: r.id,
-                                name: r.name,
-                                type: r.type,
-                                base_yield_qty: r.base_yield_qty,
-                                base_yield_unit: r.base_yield_unit,
-                                label_text: r.label_text,
-                                allergens: r.allergens,
-                                instructions: r.instructions,
-                                category_id: r.category_id, // Legacy support
-                                categories: {
-                                    connect: (r.categories || []).map((c: any) => ({ id: c.id }))
-                                }
+                                id: item.id,
+                                name: item.name,
+                                type: item.type,
+                                cost_per_unit: item.cost_per_unit || 0,
+                                quantity: item.quantity || 0,
+                                reorderUrl: item.reorderUrl,
+                                lowStockThreshold: item.lowStockThreshold || 10,
+                                business_id: item.business_id
                             },
                             update: {
-                                name: r.name,
-                                type: r.type,
-                                base_yield_qty: r.base_yield_qty,
-                                base_yield_unit: r.base_yield_unit,
-                                categories: {
-                                    set: (r.categories || []).map((c: any) => ({ id: c.id }))
-                                }
+                                name: item.name,
+                                type: item.type,
+                                cost_per_unit: item.cost_per_unit || 0,
+                                quantity: item.quantity || 0,
+                                reorderUrl: item.reorderUrl,
+                                lowStockThreshold: item.lowStockThreshold || 10
                             }
                         });
+                    }
+                    logs.push(`Restored ${backup.data.packaging_items.length} packaging items.`);
+                }
 
-                        // 2. Restore Recipe Items (Clear & Re-create)
-                        if (r.child_items) {
+                // D. Restore Recipes
+                if (recipes && Array.isArray(recipes)) {
+                    // PASS 1: Upsert All Recipe Headers (to ensure IDs exist)
+                    for (const r of recipes) {
+                        try {
+                            await prisma.recipe.upsert({
+                                where: { id: r.id },
+                                create: {
+                                    id: r.id,
+                                    name: r.name,
+                                    type: r.type,
+                                    base_yield_qty: r.base_yield_qty,
+                                    base_yield_unit: r.base_yield_unit,
+                                    label_text: r.label_text,
+                                    allergens: r.allergens,
+                                    instructions: r.instructions,
+                                    category_id: r.category_id,
+                                    categories: {
+                                        connect: (r.categories || []).map((c: any) => ({ id: c.id }))
+                                    }
+                                },
+                                update: {
+                                    name: r.name,
+                                    type: r.type,
+                                    base_yield_qty: r.base_yield_qty,
+                                    base_yield_unit: r.base_yield_unit,
+                                    categories: {
+                                        set: (r.categories || []).map((c: any) => ({ id: c.id }))
+                                    }
+                                }
+                            });
+
+                            // Clear existing items to prepare for fresh import
                             await prisma.recipeItem.deleteMany({ where: { parent_recipe_id: r.id } });
 
+                        } catch (err) {
+                            console.error(`Failed to upsert recipe ${r.name}:`, err);
+                            logs.push(`Error upserting ${r.name}`);
+                        }
+                    }
+
+                    // PASS 2: Create Relationships (Items)
+                    // Now that all recipes exist, we can safely link them.
+                    let restoredItems = 0;
+                    for (const r of recipes) {
+                        if (r.child_items) {
                             for (const item of r.child_items) {
-                                await prisma.recipeItem.create({
-                                    data: {
-                                        parent_recipe_id: r.id,
-                                        child_recipe_id: item.child_recipe_id,
-                                        child_ingredient_id: item.child_ingredient_id,
-                                        quantity: item.quantity,
-                                        unit: item.unit
+                                try {
+                                    // Verify target exists if it's a sub-recipe
+                                    if (item.child_recipe_id) {
+                                        const targetExists = await prisma.recipe.count({ where: { id: item.child_recipe_id } });
+                                        if (!targetExists) {
+                                            console.warn(`Skipping missing sub-recipe link: ${item.child_recipe_id} for ${r.name}`);
+                                            continue;
+                                        }
                                     }
-                                });
+
+                                    await prisma.recipeItem.create({
+                                        data: {
+                                            parent_recipe_id: r.id,
+                                            child_recipe_id: item.child_recipe_id,
+                                            child_ingredient_id: item.child_ingredient_id,
+                                            quantity: item.quantity,
+                                            unit: item.unit,
+                                            // Handle legacy fields if present in backup (optional)
+                                            is_sub_recipe: item.is_sub_recipe,
+                                            section_name: item.section_name,
+                                            section_batch: item.section_batch
+                                        }
+                                    });
+                                    restoredItems++;
+                                } catch (err) {
+                                    console.error(`Failed to link item for ${r.name}:`, err);
+                                }
                             }
                         }
                     }
-                    logs.push(`Restored ${recipes.length} recipes.`);
+                    logs.push(`Restored ${recipes.length} recipes and ${restoredItems} items.`);
                 }
 
                 return NextResponse.json({ success: true, message: "System Restored from Backup", logs });
@@ -248,7 +340,12 @@ export async function POST(req: NextRequest) {
                         ingId = existingIng.id;
                     } else {
                         const newIng = await prisma.ingredient.create({
-                            data: { name: ing.name, cost_per_unit: 0, unit: ing.unit }
+                            data: { 
+                                name: ing.name, 
+                                cost_per_unit: 0, 
+                                unit: ing.unit,
+                                needs_review: true // Mark for review since it's auto-created
+                            } as any
                         });
                         ingId = newIng.id;
                     }

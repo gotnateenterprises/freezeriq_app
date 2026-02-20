@@ -5,8 +5,8 @@ import { TokenManager } from '@/lib/auth/token_manager';
 export class QBOWrapper {
     private tokenManager: TokenManager;
 
-    constructor() {
-        this.tokenManager = new TokenManager('qbo');
+    constructor(businessId: string) {
+        this.tokenManager = new TokenManager('qbo', businessId);
     }
 
     async getClient(): Promise<any> {

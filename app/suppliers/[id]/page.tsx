@@ -27,7 +27,9 @@ export default function SupplierDetail({ params }: { params: Promise<{ id: strin
         salesperson_phone: '',
         billing_address: '',
         account_number: '',
-        payment_terms: ''
+        payment_terms: '',
+        portal_type: 'gfs_store',
+        search_url_pattern: ''
     });
 
     useEffect(() => {
@@ -47,7 +49,9 @@ export default function SupplierDetail({ params }: { params: Promise<{ id: strin
                     salesperson_phone: data.salesperson_phone || '',
                     billing_address: data.billing_address || '',
                     account_number: data.account_number || '',
-                    payment_terms: data.payment_terms || ''
+                    payment_terms: data.payment_terms || '',
+                    portal_type: data.portal_type || 'gfs_store',
+                    search_url_pattern: data.search_url_pattern || ''
                 });
                 setIsLoading(false);
             })
@@ -408,6 +412,38 @@ export default function SupplierDetail({ params }: { params: Promise<{ id: strin
                                             className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
                                         />
                                     </div>
+                                </div>
+                            </div>
+
+                            {/* Integration & Portals */}
+                            <div className="space-y-4">
+                                <h4 className="font-bold text-indigo-600 text-sm uppercase tracking-wide pt-4 border-t border-slate-100 dark:border-slate-700">Integration & Portals</h4>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Portal Type</label>
+                                        <select
+                                            value={editForm.portal_type}
+                                            onChange={e => setEditForm({ ...editForm, portal_type: e.target.value })}
+                                            className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                                        >
+                                            <option value="gfs_store">GFS Store</option>
+                                            <option value="sysco_shop">Sysco Shop</option>
+                                            <option value="usfoods_ordering">US Foods Ordering</option>
+                                            <option value="custom">Custom Portal</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Search URL Pattern</label>
+                                        <input
+                                            value={editForm.search_url_pattern}
+                                            onChange={e => setEditForm({ ...editForm, search_url_pattern: e.target.value })}
+                                            className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-xs"
+                                            placeholder="https://.../search?q={{query}}"
+                                        />
+                                    </div>
+                                    <p className="col-span-2 text-[10px] text-slate-400 italic">
+                                        Use `{"{{query}}"}` as a placeholder for the ingredient name to enable deep-linking from the Production Hub.
+                                    </p>
                                 </div>
                             </div>
 

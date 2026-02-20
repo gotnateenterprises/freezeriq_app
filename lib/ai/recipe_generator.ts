@@ -1,15 +1,17 @@
-
-import OpenAI from 'openai';
 import { PrismaClient } from '@prisma/client';
+import { getGeminiApiKey, callGemini } from './gemini';
 
 const prisma = new PrismaClient();
 
-// Initialize OpenAI only if key exists
-const getOpenAI = () => {
-    if (!process.env.OPENAI_API_KEY) {
-        throw new Error("Missing OPENAI_API_KEY");
+// Dynamically import and initialize OpenAI only when needed (reduces initial bundle size)
+// Dynamically import and initialize OpenAI only when needed (reduces initial bundle size)
+const getOpenAI = async (apiKey?: string | null) => {
+    const key = apiKey || process.env.OPENAI_API_KEY;
+    if (!key) {
+        throw new Error("Missing OPENAI_API_KEY. Please configure it in Settings or .env");
     }
-    return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const OpenAI = (await import('openai')).default;
+    return new OpenAI({ apiKey: key });
 };
 
 export interface GeneratedRecipe {
@@ -27,6 +29,11 @@ export interface GeneratedRecipe {
 }
 
 export class ViralChef {
+    private apiKey?: string | null;
+
+    constructor(apiKey?: string | null) {
+        this.apiKey = apiKey;
+    }
 
     // Main function to generate recipe
     async generateRecipe(vibe: string = "Trending"): Promise<GeneratedRecipe> {
@@ -55,8 +62,8 @@ export class ViralChef {
         // User Custom Preferences
         const userPrefs = preferences?.value || "Default: High-quality, viral freezer meals.";
 
-        // Format inventory for the prompt (Top 30 items to keep prompt concise)
-        const stockList = inventory.slice(0, 30).map(i => `- ${i.name} (In Stock: ${i.stock_quantity} ${i.unit})`).join('\n');
+        // Format inventory for the prompt (Top 50 items to give more variety)
+        const stockList = inventory.slice(0, 50).map(i => `- ${i.name} (In Stock: ${i.stock_quantity} ${i.unit})`).join('\n');
 
         // 2. Construct Prompt
         const prompt = `
@@ -98,15 +105,20 @@ export class ViralChef {
         `;
 
         // 3. Call AI
-        const openai = getOpenAI();
-        const completion = await openai.chat.completions.create({
-            model: "gpt-4o", // or gpt-3.5-turbo if 4o unavailable
-            messages: [{ role: "system", content: "You are a helpful JSON-speaking chef." }, { role: "user", content: prompt }],
-            response_format: { type: "json_object" }
+        const businessId = (inventory[0] as any)?.business_id; // Try to get from first item
+        const apiKey = await getGeminiApiKey(businessId || '');
+
+        if (!apiKey) {
+            throw new Error("Missing Gemini API Key. Please configure it in Settings.");
+        }
+
+        console.log(`[ViralChef] Generating recipe with Gemini for vibe: ${vibe}`);
+        const rawJson = await callGemini(apiKey, prompt, {
+            temperature: 0.9, // Higher for creativity
+            responseMimeType: 'application/json'
         });
 
-        const rawJson = completion.choices[0].message.content;
-        if (!rawJson) throw new Error("AI returned empty response");
+        if (!rawJson) throw new Error("Gemini returned empty response");
 
         const recipeData = JSON.parse(rawJson) as GeneratedRecipe;
 

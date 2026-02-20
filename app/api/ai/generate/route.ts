@@ -1,19 +1,31 @@
 
 import { NextResponse } from 'next/server';
 import { ViralChef } from '@/lib/ai/recipe_generator';
+import { prisma } from '@/lib/db';
+import { auth } from '@/auth';
+import { getGeminiApiKey } from '@/lib/ai/gemini';
 
 export async function POST(req: Request) {
     try {
         const { vibe } = await req.json();
 
-        if (!process.env.OPENAI_API_KEY) {
+        // Check for Tenant Key
+        const session = await auth();
+        let tenantKey = null;
+
+        if (session?.user?.businessId) {
+            tenantKey = await getGeminiApiKey(session.user.businessId);
+        }
+
+        // If no tenant key AND no system key, error out.
+        if (!tenantKey && !process.env.GEMINI_API_KEY) {
             return NextResponse.json(
-                { error: "OpenAI API Key is missing. Please add it to Settings." },
+                { error: "Gemini API Key is missing. Please add it to Settings." },
                 { status: 400 }
             );
         }
 
-        const chef = new ViralChef();
+        const chef = new ViralChef(tenantKey);
         const recipe = await chef.generateRecipe(vibe || "Trending");
 
         return NextResponse.json({ success: true, recipe });

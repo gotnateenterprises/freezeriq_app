@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Save, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -8,16 +8,25 @@ interface AddOrderModalProps {
     isOpen: boolean;
     onClose: () => void;
     bundles: any[];
+    initialCustomerName?: string;
+    initialCustomerId?: string;
 }
 
-export default function AddOrderModal({ isOpen, onClose, bundles }: AddOrderModalProps) {
+export default function AddOrderModal({ isOpen, onClose, bundles, initialCustomerName = '', initialCustomerId }: AddOrderModalProps) {
     const router = useRouter();
     const [isLoading, setIsLoading] = useState(false);
-    const [customerName, setCustomerName] = useState('');
+    const [customerName, setCustomerName] = useState(initialCustomerName);
     const [deliveryDate, setDeliveryDate] = useState('');
     const [items, setItems] = useState<{ bundle_id: string; quantity: number; variant_size: string }[]>([
         { bundle_id: '', quantity: 1, variant_size: 'serves_5' }
     ]);
+
+    // Update name if initialCustomerName changes
+    useEffect(() => {
+        if (initialCustomerName) {
+            setCustomerName(initialCustomerName);
+        }
+    }, [initialCustomerName]);
 
     if (!isOpen) return null;
 
@@ -48,6 +57,7 @@ export default function AddOrderModal({ isOpen, onClose, bundles }: AddOrderModa
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     customer_name: customerName,
+                    customer_id: initialCustomerId,
                     delivery_date: deliveryDate || null,
                     items
                 })

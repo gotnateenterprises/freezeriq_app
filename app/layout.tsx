@@ -1,33 +1,42 @@
-import { Plus_Jakarta_Sans } from "next/font/google";
+import { Plus_Jakarta_Sans, Playfair_Display, DM_Serif_Display, Outfit } from "next/font/google";
 import Sidebar from '@/components/Sidebar';
 import './globals.css';
 
 import { ThemeProvider } from '@/components/ThemeProvider';
+import TenantThemeProvider from '@/components/TenantThemeProvider';
+import { AuthProvider } from '@/components/AuthProvider';
+import { auth } from '@/auth';
 
-const jakarta = Plus_Jakarta_Sans({ subsets: ["latin"] });
+const jakarta = Plus_Jakarta_Sans({ subsets: ["latin"], variable: '--font-jakarta' });
+const playfair = Playfair_Display({ subsets: ["latin"], variable: '--font-playfair' });
+const dmSerif = DM_Serif_Display({ weight: '400', subsets: ["latin"], variable: '--font-dm-serif' });
+const outfit = Outfit({ subsets: ["latin"], variable: '--font-outfit' });
+
+import LayoutWrapper from '@/components/LayoutWrapper';
 
 export const metadata = {
-    title: 'FreezerIQ',
+    title: 'FreezerIQ™',
     description: 'Intelligence for your Kitchen.',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
+    const session = await auth();
+    const hasSession = !!session?.user;
+
     return (
         <html lang="en">
-            <body className={`${jakarta.className} antialiased bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 h-screen overflow-hidden transition-colors duration-300`}>
+            <body className={`${jakarta.variable} ${dmSerif.variable} ${outfit.variable} antialiased bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 h-screen overflow-hidden transition-colors duration-300`}>
                 <ThemeProvider>
-                    <div className="flex h-full print:block print:h-auto">
-                        <div className="print:hidden">
-                            <Sidebar />
-                        </div>
-                        <main className="flex-1 p-8 h-full overflow-y-auto overflow-x-hidden ml-[280px] print:ml-0 print:p-0 print:h-auto print:overflow-visible">
+                    <TenantThemeProvider />
+                    <AuthProvider session={session}>
+                        <LayoutWrapper hasSession={hasSession}>
                             {children}
-                        </main>
-                    </div>
+                        </LayoutWrapper>
+                    </AuthProvider>
                 </ThemeProvider>
             </body>
         </html>

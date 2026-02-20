@@ -3,7 +3,9 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Truck } from 'lucide-react';
+import { Truck, CheckCircle, Mail, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { useState } from 'react';
 import DeleteOrderButton from './DeleteOrderButton';
 
 export function OrdersTable({ orders }: { orders: any[] }) {
@@ -57,7 +59,58 @@ export function OrdersTable({ orders }: { orders: any[] }) {
                                 {order.status}
                             </span>
                         </td>
-                        <td className="px-6 py-5 text-right" onClick={(e) => e.stopPropagation()}>
+                        <td className="px-6 py-5 text-right space-x-2" onClick={(e) => e.stopPropagation()}>
+                            {order.rawStatus === 'pending' && (
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            const res = await fetch('/api/orders', {
+                                                method: 'PATCH',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ id: order.internalId, status: 'production_ready' })
+                                            });
+                                            if (res.ok) {
+                                                toast.success('Order marked as paid & ready for production');
+                                                router.refresh();
+                                            }
+                                        } catch (e) {
+                                            toast.error('Failed to update order');
+                                        }
+                                    }}
+                                    className="p-2 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors"
+                                    title="Mark Paid & Send to Production"
+                                >
+                                    <CheckCircle size={20} />
+                                </button>
+                            )}
+                            {order.rawStatus === 'delivered' && (
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            const res = await fetch('/api/email/send', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({
+                                                    to: order.customerEmail || '',
+                                                    template: 'thank_you',
+                                                    customerName: order.customer,
+                                                    organizationName: order.customer, // Using customer name as org name for now
+                                                    customerId: order.customerId
+                                                })
+                                            });
+                                            if (res.ok) {
+                                                toast.success('Thank you letter sent!');
+                                            }
+                                        } catch (e) {
+                                            toast.error('Failed to send thank you letter');
+                                        }
+                                    }}
+                                    className="p-2 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                    title="Send Thank You"
+                                >
+                                    <Mail size={20} />
+                                </button>
+                            )}
                             <DeleteOrderButton orderId={order.id} />
                         </td>
                     </tr>

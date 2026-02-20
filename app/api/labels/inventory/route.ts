@@ -3,8 +3,13 @@ import { prisma } from '@/lib/db';
 
 export async function GET() {
     try {
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        const businessId = session.user.businessId;
+
         const setting = await prisma.systemSetting.findUnique({
-            where: { key: 'label_inventory' }
+            where: { key: `label_inventory:${businessId}` }
         });
 
         const inventory = setting ? parseInt(setting.value) : 0;
@@ -16,11 +21,16 @@ export async function GET() {
 
 export async function POST(req: Request) {
     try {
-        const { action, quantity } = await req.json();
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        const businessId = session.user.businessId;
 
-        // Get current inventory
+        const { action, quantity } = await req.json();
+        const key = `label_inventory:${businessId}`;
+
         let setting = await prisma.systemSetting.findUnique({
-            where: { key: 'label_inventory' }
+            where: { key }
         });
 
         let currentInventory = setting ? parseInt(setting.value) : 0;
@@ -42,9 +52,9 @@ export async function POST(req: Request) {
 
         // Update or create setting
         await prisma.systemSetting.upsert({
-            where: { key: 'label_inventory' },
-            update: { value: currentInventory.toString(), updated_at: new Date() },
-            create: { key: 'label_inventory', value: currentInventory.toString() }
+            where: { key },
+            update: { value: currentInventory.toString(), updated_at: new Date(), business_id: businessId },
+            create: { key, value: currentInventory.toString(), business_id: businessId }
         });
 
         return NextResponse.json({ inventory: currentInventory });

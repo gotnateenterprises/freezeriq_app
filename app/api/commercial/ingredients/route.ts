@@ -1,11 +1,18 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { auth } from '@/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
     try {
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const ingredients = await prisma.ingredient.findMany({
+            where: { business_id: session.user.businessId },
             orderBy: { name: 'asc' },
             include: { supplier: true }
         });

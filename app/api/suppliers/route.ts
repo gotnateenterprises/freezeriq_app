@@ -1,10 +1,17 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { auth } from '@/auth';
 
 export async function GET() {
     try {
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const allSuppliers = await prisma.supplier.findMany({
+            where: { business_id: session.user.businessId },
             orderBy: { name: 'asc' },
             include: {
                 _count: {
@@ -26,6 +33,12 @@ export async function GET() {
 export async function POST(req: Request) {
     try {
         const data = await req.json();
+
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const supplier = await prisma.supplier.create({
             data: {
                 name: data.name,
@@ -40,7 +53,8 @@ export async function POST(req: Request) {
                 logo_url: data.logo_url,
                 billing_address: data.billing_address,
                 account_number: data.account_number,
-                payment_terms: data.payment_terms
+                payment_terms: data.payment_terms,
+                business_id: session.user.businessId
             }
         });
         return NextResponse.json(supplier);

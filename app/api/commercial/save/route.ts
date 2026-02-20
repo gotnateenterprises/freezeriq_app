@@ -2,8 +2,16 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 
+import { auth } from '@/auth';
+
 export async function POST(req: Request) {
     try {
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+        const businessId = session.user.businessId;
+
         const body = await req.json();
         const { ingredients, suppliers } = body;
 
@@ -19,7 +27,12 @@ export async function POST(req: Request) {
                 try {
                     await prisma.supplier.upsert({
                         where: { id: s.id },
-                        create: { id: s.id, name: s.name, website_url: s.website_url },
+                        create: {
+                            id: s.id,
+                            name: s.name,
+                            website_url: s.website_url,
+                            business_id: businessId
+                        },
                         update: { name: s.name, website_url: s.website_url }
                     });
                 } catch (supError: any) {
@@ -45,7 +58,7 @@ export async function POST(req: Request) {
                     cost_per_unit: toDecimal(ing.cost_per_unit),
                     stock_quantity: toDecimal(ing.stock_quantity),
                     unit: ing.unit || 'oz',
-                    supplier_id: (ing.supplier_id && isUUID(ing.supplier_id)) ? ing.supplier_id : null,
+                    supplier_id: ing.supplier_id || null, // Removed potentially flaky isUUID check
                     sku: ing.sku || null,
                     purchase_unit: ing.purchase_unit || null,
                     purchase_quantity: (ing.purchase_quantity === null || ing.purchase_quantity === undefined)
@@ -53,13 +66,14 @@ export async function POST(req: Request) {
                         : toDecimal(ing.purchase_quantity, 1),
                     purchase_cost: (ing.purchase_cost === null || ing.purchase_cost === undefined || ing.purchase_cost === '')
                         ? null
-                        : toDecimal(ing.purchase_cost)
+                        : toDecimal(ing.purchase_cost),
+                    needs_review: false // Review is considered complete if saved here
                 };
 
                 try {
                     await prisma.ingredient.upsert({
                         where: { id: ing.id },
-                        create: { ...data, id: ing.id },
+                        create: { ...data, id: ing.id, business_id: businessId },
                         update: data
                     });
                 } catch (ingError: any) {

@@ -7,8 +7,8 @@ import { promisify } from 'util';
 export class QBOPoller {
     private qboWrapper: QBOWrapper;
 
-    constructor(private db: DB) {
-        this.qboWrapper = new QBOWrapper();
+    constructor(private db: DB, businessId: string) {
+        this.qboWrapper = new QBOWrapper(businessId);
     }
 
     async syncInvoices() {

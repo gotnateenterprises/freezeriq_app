@@ -1,8 +1,15 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 
+import { auth } from '@/auth';
+
 export async function POST(req: Request) {
     try {
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
         const body = await req.json();
         const { name, cost_per_unit, unit, stock_quantity, sku } = body;
 
@@ -14,7 +21,8 @@ export async function POST(req: Request) {
                 sku: sku || undefined,
                 cost_per_unit: Number(cost_per_unit) || 0,
                 unit: unit || 'each',
-                stock_quantity: Number(stock_quantity) || 0
+                stock_quantity: Number(stock_quantity) || 0,
+                business_id: session.user.businessId
             }
         });
 

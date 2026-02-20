@@ -1,8 +1,5 @@
-
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './db';
 import { convertUnit } from './unit_converter';
-
-const prisma = new PrismaClient();
 
 export interface CostResult {
     totalCost: number;
@@ -13,9 +10,9 @@ export interface CostResult {
 }
 
 /**
- * Recursively calculates the cost of a recipe.
- * @param recipeId ID of the recipe to cost
- * @param depth Recursion depth safe-guard
+ * REFACTORED: Calculates the cost of a recipe.
+ * Note: For high-volume lookups (like lists), pre-fetch recipes into a Map for O(1) access.
+ * This function remains for single-recipe costings but follows the same logic as the storefront.
  */
 export async function calculateRecipeCost(recipeId: string, depth = 0): Promise<CostResult> {
     if (depth > 5) {
@@ -29,13 +26,27 @@ export async function calculateRecipeCost(recipeId: string, depth = 0): Promise<
             child_items: {
                 include: {
                     child_ingredient: true,
-                    child_recipe: true
+                    child_recipe: {
+                        include: {
+                            child_items: {
+                                include: {
+                                    child_ingredient: true,
+                                    child_recipe: true
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
     });
 
     if (!recipe) return { totalCost: 0, costPerUnit: 0, yieldUnit: '?', currency: 'USD', isAccurate: false };
+
+    // Fetch Packaging in Parallel
+    const packagingItems = await prisma.packagingItem.findMany({
+        where: { business_id: recipe.business_id }
+    });
 
     let totalCost = 0;
     let isAccurate = true;
@@ -44,47 +55,45 @@ export async function calculateRecipeCost(recipeId: string, depth = 0): Promise<
         let lineCost = 0;
 
         if (item.child_ingredient_id && item.child_ingredient) {
-            // --- INGREDIENT COSTING ---
             const ing = item.child_ingredient;
             const costPerPurchaseUnit = Number(ing.cost_per_unit);
-
-            // If cost is 0, flag as inaccurate but continue
             if (costPerPurchaseUnit === 0) isAccurate = false;
 
-            // Determine the unit the cost is based on
-            // Usually 'cost_per_unit' is price per 'unit' (e.g. $5/lb), NOT purchase_unit
-            // But sometimes people enter $20 per Case (purchase_cost) and we need to derive
-
-            // Simplification: We assume `cost_per_unit` in DB is the normalized price per `unit`
-            // Example: $0.10 / oz.
-
-            // Convert Item Qty (e.g. 1 cup) to Ingredient Unit (e.g. oz)
             const conversionRate = convertUnit(1, item.unit, ing.unit, ing.name);
             const qtyInIngUnits = Number(item.quantity) * conversionRate;
-
             lineCost = qtyInIngUnits * costPerPurchaseUnit;
 
         } else if (item.child_recipe_id && item.child_recipe) {
-            // --- SUB-RECIPE COSTING ---
-            // Recursively get cost of the child recipe
-            const childCost = await calculateRecipeCost(item.child_recipe_id, depth + 1);
-            if (!childCost.isAccurate) isAccurate = false;
+            const childResult = await calculateRecipeCost(item.child_recipe_id, depth + 1);
+            if (!childResult.isAccurate) isAccurate = false;
 
-            // Child Cost is for the WHOLE batch (base_yield_qty)
-            // We need cost per Item Unit
-
-            // 1. Get cost per yield unit of child (e.g. $/gal)
-            const childCostPerYieldUnit = childCost.costPerUnit;
-
-            // 2. Convert usage (e.g. 1 cup) to yield unit (e.g. gal)
+            const childCostPerYieldUnit = childResult.costPerUnit;
             const conversionRate = convertUnit(1, item.unit, item.child_recipe.base_yield_unit, item.child_recipe.name);
             const usageInYieldUnits = Number(item.quantity) * conversionRate;
-
             lineCost = usageInYieldUnits * childCostPerYieldUnit;
         }
 
         totalCost += lineCost;
     }
+
+    // Packaging Cost Calculation
+    const containerType = (recipe as any).container_type || 'tray';
+    const isFamily = recipe.name.toLowerCase().includes('family') || recipe.name.toLowerCase().includes('large');
+    let packagingCost = 0;
+
+    if (containerType === 'bag') {
+        const bagName = isFamily ? 'Gallon' : 'Quart';
+        const bag = packagingItems.find(p => p.name.includes(bagName) && (p.name.includes('Bag') || p.name.includes('Ziplock')));
+        if (bag) packagingCost += Number(bag.cost_per_unit || 0);
+    } else {
+        const sizeName = isFamily ? 'Large' : 'Small';
+        const container = packagingItems.find(p => p.name.includes(sizeName) && (p.name.includes('Tray') || p.name.includes('Container')));
+        const lid = packagingItems.find(p => p.name.includes(sizeName) && p.name.includes('Lid'));
+        if (container) packagingCost += Number(container.cost_per_unit || 0);
+        if (lid) packagingCost += Number(lid.cost_per_unit || 0);
+    }
+
+    totalCost += packagingCost;
 
     const baseYield = Number(recipe.base_yield_qty) || 1;
     const costPerUnit = totalCost / baseYield;

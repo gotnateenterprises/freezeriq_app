@@ -12,6 +12,7 @@ const TO_TSP: Record<string, number> = {
     // REMOVED 'oz' from here to strictly separate Weight/Volume
     'c': 48,
     'cup': 48,
+    'cups': 48,
     'pt': 96,
     'pint': 96,
     'qt': 192,
@@ -42,8 +43,10 @@ const TO_GRAMS: Record<string, number> = {
     'kilogram': 1000,
     'oz': 28.3495, // Weight oz
     'ounce': 28.3495,
+    'ounces': 28.3495,
     'lb': 453.592,
     'pound': 453.592,
+    'pounds': 453.592,
     'lbs': 453.592
 };
 

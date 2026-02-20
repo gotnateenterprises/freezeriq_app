@@ -1,0 +1,4 @@
+
+# Railway Uploads Directory
+# This directory is mounted as a Volume in Railway
+# Do not delete this file, it ensures the directory structure exists in build.

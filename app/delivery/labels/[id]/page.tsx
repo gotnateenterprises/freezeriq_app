@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Save, Type, QrCode, Image as ImageIcon, Trash, Printer, AlertTriangle, Plus, MonitorPlay, Layers } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import Link from 'next/link';
 
 // --- TYPES ---
 type ElementType = 'text' | 'qr' | 'image' | 'box';
@@ -265,9 +266,9 @@ export default function LabelEditor({ params }: { params: Promise<{ id: string }
             {/* Header */}
             <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4 flex justify-between items-center shadow-sm z-10">
                 <div className="flex items-center gap-4">
-                    <button onClick={() => router.back()} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg">
+                    <Link href="/delivery/labels" className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg">
                         <ArrowLeft size={20} className="text-slate-500" />
-                    </button>
+                    </Link>
                     <div>
                         <input
                             value={template.name}
@@ -409,8 +410,17 @@ export default function LabelEditor({ params }: { params: Promise<{ id: string }
                             </button>
                             <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-2 p-3 bg-slate-50 dark:bg-slate-900 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors border border-slate-200 dark:border-slate-700">
                                 <ImageIcon size={20} className="text-slate-600 dark:text-slate-400" />
-                                <span className="text-xs font-bold text-slate-600 dark:text-slate-300">Image</span>
+                                <span className="text-xs font-bold text-slate-600 dark:text-slate-300">Upload Img</span>
                             </button>
+                            <a
+                                href="https://www.canva.com/create/labels/"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex flex-col items-center gap-2 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-xl hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors border border-purple-100 dark:border-purple-800/30 group"
+                            >
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/0/08/Canva_icon_2021.svg" alt="Canva" className="w-5 h-5 opacity-60 group-hover:opacity-100 transition-opacity" />
+                                <span className="text-xs font-bold text-purple-700 dark:text-purple-300">Canva</span>
+                            </a>
                             <input
                                 type="file"
                                 ref={fileInputRef}
@@ -418,8 +428,10 @@ export default function LabelEditor({ params }: { params: Promise<{ id: string }
                                 accept="image/png, image/jpeg, image/webp"
                                 onChange={handleImageUpload}
                             />
-                            {/* Future: Image & Shapes */}
                         </div>
+                        <p className="text-[9px] text-slate-400 mt-2 text-center">
+                            Tip: Create in Canva → Export PNG → Upload Img
+                        </p>
                     </div>
 
                     {/* Properties Panel */}

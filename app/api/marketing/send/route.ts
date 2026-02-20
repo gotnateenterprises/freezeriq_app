@@ -5,6 +5,22 @@ import { prisma } from '@/lib/db';
 
 export async function POST(request: Request) {
     try {
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+        const user = session.user as any;
+        const businessId = user.businessId;
+        const plan = user.plan;
+        const isSuperAdmin = user.isSuperAdmin;
+
+        if (!businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+        const hasAccess = plan === 'ENTERPRISE' || plan === 'ULTIMATE' || plan === 'FREE' || isSuperAdmin;
+        if (!hasAccess) {
+            return NextResponse.json({ error: "Upgrade Now" }, { status: 403 });
+        }
+
         const body = await request.json();
         const { subject, body: messageBody, channel, audienceType, targetRecipient } = body;
 
@@ -15,11 +31,11 @@ export async function POST(request: Request) {
         let audienceSize = 1;
 
         if (audienceType === 'all') {
-            audienceSize = await prisma.organization.count();
+            audienceSize = await prisma.customer.count({ where: { business_id: businessId, archived: false } });
         } else if (audienceType === 'individual') {
-            audienceSize = await prisma.organization.count({ where: { type: 'direct_customer' } });
+            audienceSize = await prisma.customer.count({ where: { business_id: businessId, type: 'direct_customer', archived: false } });
         } else if (audienceType === 'organization') {
-            audienceSize = await prisma.organization.count({ where: { type: 'fundraiser_org' } });
+            audienceSize = await prisma.customer.count({ where: { business_id: businessId, type: { in: ['fundraiser_org', 'organization'] }, archived: false } });
         } else if (audienceType === 'single') {
             audienceSize = 1;
         }

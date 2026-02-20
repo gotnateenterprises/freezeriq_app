@@ -1,8 +1,15 @@
 import { NextResponse, NextRequest } from 'next/server';
 import { SquareClient, SquareEnvironment } from 'square';
 import { TokenManager } from '@/lib/auth/token_manager';
+import { auth } from '@/auth';
 
 export async function GET(req: NextRequest) {
+    const session = await auth();
+    if (!session?.user?.businessId) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const businessId = session.user.businessId;
+
     const searchParams = req.nextUrl.searchParams;
     const code = searchParams.get('code');
     const error = searchParams.get('error');
@@ -36,7 +43,7 @@ export async function GET(req: NextRequest) {
         }
 
         // Save to DB
-        const tokenManager = new TokenManager('square');
+        const tokenManager = new TokenManager('square', businessId);
         await tokenManager.saveTokens(
             accessToken,
             refreshToken,

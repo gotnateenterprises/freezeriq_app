@@ -1,13 +1,14 @@
-
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './db';
 import { KitchenEngine } from './kitchen_engine';
 import { PrismaAdapter } from './prisma_adapter';
 
-const prisma = new PrismaClient();
-const adapter = new PrismaAdapter();
-const kitchen = new KitchenEngine(adapter);
-
 export class InventoryEngine {
+    private kitchen: KitchenEngine;
+
+    constructor(businessId: string) {
+        const adapter = new PrismaAdapter(businessId);
+        this.kitchen = new KitchenEngine(adapter);
+    }
 
     /**
      * Calculates the maximum number of bundles that can be produced
@@ -17,35 +18,34 @@ export class InventoryEngine {
         maxPossible: number,
         limitingIngredient: string | null
     }> {
-        // 1. "Explode" a single unit of this bundle to get raw requirements
-        // We simulate an order of Qty: 1
-        const run = await kitchen.generateProductionRun([
+        // 1. "Explode" the bundle in memory
+        const run = await this.kitchen.generateProductionRun([
             { bundle_id: bundleId, quantity: 1, variant_size: variant }
         ]);
+
+        const requiredNames = Object.keys(run.rawIngredients);
+        if (requiredNames.length === 0) return { maxPossible: 0, limitingIngredient: "No Ingredients" };
+
+        // 2. Batch Fetch all required ingredients
+        const ingredients = await prisma.ingredient.findMany({
+            where: {
+                name: { in: requiredNames, mode: 'insensitive' }
+            }
+        });
+
+        const stockMap = new Map(ingredients.map(i => [i.name.toLowerCase(), Number(i.stock_quantity)]));
 
         let minRatio = Infinity;
         let limiter = null;
 
-        // 2. Iterate through all required ingredients
+        // 3. Compare requirements vs batch-fetched stock
         for (const [name, req] of Object.entries(run.rawIngredients)) {
-            // Find the ingredient in DB to get stock
-            // Note: In a real app we'd query all at once, loop for now
-            const ingredient = await prisma.ingredient.findFirst({
-                where: { name: { equals: name, mode: 'insensitive' } }
-            });
-
-            if (!ingredient) {
-                console.warn(`Ingredient not found for inventory check: ${name}`);
-                continue; // Can't limit what we don't track
-            }
-
-            const stock = Number(ingredient.stock_quantity);
+            const stock = stockMap.get(name.toLowerCase()) || 0;
             const required = req.qty;
 
             if (required <= 0) continue;
 
             const possible = Math.floor(stock / required);
-
             if (possible < minRatio) {
                 minRatio = possible;
                 limiter = name;

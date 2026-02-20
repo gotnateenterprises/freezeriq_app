@@ -20,7 +20,9 @@ export interface SquareLineItem {
     name: string;
     quantity: string; // Square sends string
     base_price_money?: SquareMoney;
-    catalog_object_id?: string; // Maps to Bundle SKU
+    catalog_object_id?: string; // Maps to Bundle SKU (fallback)
+    sku?: string; // Direct mapping to Bundle SKU
+    note?: string; // Fallback for custom items where SKU is in note
     modifiers?: SquareModifier[];
 }
 
@@ -29,6 +31,8 @@ export interface SquareOrderPayload {
     created_at: string;
     customer_id?: string;
     customer_name?: string; // Augmented for internal use
+    customer_email?: string;
+    customer_phone?: string;
     line_items: SquareLineItem[];
 }
 

@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  freezeriq_app:
+    container_name: freezeriq_app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@db:5432/freezer_iq?schema=public
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=changeme_in_prod
+    depends_on:
+      - db
+    volumes:
+      - uploads_data:/app/public/uploads
+
+  db:
+    container_name: freezeriq_db
+    image: postgres:16
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: freezer_iq
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  pgdata:
+  uploads_data:

@@ -90,7 +90,7 @@ async function handleLeadgen(value: any) {
     const pageId = value.page_id;
 
     // To get lead details, we need the Page Access Token
-    const tokenManager = new TokenManager('meta');
+    // We look up the integration by the Page ID (realm_id) since this is an incoming webhook without user context
     const integration = await prisma.integration.findFirst({
         where: { provider: 'meta', realm_id: pageId }
     });
@@ -106,10 +106,10 @@ async function handleLeadgen(value: any) {
         const nameField = leadData.field_data.find((f: any) => f.name === 'full_name')?.values[0];
 
         if (emailField) {
-            await prisma.organization.upsert({
+            await prisma.customer.upsert({
                 where: { external_id: leadgenId },
                 update: {
-                    status: 'Lead',
+                    status: 'LEAD',
                     contact_email: emailField,
                     contact_name: nameField
                 },
@@ -118,7 +118,7 @@ async function handleLeadgen(value: any) {
                     name: nameField || 'New Meta Lead',
                     contact_email: emailField,
                     contact_name: nameField,
-                    status: 'Lead',
+                    status: 'LEAD',
                     source: 'Meta'
                 }
             });

@@ -1,9 +1,16 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { auth } from '@/auth';
 
 export async function POST(req: Request) {
     try {
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+        const businessId = session.user.businessId;
+
         const { provider } = await req.json();
 
         if (!provider || (provider !== 'square' && provider !== 'qbo' && provider !== 'meta')) {
@@ -11,7 +18,10 @@ export async function POST(req: Request) {
         }
 
         await prisma.integration.deleteMany({
-            where: { provider }
+            where: {
+                provider,
+                business_id: businessId
+            }
         });
 
         return NextResponse.json({ success: true });

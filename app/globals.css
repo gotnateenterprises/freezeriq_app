@@ -1,14 +1,33 @@
 @import "tailwindcss";
 
-@layer utilities {
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
-}
+/* Premium Typography Configuration */
 
 @theme {
   --color-primary: #10b981;
   --color-secondary: #6366f1;
+
+  /* Brand Palette - Feminine Premium & Freezer Chef Teal */
+  --color-brand-rose: #f472b6;
+  --color-brand-teal: #14b8a6;
+  --color-brand-mauve: #c084fc;
+  --color-brand-cream: #fffdfa;
+  --color-brand-gold: #fbbf24;
+}
+
+:root {
+  --background: #fffdfa;
+  /* Soft Cream */
+  --foreground: #1e293b;
+
+  /* SaaS Theme Variables (Default: Teal/Indigo) */
+  --primary: #14b8a6;
+  /* Teal 500 */
+  --secondary: #6366f1;
+  /* Indigo 500 */
+
+  /* Typography Variables */
+  --font-serif: var(--font-dm-serif), serif;
+  --font-sans: var(--font-outfit), sans-serif;
 }
 
 @layer utilities {
@@ -108,29 +127,34 @@
   }
 }
 
-/* Base Styles */
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-/* Support both system preference and manual .dark class */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  body {
+    color: var(--foreground);
+    background: var(--background);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
-.dark {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+.font-serif {
+  font-family: var(--font-serif);
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+.noise-grain {
+  position: relative;
+}
+
+.noise-grain::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.03;
+  z-index: 999;
+  background-image: url("https://www.transparenttextures.com/patterns/natural-paper.png");
 }
 
 /* Print Styles */

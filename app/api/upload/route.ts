@@ -1,8 +1,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import { writeFile } from 'fs/promises';
-import { join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { uploadToS3 } from '@/lib/s3';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,14 +29,8 @@ export async function POST(request: NextRequest) {
         const buffer = Buffer.from(await file.arrayBuffer());
         const filename = `${uuidv4()}${getExtension(file.name)}`;
 
-        // Save to public/uploads
-        // Note: In Vercel/Cloud, this won't persist. But for local dev/VPS, this works.
-        const uploadDir = join(process.cwd(), 'public', 'uploads');
-        const filepath = join(uploadDir, filename);
-
-        await writeFile(filepath, buffer);
-
-        const url = `/uploads/${filename}`;
+        // Save to S3 Compatible Storage
+        const url = await uploadToS3(buffer, filename, file.type);
 
         return NextResponse.json({
             success: true,
