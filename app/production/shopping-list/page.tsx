@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
-import { ArrowLeft, ShoppingCart, CheckCircle, ExternalLink, Printer, Trash2, RefreshCw } from 'lucide-react';
+import { ArrowLeft, ShoppingCart, CheckCircle, ExternalLink, Printer, Trash2, RefreshCw, Mail } from 'lucide-react';
+import { GeneratePOModal } from '../../../components/production/GeneratePOModal';
 
 interface ShoppingItem {
     id: string; // key
@@ -20,6 +21,7 @@ interface ShoppingItem {
     purchaseUnit?: string;
     purchaseQuantity?: number; // Quantity per purchase unit (e.g. 32 oz per Case)
     casesNeeded?: number;
+    casesToOrder?: number;
 }
 
 export default function ShoppingList() {
@@ -29,6 +31,7 @@ export default function ShoppingList() {
     const [items, setItems] = useState<ShoppingItem[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [filter, setFilter] = useState<'all' | 'todo' | 'done'>('all');
+    const [isPOModalOpen, setIsPOModalOpen] = useState(false);
 
     // Load Data
     useEffect(() => {
@@ -50,6 +53,7 @@ export default function ShoppingList() {
                         const toBuy = Math.max(0, needed - onHand);
                         const purchaseQuantity = val.purchaseQuantity;
                         const casesNeeded = (purchaseQuantity && purchaseQuantity > 0) ? (toBuy / purchaseQuantity) : undefined;
+                        const casesToOrder = casesNeeded !== undefined ? Math.ceil(casesNeeded) : undefined;
 
                         return {
                             id: key,
@@ -65,7 +69,8 @@ export default function ShoppingList() {
                             purchaseCost: val.purchaseCost,
                             purchaseUnit: val.purchaseUnit,
                             purchaseQuantity: purchaseQuantity,
-                            casesNeeded: casesNeeded
+                            casesNeeded: casesNeeded,
+                            casesToOrder: casesToOrder
                         };
                     }).filter(i => i.toBuy > 0); // Only show what we need to buy? Or show all? Usually just to buy.
 
@@ -106,8 +111,13 @@ export default function ShoppingList() {
         }
     };
 
-    // Calculate Totals
-    const totalEstCost = items.reduce((sum, i) => sum + (i.toBuy * i.costPerUnit), 0);
+    // Calculate Totals using Math.ceil() logic where possible
+    const totalEstCost = items.reduce((sum, i) => {
+        if (i.casesToOrder !== undefined && i.purchaseCost !== undefined) {
+            return sum + (i.casesToOrder * i.purchaseCost);
+        }
+        return sum + (i.toBuy * i.costPerUnit);
+    }, 0);
     const checkedCount = items.filter(i => i.isChecked).length;
 
     // Filter
@@ -147,8 +157,14 @@ export default function ShoppingList() {
 
                     <div className="flex items-center gap-3">
                         <button
+                            onClick={() => setIsPOModalOpen(true)}
+                            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-bold transition-colors shadow-sm"
+                        >
+                            <Mail size={18} /> Email POs
+                        </button>
+                        <button
                             onClick={() => window.print()}
-                            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 font-bold text-slate-700 dark:text-slate-300 transition-colors"
+                            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 font-bold text-slate-700 dark:text-slate-300 transition-colors shadow-sm"
                         >
                             <Printer size={18} /> Print
                         </button>
@@ -213,19 +229,32 @@ export default function ShoppingList() {
                                                     {item.name}
                                                 </div>
                                                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 font-mono mt-0.5">
-                                                    <span className={item.toBuy > 0 ? "font-bold text-indigo-600 dark:text-indigo-400" : ""}>
-                                                        Need: {item.toBuy.toFixed(2)} {item.unit}
-                                                    </span>
+                                                    {/* Purchase Unit Display (Primary) */}
+                                                    {item.casesToOrder !== undefined && item.casesToOrder > 0 ? (
+                                                        <span className="font-bold bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800 text-sm">
+                                                            Buy: {item.casesToOrder} {item.purchaseUnit || 'cases'}
+                                                        </span>
+                                                    ) : (
+                                                        <span className={item.toBuy > 0 ? "font-bold text-indigo-600 dark:text-indigo-400 text-sm" : ""}>
+                                                            Need: {item.toBuy.toFixed(2)} {item.unit}
+                                                        </span>
+                                                    )}
 
-                                                    {/* Case Calculator */}
-                                                    {item.purchaseQuantity && item.purchaseQuantity > 0 && (
-                                                        <span className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-100 dark:border-indigo-800">
-                                                            Avg: {(item.toBuy / item.purchaseQuantity).toFixed(2)} {item.purchaseUnit || 'cases'}
+                                                    {/* Underneath Context */}
+                                                    {item.casesToOrder !== undefined && item.casesToOrder > 0 && (
+                                                        <span className="text-slate-400">
+                                                            (Need {item.toBuy.toFixed(2)} {item.unit})
                                                         </span>
                                                     )}
 
                                                     {item.onHand > 0 && <span className="text-amber-600">• Have: {item.onHand} {item.unit}</span>}
-                                                    {item.costPerUnit > 0 && <span>• ~${(item.toBuy * item.costPerUnit).toFixed(2)}</span>}
+
+                                                    {/* Cost Logic */}
+                                                    {item.casesToOrder !== undefined && item.purchaseCost !== undefined ? (
+                                                        <span>• ~${(item.casesToOrder * item.purchaseCost).toFixed(2)}</span>
+                                                    ) : item.costPerUnit > 0 ? (
+                                                        <span>• ~${(item.toBuy * item.costPerUnit).toFixed(2)}</span>
+                                                    ) : null}
                                                 </div>
                                             </div>
 
@@ -248,6 +277,12 @@ export default function ShoppingList() {
                     </div>
                 )}
             </div>
+
+            <GeneratePOModal
+                isOpen={isPOModalOpen}
+                onClose={() => setIsPOModalOpen(false)}
+                items={items}
+            />
 
             {/* Print Styles */}
             <style jsx global>{`
