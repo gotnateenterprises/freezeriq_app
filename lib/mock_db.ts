@@ -52,4 +52,8 @@ export class MockDB implements DBAdapter {
     async getBundles(): Promise<Bundle[]> {
         return this.bundles;
     }
+
+    async getAllRecipes(): Promise<Recipe[]> {
+        return this.recipes;
+    }
 }

@@ -13,7 +13,7 @@ export async function POST() {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        const resources = [
+        const resources: any[] = [
             {
                 title: "🔑 How to get a Gemini API Key",
                 description: "Step-by-step guide to enable AI content generation (Recipe Descriptions & Photos).",

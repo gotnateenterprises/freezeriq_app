@@ -36,6 +36,8 @@ import UpgradeRequired from '@/components/UpgradeRequired';
 import MarketingAssetGenerator from '@/components/marketing/MarketingAssetGenerator';
 
 import Leaderboard from '@/components/coordinator/Leaderboard';
+import ProgressThermometer from '@/components/coordinator/ProgressThermometer';
+import ShareAction from '@/components/coordinator/ShareAction';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 
@@ -64,6 +66,13 @@ export default function CoordinatorPortal() {
 
     useEffect(() => {
         fetchCampaign();
+
+        // Polling mechanism (every 30 seconds)
+        const interval = setInterval(() => {
+            fetchCampaign();
+        }, 30000);
+
+        return () => clearInterval(interval);
     }, [token]);
 
     const fetchCampaign = async () => {
@@ -228,29 +237,10 @@ export default function CoordinatorPortal() {
                         <p className="text-sm font-black text-indigo-600 uppercase tracking-widest mb-2">Live Progress</p>
                         <h1 className="text-3xl font-black text-slate-900 mb-6">{campaign.name}</h1>
 
-                        <div className="flex justify-between items-end mb-3">
-                            <div>
-                                <p className="text-4xl font-black text-slate-900">${campaign.total_sales || 0}</p>
-                                <p className="text-sm font-bold text-slate-400">Total Raised So Far</p>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-xl font-black text-slate-400">${campaign.goal_amount || 0}</p>
-                                <p className="text-xs font-black text-slate-300 uppercase tracking-tighter">Goal</p>
-                            </div>
-                        </div>
-
-                        {/* Progress Bar */}
-                        <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden mb-2">
-                            <motion.div
-                                className="h-full bg-indigo-600"
-                                initial={{ width: 0 }}
-                                animate={{ width: `${progress}%` }}
-                                transition={{ type: 'spring', bounce: 0.25, duration: 1.5, delay: 0.2 }}
-                            />
-                        </div>
-                        <p className="text-right text-xs font-black text-indigo-600 uppercase italic">
-                            {progress.toFixed(0)}% Towards Goal!
-                        </p>
+                        <ProgressThermometer
+                            current={campaign.total_sales || 0}
+                            goal={campaign.goal_amount || 0}
+                        />
                     </div>
                 </div>
 
@@ -262,8 +252,8 @@ export default function CoordinatorPortal() {
                     />
                 )}
 
-                {/* Quick Actions */}
-                <div className="grid grid-cols-2 gap-4">
+                {/* Quick Actions (Desktop & Large Screens - hidden on exact mobile as we use sticky bottom bar) */}
+                <div className="hidden sm:grid grid-cols-2 gap-4">
                     <button
                         onClick={() => setShowOrderModal(true)}
                         className="bg-indigo-600 hover:bg-indigo-700 text-white p-6 rounded-3xl font-black shadow-lg shadow-indigo-500/20 flex flex-col items-center gap-3 transition-all active:scale-95"
@@ -271,13 +261,11 @@ export default function CoordinatorPortal() {
                         <Plus size={32} strokeWidth={3} />
                         <span className="text-sm">Add Offline Order</span>
                     </button>
-                    <button
-                        onClick={handleCopy}
-                        className="bg-white hover:bg-slate-50 text-slate-900 p-6 rounded-3xl font-black border border-slate-200 shadow-sm flex flex-col items-center gap-3 transition-all active:scale-95"
-                    >
-                        {copied ? <CheckCircle2 size={32} className="text-emerald-500" /> : <Share2 size={32} />}
-                        <span className="text-sm">{copied ? 'Copied!' : 'Share Public Link'}</span>
-                    </button>
+                    <ShareAction
+                        url={`${typeof window !== 'undefined' ? window.location.origin : ''}/fundraiser/${campaign?.public_token}`}
+                        title={campaign.name || 'Fundraiser'}
+                        className="bg-white hover:bg-slate-50 text-slate-900 p-6 rounded-3xl font-black border border-slate-200 shadow-sm flex flex-col items-center gap-3 transition-all active:scale-95 text-sm"
+                    />
                 </div>
 
                 {/* Marketing Tools */}
@@ -542,6 +530,22 @@ export default function CoordinatorPortal() {
                     </div>
                 </div>
             )}
+
+            {/* Mobile Sticky Bottom Nav Actions */}
+            <div className="sm:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 pb-safe flex gap-3 z-40 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
+                <button
+                    onClick={() => setShowOrderModal(true)}
+                    className="flex-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 py-3 px-4 rounded-xl flex items-center justify-center gap-2 font-black transition-colors"
+                >
+                    <Plus size={20} strokeWidth={3} />
+                    <span>Offl. Order</span>
+                </button>
+                <ShareAction
+                    url={`${typeof window !== 'undefined' ? window.location.origin : ''}/fundraiser/${campaign?.public_token}`}
+                    title={campaign.name || 'Support our Fundraiser!'}
+                    className="flex-[2] bg-indigo-600 hover:bg-indigo-700 text-white py-3 px-4 rounded-xl flex items-center justify-center gap-2 font-black shadow-lg shadow-indigo-500/20"
+                />
+            </div>
 
             {/* Settings Modal */}
             <SettingsModal

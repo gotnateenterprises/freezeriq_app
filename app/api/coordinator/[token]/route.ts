@@ -26,7 +26,7 @@ export async function GET(
                 },
                 // 2. PRIVACY FIX: Only select fields needed for Leaderboard/Progress
                 orders: {
-                    where: { status: { not: 'cancelled' } }, // Optional: hide cancelled
+                    where: { status: { not: 'cancelled' as any } }, // Optional: hide cancelled
                     orderBy: { created_at: 'desc' },
                     select: {
                         id: true,
@@ -120,7 +120,7 @@ export async function POST(
                 source: 'manual',
                 customer_name: customerName,
                 participant_name: participantName,
-                status: 'pending',
+                status: 'pending' as any,
                 total_amount: totalAmount,
                 delivery_address: deliveryAddress,
                 business_id: business.id,

@@ -13,7 +13,6 @@ export async function generateMetadata(
     const { token } = await params;
 
     const campaign = await prisma.fundraiserCampaign.findUnique({
-        id: undefined, // Prisma fix if fields are missing? No, should be public_token: token
         where: { public_token: token },
         include: {
             customer: {
