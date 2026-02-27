@@ -39,6 +39,7 @@ const navItems = [
     { type: 'divider' },
     { name: 'Recipes', href: '/recipes', icon: BookOpen },
     { name: 'Bundles', href: '/bundles', icon: Package },
+    { name: 'Subscriptions', href: '/admin/subscribers/tiers', icon: Tag },
     { name: 'Inventory', href: '/commercial', icon: Package },
     { type: 'divider' },
     { name: 'Customer CRM', href: '/customers', icon: Users, requiredPlan: 'ENTERPRISE' },

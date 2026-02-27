@@ -26,8 +26,10 @@ import { convertUnit, optimizeUnit } from '@/lib/unit_converter';
 import { formatQuantity } from '@/lib/format_quantity';
 import RecipeIngredientRow from './RecipeIngredientRow';
 import NutritionFactsLabel, { NutritionData } from './NutritionFactsLabel';
+import { QRCodeSVG } from 'qrcode.react';
 
 import { Category } from '@/types';
+import { useSession } from 'next-auth/react';
 
 interface RecipeEditorProps {
     initialData?: Recipe | null; // Keep the original optional type if needed, or unify
@@ -63,6 +65,28 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
     const [units, setUnits] = useState<string[]>(UNIT_OPTIONS);
     const [allIngredients, setAllIngredients] = useState<any[]>([]);
     const [allRecipes, setAllRecipes] = useState<any[]>([]);
+    const [scanUrl, setScanUrl] = useState<string>('');
+
+    const { data: session } = useSession();
+    const [instructionSets, setInstructionSets] = useState<{ name: string, text: string }[]>([]);
+    const [selectedSet, setSelectedSet] = useState('');
+
+    const getStorageKey = (key: string) => {
+        if (!session?.user?.businessId) return null;
+        return `${session.user.businessId}_${key}`;
+    };
+
+    const saveSets = (newSets: { name: string, text: string }[]) => {
+        setInstructionSets(newSets);
+        const key = getStorageKey('instructionSets');
+        if (key) localStorage.setItem(key, JSON.stringify(newSets));
+    };
+
+    useEffect(() => {
+        if (typeof window !== 'undefined' && initialData?.id) {
+            setScanUrl(`${window.location.origin}/scan?id=${initialData.id}&type=recipe`);
+        }
+    }, [initialData]);
 
     // Helper to ensure custom units are in the dropdown
     const addMissingUnits = (incomingUnits: (string | undefined | null)[]) => {
@@ -152,6 +176,25 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
         }
     }, [initialData]);
 
+    useEffect(() => {
+        const setsKey = getStorageKey('instructionSets');
+        if (setsKey) {
+            const savedSets = localStorage.getItem(setsKey);
+            const defaultSets = [
+                { name: "Oven - Serves 2", text: "Preheat oven to 375°F. Remove film. Bake for {cook_time}." },
+                { name: "Oven - Family", text: "Preheat oven to 375°F. Remove film. Bake for {cook_time}." },
+                { name: "Crock Pot - Serves 2", text: "Place in Crock Pot. Cook on Low for {cook_time}." },
+                { name: "Crock Pot - Family", text: "Place in Crock Pot. Cook on Low for {cook_time}." },
+                { name: "Microwave - Serves 2", text: "Pierce film. Microwave on High for {cook_time}." }
+            ];
+            if (savedSets) {
+                try { setInstructionSets(JSON.parse(savedSets)); } catch (e) { }
+            } else {
+                setInstructionSets(defaultSets);
+            }
+        }
+    }, [session?.user?.businessId]);
+
     // Populate Initial Category Selection
     // Populate Initial Category Selection
     // Hydrate categories once loaded
@@ -228,6 +271,7 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
             container_type: (initialData as any).container_type || 'tray',
             yield_qty: Number(initialData.base_yield_qty) || 1,
             yield_unit: initialData.base_yield_unit ?? 'servings',
+            is_subscriber_only: (initialData as any).is_subscriber_only || false,
             items: (initialData.items || []).map((i: any) => ({
                 name: (i.child_recipe?.name || i.child_ingredient?.name || i.name) ?? '',
                 qty: Number(i.quantity) || 0,
@@ -248,6 +292,7 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
             container_type: 'tray',
             yield_qty: 1,
             yield_unit: 'servings',
+            is_subscriber_only: false,
             items: [{ name: '', qty: 0, unit: '', is_sub_recipe: false, section_name: '', section_batch: 1 }],
             instructions: '',
             label_text: '',
@@ -815,9 +860,17 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
             {/* Main Content */}
             <div className="bg-white dark:bg-slate-800 bg-adaptive rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-8 transition-colors print:shadow-none print:border-none print:p-0">
 
-                {/* Print Header - Recipe Card Style */}
-                <div className="hidden print:flex justify-between items-end mb-8 border-b-2 border-slate-900 pb-4">
-                    <h1 className="text-4xl font-bold text-slate-900">{watch('name') || 'Untitled Recipe'}</h1>
+                {/* Header - Recipe Card Style */}
+                <div className="flex justify-between items-end mb-8 border-b-2 border-slate-900 pb-4">
+                    <div className="flex gap-4 items-center">
+                        {scanUrl && (
+                            <div className="flex flex-col items-center gap-1 border-2 border-slate-200 p-2 rounded-xl bg-white shadow-sm">
+                                <QRCodeSVG value={scanUrl} size={96} level="H" includeMargin={false} />
+                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Scan for Details</span>
+                            </div>
+                        )}
+                        <h1 className="text-4xl font-bold text-slate-900">{watch('name') || 'Untitled Recipe'}</h1>
+                    </div>
                     <div className="flex flex-col items-end">
                         <div className="text-xl font-medium text-slate-600">
                             {isScaling ? (
@@ -1155,6 +1208,22 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
                     </div>
 
                     <div className="space-y-2">
+                        <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Subscriber Only?</label>
+                        <div className="flex items-center h-full pt-1">
+                            <label className="relative inline-flex items-center cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    className="sr-only peer"
+                                    {...register('is_subscriber_only')}
+                                    disabled={isScaling}
+                                />
+                                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-indigo-600"></div>
+                                <span className="ml-3 text-sm font-medium text-slate-700 dark:text-slate-300 text-adaptive">Exclusive to subscribers</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
                         <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Cook Time (Public)</label>
                         <input
                             {...register('cook_time')}
@@ -1162,6 +1231,20 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
                             className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:text-slate-500 dark:disabled:text-slate-500 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 print:hidden"
                             placeholder="e.g. 4-6 hrs Low"
                         />
+                    </div>
+
+                    <div className="space-y-2 lg:col-span-3">
+                        <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Label Text / Instructions</label>
+                        <textarea
+                            {...register('label_text')}
+                            disabled={isScaling}
+                            rows={3}
+                            className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:text-slate-500 dark:disabled:text-slate-500 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 print:hidden resize-none overflow-y-auto"
+                            placeholder="e.g. Preheat oven to 375°F. Remove film. Bake for {cook_time}."
+                        />
+                        <div className="text-xs text-slate-500 mt-1 dark:text-slate-400">
+                            Use {'{cook_time}'} to dynamically insert the cook time value above.
+                        </div>
                     </div>
 
                     {/* Row 3 - Large Description & Photo */}
@@ -1453,6 +1536,83 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
                         <p className="text-xs text-slate-500 -mt-2">Instructions for the customer (e.g. Bake at 375°F for 45 mins). Shown on labels.</p>
 
                         <div className={isScaling ? 'hidden' : 'block print:hidden'}>
+                            <div className="flex justify-between items-center mb-2">
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-tight"></label>
+                                <div className="flex gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setValue('label_text', '', { shouldDirty: true });
+                                            setSelectedSet('');
+                                        }}
+                                        className="text-[10px] font-bold text-slate-400 hover:text-slate-600"
+                                    >
+                                        CLEAR
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const name = prompt("Name for new set?");
+                                            if (name) {
+                                                const existing = instructionSets.find(s => s.name === name);
+                                                const currentText = watch('label_text') || '';
+                                                if (existing) {
+                                                    if (confirm(`Set "${name}" already exists. Overwrite?`)) {
+                                                        const newSets = instructionSets.map(s => s.name === name ? { ...s, text: currentText } : s);
+                                                        saveSets(newSets);
+                                                        setSelectedSet(name);
+                                                    }
+                                                } else {
+                                                    saveSets([...instructionSets, { name, text: currentText }]);
+                                                    setSelectedSet(name);
+                                                }
+                                            }
+                                        }}
+                                        className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700"
+                                    >
+                                        + Add New Instructions
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="flex gap-2 mb-2">
+                                <select
+                                    value={selectedSet}
+                                    onChange={(e) => {
+                                        const setName = e.target.value;
+                                        setSelectedSet(setName);
+                                        const set = instructionSets.find(s => s.name === setName);
+                                        if (set) {
+                                            let formatted = set.text;
+                                            const cookTime = watch('cook_time');
+                                            if (formatted.includes('{cook_time}')) {
+                                                formatted = formatted.replace(/{cook_time}/g, cookTime || 'specified time');
+                                            }
+                                            setValue('label_text', formatted, { shouldDirty: true });
+                                        }
+                                    }}
+                                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500 text-slate-900 dark:text-slate-100"
+                                >
+                                    <option value="">-- Auto-fill from Set --</option>
+                                    {instructionSets.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
+                                </select>
+                                {selectedSet && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const currentText = watch('label_text') || '';
+                                            const newSets = instructionSets.map(s =>
+                                                s.name === selectedSet ? { ...s, text: currentText } : s
+                                            );
+                                            saveSets(newSets);
+                                            alert(`Updated "${selectedSet}"`);
+                                        }}
+                                        className="p-2 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg border border-transparent hover:border-indigo-200 transition-colors font-bold text-xs"
+                                        title="Save current text to this set"
+                                    >
+                                        Update
+                                    </button>
+                                )}
+                            </div>
                             <textarea
                                 {...register('label_text')}
                                 rows={8}

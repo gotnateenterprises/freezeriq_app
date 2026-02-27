@@ -16,6 +16,8 @@ interface Fundraiser {
     participant_label?: string;
     group_label?: string;
     is_group_enabled?: boolean;
+    bundles?: any[];
+    bundle_stats?: { name: string, count: number }[];
 }
 
 export default function FundraisersTab({ customerId, businessSlug }: { customerId: string, businessSlug: string }) {
@@ -29,17 +31,35 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
         goalAmount: '',
         endDate: '',
         participantLabel: 'Seller',
-        groupLabel: ''
+        groupLabel: '',
+        bundleIds: [] as string[]
     });
 
-    const [editData, setEditData] = useState({
+    const [editData, setEditData] = useState<{
+        participant_label: string;
+        group_label: string;
+        bundleIds?: string[];
+    }>({
         participant_label: '',
         group_label: ''
     });
 
+    const [availableBundles, setAvailableBundles] = useState<{ id: string, name: string }[]>([]);
+
     useEffect(() => {
         fetchCampaigns();
+        fetchBundles();
     }, [customerId]);
+
+    async function fetchBundles() {
+        try {
+            const res = await fetch('/api/bundles');
+            const data = await res.json();
+            if (res.ok) setAvailableBundles(data.filter((b: any) => b.is_active));
+        } catch (error) {
+            console.error('Failed to load bundles', error);
+        }
+    }
 
     async function fetchCampaigns() {
         try {
@@ -66,14 +86,15 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                     goalAmount: newCampaign.goalAmount,
                     endDate: newCampaign.endDate,
                     participantLabel: newCampaign.participantLabel,
-                    groupLabel: newCampaign.groupLabel
+                    groupLabel: newCampaign.groupLabel,
+                    bundleIds: newCampaign.bundleIds
                 })
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
 
             toast.success('Campaign created!');
-            setNewCampaign({ name: '', goalAmount: '', endDate: '', participantLabel: 'Seller', groupLabel: '' });
+            setNewCampaign({ name: '', goalAmount: '', endDate: '', participantLabel: 'Seller', groupLabel: '', bundleIds: [] });
             setIsCreating(false);
             fetchCampaigns();
         } catch (error: any) {
@@ -91,16 +112,17 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                 body: JSON.stringify({
                     participant_label: editData.participant_label,
                     group_label: editData.group_label,
-                    is_group_enabled: !!editData.group_label
+                    is_group_enabled: !!editData.group_label,
+                    bundleIds: editData.bundleIds
                 })
             });
             if (res.ok) {
-                toast.success('Labels updated!');
+                toast.success('Campaign updated!');
                 setEditingLabelsId(null);
                 fetchCampaigns();
             }
         } catch (error) {
-            toast.error('Failed to update labels');
+            toast.error('Failed to update campaign');
         }
     }
 
@@ -204,6 +226,33 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                             </div>
                         </div>
 
+                        {/* Bundle Selection */}
+                        <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
+                            <h4 className="text-xs font-black text-indigo-500 uppercase tracking-widest mb-4">Select Bundles</h4>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                {availableBundles.map(bundle => (
+                                    <label key={bundle.id} className="flex items-center gap-3 p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
+                                        <input
+                                            type="checkbox"
+                                            className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                                            checked={newCampaign.bundleIds.includes(bundle.id)}
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setNewCampaign(prev => ({ ...prev, bundleIds: [...prev.bundleIds, bundle.id] }));
+                                                } else {
+                                                    setNewCampaign(prev => ({ ...prev, bundleIds: prev.bundleIds.filter(id => id !== bundle.id) }));
+                                                }
+                                            }}
+                                        />
+                                        <span className="text-sm font-bold text-slate-700 dark:text-slate-200">{bundle.name}</span>
+                                    </label>
+                                ))}
+                                {availableBundles.length === 0 && (
+                                    <div className="text-sm text-slate-500 col-span-3">No active bundles found. Add bundles in the Catalog first.</div>
+                                )}
+                            </div>
+                        </div>
+
                         <div className="flex justify-end gap-2 pt-2">
                             <button
                                 type="button"
@@ -226,43 +275,54 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
             <div className="grid gap-4">
                 {campaigns.length > 0 ? campaigns.map(campaign => (
                     <div key={campaign.id} className="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col gap-4">
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                            <div>
+                        <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
+                            <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-1">
-                                    <h4 className="font-bold text-lg text-slate-900 dark:text-white">{campaign.name}</h4>
-                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${campaign.status === 'Active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
+                                    <h4 className="font-bold text-base text-slate-900 dark:text-white truncate">{campaign.name}</h4>
+                                    <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${campaign.status === 'Active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
                                         }`}>
                                         {campaign.status}
                                     </span>
                                 </div>
-                                <div className="flex flex-wrap gap-4 text-sm text-slate-500">
+                                <div className="flex flex-wrap gap-4 text-xs text-slate-500">
                                     <div className="flex items-center gap-1.5">
-                                        <Target className="w-4 h-4 text-slate-400" />
+                                        <Target className="w-3.5 h-3.5 text-slate-400" />
                                         <span>Goal: ${campaign.goal_amount?.toLocaleString() || 'N/A'}</span>
                                     </div>
                                     <div className="flex items-center gap-1.5">
-                                        <Calendar className="w-4 h-4 text-slate-400" />
+                                        <Calendar className="w-3.5 h-3.5 text-slate-400" />
                                         <span>Ends: {campaign.end_date ? new Date(campaign.end_date).toLocaleDateString() : 'No date set'}</span>
                                     </div>
                                 </div>
+                                {/* Live Bundle Sales Counters */}
+                                {campaign.bundle_stats && campaign.bundle_stats.length > 0 && (
+                                    <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700/50">
+                                        {campaign.bundle_stats.map((stat, idx) => (
+                                            <span key={idx} className="px-2 py-1 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded-md text-[10px] font-black tracking-wide border border-indigo-100 dark:border-indigo-800">
+                                                {stat.name} - {stat.count}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
 
-                            <div className="flex items-center gap-3 w-full md:w-auto">
-                                <div className="flex-1 md:flex-none text-right mr-4">
-                                    <p className="text-xs font-medium text-slate-500 uppercase">Raised so far</p>
-                                    <p className="text-xl font-black text-emerald-600">${Number(campaign.total_sales).toFixed(2)}</p>
+                            <div className="flex flex-wrap items-center justify-start xl:justify-end gap-3 w-full xl:w-auto mt-1 xl:mt-0">
+                                <div className="text-left sm:text-right shrink-0">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Raised</p>
+                                    <p className="text-lg font-black text-emerald-600 leading-none">${Number(campaign.total_sales).toFixed(2)}</p>
                                 </div>
-                                <div className="flex gap-2">
+                                <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                                     <button
                                         onClick={() => {
                                             setEditingLabelsId(campaign.id);
                                             setEditData({
                                                 participant_label: campaign.participant_label || 'Seller',
-                                                group_label: campaign.group_label || ''
+                                                group_label: campaign.group_label || '',
+                                                bundleIds: campaign.bundles?.map((b: any) => b.id) || []
                                             });
                                         }}
-                                        className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 rounded-lg transition-colors"
-                                        title="Edit Terminology"
+                                        className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 rounded-lg transition-colors shrink-0"
+                                        title="Edit Campaign Details"
                                     >
                                         <Settings className="w-4 h-4" />
                                     </button>
@@ -270,17 +330,17 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                         href={`/shop/${businessSlug}/fundraiser/${campaign.id}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-medium transition-colors"
+                                        className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap"
                                     >
-                                        <ExternalLink className="w-4 h-4" /> View Page
+                                        <ExternalLink className="w-3.5 h-3.5 shrink-0" /> View Page
                                     </a>
                                     {campaign.status === 'Active' && (
                                         <button
                                             onClick={() => handleCloseAndInvoice(campaign)}
-                                            className="flex items-center gap-2 px-4 py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-sm font-bold transition-colors"
+                                            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-black transition-colors whitespace-nowrap shadow-sm"
                                             title="Close Campaign and Generate Invoice"
                                         >
-                                            Close & Invoice
+                                            Invoice
                                         </button>
                                     )}
                                 </div>
@@ -290,7 +350,7 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                         {/* Inline Edit Mode */}
                         {editingLabelsId === campaign.id && (
                             <div className="mt-2 pt-4 border-t border-slate-100 dark:border-slate-700/50 bg-slate-50/50 dark:bg-slate-900/20 p-4 rounded-xl">
-                                <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-3">Update Labels</p>
+                                <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-3">Update Campaign Details</p>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
                                         <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Participant Label</label>
@@ -309,6 +369,29 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                         />
                                     </div>
                                 </div>
+                                <div className="mt-4 pt-4 border-t border-slate-200/50 dark:border-slate-700/50">
+                                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Campaign Bundles</label>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {availableBundles.map(bundle => (
+                                            <label key={bundle.id} className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
+                                                <input
+                                                    type="checkbox"
+                                                    className="w-3.5 h-3.5 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                                                    checked={editData.bundleIds?.includes(bundle.id) || false}
+                                                    onChange={(e) => {
+                                                        const currentIds = editData.bundleIds || [];
+                                                        if (e.target.checked) {
+                                                            setEditData(prev => ({ ...prev, bundleIds: [...currentIds, bundle.id] }));
+                                                        } else {
+                                                            setEditData(prev => ({ ...prev, bundleIds: currentIds.filter(id => id !== bundle.id) }));
+                                                        }
+                                                    }}
+                                                />
+                                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300 line-clamp-1">{bundle.name}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
                                 <div className="flex justify-end gap-2 mt-4">
                                     <button
                                         onClick={() => setEditingLabelsId(null)}
@@ -320,7 +403,7 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                         onClick={() => handleUpdateLabels(campaign.id)}
                                         className="text-xs font-bold text-indigo-600 hover:text-indigo-800"
                                     >
-                                        Save Labels
+                                        Save Changes
                                     </button>
                                 </div>
                             </div>

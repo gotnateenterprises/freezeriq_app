@@ -15,8 +15,13 @@ export async function GET() {
             select: { provider: true }
         });
 
+        const business = await prisma.business.findUnique({
+            where: { id: businessId },
+            select: { stripe_account_id: true }
+        });
+
         const status = {
-            square: integrations.some(i => i.provider === 'square'),
+            stripe: !!business?.stripe_account_id,
             qbo: integrations.some(i => i.provider === 'qbo'),
             meta: integrations.some(i => i.provider === 'meta'),
             instagram: integrations.some(i => i.provider === 'instagram')

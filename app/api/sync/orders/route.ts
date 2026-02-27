@@ -2,7 +2,6 @@
 import { NextResponse } from 'next/server';
 import { IngestionDBAdapter } from '@/lib/ingestion_db';
 import { QBOPoller } from '@/lib/ingestion/qbo_poller';
-import { SquareOrderHandler } from '@/lib/ingestion/square_handler';
 import Stripe from 'stripe';
 
 
@@ -31,8 +30,7 @@ export async function POST() {
 
     const db = new IngestionDBAdapter(businessId);
     const qbo = new QBOPoller(db, businessId);
-    const square = new SquareOrderHandler(db, businessId);
-    const results = { qbo: 'skipped', square: 'skipped', errors: [] as string[] };
+    const results = { qbo: 'skipped', errors: [] as string[] };
 
     // 1. Process QBO
     try {
@@ -42,16 +40,6 @@ export async function POST() {
         console.error("QBO Sync Failed (Detail):", e);
         results.qbo = 'failed';
         results.errors.push(`QuickBooks: ${e.message || 'Connection Error'}`);
-    }
-
-    // 2. Process Square
-    try {
-        await square.syncOrders();
-        results.square = 'success';
-    } catch (e: any) {
-        console.error("Square Sync Failed (Detail):", e);
-        results.square = 'failed';
-        results.errors.push(`Square: ${e.message || 'Sync Error'}`);
     }
 
     return NextResponse.json({

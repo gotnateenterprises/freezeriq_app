@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { ArrowLeft, ShoppingCart, CheckCircle, ExternalLink, Printer, Trash2, RefreshCw, Mail } from 'lucide-react';
-import { GeneratePOModal } from '../../../components/production/GeneratePOModal';
+import { GeneratePOModal } from '@/components/production/GeneratePOModal';
 
 interface ShoppingItem {
     id: string; // key
@@ -33,6 +33,24 @@ export default function ShoppingList() {
     const [filter, setFilter] = useState<'all' | 'todo' | 'done'>('all');
     const [isPOModalOpen, setIsPOModalOpen] = useState(false);
 
+    // Calculate Totals using Math.ceil() logic where possible
+    const calculateTotalCost = (listItems: ShoppingItem[]) => {
+        return listItems.reduce((sum, i) => {
+            if (i.casesToOrder !== undefined && i.purchaseCost !== undefined) {
+                return sum + (i.casesToOrder * i.purchaseCost);
+            }
+            return sum + (i.toBuy * i.costPerUnit);
+        }, 0);
+    };
+
+    const updateDashboardTotal = (listItems: ShoppingItem[]) => {
+        if (businessId) {
+            const total = calculateTotalCost(listItems);
+            localStorage.setItem(`${businessId}_shoppingListTotal`, total.toString());
+            window.dispatchEvent(new Event('storage'));
+        }
+    };
+
     // Load Data
     useEffect(() => {
         if (!businessId) return;
@@ -52,8 +70,15 @@ export default function ShoppingList() {
                         const onHand = val.onHand || 0;
                         const toBuy = Math.max(0, needed - onHand);
                         const purchaseQuantity = val.purchaseQuantity;
-                        const casesNeeded = (purchaseQuantity && purchaseQuantity > 0) ? (toBuy / purchaseQuantity) : undefined;
-                        const casesToOrder = casesNeeded !== undefined ? Math.ceil(casesNeeded) : undefined;
+
+                        let casesNeeded: number | undefined = undefined;
+                        let casesToOrder: number | undefined = undefined;
+
+                        // Only calculate cases if we actually need to buy something
+                        if (toBuy > 0 && purchaseQuantity && purchaseQuantity > 0) {
+                            casesNeeded = toBuy / purchaseQuantity;
+                            casesToOrder = Math.ceil(casesNeeded);
+                        }
 
                         return {
                             id: key,
@@ -72,12 +97,12 @@ export default function ShoppingList() {
                             casesNeeded: casesNeeded,
                             casesToOrder: casesToOrder
                         };
-                    }).filter(i => i.toBuy > 0); // Only show what we need to buy? Or show all? Usually just to buy.
+                    }).filter(i => i.toBuy > 0);
 
-                    // Group/Sort?
                     list.sort((a, b) => (a.supplier || '').localeCompare(b.supplier || '') || a.name.localeCompare(b.name));
 
                     setItems(list);
+                    updateDashboardTotal(list); // Sync on initial load
                 }
             } catch (e) {
                 console.error("Failed to load shopping list", e);
@@ -98,26 +123,14 @@ export default function ShoppingList() {
         const checked = newItems.filter(i => i.isChecked).map(i => i.id);
         if (businessId) {
             localStorage.setItem(`${businessId}_shoppingChecked`, JSON.stringify(checked));
-
-            // Update Total for Dashboard
-            // Logic: Total Cost of *Pending* items? or Total Cost of *All* items?
-            // Dashboard says "Est. Cost". Usually implies total cost of the plan.
-            // Let's sum up total "To Buy" cost.
-            const totalCost = newItems.reduce((sum, i) => sum + (i.toBuy * i.costPerUnit), 0);
-            localStorage.setItem(`${businessId}_shoppingListTotal`, totalCost.toString());
-
-            // Trigger storage event for Dashboard to pick up
-            window.dispatchEvent(new Event('storage'));
         }
+
+        // Still update dashboard so components syncing on storage see it, even though total cost might not change just by checking box 
+        // depending on if they want checked vs unchecked cost. But typically it's total PO cost.
+        updateDashboardTotal(newItems);
     };
 
-    // Calculate Totals using Math.ceil() logic where possible
-    const totalEstCost = items.reduce((sum, i) => {
-        if (i.casesToOrder !== undefined && i.purchaseCost !== undefined) {
-            return sum + (i.casesToOrder * i.purchaseCost);
-        }
-        return sum + (i.toBuy * i.costPerUnit);
-    }, 0);
+    const totalEstCost = calculateTotalCost(items);
     const checkedCount = items.filter(i => i.isChecked).length;
 
     // Filter
@@ -241,9 +254,9 @@ export default function ShoppingList() {
                                                     )}
 
                                                     {/* Underneath Context */}
-                                                    {item.casesToOrder !== undefined && item.casesToOrder > 0 && (
+                                                    {item.casesToOrder !== undefined && item.casesToOrder > 0 && item.purchaseQuantity && (
                                                         <span className="text-slate-400">
-                                                            (Need {item.toBuy.toFixed(2)} {item.unit})
+                                                            (Order supplies {item.casesToOrder * item.purchaseQuantity} {item.unit}, needed {item.toBuy.toFixed(2)} {item.unit})
                                                         </span>
                                                     )}
 

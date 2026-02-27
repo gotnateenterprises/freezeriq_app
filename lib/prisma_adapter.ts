@@ -163,15 +163,15 @@ export class PrismaAdapter implements DBAdapter {
         return [];
     }
 
-    async getBundleInfo(bundleId: Uuid): Promise<{ serving_tier: string } | null> {
+    async getBundleInfo(bundleId: Uuid): Promise<{ serving_tier: string, name?: string } | null> {
         const bundle = await prisma.bundle.findFirst({
             where: {
                 id: bundleId,
                 business_id: this.businessId
             },
-            select: { serving_tier: true }
+            select: { serving_tier: true, name: true }
         });
-        return bundle ? { serving_tier: bundle.serving_tier } : null;
+        return bundle ? { serving_tier: bundle.serving_tier, name: bundle.name } : null;
     }
 
     async getBundles() {
@@ -188,9 +188,16 @@ export class PrismaAdapter implements DBAdapter {
         }));
     }
 
-    async getOrders() {
+    async getOrders(includeFundraisers: boolean = false) {
+        const whereClause: any = { business_id: this.businessId };
+
+        // Hide fundraiser orders from main lists by default to prevent clutter
+        if (!includeFundraisers) {
+            whereClause.campaign_id = null;
+        }
+
         const orders = await prisma.order.findMany({
-            where: { business_id: this.businessId },
+            where: whereClause,
             orderBy: { created_at: 'desc' },
             include: {
                 customer: true,

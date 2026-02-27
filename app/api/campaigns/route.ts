@@ -26,7 +26,8 @@ export async function POST(req: Request) {
             missionText, // Optional
             aboutText, // Optional
             participantLabel, // Optional
-            groupLabel // Optional
+            groupLabel, // Optional
+            bundleIds // Add support for linking bundles
         } = body;
 
         if (!customerId || !name) {
@@ -53,9 +54,11 @@ export async function POST(req: Request) {
                 // @ts-ignore - Stale client
                 is_group_enabled: !!groupLabel,
                 status: 'Active',
-                // Generate tokens automatically via default(cuid()) in schema, 
-                // but we can also set them explicitly if we wanted specific formats. 
-                // Schema has @default(cuid()), so we leave them out.
+                ...(bundleIds && bundleIds.length > 0 ? {
+                    bundles: {
+                        connect: bundleIds.map((id: string) => ({ id }))
+                    }
+                } : {})
             }
         });
 
@@ -117,7 +120,23 @@ export async function GET(req: Request) {
                     is_group_enabled: true,
                     customer_id: true,
                     created_at: true,
-                    portal_token: true
+                    portal_token: true,
+                    bundles: {
+                        select: { id: true, name: true }
+                    },
+                    orders: {
+                        select: {
+                            items: {
+                                select: {
+                                    quantity: true,
+                                    variant_size: true,
+                                    bundle: {
+                                        select: { name: true }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 } as any // Use 'as any' for select to avoid TS errors on potential missing fields
             });
 
@@ -154,7 +173,29 @@ export async function GET(req: Request) {
                             participant_label: (fc as any).participant_label || 'Seller',
                             group_label: (fc as any).group_label,
                             is_group_enabled: (fc as any).is_group_enabled,
-                            portal_token: (fc as any).portal_token
+                            portal_token: (fc as any).portal_token,
+                            public_token: fc.portal_token, // Alias
+                            bundles: fc.bundles || [],
+                            bundle_stats: (() => {
+                                const map: Record<string, number> = {};
+                                if (fc.orders) {
+                                    for (const order of fc.orders) {
+                                        for (const item of order.items) {
+                                            if (item.bundle?.name) {
+                                                let sizeLabel = '';
+                                                if (item.variant_size === 'serves_5') sizeLabel = 'FS';
+                                                else if (item.variant_size === 'serves_2') sizeLabel = 'S2';
+                                                else sizeLabel = item.variant_size;
+
+                                                // Shorten bundle name if needed, e.g., "The Family Bundle" to "The Family Bundle"
+                                                const key = `${item.bundle.name} (${sizeLabel})`;
+                                                map[key] = (map[key] || 0) + item.quantity;
+                                            }
+                                        }
+                                    }
+                                }
+                                return Object.entries(map).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+                            })()
                         });
                     }
                 } else {

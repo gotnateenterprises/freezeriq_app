@@ -13,38 +13,31 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
         }
 
-        // Find orders that contain this bundle and have the current status (or APPROVED if not specified)
-        // Note: Using findMany first to identify orders might be safer if the relationship is complex,
-        // but updateMany on OrderItems is slightly tricky because we want to update the ORDER status, not the ITEM.
-
-        // Approach: Find all orders that have an item with this bundleId AND are in currentStatus
-        const ordersToUpdate = await prisma.order.findMany({
+        // 1. Update the OrderItems directly
+        const itemResult = await prisma.orderItem.updateMany({
             where: {
-                business_id: session.user.businessId,
-                status: currentStatus || 'APPROVED',
-                items: {
-                    some: {
-                        bundle_id: bundleId
-                    }
-                }
+                bundle_id: bundleId,
+                production_status: currentStatus || 'PENDING',
+                order: { business_id: session.user.businessId }
             },
-            select: { id: true }
+            data: { production_status: newStatus === 'COMPLETED' ? 'READY_TO_SHIP' : newStatus }
         });
 
-        const orderIds = ordersToUpdate.map(o => o.id);
-
-        if (orderIds.length === 0) {
-            return NextResponse.json({ count: 0, message: "No matching orders found" });
+        // 2. If moving to IN_PRODUCTION, ensure parent Orders are bumped out of APPROVED/PENDING
+        if (newStatus === 'IN_PRODUCTION') {
+            await prisma.order.updateMany({
+                where: {
+                    business_id: session.user.businessId,
+                    status: { in: ['APPROVED', 'PENDING', 'pending'] as any },
+                    items: {
+                        some: { bundle_id: bundleId }
+                    }
+                },
+                data: { status: 'IN_PRODUCTION' }
+            });
         }
 
-        const result = await prisma.order.updateMany({
-            where: {
-                id: { in: orderIds }
-            },
-            data: { status: newStatus }
-        });
-
-        return NextResponse.json({ count: result.count });
+        return NextResponse.json({ count: itemResult.count });
 
     } catch (e) {
         console.error("Batch Update Error:", e);

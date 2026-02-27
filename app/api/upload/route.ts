@@ -26,17 +26,37 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid file type. Only JPG, PNG, GIF, WEBP allowed.' }, { status: 400 });
         }
 
-        const buffer = Buffer.from(await file.arrayBuffer());
-        const filename = `${uuidv4()}${getExtension(file.name)}`;
+        const originalBuffer = Buffer.from(await file.arrayBuffer() as ArrayBuffer);
+
+        let finalBuffer: Buffer = originalBuffer;
+        let finalFilename = `${uuidv4()}`;
+        let finalType = file.type;
+
+        // Compress and convert to WEBP if it's not a GIF (GIFs break if aggressively optimized this way)
+        if (file.type !== 'image/gif') {
+            const sharp = (await import('sharp')).default;
+            finalBuffer = await sharp(originalBuffer)
+                .resize(1200, 1200, {
+                    fit: 'inside', // Maintains aspect ratio, won't enlarge if smaller
+                    withoutEnlargement: true
+                })
+                .webp({ quality: 80 }) // Converts to highly optimized webp
+                .toBuffer() as Buffer;
+
+            finalFilename += '.webp';
+            finalType = 'image/webp';
+        } else {
+            finalFilename += getExtension(file.name);
+        }
 
         // Save to S3 Compatible Storage
-        const url = await uploadToS3(buffer, filename, file.type);
+        const url = await uploadToS3(finalBuffer, finalFilename, finalType);
 
         return NextResponse.json({
             success: true,
             url,
             name: file.name,
-            type: file.type
+            type: finalType
         });
 
     } catch (error) {

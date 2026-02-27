@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import { ShoppingBag, Users, ArrowRight, ArrowLeft, MessageSquare, Tag } from 'lucide-react';
 import Link from 'next/link';
@@ -15,14 +15,17 @@ import StickyCategoryBar from '@/components/shop/StickyCategoryBar';
 import StorefrontFooter from '@/components/shop/StorefrontFooter';
 import StorefrontProductCard from '@/components/shop/StorefrontProductCard';
 import WeeklyBundles from '@/components/shop/WeeklyBundles';
+import BundleDetailsModal from '@/components/shop/BundleDetailsModal';
 import SurplusWaitlist from '@/components/shop/SurplusWaitlist';
 import DeliciousGrid from '@/components/shop/DeliciousGrid';
+import FilterBar from '@/components/shop/FilterBar';
 import PurchaseSidebar from '@/components/shop/PurchaseSidebar';
 import PublicRecipeDetail from '@/components/shop/PublicRecipeDetail';
 import FreezerIQLandingPage from '@/components/shop/FreezerIQLandingPage';
 import CountdownBanner from '@/components/shop/CountdownBanner';
 import TestimonialWall from '@/components/shop/TestimonialWall';
 import MobileStickyCart from '@/components/shop/MobileStickyCart';
+import LoyaltyWidget from '@/components/shop/LoyaltyWidget';
 
 interface Bundle {
     id: string;
@@ -101,7 +104,9 @@ export default function StorefrontClient() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<{ message: string, slugs?: { name: string, slug: string }[] } | null>(null);
     const [activeBundleId, setActiveBundleId] = useState<string | null>(null);
+    const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
     const [selectedPublicRecipe, setSelectedPublicRecipe] = useState<any | null>(null);
+    const [activeFilters, setActiveFilters] = useState<string[]>([]);
 
     useEffect(() => {
         async function fetchStorefront() {
@@ -146,6 +151,54 @@ export default function StorefrontClient() {
         }
         if (slug) fetchStorefront();
     }, [slug]);
+
+    // Move computations above early returns to fix Hook order
+    const regularBundles = useMemo(() => {
+        return data?.bundles?.filter(b => !b.is_surplus) || [];
+    }, [data?.bundles]);
+
+    const featuredBundle = useMemo(() => {
+        return regularBundles.find(b => b.id === activeBundleId) || regularBundles[0] || null;
+    }, [regularBundles, activeBundleId]);
+
+    // Compute Dynamic Tags
+    const availableTags = useMemo(() => {
+        if (!featuredBundle) return [];
+        const tags = new Set<string>();
+        featuredBundle.contents?.forEach((c: any) => {
+            const r = c.recipe;
+            if (!r) return;
+            if (r.macros) r.macros.split(',').forEach((t: string) => {
+                const trimmed = t.trim();
+                if (trimmed) tags.add(trimmed);
+            });
+            if (r.allergens) r.allergens.split(',').forEach((t: string) => {
+                const trimmed = t.trim();
+                if (trimmed) tags.add(trimmed);
+            });
+        });
+        return Array.from(tags).sort();
+    }, [featuredBundle]);
+
+    const filteredRecipes = useMemo(() => {
+        const rawRecipes = featuredBundle?.contents?.map((c: any) => c.recipe).filter(Boolean) || [];
+        if (activeFilters.length === 0) return rawRecipes;
+
+        return rawRecipes.filter((r: any) => {
+            const recipeTags = [
+                ...(r.macros ? r.macros.split(',').map((t: string) => t.trim().toLowerCase()) : []),
+                ...(r.allergens ? r.allergens.split(',').map((t: string) => t.trim().toLowerCase()) : [])
+            ];
+            // Match ALL active filters to allow drill-down
+            return activeFilters.every(f => recipeTags.includes(f.toLowerCase()));
+        });
+    }, [featuredBundle, activeFilters]);
+
+    const handleToggleFilter = (tag: string) => {
+        setActiveFilters(prev =>
+            prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+        );
+    };
 
     if (loading) return (
         <div className="min-h-screen bg-brand-cream dark:bg-slate-950 pb-32 overflow-hidden">
@@ -228,12 +281,7 @@ export default function StorefrontClient() {
     const { business, bundles, fundraisers } = data;
     const { branding, storefrontConfig } = business;
 
-    // Filter bundles
-    const regularBundles = bundles.filter(b => !b.is_surplus);
     const surplusBundles = bundles.filter(b => b.is_surplus);
-
-    // Current featured bundle based on activeBundleId
-    const featuredBundle = regularBundles.find(b => b.id === activeBundleId) || regularBundles[0];
 
     // Find the global order cutoff date across all regular bundles
     const globalCutoffDate = regularBundles.reduce((latest: string | null, bundle) => {
@@ -252,13 +300,7 @@ export default function StorefrontClient() {
 
     const handleSelectBundle = (bundleId: string) => {
         setActiveBundleId(bundleId);
-        // Smooth scroll back up to the purchase box if it's far down
-        const purchaseBox = document.getElementById('purchase-section');
-        if (purchaseBox) {
-            purchaseBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } else {
-            window.scrollTo({ top: 400, behavior: 'smooth' });
-        }
+        setIsBundleModalOpen(true);
     };
 
     if (slug === 'freezeriq') {
@@ -292,7 +334,6 @@ export default function StorefrontClient() {
                 />
 
                 <MobileStickyCart
-                    bundle={featuredBundle}
                     primaryColor={branding.primary_color}
                 />
 
@@ -301,6 +342,26 @@ export default function StorefrontClient() {
                     onClose={() => setSelectedPublicRecipe(null)}
                     recipe={selectedPublicRecipe}
                     primaryColor={branding.primary_color}
+                />
+
+                <BundleDetailsModal
+                    isOpen={isBundleModalOpen}
+                    onClose={() => setIsBundleModalOpen(false)}
+                    bundle={featuredBundle}
+                    primaryColor={branding.primary_color}
+                    onAddToCart={(quantity) => {
+                        if (featuredBundle) {
+                            addToCart({
+                                bundleId: featuredBundle.id,
+                                name: featuredBundle.name,
+                                price: featuredBundle.price,
+                                image_url: featuredBundle.image_url,
+                                serving_tier: featuredBundle.serving_tier,
+                                quantity
+                            });
+                            setIsBundleModalOpen(false);
+                        }
+                    }}
                 />
 
                 <JsonLd data={{
@@ -328,10 +389,11 @@ export default function StorefrontClient() {
                     primaryColor={business.branding.primary_color}
                     heroImage={storefrontConfig?.hero_image_url || "/images/nostalgic-hero.jpg"}
                     logoUrl={business.branding.logo_url}
+                    slug={business.slug}
                 />
 
                 {/* Main Content Flow */}
-                <div className="max-w-7xl mx-auto px-6 -mt-24 relative z-20 space-y-24">
+                <div className="max-w-7xl mx-auto px-6 py-8 md:py-12 relative z-20 space-y-12 md:space-y-16">
 
                     {/* Our Story / Mission */}
                     <section className="bg-white/40 dark:bg-slate-900/60 backdrop-blur-3xl p-12 md:p-20 rounded-[4rem] border border-white dark:border-white/5 shadow-[0_48px_96px_-24px_rgba(244,114,182,0.1)] relative overflow-hidden">
@@ -354,151 +416,24 @@ export default function StorefrontClient() {
                             ) : (
                                 <div className="space-y-8">
                                     <p>At <strong>{(!business.branding.business_name || business.branding.business_name === 'FreezerIQ') ? 'Freezer Chef' : business.branding.business_name}</strong>, we bring over 10 years of experience in freezer meal preparation to your table—taking the stress out of dinnertime and replacing it with comforting, crave-worthy flavors your whole family will love.</p>
-                                    <p>Our freezer-ready meals are handcrafted with care and packed with nostalgia—from hearty casseroles and slow-simmered soups to warm, oven-baked favorites and cozy crockpot classics that taste just like Grandma used to make.</p>
                                 </div>
                             )}
                         </div>
                     </section>
 
-                    {/* The Process (Now below Story) */}
-                    <StorefrontHowItWorks content={storefrontConfig?.how_it_works_content} />
-
-                    {/* Customer Feedback Wall */}
-                    <TestimonialWall testimonials={storefrontConfig?.testimonials as any} />
-
-                    {/* Marketing Video Section */}
-                    {storefrontConfig?.marketing_video_url && (
-                        <section className="relative aspect-video max-w-5xl mx-auto rounded-[3rem] overflow-hidden shadow-2xl shadow-indigo-500/10 border border-white/50 dark:border-white/5 group">
-                            <iframe
-                                src={storefrontConfig.marketing_video_url.includes('youtube.com') || storefrontConfig.marketing_video_url.includes('youtu.be')
-                                    ? storefrontConfig.marketing_video_url.replace('watch?v=', 'embed/').replace('youtu.be/', 'youtube.com/embed/')
-                                    : storefrontConfig.marketing_video_url
-                                }
-                                className="w-full h-full"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                allowFullScreen
-                            />
-                        </section>
-                    )}
-
-                    {/* Lower Section: Bundles & Stationary Purchase Box */}
-                    <div className="flex flex-col lg:flex-row gap-16 pb-20">
-                        {/* Left Column: Monthly Bundles */}
-                        <div className="flex-1 space-y-16">
-
-                            {/* Monthly Bundles Container */}
-                            <div id="shop-bundles" className="scroll-mt-32">
-                                <WeeklyBundles
-                                    bundles={monthlyBundles}
-                                    primaryColor={branding.primary_color}
-                                    onAddToCart={addToCart}
-                                    onSelect={handleSelectBundle}
-                                    activeBundleId={activeBundleId || ''}
-                                />
-                            </div>
-
-                            {/* Featured Recipes Grid (Reflects active bundle) */}
-                            <div className="space-y-6">
-                                <div className="flex items-center gap-2 mb-4">
-                                    <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600">
-                                        <ShoppingBag size={20} />
-                                    </div>
-                                    <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight uppercase tracking-[0.1em]">
-                                        Menu: {featuredBundle?.name}
-                                    </h2>
-                                </div>
-                                <DeliciousGrid
-                                    recipes={featuredBundle?.contents?.map((c: any) => c.recipe).filter(Boolean) || []}
-                                    onItemClick={(recipe) => setSelectedPublicRecipe(recipe)}
-                                />
-                            </div>
-                        </div>
-
-                        {/* Right Column: Stationary Purchase Box */}
-                        <div className="lg:w-[400px]" id="purchase-section">
-                            {featuredBundle ? (
-                                <div className="space-y-8">
-                                    <div className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest text-center shadow-lg">
-                                        Subscribe & Save
-                                    </div>
-                                    <PurchaseSidebar
-                                        key={featuredBundle.id} // Force re-render on selection change
-                                        // @ts-ignore
-                                        bundle={featuredBundle}
-                                        primaryColor={branding.primary_color}
-                                    />
-
-                                    {/* Host Fundraiser CTA */}
-                                    <div className="mt-8 p-10 bg-linear-to-br from-pink-500 to-rose-500 rounded-[2.5rem] text-white space-y-6 shadow-2xl shadow-pink-500/20">
-                                        <h4 className="text-xl font-black leading-tight">Raise Funds With Us</h4>
-                                        <p className="text-pink-100 text-sm font-medium leading-relaxed">
-                                            Partner with us to raise money for your organization with delicious freezer meals.
-                                        </p>
-                                        <Link
-                                            href={`/shop/${slug}/raise-funds`}
-                                            className="inline-flex items-center gap-2 bg-white text-pink-600 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-transform hover:scale-105"
-                                        >
-                                            Start Fundraising
-                                            <ArrowRight size={14} strokeWidth={3} />
-                                        </Link>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="p-8 bg-slate-50 dark:bg-slate-900 rounded-[2.5rem] text-center border border-slate-100 dark:border-slate-800">
-                                    <p className="text-slate-500 font-medium">No bundles available right now.</p>
-                                </div>
-                            )}
-                        </div>
+                    <div id="shop-bundles" className="scroll-mt-32 space-y-16">
+                        <WeeklyBundles
+                            bundles={monthlyBundles}
+                            primaryColor={branding.primary_color}
+                            onAddToCart={addToCart}
+                            onSelect={handleSelectBundle}
+                            activeBundleId={activeBundleId || ''}
+                        />
                     </div>
                 </div>
 
-                {/* Sticky Navigation */}
-                <StickyCategoryBar
-                    primaryColor={branding.primary_color}
-                    hasFundraisers={fundraisers.length > 0}
-                    hasBundles={regularBundles.length > 0}
-                />
-
-                <div className="max-w-6xl mx-auto px-6 relative z-20 py-24 space-y-32">
-                    {/* Fundraisers Section - Refined Cards */}
-                    {fundraisers.length > 0 && (
-                        <section id="fundraisers" className="space-y-12">
-                            <div className="text-center space-y-4">
-                                <span className="text-pink-600 dark:text-pink-400 font-black tracking-[0.2em] uppercase text-[10px] block">Giving Back</span>
-                                <h2 className="text-4xl md:text-5xl font-black text-slate-900 dark:text-white tracking-tight">Active Fundraisers</h2>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                                {fundraisers.map(campaign => (
-                                    <Link
-                                        key={campaign.id}
-                                        href={`/shop/${slug}/fundraiser/${campaign.id}`}
-                                        className="group bg-white dark:bg-slate-900 p-8 rounded-[3rem] shadow-[0_24px_48px_-12px_rgba(79,70,229,0.08)] border border-indigo-50/50 dark:border-slate-800 hover:scale-[1.03] hover:shadow-[0_32px_64px_-16px_rgba(79,70,229,0.15)] transition-all duration-500"
-                                    >
-                                        <div className="flex justify-between items-start mb-6">
-                                            <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600 transition-transform group-hover:scale-110 group-hover:-rotate-3">
-                                                <Tag size={24} />
-                                            </div>
-                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] bg-slate-50 dark:bg-slate-900/50 px-4 py-1.5 rounded-full border border-slate-100 dark:border-slate-800">
-                                                Fundraising
-                                            </span>
-                                        </div>
-                                        <h3 className="text-2xl font-black mb-3 group-hover:text-indigo-600 transition-colors tracking-tight">
-                                            {campaign.name}
-                                        </h3>
-                                        <p className="text-sm text-slate-500 dark:text-slate-400 font-medium line-clamp-2 mb-6 leading-relaxed">
-                                            {campaign.about_text || `Supporting ${campaign.customer.name}`}
-                                        </p>
-                                        <div className="flex items-center gap-2 text-indigo-600 font-black text-[10px] uppercase tracking-widest">
-                                            Support This Cause <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
-                                        </div>
-                                    </Link>
-                                ))}
-                            </div>
-                        </section>
-                    )}
-
-                    {/* Direct Sales / Extra Meals Section (Surplus) */}
+                {/* Direct Sales / Extra Meals Section (Surplus) */}
+                <div className="max-w-6xl mx-auto px-6 relative z-20 mb-12 md:mb-16">
                     <section id="extras" className="space-y-12">
                         <div className="flex flex-col items-center text-center space-y-4">
                             <span className="text-emerald-600 dark:text-emerald-400 font-black tracking-[0.2em] uppercase text-[10px] block">Available Now</span>
@@ -539,14 +474,83 @@ export default function StorefrontClient() {
                     </section>
                 </div>
 
-                {/* Footer */}
-                <StorefrontFooter
-                    businessName={branding.business_name}
-                    slug={business.slug}
-                    primaryColor={branding.primary_color}
-                    footerText={storefrontConfig?.footer_text}
-                />
+                {/* The Process (Now below Store / Extras) */}
+                <StorefrontHowItWorks content={storefrontConfig?.how_it_works_content} />
+
+                {/* Customer Feedback Wall */}
+                <TestimonialWall testimonials={storefrontConfig?.testimonials as any} />
+
+                {/* Marketing Video Section */}
+                {storefrontConfig?.marketing_video_url && (
+                    <section className="relative aspect-video max-w-5xl mx-auto rounded-[3rem] overflow-hidden shadow-2xl shadow-indigo-500/10 border border-white/50 dark:border-white/5 group">
+                        <iframe
+                            src={storefrontConfig.marketing_video_url.includes('youtube.com') || storefrontConfig.marketing_video_url.includes('youtu.be')
+                                ? storefrontConfig.marketing_video_url.replace('watch?v=', 'embed/').replace('youtu.be/', 'youtube.com/embed/')
+                                : storefrontConfig.marketing_video_url
+                            }
+                            className="w-full h-full"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                        />
+                    </section>
+                )}
             </div>
+
+            {/* Sticky Navigation */}
+            <StickyCategoryBar
+                primaryColor={branding.primary_color}
+                hasFundraisers={fundraisers.length > 0}
+                hasBundles={regularBundles.length > 0}
+            />
+
+            <div className="max-w-6xl mx-auto px-6 relative z-20 py-12 md:py-16 space-y-16 md:space-y-20">
+                {/* Fundraisers Section - Refined Cards */}
+                {fundraisers.length > 0 && (
+                    <section id="fundraisers" className="space-y-12">
+                        <div className="text-center space-y-4">
+                            <span className="text-pink-600 dark:text-pink-400 font-black tracking-[0.2em] uppercase text-[10px] block">Giving Back</span>
+                            <h2 className="text-4xl md:text-5xl font-black text-slate-900 dark:text-white tracking-tight">Active Fundraisers</h2>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                            {fundraisers.map(campaign => (
+                                <Link
+                                    key={campaign.id}
+                                    href={`/shop/${slug}/fundraiser/${campaign.id}`}
+                                    className="group bg-white dark:bg-slate-900 p-8 rounded-[3rem] shadow-[0_24px_48px_-12px_rgba(79,70,229,0.08)] border border-indigo-50/50 dark:border-slate-800 hover:scale-[1.03] hover:shadow-[0_32px_64px_-16px_rgba(79,70,229,0.15)] transition-all duration-500"
+                                >
+                                    <div className="flex justify-between items-start mb-6">
+                                        <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600 transition-transform group-hover:scale-110 group-hover:-rotate-3">
+                                            <Tag size={24} />
+                                        </div>
+                                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] bg-slate-50 dark:bg-slate-900/50 px-4 py-1.5 rounded-full border border-slate-100 dark:border-slate-800">
+                                            Fundraising
+                                        </span>
+                                    </div>
+                                    <h3 className="text-2xl font-black mb-3 group-hover:text-indigo-600 transition-colors tracking-tight">
+                                        {campaign.name}
+                                    </h3>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 font-medium line-clamp-2 mb-6 leading-relaxed">
+                                        {campaign.about_text || `Supporting ${campaign.customer.name}`}
+                                    </p>
+                                    <div className="flex items-center gap-2 text-indigo-600 font-black text-[10px] uppercase tracking-widest">
+                                        Support This Cause <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+                                    </div>
+                                </Link>
+                            ))}
+                        </div>
+                    </section>
+                )}
+
+            </div>
+
+            {/* Footer */}
+            <StorefrontFooter
+                businessName={branding.business_name}
+                slug={business.slug}
+                primaryColor={branding.primary_color}
+                footerText={storefrontConfig?.footer_text}
+            />
         </div>
     );
 }

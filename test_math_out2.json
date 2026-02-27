@@ -1,0 +1,2054 @@
+{
+  "bundles": [
+    {
+      "name": "Q1 - Keto/GF (Serves 2)",
+      "contents": [
+        {
+          "recipe": "Broccoli Cheese Soup - Keto (Serves 2)",
+          "yield": "2",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Creamy Pork Tacos (Serves 2) - Keto",
+          "yield": "2",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Tuscan Garlic Chicken - Keto (Serves 2)",
+          "yield": "2",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Chicken Parmesan Casserole (Serves 2) (Keto)",
+          "yield": "2",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Buttery Garlic Pork Roast - Keto (Serves 2)",
+          "yield": "2",
+          "content_qty": 1
+        }
+      ]
+    },
+    {
+      "name": "Q1 - Keto/GF",
+      "contents": [
+        {
+          "recipe": "Broccoli Cheese Soup - Keto",
+          "yield": "5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Creamy Pork Tacos - Keto",
+          "yield": "5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Tuscan Garlic Chicken - Keto",
+          "yield": "5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Chicken Parmesan Casserole (Keto)",
+          "yield": "5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Bacon Cheeseburger Casserole (Keto)",
+          "yield": "5",
+          "content_qty": 1
+        }
+      ]
+    },
+    {
+      "name": "Q1 - Soups & Casseroles",
+      "contents": [
+        {
+          "recipe": "Cheesy Chicken n Potato Cass",
+          "yield": "5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Breakfast Casserole - Sauage",
+          "yield": "5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Hamburger Soup",
+          "yield": "5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Taco Soup",
+          "yield": "5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Zuppa Toscana",
+          "yield": "5",
+          "content_qty": 1
+        }
+      ]
+    },
+    {
+      "name": "Q1 - Soups & Casseroles (Serves 2)",
+      "contents": [
+        {
+          "recipe": "Hamburger Soup (Serves 2)",
+          "yield": "2",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Taco Soup (Serves 2)",
+          "yield": "2",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Zuppa Toscana (Serves 2)",
+          "yield": "2",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Breakfast Casserole - Sauage (Serves 2)",
+          "yield": "2",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Cheesy Chicken n Potato Cass (Serves 2)",
+          "yield": "0.5",
+          "content_qty": 1
+        }
+      ]
+    },
+    {
+      "name": "Game Day Bundle - Family Size",
+      "contents": [
+        {
+          "recipe": "BBQ Pulled Pork",
+          "yield": "5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Chili",
+          "yield": "5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Party Meatballs",
+          "yield": "5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Mac-N-Cheese (King Ranch)",
+          "yield": "5",
+          "content_qty": 1
+        }
+      ]
+    },
+    {
+      "name": "Fall Keto Bundle ",
+      "contents": [
+        {
+          "recipe": "Ranch Chicken n Broccoli",
+          "yield": "5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Crack Chicken",
+          "yield": "5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Pizza Chicken - Keto",
+          "yield": "5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Buttery Garlic Pork Roast - Keto",
+          "yield": "5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Sour Cream Chicken Enchilada Casserole",
+          "yield": "5",
+          "content_qty": 1
+        }
+      ]
+    },
+    {
+      "name": "Game Day Bundle - Serves 2",
+      "contents": [
+        {
+          "recipe": "Chili (Serves 2)",
+          "yield": "2.5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "BBQ Pulled Pork (Serves 2)",
+          "yield": "2",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Party Meatballs (Serves 2)",
+          "yield": "2.5",
+          "content_qty": 1
+        },
+        {
+          "recipe": "Mac-N-Cheese (King Ranch) (Serves 2)",
+          "yield": "2",
+          "content_qty": 1
+        }
+      ]
+    }
+  ],
+  "chicken_recipes": [
+    {
+      "recipe": "Chicken Noodle Casserole",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Noodle CasseroleMix",
+      "qty": "6",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Noodle Casserole",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "3",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Noodle Casserole",
+      "recipe_yield": "5",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "2.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Parmesan Casserole (Keto)",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Shredded)",
+      "qty": "5",
+      "unit": "cups"
+    },
+    {
+      "recipe": "Chicken Parmesan Casserole (Serves 2) (Keto)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Shredded)",
+      "qty": "2",
+      "unit": "cups"
+    },
+    {
+      "recipe": "Chicken Noodle Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Noodle CasseroleMix",
+      "qty": "2",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Noodle Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Diced)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Noodle Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "White Chicken Chili",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "3",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Gravy Pork Roast",
+      "recipe_yield": "5",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Gravy Pork Roast",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Balsamic Chicken (CE/P)",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "White Chicken Chili",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "3",
+      "unit": "cup"
+    },
+    {
+      "recipe": "White Chicken Chili",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "3",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Gravy Pork Roast",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "White Chicken Chili (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Diced)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "White Chicken Chili (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "1.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Taco Casserole",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Taco Mix",
+      "qty": "4",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Taco Casserole",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "4",
+      "unit": "cup"
+    },
+    {
+      "recipe": "White Chicken Chili (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "1",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Chicken Broccoli & Rice Casserole",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broc Rice Mix",
+      "qty": "6",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Broccoli & Rice Casserole",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "2",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Broccoli & Rice Casserole",
+      "recipe_yield": "5",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Gravy Pork Roast (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.25",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "1",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Tuscan Garlic Chicken - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Parmesan Honey Pork (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Mississippi Mud Pork",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Gravy Pork Roast (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Gravy Pork Roast (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2",
+      "unit": "each"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Broccoli & Rice Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broc Rice Mix",
+      "qty": "2",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Broccoli & Rice Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Diced)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Broccoli & Rice Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Pizza Chicken (Keto) (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2",
+      "unit": "each"
+    },
+    {
+      "recipe": "Crack Chicken",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Crack Chicken (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Cheesy Chicken n Potato Cass",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Shredded)",
+      "qty": "3",
+      "unit": "cups"
+    },
+    {
+      "recipe": "Cheesy Chicken n Potato Cass",
+      "recipe_yield": "5",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Sour Cream Chicken Enchilada Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Diced)",
+      "qty": "2",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Pizza Chicken (Keto./GF)",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Cheesy Chicken n Potato Cass (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Shredded)",
+      "qty": "1.5",
+      "unit": "cups"
+    },
+    {
+      "recipe": "Cheesy Chicken n Potato Cass (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Fajita Casserole - Keto (Serves 2)",
+      "recipe_yield": "2.5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "2.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "BBQ Chicken (Serves 2)",
+      "recipe_yield": "2.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Mac-N-Cheese (King Ranch) (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Mac-N-Cheese (King Ranch) (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Shredded)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Tuscan Garlic Chicken - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Ranch Chicken n Broccoli",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Shredded)",
+      "qty": "4",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Tuscan Garlic Chicken - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Orange Chicken (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Italian Pork Chops n Veggies (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Taco Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Diced)",
+      "qty": "2",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Chicken n Broccoli",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Chicken n Broccoli (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Shredded)",
+      "qty": "2",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Mississippi Mud Pork (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "White Chicken Chili (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Diced)",
+      "qty": "1.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Cordon Bleu Casserole - Keto (Serves 2)",
+      "recipe_yield": "2.5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "2",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Chicken (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Brown Sugar Chicken",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Brown Sugar Chicken (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2",
+      "unit": "each"
+    },
+    {
+      "recipe": "Chicken Fajita Casserole - Keto (Serves 2)",
+      "recipe_yield": "2.5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "2.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Mississippi Mud Pork",
+      "recipe_yield": "1",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Mac-N-Cheese (King Ranch) (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Mac-N-Cheese (King Ranch) (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Shredded)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Chicken n Broccoli (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "0.125",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Indian Butter Chicken - Keto (Serves 2)",
+      "recipe_yield": "2.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Indian Butter Chicken - Keto (Serves 2)",
+      "recipe_yield": "2.5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "BBQ Chicken",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Homestead Honey Mustard Chicken (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Homestead Honey Mustard Chicken (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Tuscan Garlic Chicken - Keto (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Tuscan Garlic Chicken - Keto (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Country Style Chicken & Biscuits (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "0.5",
+      "unit": "pound"
+    },
+    {
+      "recipe": "Teriyaki Chicken",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Country Style Chicken & Biscuits (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Tuscan Garlic Chicken - Keto (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.25",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Chicken Fajita Casserole - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Broccoli & Rice Casserole",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broc Rice Mix",
+      "qty": "6",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Broccoli & Rice Casserole",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "3",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Orange Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Chicken Broccoli & Rice Casserole",
+      "recipe_yield": "5",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2",
+      "unit": "each"
+    },
+    {
+      "recipe": "Black Bean Chicken",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Chicken Parmesan Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Shredded)",
+      "qty": "2.5",
+      "unit": "cups"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Teriyaki Chicken (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Chicken Broccoli & Rice Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broc Rice Mix",
+      "qty": "3",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Broccoli & Rice Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Diced)",
+      "qty": "1.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Country Style Chicken & Biscuits",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (Diced)",
+      "qty": "1",
+      "unit": "pound"
+    },
+    {
+      "recipe": "Chicken Broccoli & Rice Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Homestead Honey Mustard Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Brown Sugar Chicken",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Country Style Chicken & Biscuits",
+      "recipe_yield": "1",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Homestead Honey Mustard Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Pork Chops n Veggies",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Pork Roast",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "0",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Taco Casserole  ",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "4",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Pork Roast",
+      "recipe_yield": "5",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Pork Roast",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Ranch Pork Roast (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Noodle Casserole",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Noodle Mix",
+      "qty": "5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Noodle Casserole",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "3",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Balsamic Chicken (CE/P) (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Chicken Spaghetti",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Spaghetti Sauce",
+      "qty": "4",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Pork Roast (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Noodle Casserole",
+      "recipe_yield": "5",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "2",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Mississippi Mud Pork (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Pork Roast (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.25",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Chicken Spaghetti",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "4",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Spaghetti (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Spaghetti Sauce",
+      "qty": "2",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Spaghetti (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Diced)",
+      "qty": "2",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Noodle Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Noodle Mix",
+      "qty": "2.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Noodle Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Diced)",
+      "qty": "1.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Fajitas (CE/P)",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Chicken Noodle Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Spaghetti",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "1",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Chicken Spaghetti (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Italian Chicken n Veggies",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Zuppa Toscana (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "1.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Chicken n Veggies",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Zuppa Toscana (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "1.5",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Sour Cream Chicken Enchilada Casserole",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Zuppa Toscana",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "3",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Zuppa Toscana",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "3",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Chicken Pot Pie Tater Tot Casserole (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Pot Pie Tater Tot Casserole (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "2",
+      "unit": "cups"
+    },
+    {
+      "recipe": "Country Style Chicken & Biscuits",
+      "recipe_yield": "5",
+      "ingredient": "Chicken n Veggie Mix",
+      "qty": "5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Country Style Chicken & Biscuits",
+      "recipe_yield": "5",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Country Style Chicken & Biscuits",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "3",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos",
+      "recipe_yield": "1",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Country Style Chicken & Biscuits (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken n Veggie Mix",
+      "qty": "2",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Country Style Chicken & Biscuits (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Country Style Chicken & Biscuits (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Diced)",
+      "qty": "1.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Pork Roast",
+      "recipe_yield": "5",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Pork Roast",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Pot Pie Tater Tot Casserole",
+      "recipe_yield": "1",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Pot Pie Tater Tot Casserole",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (Diced)",
+      "qty": "4",
+      "unit": "cups"
+    },
+    {
+      "recipe": "Ranch Pork Roast (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Pork Roast (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Black Bean Chicken",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Black Bean Chicken (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2",
+      "unit": "each"
+    },
+    {
+      "recipe": "Chicken Spaghetti ",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "3",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Spaghetti ",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Ranch Chicken Street Tacos",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Chicken Spaghetti  (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Diced)",
+      "qty": "1.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Spaghetti  (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Balsamic Chicken (CE/P/GF)",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Balsamic Chicken (CE/P/GF) (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2",
+      "unit": "each"
+    },
+    {
+      "recipe": "Chicken Fajitas (CE/P/GF)",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Teriyaki Chicken",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Teriyaki Chicken (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Broccoli Cheese Soup - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "3",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Fajitas (CE/P/GF) (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2",
+      "unit": "each"
+    },
+    {
+      "recipe": "Broccoli Cheese Soup - Keto (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "1.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "BBQ Chicken (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Black Bean Chicken (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Italian Pork Chops n Veggies",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Pork Chops n Veggies (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "BBQ Chicken",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Zuppa Toscana",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "3",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Fajitas (CE/P) (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Italian Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Zuppa Toscana",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "3",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Chicken Cordon Bleu Casserole - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "4",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Chicken (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Parmesan Honey Pork (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Chicken n Veggies (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Chicken n Veggies (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "1.5",
+      "unit": "cups"
+    },
+    {
+      "recipe": "Buttery Garlic Pork Roast - Keto (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Buttery Garlic Pork Roast - Keto (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.25",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Pizza Chicken - Keto (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2",
+      "unit": "each"
+    },
+    {
+      "recipe": "Parmesan Honey Pork",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Chicken n Veggies",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "3",
+      "unit": "cups"
+    },
+    {
+      "recipe": "Italian Chicken n Veggies",
+      "recipe_yield": "1",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Gravy Pork Roast",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Cheesy Chicken n Potato Cass",
+      "recipe_yield": "1",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Gravy Pork Roast",
+      "recipe_yield": "5",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Cheesy Chicken n Potato Cass",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (Shredded)",
+      "qty": "3",
+      "unit": "cups"
+    },
+    {
+      "recipe": "Gravy Pork Roast",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Zuppa Toscana (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "1.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Indian Butter Chicken - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Indian Butter Chicken - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Cordon Bleu Casserole - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "4",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Zuppa Toscana (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "1.5",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Gravy Pork Roast (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Pizza Chicken - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Gravy Pork Roast (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Cheesy Chicken n Potato Cass (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Cheesy Chicken n Potato Cass (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (Shredded)",
+      "qty": "1.5",
+      "unit": "cups"
+    },
+    {
+      "recipe": "Gravy Pork Roast (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.25",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Italian Chicken n Veggies (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2",
+      "unit": "each"
+    },
+    {
+      "recipe": "Mac-N-Cheese (King Ranch)",
+      "recipe_yield": "5",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Mac-N-Cheese (King Ranch)",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Shredded)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Chicken n Veggies (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Orange Chicken (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Parmesan Honey Pork (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Cheesy Ham & Potato Soup",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "3",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Cordon Bleu Casserole - Keto (Serves 2)",
+      "recipe_yield": "2.5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "2",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Cheesy Ham & Potato Soup",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "3",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Homestead Honey Mustard Chicken (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Italian Chicken (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Brown Sugar Chicken (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "1",
+      "unit": "pounds"
+    },
+    {
+      "recipe": "Brown Sugar Chicken (Serves 2)",
+      "recipe_yield": "2.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Homestead Honey Mustard Chicken (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Indian Butter Chicken - Keto (Serves 2)",
+      "recipe_yield": "2.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Indian Butter Chicken - Keto (Serves 2)",
+      "recipe_yield": "2.5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Cordon Bleu Casserole - Keto (Serves 2)",
+      "recipe_yield": "2.5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "2",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Homestead Honey Mustard Chicken (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Homestead Honey Mustard Chicken (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Orange Chicken (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2.5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Mississippi Mud Pork (Serves 2)",
+      "recipe_yield": "0.5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Cheesy Ham & Potato Soup (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Tuscan Garlic Chicken - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Tuscan Garlic Chicken - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Cheesy Ham & Potato Soup (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "1",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Chicken Fajita Casserole - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Homestead Honey Mustard Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Homestead Honey Mustard Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Orange Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Mississippi Mud Pork",
+      "recipe_yield": "1",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Parmesan Honey Pork",
+      "recipe_yield": "1",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Chicken n Veggies",
+      "recipe_yield": "1",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Chicken n Veggies",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "3",
+      "unit": "cups"
+    },
+    {
+      "recipe": "Tuscan Garlic Chicken - Keto (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2",
+      "unit": "each"
+    },
+    {
+      "recipe": "Tuscan Garlic Chicken - Keto (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Broth",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Homestead Honey Mustard Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Homestead Honey Mustard Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Orange Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Parmesan Honey Pork",
+      "recipe_yield": "1",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Homestead Honey Mustard Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Homestead Honey Mustard Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Buttery Garlic Pork Roast - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Buttery Garlic Pork Roast - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "tsp"
+    },
+    {
+      "recipe": "Italian Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Orange Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Brown Sugar Chicken",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2",
+      "unit": "pounds"
+    },
+    {
+      "recipe": "Mississippi Mud Pork",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Parmesan Honey Pork",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Chicken n Veggies",
+      "recipe_yield": "1",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "3",
+      "unit": "cups"
+    },
+    {
+      "recipe": "Italian Chicken n Veggies",
+      "recipe_yield": "1",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Indian Butter Chicken - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "5",
+      "unit": "each"
+    },
+    {
+      "recipe": "Indian Butter Chicken - Keto",
+      "recipe_yield": "5",
+      "ingredient": "Chicken Broth",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Chicken n Veggies (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (5oz. Breast)",
+      "qty": "2",
+      "unit": "each"
+    },
+    {
+      "recipe": "Mac-N-Cheese (King Ranch)",
+      "recipe_yield": "5",
+      "ingredient": "Soup (Cream of Chicken)",
+      "qty": "0.5",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Mac-N-Cheese (King Ranch)",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Shredded)",
+      "qty": "1",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Italian Chicken n Veggies (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Bullion)",
+      "qty": "0.25",
+      "unit": "cup"
+    },
+    {
+      "recipe": "White Chicken Chili",
+      "recipe_yield": "5",
+      "ingredient": "Chicken (Diced)",
+      "qty": "3",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Taco Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken (Diced)",
+      "qty": "2",
+      "unit": "cup"
+    },
+    {
+      "recipe": "Chicken Taco Casserole (Serves 2)",
+      "recipe_yield": "2",
+      "ingredient": "Chicken Taco Mix",
+      "qty": "2",
+      "unit": "cup"
+    }
+  ]
+}

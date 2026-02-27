@@ -1,4 +1,4 @@
-import { Plus, Minus, Search, Save, Copy, Merge, Trash2, ExternalLink, Loader2 } from 'lucide-react';
+import { Plus, Minus, Search, Save, Copy, Merge, Trash2, ExternalLink, Loader2, Printer } from 'lucide-react';
 
 interface Supplier {
     id: string;
@@ -67,6 +67,87 @@ export default function IngredientTable({
     setMergeSource,
     UNIT_OPTIONS
 }: IngredientTableProps) {
+    const handlePrint = () => {
+        const sortedIngredients = [...ingredients]
+            .filter(ing => {
+                const query = searchQuery.toLowerCase();
+                const supplierName = suppliers.find(s => s.id === ing.supplier_id)?.name.toLowerCase() || '';
+
+                // Exclude "Batch Recipe" from the print list
+                if (supplierName === 'batch recipe') {
+                    return false;
+                }
+
+                return ing.name.toLowerCase().includes(query) ||
+                    (ing.sku?.toLowerCase().includes(query)) ||
+                    supplierName.includes(query);
+            })
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) return;
+
+        const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Inventory Checklist</title>
+            <style>
+                @media print {
+                    @page { size: portrait; margin: 0.5in; }
+                    body { margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+                }
+                body { padding: 20px; font-family: system-ui, -apple-system, sans-serif; color: #000; }
+                table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 12px; }
+                th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; }
+                th { background: #f8fafc; font-weight: bold; border-bottom: 2px solid #cbd5e1; }
+                h1 { margin-top: 0; font-size: 24px; }
+                .date { color: #64748b; font-size: 14px; margin-bottom: 20px; }
+                .count-col { width: 80px; }
+                .count-line { border-bottom: 1px solid #000; width: 100%; display: inline-block; height: 16px; }
+                tr { page-break-inside: avoid; }
+            </style>
+        </head>
+        <body onload="window.print(); setTimeout(() => window.close(), 500);">
+            <div class="header">
+                <h1>Inventory Checklist</h1>
+                <div class="date">Generated: ${new Date().toLocaleDateString()}</div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th class="count-col">Count</th>
+                        <th>Ingredient Name</th>
+                        <th>SKU</th>
+                        <th>Cost</th>
+                        <th>Supplier</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${sortedIngredients.map(ing => {
+            const supName = suppliers.find(s => s.id === ing.supplier_id)?.name || '';
+            const sku = ing.sku || '';
+            const cost = ing.purchase_cost ? '$' + ing.purchase_cost.toFixed(2) : '';
+            return `
+                        <tr>
+                            <td><div class="count-line"></div></td>
+                            <td><strong>${ing.name}</strong></td>
+                            <td>${sku}</td>
+                            <td>${cost}</td>
+                            <td>${supName}</td>
+                        </tr>
+                        `;
+        }).join('')}
+                </tbody>
+            </table>
+        </body>
+        </html>
+        `;
+
+        printWindow?.document.write(html);
+        printWindow?.document.close();
+    };
+
     return (
         <>
             <div className="glass-panel rounded-3xl p-6 mb-6 bg-white/50 dark:bg-slate-800/40 border border-white/40 dark:border-slate-700/50">
@@ -125,17 +206,27 @@ export default function IngredientTable({
                 </div>
             </div>
 
-            <div className="relative mb-6">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400">
-                    <Search size={20} />
+            <div className="flex gap-4 items-center mb-6">
+                <div className="relative flex-1">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400">
+                        <Search size={20} />
+                    </div>
+                    <input
+                        type="text"
+                        placeholder="Search ingredients, SKUs, or suppliers..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-12 pr-4 py-4 bg-white/80 dark:bg-slate-900/60 border border-white/40 dark:border-slate-700/50 rounded-3xl shadow-sm backdrop-blur-xl focus:ring-2 focus:ring-indigo-500 outline-none font-medium transition-all text-adaptive"
+                    />
                 </div>
-                <input
-                    type="text"
-                    placeholder="Search ingredients, SKUs, or suppliers..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-12 pr-4 py-4 bg-white/80 dark:bg-slate-900/60 border border-white/40 dark:border-slate-700/50 rounded-3xl shadow-sm backdrop-blur-xl focus:ring-2 focus:ring-indigo-500 outline-none font-medium transition-all text-adaptive"
-                />
+                <button
+                    onClick={handlePrint}
+                    className="flex shrink-0 items-center justify-center gap-2 px-6 py-4 bg-white/80 dark:bg-slate-900/60 border border-slate-300 dark:border-slate-700/50 rounded-3xl text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-sm"
+                    title="Print Inventory Checklist"
+                >
+                    <Printer size={20} />
+                    <span className="hidden sm:inline">Print List</span>
+                </button>
             </div>
 
             <div className="glass-panel rounded-3xl bg-white/80 dark:bg-slate-900/60 border border-white/40 dark:border-slate-700/50 shadow-sm backdrop-blur-xl">

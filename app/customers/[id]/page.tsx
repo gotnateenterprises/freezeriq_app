@@ -2,13 +2,11 @@
 
 import { useState, useEffect, use } from 'react';
 import { format } from 'date-fns';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Save, ShoppingBag, Calendar, DollarSign, StickyNote, MapPin, Mail, User, Edit2, X, Phone, Check, FileText, Send, Loader2, LayoutDashboard, FileCheck, Clock, Megaphone } from 'lucide-react';
 import Link from 'next/link';
-import DocumentsTab from '@/components/crm/DocumentsTab';
 import ActivityFeed from '@/components/crm/ActivityFeed';
 import CustomerOverview from '@/components/crm/CustomerOverview';
-import FundraisersTab from '@/components/crm/FundraisersTab';
 import AddOrderModal from '@/components/AddOrderModal';
 import { STATUS_COLORS, STATUS_LABELS, type CustomerStatus } from '@/lib/statusConstants';
 
@@ -45,9 +43,8 @@ export default function CustomerProfilePage({ params }: { params: Promise<{ id: 
             .catch(err => console.error("Failed to fetch bundles:", err));
     }, []);
 
-    // Check if customer can use documents
-    const hasDocumentsAccess = customer && (customer.type === 'Fundraiser' || customer.type === 'Organization');
-    const [activeTab, setActiveTab] = useState('overview');
+    const searchParams = useSearchParams();
+    const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview');
 
     // Edit Modal State
     const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -194,8 +191,7 @@ export default function CustomerProfilePage({ params }: { params: Promise<{ id: 
                     <div>
                         <h1 className="text-4xl font-black text-slate-900 dark:text-white flex items-center gap-4 tracking-tight">
                             {customer.name}
-                            <span className={`text-sm px-4 py-1.5 rounded-full uppercase font-bold tracking-wide 
-                                ${customer.type === 'Organization' ? 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-100' : 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-100'}`}>
+                            <span className={`text-sm px-4 py-1.5 rounded-full uppercase font-bold tracking-wide bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400`}>
                                 {customer.type}
                             </span>
                             {customer.status && (
@@ -269,17 +265,6 @@ export default function CustomerProfilePage({ params }: { params: Promise<{ id: 
                     History
                 </button>
                 <button
-                    onClick={() => setActiveTab('fundraisers')}
-                    className={`px-6 py-3 rounded-t-xl font-bold flex items-center gap-2 transition-all ${activeTab === 'fundraisers'
-                        ? 'bg-slate-100 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border-b-2 border-indigo-500'
-                        : customer.type === 'ORGANIZATION'
-                            ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-900/20 hover:bg-indigo-100 dark:hover:bg-indigo-900/30'
-                            : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-700 dark:hover:text-slate-300'}`}
-                >
-                    <Megaphone size={18} className={customer.type === 'ORGANIZATION' && activeTab !== 'fundraisers' ? 'animate-pulse' : ''} />
-                    Fundraisers <span className="bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded-full text-xs">{(customer.campaigns || []).length}</span>
-                </button>
-                <button
                     onClick={() => setActiveTab('subscriptions')}
                     className={`px-6 py-3 rounded-t-xl font-bold flex items-center gap-2 transition-all ${activeTab === 'subscriptions'
                         ? 'bg-slate-100 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border-b-2 border-indigo-500'
@@ -288,17 +273,6 @@ export default function CustomerProfilePage({ params }: { params: Promise<{ id: 
                     <Calendar size={18} />
                     Subscriptions <span className="bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded-full text-xs">{(customer.orders || []).flatMap((o: any) => o.orderItems || []).filter((i: any) => i.is_subscription).length}</span>
                 </button>
-                {hasDocumentsAccess && (
-                    <button
-                        onClick={() => setActiveTab('documents')}
-                        className={`px-6 py-3 rounded-t-xl font-bold flex items-center gap-2 transition-all ${activeTab === 'documents'
-                            ? 'bg-slate-100 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border-b-2 border-indigo-500'
-                            : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-700 dark:hover:text-slate-300'}`}
-                    >
-                        <FileCheck size={18} />
-                        Documents
-                    </button>
-                )}
             </div>
 
             {/* TAB CONTENT */}
@@ -413,15 +387,6 @@ export default function CustomerProfilePage({ params }: { params: Promise<{ id: 
                 </div>
             )}
 
-            {activeTab === 'fundraisers' && (
-                <FundraisersTab
-                    customerId={customer.id}
-                    businessSlug={businessSlug}
-                />
-            )}
-
-            {activeTab === 'documents' && <DocumentsTab customer={customer} />}
-
             {/* Edit Profile Modal */}
             {isEditingProfile && (
                 <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -454,23 +419,9 @@ export default function CustomerProfilePage({ params }: { params: Promise<{ id: 
                                         className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-900 dark:text-white appearance-none"
                                     >
                                         <option value="Individual">Individual (Direct)</option>
-                                        <option value="Organization">Organization (B2B)</option>
-                                        <option value="Fundraiser">Fundraiser Group</option>
                                     </select>
                                 </div>
                             </div>
-
-                            {editForm.type !== 'Individual' && (
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">{editForm.type} Name</label>
-                                    <input
-                                        value={editForm.name}
-                                        onChange={e => setEditForm({ ...editForm, name: e.target.value })}
-                                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-900 dark:text-white"
-                                        placeholder={`e.g. ${editForm.type === 'Fundraiser' ? 'Spring 2026 PTA' : 'Acme Corp'}`}
-                                    />
-                                </div>
-                            )}
 
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">

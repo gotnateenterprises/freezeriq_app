@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { Recipe } from '@/types';
 import { auth } from '@/auth';
+import { revalidatePath } from 'next/cache';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +47,7 @@ export async function PUT(
         }
 
         const body = await request.json();
-        const { name, type, yield_qty, yield_unit, container_type, items, category_id, allergens, instructions, label_text, macros, image_url, description, cook_time } = body;
+        const { name, type, yield_qty, yield_unit, container_type, items, category_id, allergens, instructions, label_text, macros, image_url, description, cook_time, is_subscriber_only } = body;
 
         // Interactive Transaction to ensure atomicity
         console.log(`[Recipe API] Updating recipe ${id} with data:`, JSON.stringify({ ...body, items: undefined }));
@@ -67,7 +68,8 @@ export async function PUT(
                     allergens: allergens || null,
                     instructions: instructions || null,
                     label_text: label_text || null,
-                    macros: macros || null
+                    macros: macros || null,
+                    is_subscriber_only: is_subscriber_only !== undefined ? is_subscriber_only : undefined
                 }
             });
 
@@ -165,6 +167,7 @@ export async function PUT(
             return updated.id;
         });
 
+        revalidatePath('/recipes');
         return NextResponse.json({ success: true, id: updatedId });
 
     } catch (error: any) {
@@ -202,6 +205,7 @@ export async function DELETE(
             })
         ]);
 
+        revalidatePath('/recipes');
         return NextResponse.json({ success: true });
     } catch (error: any) {
         console.error("Delete Error:", error);

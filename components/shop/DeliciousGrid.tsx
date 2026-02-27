@@ -77,22 +77,22 @@ export default function DeliciousGrid({ images = [], recipes = [], onItemClick }
                     </div>
 
                     {/* Premium Gradient Overlay */}
-                    <div className="absolute inset-0 z-2 bg-linear-to-t from-black/60 via-black/10 to-transparent group-hover/grid:from-black/70 transition-all duration-500" />
+                    <div className="absolute inset-0 z-2 bg-gradient-to-t from-black/80 via-black/30 to-transparent md:from-black/60 md:via-black/10 md:group-hover/grid:from-black/70 transition-all duration-500" />
 
                     {/* Content Overlay */}
-                    <div className="absolute inset-x-0 bottom-0 p-8 z-3 translate-y-2 group-hover/grid:translate-y-0 transition-transform duration-500">
+                    <div className="absolute inset-x-0 bottom-0 p-5 md:p-8 z-3 md:translate-y-2 md:group-hover/grid:translate-y-0 transition-transform duration-500">
                         <div className="overflow-hidden">
-                            <p className="text-white font-serif text-2xl md:text-4xl tracking-tight mb-2 transform translate-y-0 transition-transform duration-500 drop-shadow-lg">
+                            <p className="text-white font-serif text-xl md:text-3xl tracking-tight mb-2 transform translate-y-0 transition-transform duration-500 drop-shadow-lg">
                                 {item.name}
                             </p>
                             {item.description && (
-                                <p className="text-white/80 text-xs md:text-sm font-medium mb-4 line-clamp-2 transform translate-y-0 transition-transform duration-500 drop-shadow-md">
+                                <p className="text-white/80 text-xs md:text-sm font-medium mb-4 line-clamp-2 md:line-clamp-3 transform translate-y-0 transition-transform duration-500 drop-shadow-md">
                                     {item.description}
                                 </p>
                             )}
-                            <div className="flex items-center gap-2 opacity-0 group-hover/grid:opacity-100 transform translate-y-4 group-hover/grid:translate-y-0 transition-all duration-500 delay-75">
+                            <div className="flex items-center gap-2 opacity-100 md:opacity-0 md:group-hover/grid:opacity-100 transform translate-y-0 md:translate-y-4 md:group-hover/grid:translate-y-0 transition-all duration-500 md:delay-75">
                                 <div className="h-px w-8 bg-brand-rose" />
-                                <p className="text-pink-100 text-[10px] font-black uppercase tracking-[0.2em]">
+                                <p className="text-pink-100 text-[10px] font-black uppercase tracking-[0.2em] drop-shadow-lg">
                                     {item.cook_time ? `Ready in ${item.cook_time}` : "Chef's Special"}
                                 </p>
                             </div>

@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
+import { InventoryEngine } from '@/lib/inventory_engine';
 
 export async function POST(req: Request) {
     try {
         const session = await auth();
-        if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
         const { orderIds, status } = await req.json();
 
@@ -20,6 +21,17 @@ export async function POST(req: Request) {
             },
             data: { status }
         });
+
+        // Trigger ERP ERP Deduction Hook
+        if (status === 'completed' || status === 'delivered') {
+            const engine = new InventoryEngine(session.user.businessId);
+            for (const id of orderIds) {
+                // Async background deduct to prevent blocking response too long
+                engine.deductOrderInventory(id).catch(err => {
+                    console.error(`Inventory deduction failed for ${id}:`, err);
+                });
+            }
+        }
 
         return NextResponse.json({ count: result.count });
 

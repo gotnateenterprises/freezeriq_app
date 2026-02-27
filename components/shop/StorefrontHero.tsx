@@ -1,7 +1,8 @@
 "use client";
 
-import { ArrowRight, Truck, CheckCircle, Calendar, ArrowDown, ChefHat } from 'lucide-react';
+import { ArrowRight, Truck, CheckCircle, Calendar, ArrowDown, ChefHat, UserCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
+import Link from 'next/link';
 
 interface StorefrontHeroProps {
     headline: string;
@@ -10,6 +11,7 @@ interface StorefrontHeroProps {
     primaryColor: string;
     heroImage?: string; // Optional background image URL
     logoUrl?: string | null; // Optional business logo
+    slug?: string; // Need slug for login link
 }
 
 export default function StorefrontHero({
@@ -18,7 +20,8 @@ export default function StorefrontHero({
     businessName,
     primaryColor,
     heroImage,
-    logoUrl
+    logoUrl,
+    slug
 }: StorefrontHeroProps) {
 
     const scrollToShop = () => {
@@ -51,6 +54,23 @@ export default function StorefrontHero({
                         {(!businessName || businessName === 'FreezerIQ') ? 'Freezer Chef' : businessName}
                     </h2>
                 </div>
+
+                {slug && (
+                    <div className="flex items-center pointer-events-auto relative">
+                        <Link
+                            href={`/shop/${slug}/login`}
+                            className="group flex items-center gap-2 bg-slate-900/40 hover:bg-slate-900/60 backdrop-blur-xl border-2 border-white/50 px-4 py-2.5 rounded-full text-white transition-all hover:scale-105 shadow-[0_8px_32px_0_rgba(0,0,0,0.5)]"
+                        >
+                            <UserCircle size={18} />
+                            <span className="text-xs font-black uppercase tracking-widest hidden sm:inline">Sign In</span>
+
+                            {/* Hover Tooltip (Desktop Only) */}
+                            <div className="absolute top-12 right-0 bg-slate-900/90 backdrop-blur-md text-white px-3 py-1.5 rounded-lg text-xs font-bold tracking-widest uppercase opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none shadow-xl border border-white/10 hidden sm:block">
+                                Manage Account
+                            </div>
+                        </Link>
+                    </div>
+                )}
             </nav>
 
             {/* Immersive Background Layer */}
@@ -97,6 +117,15 @@ export default function StorefrontHero({
                     className="w-full max-w-4xl"
                 >
                     <div className="bg-white/10 dark:bg-slate-900/20 backdrop-blur-md rounded-[3rem] md:rounded-[5rem] p-10 md:p-24 text-center shadow-[0_32px_64px_-16px_rgba(0,0,0,0.2)] border border-white/20 dark:border-white/5 relative overflow-hidden">
+
+                        {logoUrl && (
+                            <div className="flex justify-center mb-10 relative z-10">
+                                <div className="w-28 h-28 md:w-36 md:h-36 rounded-full bg-white dark:bg-slate-900 shadow-2xl flex items-center justify-center p-4 md:p-6 border border-slate-100 dark:border-slate-800 relative hover:scale-105 transition-transform duration-500"
+                                    style={{ boxShadow: `0 25px 50px -12px ${primaryColor}40` }}>
+                                    <img src={logoUrl} alt={`${businessName} Logo`} className="w-full h-full object-contain" />
+                                </div>
+                            </div>
+                        )}
                         {/* Status Label */}
                         <motion.div
                             initial={{ opacity: 0, scale: 0.9 }}
@@ -112,12 +141,12 @@ export default function StorefrontHero({
 
                         <h1 className="text-4xl md:text-7xl font-black text-slate-900 dark:text-white mb-6 md:mb-10 leading-[1.1] tracking-tight">
                             {headline || (
-                                <>Delicious Freezer Meals<br />Made for Your Busy Life</>
+                                <>Stock your freezer<br />in 5 minutes.</>
                             )}
                         </h1>
 
                         <p className="text-lg md:text-3xl text-slate-800 dark:text-slate-100 font-serif mb-10 md:mb-14 max-w-2xl mx-auto leading-relaxed opacity-95">
-                            {subheadline || "Home-cooked flavor. Zero dinner stress. Stock your freezer. Gather around the table."}
+                            {subheadline || "Take the stress out of dinner. Real food, ready when you are."}
                         </p>
 
                         <div className="flex flex-col items-center gap-10">

@@ -7,25 +7,26 @@ interface StatusPipelineProps {
     currentStatus: CustomerStatus;
     onStatusClick?: (status: CustomerStatus) => void;
     allowManualChange?: boolean;
+    stages?: CustomerStatus[];
 }
 
-const PIPELINE_STAGES: CustomerStatus[] = [
+const DEFAULT_PIPELINE_STAGES: CustomerStatus[] = [
     'LEAD',
     'SEND_INFO',
     'FLYERS',
     'ACTIVE',
     'PRODUCTION',
     'DELIVERY',
-    'COMPLETE',
-    'INACTIVE'
+    'COMPLETE'
 ];
 
 export default function StatusPipeline({
     currentStatus,
     onStatusClick,
-    allowManualChange = false
+    allowManualChange = false,
+    stages = DEFAULT_PIPELINE_STAGES
 }: StatusPipelineProps) {
-    const currentIndex = PIPELINE_STAGES.indexOf(currentStatus);
+    const currentIndex = stages.indexOf(currentStatus);
 
     return (
         <div className="w-full py-6">
@@ -35,12 +36,12 @@ export default function StatusPipeline({
                 <div className="absolute top-6 left-0 right-0 h-1 bg-slate-200 dark:bg-slate-700" style={{ zIndex: 0 }}>
                     <div
                         className="h-full bg-indigo-500 transition-all duration-500"
-                        style={{ width: `${(currentIndex / (PIPELINE_STAGES.length - 1)) * 100}%` }}
+                        style={{ width: `${Math.max(0, (currentIndex / (stages.length - 1)) * 100)}%` }}
                     />
                 </div>
 
                 {/* Pipeline Stages */}
-                {PIPELINE_STAGES.map((status, index) => {
+                {stages.map((status, index) => {
                     const isCompleted = index < currentIndex;
                     const isCurrent = index === currentIndex;
                     const isPending = index > currentIndex;

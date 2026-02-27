@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(
     req: Request,
     { params }: { params: Promise<{ token: string }> }
@@ -26,7 +28,6 @@ export async function GET(
                 },
                 // 2. PRIVACY FIX: Only select fields needed for Leaderboard/Progress
                 orders: {
-                    where: { status: { not: 'cancelled' as any } }, // Optional: hide cancelled
                     orderBy: { created_at: 'desc' },
                     select: {
                         id: true,
@@ -34,8 +35,19 @@ export async function GET(
                         customer_name: true,
                         total_amount: true,
                         created_at: true,
-                        source: true
-                        // EXCLUDED: delivery_address, customer_email, phone, items
+                        source: true,
+                        customer_email: true,
+                        customer_phone: true,
+                        coordinator_paid: true,
+                        coordinator_check: true,
+                        coordinator_picked_up: true,
+                        items: {
+                            select: {
+                                bundle_id: true,
+                                quantity: true,
+                                variant_size: true
+                            }
+                        }
                     }
                 }
             }
@@ -56,19 +68,51 @@ export async function GET(
             return NextResponse.json({ error: "Portal unavailable (Plan Restriction)" }, { status: 403 });
         }
 
-        // 4. Fetch Active Bundles for the business
-        const bundles = await prisma.bundle.findMany({
-            where: {
-                business_id: businessId,
-                is_active: true
-            },
-            select: {
-                id: true,
-                name: true,
-                price: true,
-                serving_tier: true
+        // 4. Fetch Specific Bundles assigned to the Fundraiser via Invoice
+        let bundles: any[] = [];
+
+        const latestInvoice = await prisma.invoice.findFirst({
+            where: { customer_id: campaign.customer_id },
+            orderBy: { created_at: 'desc' },
+            include: {
+                items: {
+                    include: {
+                        bundle: {
+                            select: {
+                                id: true,
+                                name: true,
+                                price: true,
+                                serving_tier: true
+                            }
+                        }
+                    }
+                }
             }
         });
+
+        if (latestInvoice && latestInvoice.items.length > 0) {
+            // Extract bundles from invoice items, filtering out nulls
+            bundles = latestInvoice.items
+                .filter(item => item.bundle)
+                .map(item => item.bundle);
+
+            // Deduplicate bundles by ID
+            bundles = Array.from(new Map(bundles.map(b => [b.id, b])).values());
+        } else {
+            // Fallback for dummy/new campaigns with no invoices
+            bundles = await prisma.bundle.findMany({
+                where: {
+                    business_id: businessId,
+                    is_active: true
+                },
+                select: {
+                    id: true,
+                    name: true,
+                    price: true,
+                    serving_tier: true
+                }
+            });
+        }
 
         return NextResponse.json({
             ...campaign,
@@ -126,12 +170,20 @@ export async function POST(
                 business_id: business.id,
                 customer_id: campaign.customer_id,
                 campaign_id: campaign.id,
+                customer_email: email || null,
+                customer_phone: phone || null,
                 items: {
-                    create: (items || []).map((item: any) => ({
-                        bundle_id: item.bundleId || item.id,
-                        quantity: item.quantity,
-                        variant_size: item.variantSize || item.serving_tier || 'family'
-                    }))
+                    create: (items || []).map((item: any) => {
+                        let mappedVariant = item.variantSize || item.serving_tier || 'serves_5';
+                        if (mappedVariant === 'family') mappedVariant = 'serves_5';
+                        if (mappedVariant === 'serves 2') mappedVariant = 'serves_2';
+
+                        return {
+                            bundle_id: item.bundleId || item.id,
+                            quantity: item.quantity,
+                            variant_size: mappedVariant
+                        };
+                    })
                 }
             }
         });
@@ -186,5 +238,54 @@ export async function PUT(
     } catch (e: any) {
         console.error("Update Coordinator Settings Error:", e);
         return NextResponse.json({ error: "Failed to update settings" }, { status: 500 });
+    }
+}
+
+export async function PATCH(
+    req: Request,
+    { params }: { params: Promise<{ token: string }> }
+) {
+    try {
+        const { token } = await params;
+        const body = await req.json();
+        const { orderId, updates } = body;
+
+        if (!orderId || !updates) {
+            return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+        }
+
+        // Verify the token belongs to the campaign that owns this order
+        const campaign = await prisma.fundraiserCampaign.findFirst({
+            where: { portal_token: token }
+        });
+
+        if (!campaign) {
+            return NextResponse.json({ error: "Portal not found" }, { status: 404 });
+        }
+
+        const order = await prisma.order.findFirst({
+            where: { id: orderId, campaign_id: campaign.id }
+        });
+
+        if (!order) {
+            return NextResponse.json({ error: "Order not found in this campaign" }, { status: 404 });
+        }
+
+        // Update the explicitly allowed fields
+        const safeUpdates: any = {};
+        if (updates.coordinator_paid !== undefined) safeUpdates.coordinator_paid = updates.coordinator_paid;
+        if (updates.coordinator_check !== undefined) safeUpdates.coordinator_check = updates.coordinator_check;
+        if (updates.coordinator_picked_up !== undefined) safeUpdates.coordinator_picked_up = updates.coordinator_picked_up;
+
+        const updatedOrder = await prisma.order.update({
+            where: { id: orderId },
+            data: safeUpdates
+        });
+
+        return NextResponse.json(updatedOrder);
+
+    } catch (e: any) {
+        console.error("Coordinator Order Patch Error:", e);
+        return NextResponse.json({ error: "Failed to update order" }, { status: 500 });
     }
 }

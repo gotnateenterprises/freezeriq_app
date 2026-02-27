@@ -1,5 +1,6 @@
 @import "tailwindcss";
 
+
 /* Premium Typography Configuration */
 
 @theme {
@@ -20,10 +21,10 @@
   --foreground: #1e293b;
 
   /* SaaS Theme Variables (Default: Teal/Indigo) */
-  --primary: #14b8a6;
-  /* Teal 500 */
-  --secondary: #6366f1;
-  /* Indigo 500 */
+  --primary: 20 184 166;
+  /* Teal 500 (#14b8a6) */
+  --secondary: 99 102 241;
+  /* Indigo 500 (#6366f1) */
 
   /* Typography Variables */
   --font-serif: var(--font-dm-serif), serif;

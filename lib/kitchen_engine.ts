@@ -9,7 +9,7 @@ export interface DBAdapter {
         position: number;
         quantity?: number | null;
     }[]>;
-    getBundleInfo(bundleId: Uuid): Promise<{ serving_tier: string } | null>;
+    getBundleInfo(bundleId: Uuid): Promise<{ serving_tier: string, name?: string } | null>;
 }
 
 export class KitchenEngine {
@@ -34,8 +34,20 @@ export class KitchenEngine {
         for (const order of orders) {
             const bundleRecipes = await this.db.getBundleContents(order.bundle_id);
             for (const item of bundleRecipes) {
-                const multiplier = order.quantity * (item.quantity || 1.0);
-                this.explodeRecipeSync(item.recipe_id, multiplier, rawIngredients, prepTasks);
+                const recipe = this.recipeCache.get(item.recipe_id);
+                if (!recipe) continue;
+
+                const baseYield = Number(recipe.base_yield_qty) || 1.0;
+
+                // item.quantity in BundleContent represents the number of BATCHES of this recipe per bundle.
+                // order.quantity is the number of times this Bundle was ordered.
+                // explodeRecipeSync expects `neededAmt` to be in the Recipe's YIELD units.
+                const neededAmt = order.quantity * (item.quantity || 1.0) * baseYield;
+
+                const bundleInfo = await this.db.getBundleInfo(order.bundle_id);
+                const bundleName = bundleInfo?.name || 'Unknown Bundle';
+
+                this.explodeRecipeSync(item.recipe_id, neededAmt, rawIngredients, prepTasks, 0, bundleName);
             }
         }
 
@@ -101,7 +113,8 @@ export class KitchenEngine {
         neededAmt: number, // Represents the "amount" of the recipe output needed
         rawIngredients: Map<string, { id: string, qty: number, netQty: number, unit: string, displayName: string, usedIn: Set<string>, supplier?: string, supplierUrl?: string, portalType?: string, searchUrlPattern?: string, onHand: number, costPerUnit: number, costUnit?: string, sku?: string, purchaseCost?: number, purchaseUnit?: string, purchaseQuantity?: number }>,
         prepTasks: Map<string, { qty: number, id: string, unit: string, label_text?: string, allergens?: string }>,
-        depth = 0
+        depth = 0,
+        bundleName = 'Unknown Bundle'
     ) {
         if (depth > 10) return; // Prevent infinite loops
 
@@ -117,14 +130,16 @@ export class KitchenEngine {
         const baseYield = Number(recipe.base_yield_qty) || 1.0;
         const multiplier = neededAmt / baseYield;
 
+        // OR if we are at the top level (checking via stack trace or context would be hard, but generally if we are exploding it, it's a task)
         if (recipe.type === 'prep' || recipe.type === 'menu_item' || recipe.label_text || recipe.allergens) {
-            const current = prepTasks.get(recipe.name) || { qty: 0, id: recipe.id, unit: recipe.base_yield_unit, label_text: recipe.label_text, allergens: recipe.allergens };
+            const prepKey = `${bundleName} - ${recipe.name}`;
+            const current = prepTasks.get(prepKey) || { qty: 0, id: recipe.id, unit: recipe.base_yield_unit, label_text: recipe.label_text, allergens: recipe.allergens };
 
             if (recipe.label_text && !current.label_text) current.label_text = recipe.label_text;
             if (recipe.allergens && !current.allergens) current.allergens = recipe.allergens;
 
-            prepTasks.set(recipe.name, {
-                qty: current.qty + neededAmt, // We need this many total yield units (e.g. 10 servings)
+            prepTasks.set(prepKey, {
+                qty: current.qty + multiplier, // Reverted to use multiplier (Batches) instead of neededAmt (Servings)
                 id: recipe.id,
                 unit: recipe.base_yield_unit,
                 label_text: current.label_text,
@@ -142,6 +157,7 @@ export class KitchenEngine {
 
                 const key = rawName.toLowerCase().trim();
                 const current = rawIngredients.get(key) || {
+                    id: item.child_item_id,
                     qty: 0,
                     netQty: 0,
                     unit: item.unit,
@@ -168,32 +184,24 @@ export class KitchenEngine {
                     finalQty = convertUnit(childNeededQty, item.unit, targetUnit);
                 }
 
-                const totalNeeded = current.qty + finalQty;
-                // Subtract stock from total to get netNeeded
-                const netNeeded = Math.max(0, totalNeeded - current.onHand);
+                current.qty += finalQty;
+                current.netQty = Math.max(0, current.qty - current.onHand);
+                current.unit = targetUnit;
 
-                rawIngredients.set(key, {
-                    id: item.child_item_id,
-                    qty: totalNeeded,
-                    netQty: netNeeded,
-                    unit: targetUnit,
-                    displayName: current.displayName,
-                    usedIn: current.usedIn,
-                    supplier: current.supplier,
-                    supplierUrl: current.supplierUrl || item.supplier_url,
-                    portalType: current.portalType || (item as any).portal_type,
-                    searchUrlPattern: current.searchUrlPattern || (item.search_url_pattern as any),
-                    onHand: current.onHand,
-                    costPerUnit: Math.max(current.costPerUnit, item.cost_per_unit || 0),
-                    costUnit: current.costUnit || item.cost_unit,
-                    sku: current.sku || item.sku,
-                    purchaseCost: current.purchaseCost || item.purchase_cost,
-                    purchaseUnit: current.purchaseUnit || item.purchase_unit,
-                    purchaseQuantity: current.purchaseQuantity || item.purchase_quantity
-                });
+                // Keep the largest cost/best info
+                current.costPerUnit = Math.max(current.costPerUnit, item.cost_per_unit || 0);
+                if (!current.supplier) current.supplier = item.supplier_name;
+                if (!current.supplierUrl) current.supplierUrl = item.supplier_url;
+                if (!current.portalType) current.portalType = (item as any).portal_type;
+                if (!current.sku) current.sku = item.sku;
+                if (!current.purchaseCost) current.purchaseCost = item.purchase_cost;
+                if (!current.purchaseUnit) current.purchaseUnit = item.purchase_unit;
+                if (!current.purchaseQuantity) current.purchaseQuantity = item.purchase_quantity;
+
+                rawIngredients.set(key, current);
 
             } else if (item.child_type === 'recipe') {
-                this.explodeRecipeSync(item.child_item_id, childNeededQty, rawIngredients, prepTasks, depth + 1);
+                this.explodeRecipeSync(item.child_item_id, childNeededQty, rawIngredients, prepTasks, depth + 1, bundleName);
             }
         }
     }

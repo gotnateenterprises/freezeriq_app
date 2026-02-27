@@ -480,7 +480,7 @@ function CustomerImportTrigger() {
 
 export default function SettingsPage() {
     const { data: session } = useSession();
-    const [integrationStatus, setIntegrationStatus] = useState({ square: false, qbo: false, meta: false, instagram: false });
+    const [integrationStatus, setIntegrationStatus] = useState({ stripe: false, qbo: false, meta: false, instagram: false });
     const [isBackingUp, setIsBackingUp] = useState(false);
     const [backupStatus, setBackupStatus] = useState<{ success: boolean; message: string } | null>(null);
     const [isConfirmingClear, setIsConfirmingClear] = useState(false);
@@ -488,13 +488,27 @@ export default function SettingsPage() {
     const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
+        // Check standard integration status
         fetch('/api/integrations/status')
             .then(res => res.json())
             .then(data => setIntegrationStatus(data))
             .catch(console.error);
+
+        // Check if returning from Stripe Onboarding
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('stripe_connected') === 'true') {
+            fetch('/api/stripe/connect/verify', { method: 'POST' })
+                .then(res => {
+                    if (res.ok) {
+                        alert("Stripe Connected Successfully!");
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                        window.location.reload();
+                    }
+                });
+        }
     }, []);
 
-    const disconnectIntegration = async (provider: 'square' | 'qbo' | 'meta' | 'instagram') => {
+    const disconnectIntegration = async (provider: 'stripe' | 'qbo' | 'meta' | 'instagram') => {
         if (!confirm(`Are you sure you want to delete the ${provider} connection?`)) return;
         try {
             const res = await fetch('/api/integrations/disconnect', {
@@ -508,6 +522,21 @@ export default function SettingsPage() {
             }
         } catch (e) {
             console.error(e);
+        }
+    };
+
+    const handleStripeConnect = async () => {
+        try {
+            const res = await fetch('/api/stripe/connect', { method: 'POST' });
+            const data = await res.json();
+            if (data.url) {
+                window.location.href = data.url;
+            } else {
+                alert('Failed to initialize Stripe Onboarding.');
+            }
+        } catch (e) {
+            console.error(e);
+            alert('Failed to connect to Stripe.');
         }
     };
 
@@ -595,11 +624,11 @@ export default function SettingsPage() {
                         </h3>
                         <div className="space-y-4">
                             <IntegrationItem
-                                name="Square POS"
-                                logo="SQ"
-                                isConnected={integrationStatus.square}
-                                connectUrl="/api/auth/square"
-                                onDisconnect={() => disconnectIntegration('square')}
+                                name="Stripe Connect"
+                                logo="S"
+                                isConnected={integrationStatus.stripe}
+                                onConnect={handleStripeConnect}
+                                onDisconnect={() => disconnectIntegration('stripe')}
                             />
                             <IntegrationItem
                                 name="QuickBooks"
@@ -659,15 +688,17 @@ export default function SettingsPage() {
     );
 }
 
-function IntegrationItem({ name, logo, isConnected, connectUrl, onDisconnect }: any) {
+function IntegrationItem({ name, logo, isConnected, connectUrl, onConnect, onDisconnect }: any) {
     return (
         <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-700">
             <div className="flex items-center gap-4">
-                <div className="w-10 h-10 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 flex items-center justify-center font-bold">{logo}</div>
+                <div className="w-10 h-10 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 flex items-center justify-center font-bold text-indigo-600 dark:text-indigo-400">{logo}</div>
                 <p className="font-bold text-slate-900 dark:text-white text-sm">{name}</p>
             </div>
             {isConnected ? (
-                <button onClick={onDisconnect} className="text-slate-400 hover:text-rose-500"><Trash2 size={16} /></button>
+                <button onClick={onDisconnect} className="text-slate-400 hover:text-rose-500 transition-colors"><Trash2 size={16} /></button>
+            ) : onConnect ? (
+                <button onClick={onConnect} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition-colors">Connect</button>
             ) : (
                 <a href={connectUrl} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-bold">Connect</a>
             )}

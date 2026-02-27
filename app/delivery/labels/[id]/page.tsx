@@ -26,6 +26,7 @@ interface LabelElement {
         borderColor?: string;
         borderWidth?: number;
         borderRadius?: number;
+        rotation?: number;
     };
 }
 
@@ -83,7 +84,7 @@ export default function LabelEditor({ params }: { params: Promise<{ id: string }
         if (!template) return;
         setIsSaving(true);
         try {
-            await fetch(`/api/delivery/labels/${template.id}`, {
+            const res = await fetch(`/api/delivery/labels/${template.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -94,8 +95,9 @@ export default function LabelEditor({ params }: { params: Promise<{ id: string }
                     isDefault: template.isDefault
                 })
             });
+            if (!res.ok) throw new Error("Failed to save");
             alert("Label saved successfully!");
-            router.push('/delivery/labels');
+            // router.push('/delivery/labels');
         } catch (e) {
             console.error("Failed to save", e);
             alert("Failed to save label.");
@@ -345,6 +347,8 @@ export default function LabelEditor({ params }: { params: Promise<{ id: string }
                                     ...el.style,
                                     // Scale font size visually
                                     fontSize: (el.style.fontSize || 12) * ZOOM,
+                                    // Apply rotation to the container
+                                    transform: el.style.rotation ? `rotate(${el.style.rotation}deg)` : undefined
                                 }}
                             >
                                 {/* Renderer */}
@@ -533,6 +537,24 @@ export default function LabelEditor({ params }: { params: Promise<{ id: string }
                                     </>
                                 )}
 
+                                {/* Style Editor (Image Only) */}
+                                {selectedElement.type === 'image' && (
+                                    <div className="mt-2">
+                                        <label className="text-[10px] uppercase font-bold text-slate-400">Rotation (&deg;)</label>
+                                        <div className="flex gap-2 mt-1">
+                                            {[0, 90, 180, 270].map(deg => (
+                                                <button
+                                                    key={deg}
+                                                    onClick={() => updateElement(selectedElement.id, { style: { rotation: deg } })}
+                                                    className={`px-3 py-1 text-xs font-bold rounded flex-1 ${selectedElement.style?.rotation === deg ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                                >
+                                                    {deg}&deg;
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="pt-4">
                                     <button
                                         onClick={() => removeElement(selectedElement.id)}
@@ -566,6 +588,7 @@ export default function LabelEditor({ params }: { params: Promise<{ id: string }
                         visibility: visible;
                     }
                     .print-area {
+                        display: block !important;
                         position: absolute;
                         left: 0;
                         top: 0;
@@ -592,6 +615,8 @@ export default function LabelEditor({ params }: { params: Promise<{ id: string }
                             ...el.style,
                             // Font size in pt usually better for print, close enough
                             fontSize: `${el.style?.fontSize || 12}px`,
+                            // Apply rotation to the container
+                            transform: el.style?.rotation ? `rotate(${el.style.rotation}deg)` : undefined
                         }}
                     >
                         {el.type === 'text' && (

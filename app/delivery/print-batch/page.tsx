@@ -39,7 +39,7 @@ interface Stats {
 // --- PRINT COMPONENT ---
 function PrintedLabel({ template, scale = 1 }: { template: LabelTemplate | null, scale?: number }) {
     if (!template) return null; // Logic handles null slots elsewhere, but safety first
-    const UNITS_PER_INCH = 100;
+    const UNITS_PER_INCH = 96;
     return (
         <div
             style={{
@@ -64,6 +64,7 @@ function PrintedLabel({ template, scale = 1 }: { template: LabelTemplate | null,
                         height: `${el.height / UNITS_PER_INCH}in`,
                         ...el.style,
                         fontSize: `${el.style?.fontSize || 12}px`,
+                        transform: el.style?.rotation ? `rotate(${el.style.rotation}deg)` : undefined
                     }}
                 >
                     {el.type === 'text' && (
@@ -164,6 +165,10 @@ export default function BatchPrintPage() {
     const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
     const [templates, setTemplates] = useState<LabelTemplate[]>([]);
 
+    // Custom Adder State
+    const [customLabelId, setCustomLabelId] = useState('');
+    const [customQty, setCustomQty] = useState(1);
+
     useEffect(() => {
         loadData();
     }, []);
@@ -249,6 +254,46 @@ export default function BatchPrintPage() {
         newSlots[selectedSlotIndex] = template;
         setAllSlots(newSlots);
         setShowFillerModal(false);
+    };
+
+    const handleAddCustom = () => {
+        if (!customLabelId || customQty < 1) return;
+        const tpl = templates.find(t => t.id === customLabelId);
+        if (!tpl) return;
+
+        let newSlots = [...allSlots];
+        let addedCount = 0;
+
+        // Try to fill empty slots first
+        for (let i = 0; i < newSlots.length && addedCount < customQty; i++) {
+            if (newSlots[i] === null) {
+                newSlots[i] = tpl;
+                addedCount++;
+            }
+        }
+
+        // Add remaining to the end
+        while (addedCount < customQty) {
+            newSlots.push(tpl);
+            addedCount++;
+        }
+
+        // Re-pad to multiple of 8
+        const remainder = newSlots.length % 8;
+        if (remainder > 0) {
+            for (let k = 0; k < (8 - remainder); k++) newSlots.push(null);
+        }
+
+        setAllSlots(newSlots);
+
+        const existingJob = jobs.find(j => j.template.id === tpl.id);
+        if (existingJob) {
+            setJobs(jobs.map(j => j.template.id === tpl.id ? { ...j, count: j.count + customQty } : j));
+        } else {
+            setJobs([...jobs, { template: tpl, count: customQty, typeName: tpl.name }]);
+        }
+
+        setCustomQty(1);
     };
 
     const handlePrint = async () => {
@@ -354,13 +399,47 @@ export default function BatchPrintPage() {
                     ℹ Tip: Click empty slots to Add Filler. Click occupied slots to Remove.
                 </p>
 
+                {/* Custom Label Adder UI */}
+                <div className="bg-white p-4 rounded-xl border border-slate-200 mb-8 flex flex-col sm:flex-row items-end gap-4 shadow-sm">
+                    <div className="flex-1 w-full">
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Add Specific Labels</label>
+                        <select
+                            value={customLabelId}
+                            onChange={e => setCustomLabelId(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white font-medium"
+                        >
+                            <option value="">-- Select a Label Template --</option>
+                            {templates.map(t => (
+                                <option key={t.id} value={t.id}>{t.name} ({t.width}"x{t.height}")</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="w-32">
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Quantity</label>
+                        <input
+                            type="number"
+                            min="1"
+                            value={customQty}
+                            onChange={e => setCustomQty(parseInt(e.target.value) || 1)}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white font-medium"
+                        />
+                    </div>
+                    <button
+                        onClick={handleAddCustom}
+                        disabled={!customLabelId || customQty < 1}
+                        className="bg-slate-800 text-white px-6 py-2 rounded-lg font-bold hover:bg-slate-900 transition-colors disabled:opacity-50 h-[42px] whitespace-nowrap"
+                    >
+                        Add to Queue
+                    </button>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                     {/* Job Summary */}
                     {jobs.map((job, i) => (
                         <div key={i} className="bg-white p-4 rounded-xl border border-slate-200">
                             <h4 className="font-bold text-slate-700 mb-2 border-b border-slate-100 pb-2 flex justify-between">
-                                <span>{job.typeName}</span>
-                                <span className="bg-slate-100 px-2 rounded text-xs py-0.5">{job.count} copies</span>
+                                <span className="truncate pr-2">{job.typeName}</span>
+                                <span className="bg-slate-100 px-2 rounded text-xs py-0.5 whitespace-nowrap">{job.count} copies</span>
                             </h4>
                             <div className="scale-[0.4] origin-top-left" style={{ width: `${job.template.width}in`, height: `${job.template.height}in` }}>
                                 <PrintedLabel template={job.template} />

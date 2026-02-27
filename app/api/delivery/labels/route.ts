@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { auth } from '@/auth';
 
 const prisma = new PrismaClient();
 
 // GET /api/delivery/labels
 // List all label templates
-export async function GET() {
+export async function GET(req: Request) {
     try {
-        const { auth } = await import('@/auth');
         const session = await auth();
         if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

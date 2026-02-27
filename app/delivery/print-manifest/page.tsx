@@ -6,17 +6,22 @@ import { Truck, ArrowLeft, Printer } from 'lucide-react';
 import Link from 'next/link';
 
 interface OrderItem {
-    bundle: {
+    bundle?: {
         name: string;
         serving_tier: string;
     };
+    variant_size: string;
     quantity: number;
 }
 
 interface Order {
     id: string;
     customer_name: string;
-    organization?: { name: string };
+    customer?: {
+        name: string;
+        delivery_address?: string;
+        type: string;
+    };
     delivery_sequence: number;
     items: OrderItem[];
     // ... other fields
@@ -31,8 +36,15 @@ export default function PrintManifestPage() {
     useEffect(() => {
         const fetchData = async () => {
             try {
+                const searchParams = new URLSearchParams(window.location.search);
+                const orderId = searchParams.get('orderId');
+
                 // Fetch Orders
-                const ordersRes = await fetch('/api/orders?status=pending,production_ready');
+                const apiUrl = orderId
+                    ? `/api/orders?id=${orderId}`
+                    : '/api/orders?status=pending,production_ready';
+
+                const ordersRes = await fetch(apiUrl);
                 const ordersData = await ordersRes.json();
                 const sorted = ordersData.sort((a: any, b: any) =>
                     (a.delivery_sequence || 999) - (b.delivery_sequence || 999)
@@ -60,15 +72,28 @@ export default function PrintManifestPage() {
     let totalLarge = 0;
     let totalSmall = 0;
 
+    // Get the first organization to display at the top if there is one
+    const primaryOrg = orders.find(o => o.customer?.type === 'fundraiser_org')?.customer;
+
     const manifestRows = orders.map((order, index) => {
-        const customerName = order.customer_name || order.organization?.name || 'Unknown';
+        const customerName = order.customer_name || order.customer?.name || 'Unknown';
         const largeCount = order.items.reduce((acc, item) => {
-            const isLarge = item.bundle?.name.toLowerCase().includes('family') || item.bundle?.serving_tier?.toLowerCase() === 'family';
+            const isSmall = item.variant_size?.toLowerCase() === 'serves_2' ||
+                item.bundle?.name?.toLowerCase().includes('serves 2');
+
+            const isLarge = !isSmall && (
+                item.variant_size?.toLowerCase() === 'serves_5' ||
+                item.bundle?.name?.toLowerCase().includes('family') ||
+                item.bundle?.serving_tier?.toLowerCase() === 'family' ||
+                !item.variant_size // Default to large if undefined and not explicitly small
+            );
             return acc + (isLarge ? item.quantity : 0);
         }, 0);
+
         const smallCount = order.items.reduce((acc, item) => {
-            const isLarge = item.bundle?.name.toLowerCase().includes('family') || item.bundle?.serving_tier?.toLowerCase() === 'family';
-            return acc + (isLarge ? 0 : item.quantity);
+            const isSmall = item.variant_size?.toLowerCase() === 'serves_2' ||
+                item.bundle?.name?.toLowerCase().includes('serves 2');
+            return acc + (isSmall ? item.quantity : 0);
         }, 0);
 
         totalLarge += largeCount;
@@ -101,7 +126,7 @@ export default function PrintManifestPage() {
             </div>
 
             {/* Print Sheet */}
-            <div className="bg-white shadow-xl print:shadow-none max-w-5xl mx-auto p-8 min-h-[11in] relative">
+            <div className="bg-white shadow-xl print:shadow-none max-w-5xl mx-auto p-8 min-h-[11in] flex flex-col relative">
                 <div className="flex justify-between items-end border-b-4 border-black pb-4 mb-6">
                     <div className="flex flex-col gap-4">
                         {logo && (
@@ -110,8 +135,18 @@ export default function PrintManifestPage() {
                             </div>
                         )}
                         <div>
-                            <h1 className="text-4xl font-black uppercase tracking-tighter">Shipping Manifest</h1>
+                            <h1 className="text-4xl font-black uppercase tracking-tighter">Delivery Manifest</h1>
                             <p className="text-xl font-bold text-slate-500 mt-1">Delivery Run: {date}</p>
+                            {primaryOrg && (
+                                <div className="mt-4 border-l-4 border-indigo-600 pl-4 py-1">
+                                    <p className="font-black text-slate-800 text-lg uppercase">{primaryOrg.name}</p>
+                                    {primaryOrg.delivery_address && (
+                                        <p className="text-slate-600 font-medium text-sm mt-1 max-w-sm">
+                                            {primaryOrg.delivery_address}
+                                        </p>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>
                     <div className="text-right">
@@ -121,34 +156,36 @@ export default function PrintManifestPage() {
                     </div>
                 </div>
 
-                <table className="w-full text-left border-collapse">
-                    <thead>
-                        <tr className="border-b-2 border-black text-sm uppercase">
-                            <th className="py-2 w-12 text-center">#</th>
-                            <th className="py-2 w-1/4">Customer</th>
-                            <th className="py-2">Bundles (Contents)</th>
-                            <th className="py-2 w-20 text-center">Lg Box</th>
-                            <th className="py-2 w-20 text-center">Sm Box</th>
-                            <th className="py-2 w-32 text-right">Signature</th>
-                        </tr>
-                    </thead>
-                    <tbody className="text-sm">
-                        {manifestRows.map((row) => (
-                            <tr key={row.index} className="border-b border-slate-300">
-                                <td className="py-3 text-center font-bold text-slate-500">{row.index}</td>
-                                <td className="py-3 font-bold">{row.customer}</td>
-                                <td className="py-3 text-slate-600">{row.details}</td>
-                                <td className="py-3 text-center font-mono font-bold text-lg">{row.large || '-'}</td>
-                                <td className="py-3 text-center font-mono font-bold text-lg">{row.small || '-'}</td>
-                                <td className="py-3">
-                                    <div className="border-b border-slate-300 h-6 w-full"></div>
-                                </td>
+                <div className="flex-grow">
+                    <table className="w-full text-left border-collapse">
+                        <thead>
+                            <tr className="border-b-2 border-black text-sm uppercase">
+                                <th className="py-2 w-12 text-center">#</th>
+                                <th className="py-2 w-1/4">Customer</th>
+                                <th className="py-2">Bundles (Contents)</th>
+                                <th className="py-2 w-20 text-center">Lg Box</th>
+                                <th className="py-2 w-20 text-center">Sm Box</th>
+                                <th className="py-2 w-32 text-right">Signature</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody className="text-sm">
+                            {manifestRows.map((row) => (
+                                <tr key={row.index} className="border-b border-slate-300">
+                                    <td className="py-3 text-center font-bold text-slate-500">{row.index}</td>
+                                    <td className="py-3 font-bold">{row.customer}</td>
+                                    <td className="py-3 text-slate-600">{row.details}</td>
+                                    <td className="py-3 text-center font-mono font-bold text-lg">{row.large || '-'}</td>
+                                    <td className="py-3 text-center font-mono font-bold text-lg">{row.small || '-'}</td>
+                                    <td className="py-3">
+                                        <div className="border-b border-slate-300 h-6 w-full"></div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
 
-                <div className="mt-12 pt-8 border-t-2 border-black flex justify-between items-end">
+                <div className="mt-auto pt-8 border-t-2 border-black flex justify-between items-end">
                     <div className="flex gap-16">
                         <div>
                             <p className="font-bold">Driver Signature:</p>

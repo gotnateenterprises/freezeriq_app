@@ -1,7 +1,8 @@
 "use client";
 
-import { X, ShoppingBag, Tag, Utensils, ArrowRight, Sparkles } from 'lucide-react';
+import { X, ShoppingBag, Tag, Utensils, ArrowRight, Sparkles, Share2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Image from 'next/image';
 
 interface BundleDetailsModalProps {
     isOpen: boolean;
@@ -38,6 +39,31 @@ export default function BundleDetailsModal({ isOpen, onClose, bundle, primaryCol
                             onClick={(e) => e.stopPropagation()}
                             className="bg-white dark:bg-slate-900 w-full max-w-2xl max-h-[85vh] rounded-[3.5rem] shadow-[0_64px_128px_-32px_rgba(20,184,166,0.2)] overflow-hidden flex flex-col relative border border-white dark:border-white/10"
                         >
+                            {/* Share Button */}
+                            <button
+                                onClick={async (e) => {
+                                    e.stopPropagation();
+                                    const url = window.location.href;
+                                    if (navigator.share) {
+                                        try {
+                                            await navigator.share({
+                                                title: bundle.name,
+                                                text: `Check out the ${bundle.name}!`,
+                                                url: url,
+                                            });
+                                        } catch (error) {
+                                            console.log('Sharing canceled or error', error);
+                                        }
+                                    } else {
+                                        navigator.clipboard.writeText(url);
+                                        alert("Link copied to clipboard!");
+                                    }
+                                }}
+                                className="absolute top-6 right-20 w-12 h-12 bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl rounded-full shadow-xl flex items-center justify-center text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 hover:scale-110 active:scale-95 transition-all z-20 border border-teal-50/50 dark:border-white/10"
+                            >
+                                <Share2 size={20} />
+                            </button>
+
                             {/* Close Button */}
                             <button
                                 onClick={onClose}
@@ -117,8 +143,22 @@ export default function BundleDetailsModal({ isOpen, onClose, bundle, primaryCol
                                                     transition={{ delay: 0.5 + (idx * 0.1) }}
                                                     className="flex gap-6 p-6 rounded-[2.5rem] bg-teal-50/30 dark:bg-slate-800/50 border border-white/50 dark:border-white/5 group hover:bg-white dark:hover:bg-slate-800 hover:shadow-xl transition-all duration-500"
                                                 >
-                                                    <div className="w-16 h-16 rounded-[1.5rem] bg-white dark:bg-slate-900 flex items-center justify-center text-xl font-black text-brand-teal shadow-sm border border-teal-100/50 dark:border-slate-700 group-hover:scale-110 group-hover:-rotate-3 transition-transform">
-                                                        {item.quantity}
+                                                    <div className="w-16 h-16 shrink-0 rounded-[1.5rem] bg-white dark:bg-slate-900 flex items-center justify-center text-xl font-black text-brand-teal shadow-sm border border-teal-100/50 dark:border-slate-700 group-hover:scale-110 group-hover:-rotate-3 transition-transform relative overflow-hidden">
+                                                        {item.recipe?.image_url ? (
+                                                            <>
+                                                                <Image
+                                                                    src={item.recipe.image_url}
+                                                                    alt={item.recipe.name || 'Meal'}
+                                                                    fill
+                                                                    className="object-cover"
+                                                                />
+                                                                <div className="absolute -top-1 -right-1 w-6 h-6 bg-brand-teal text-white rounded-full flex items-center justify-center text-xs font-black shadow-md border-2 border-white dark:border-slate-900 z-10">
+                                                                    {item.quantity}
+                                                                </div>
+                                                            </>
+                                                        ) : (
+                                                            item.quantity
+                                                        )}
                                                     </div>
                                                     <div className="flex-1 space-y-1">
                                                         <h4 className="font-black text-slate-900 dark:text-white text-lg tracking-tight">
@@ -161,12 +201,18 @@ export default function BundleDetailsModal({ isOpen, onClose, bundle, primaryCol
                                 <button
                                     onClick={() => onAddToCart(1)}
                                     style={{ backgroundColor: primaryColor }}
-                                    className="w-full h-20 rounded-[2.5rem] font-black text-white shadow-[0_24px_48px_-12px_rgba(20,184,166,0.4)] hover:shadow-[0_32px_64px_-16px_rgba(20,184,166,0.5)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-4 text-xl tracking-tight"
+                                    className="w-full h-16 md:h-20 rounded-[2rem] font-black text-white shadow-[0_24px_48px_-12px_rgba(20,184,166,0.4)] hover:shadow-[0_32px_64px_-16px_rgba(20,184,166,0.5)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 md:gap-4 text-lg md:text-xl tracking-tight"
                                 >
-                                    <ShoppingBag size={28} />
+                                    <ShoppingBag size={24} className="md:w-7 md:h-7" />
                                     Reserve My Bundle
-                                    <ArrowRight size={24} />
+                                    <ArrowRight size={20} className="md:w-6 md:h-6" />
                                 </button>
+
+                                <div className="mt-6 text-center">
+                                    <p className="text-slate-500 dark:text-slate-400 text-xs md:text-sm font-bold">
+                                        OR - <a href={`/shop/${typeof window !== 'undefined' ? window.location.pathname.split('/')[2] : ''}/subscribe`} className="text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 underline underline-offset-4 decoration-2 decoration-indigo-200 dark:decoration-indigo-900 transition-colors">Build your own Bundle - Learn more &rarr;</a>
+                                    </p>
+                                </div>
                             </div>
                         </motion.div>
                     </motion.div>

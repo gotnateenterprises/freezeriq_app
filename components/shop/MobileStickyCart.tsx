@@ -7,18 +7,17 @@ import { getContrastTextClass } from '@/lib/colorUtils';
 import { useEffect, useState } from 'react';
 
 interface MobileStickyCartProps {
-    bundle: any;
     primaryColor: string;
 }
 
-export default function MobileStickyCart({ bundle, primaryColor }: MobileStickyCartProps) {
-    const { addToCart, setIsCartOpen } = useCart();
+export default function MobileStickyCart({ primaryColor }: MobileStickyCartProps) {
+    const { setIsCartOpen, cartCount } = useCart();
     const [isVisible, setIsVisible] = useState(false);
 
-    // Only show after scrolling down a bit past the hero
+    // Show the FAB after scrolling past the immersive hero section
     useEffect(() => {
         const handleScroll = () => {
-            if (window.scrollY > 300) {
+            if (window.scrollY > 200) {
                 setIsVisible(true);
             } else {
                 setIsVisible(false);
@@ -26,54 +25,45 @@ export default function MobileStickyCart({ bundle, primaryColor }: MobileStickyC
         };
 
         window.addEventListener('scroll', handleScroll);
+        // Fire once to check initial scroll
+        handleScroll();
+
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
 
-    if (!bundle) return null;
-
     const textClass = getContrastTextClass(primaryColor || '#0ea5e9');
-
-    const handleCheckout = () => {
-        addToCart({
-            bundleId: bundle.id,
-            name: bundle.name,
-            price: Number(bundle.price),
-            image_url: bundle.image_url,
-            serving_tier: bundle.serving_tier,
-            quantity: 1
-        });
-        setIsCartOpen(true);
-    };
 
     return (
         <AnimatePresence>
             {isVisible && (
-                <div className="fixed bottom-0 left-0 right-0 z-40 lg:hidden p-4 pointer-events-none">
-                    <motion.div
-                        initial={{ y: 100, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        exit={{ y: 100, opacity: 0 }}
-                        transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                        className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-2xl border border-white dark:border-slate-800 shadow-[0_-8px_32px_-12px_rgba(0,0,0,0.1)] p-4 rounded-3xl flex items-center justify-between gap-4 pointer-events-auto"
+                <div className="fixed bottom-6 right-6 z-40 lg:hidden pointer-events-none">
+                    <motion.button
+                        initial={{ y: 100, opacity: 0, scale: 0.5 }}
+                        animate={{ y: 0, opacity: 1, scale: 1 }}
+                        exit={{ y: 100, opacity: 0, scale: 0.5 }}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.9 }}
+                        transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                        onClick={() => setIsCartOpen(true)}
+                        style={{ backgroundColor: primaryColor || '#0ea5e9' }}
+                        className={`pointer-events-auto relative w-16 h-16 rounded-full flex items-center justify-center shadow-[0_8px_32px_-4px_rgba(0,0,0,0.3)] transition-colors border-2 border-white/20 ${textClass}`}
                     >
-                        <div className="flex-1 min-w-0">
-                            <p className="text-xs font-bold text-slate-500 truncate mb-0.5">{bundle.name}</p>
-                            <div className="flex items-baseline gap-1.5">
-                                <span className="text-xl font-black text-slate-900 dark:text-white">
-                                    ${Number(bundle.price).toFixed(2)}
-                                </span>
-                            </div>
-                        </div>
+                        <ShoppingBag size={24} strokeWidth={2.5} />
 
-                        <button
-                            onClick={handleCheckout}
-                            style={{ backgroundColor: primaryColor || '#0ea5e9' }}
-                            className={`flex-shrink-0 px-6 py-3.5 rounded-2xl font-black text-sm uppercase tracking-widest hover:scale-105 active:scale-95 transition-all flex items-center gap-2 shadow-lg ${textClass}`}
-                        >
-                            <ShoppingBag size={18} />
-                            Checkout
-                        </button>
-                    </motion.div>
+                        {/* Notification Badge */}
+                        <AnimatePresence>
+                            {cartCount > 0 && (
+                                <motion.div
+                                    initial={{ scale: 0, opacity: 0 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    exit={{ scale: 0, opacity: 0 }}
+                                    className="absolute -top-1 -right-1 w-6 h-6 bg-rose-500 text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-white shadow-sm"
+                                >
+                                    {cartCount}
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </motion.button>
                 </div>
             )}
         </AnimatePresence>

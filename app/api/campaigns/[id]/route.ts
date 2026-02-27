@@ -54,6 +54,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
                 participant_label: body.participant_label ?? undefined,
                 group_label: body.group_label ?? undefined,
                 is_group_enabled: body.is_group_enabled ?? undefined,
+                ...(body.bundleIds ? {
+                    bundles: {
+                        set: body.bundleIds.map((id: string) => ({ id }))
+                    }
+                } : {})
             } as any
         });
 

@@ -1,6 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { revalidatePath } from 'next/cache';
 
 export async function POST(req: Request) {
     try {
@@ -78,6 +79,7 @@ export async function POST(req: Request) {
             }
         }
 
+        revalidatePath('/recipes');
         return NextResponse.json({ success: true, recipeId: newRecipe.id });
 
     } catch (e: any) {

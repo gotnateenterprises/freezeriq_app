@@ -27,7 +27,9 @@ export async function generateMetadata(
         };
     }
 
-    const description = `Support ${(campaign as any).customer.name}'s fundraiser! We've raised $${campaign.total_sales || 0} of our $${campaign.goal_amount} goal.`;
+    const impactRaised = Number(campaign.total_sales || 0) * 0.20;
+
+    const description = `Support ${(campaign as any).customer.name}'s fundraiser! We've raised $${impactRaised.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} of our $${(campaign.goal_amount || 0).toLocaleString()} goal.`;
 
     return {
         title: `${campaign.name} | Live Scoreboard`,

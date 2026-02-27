@@ -604,16 +604,40 @@ export function ProductionCalculator() {
                                                             </td>
 
                                                             <td className={`p-3 text-right font-mono font-bold text-sm print:p-0 print:text-[10px] ${isChecked ? 'text-slate-400 dark:text-slate-500' : 'text-indigo-600 dark:text-indigo-400'}`}>
-                                                                {toFraction(Number(data.netQty))} {data.unit}
-                                                                {(data.qty > data.netQty || (data.purchaseQuantity && data.purchaseQuantity > 0)) && (
-                                                                    <div className="item-meta-print">
-                                                                        {data.qty > data.netQty && `T: ${toFraction(Number(data.qty))} `}
-                                                                        {data.purchaseQuantity && data.purchaseQuantity > 0 && `(${(data.netQty / data.purchaseQuantity).toFixed(1)} ${data.purchaseUnit === 'Cases' ? 'cs' : (data.purchaseUnit || 'cs')})`}
+
+                                                                {/* Web View */}
+                                                                <div className="print:hidden flex flex-col items-end">
+                                                                    <div className="text-sm font-bold text-slate-900 dark:text-white">
+                                                                        {data.purchaseQuantity && data.purchaseQuantity > 0
+                                                                            ? `${Math.ceil(data.netQty / data.purchaseQuantity)} ${data.purchaseUnit || 'Pkg'}`
+                                                                            : `${toFraction(Number(data.netQty))} ${data.unit}`
+                                                                        }
                                                                     </div>
-                                                                )}
+                                                                    {(data.qty > data.netQty || (data.purchaseQuantity && data.purchaseQuantity > 0)) && (
+                                                                        <div className="text-[10px] text-slate-500 font-bold tracking-wider mt-0.5">
+                                                                            {data.qty > data.netQty && `T: ${toFraction(Number(data.qty))} `}
+                                                                            {data.purchaseQuantity && data.purchaseQuantity > 0 && `(${toFraction(Number(data.netQty))} ${data.unit})`}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+
+                                                                {/* Print View */}
+                                                                <div className="hidden print:block">
+                                                                    <div className="text-[11px] font-black text-slate-900 leading-tight">
+                                                                        {data.purchaseQuantity && data.purchaseQuantity > 0
+                                                                            ? `${Math.ceil(data.netQty / data.purchaseQuantity)} ${data.purchaseUnit || 'Pkg'}`
+                                                                            : `${toFraction(Number(data.netQty))} ${data.unit}`
+                                                                        }
+                                                                    </div>
+                                                                    <div className="item-meta-print">
+                                                                        ({(data.purchaseQuantity && data.purchaseQuantity > 0) ? `${toFraction(Number(data.netQty))} ${data.unit}` : `${toFraction(Number(data.qty))} ${data.unit}`})
+                                                                    </div>
+                                                                </div>
                                                             </td>
                                                             <td className={`p-3 text-right font-mono font-bold text-sm print:hidden ${isChecked ? 'text-slate-400 dark:text-slate-500' : 'text-emerald-600 dark:text-emerald-500'}`}>
-                                                                ${(data.netQty * data.costPerUnit).toFixed(2)}
+                                                                ${(data.purchaseQuantity && data.purchaseQuantity > 0 && data.purchaseCost)
+                                                                    ? (Math.ceil(data.netQty / data.purchaseQuantity) * data.purchaseCost).toFixed(2)
+                                                                    : (data.netQty * (data.costPerUnit || 0)).toFixed(2)}
                                                             </td>
                                                             <td className="p-3 text-right print:hidden" onClick={(e) => e.stopPropagation()}>
                                                                 <a
@@ -752,20 +776,28 @@ export function ProductionCalculator() {
                                             Object.entries(result.prepTasks).forEach(([fullName, task]) => {
                                                 if (!details[task.id]) return;
 
-                                                // Identify Base Name & Tier
-                                                let baseName = fullName;
-                                                let tier = 'family';
+                                                const recipeInfo = details[task.id];
+                                                const recipeName = recipeInfo?.name || fullName;
 
-                                                if (fullName.includes('(Serves 2)')) {
-                                                    baseName = fullName.replace('(Serves 2)', '').trim();
+                                                // 1. Identify Tier from the actual recipe name
+                                                let tier = 'family';
+                                                const lowerRecipe = recipeName.toLowerCase();
+                                                if (lowerRecipe.includes('(serves 2)')) {
                                                     tier = 'serves_2';
-                                                } else if (fullName.includes('(Keto)')) {
-                                                    baseName = fullName.replace('(Keto)', '').trim();
+                                                } else if (lowerRecipe.includes('(keto)')) {
                                                     tier = 'keto';
-                                                } else if (fullName.includes('(Single)')) {
-                                                    baseName = fullName.replace('(Single)', '').trim();
+                                                } else if (lowerRecipe.includes('(single)')) {
                                                     tier = 'single';
                                                 }
+
+                                                // 2. Identify Base Name (Strip all modifiers from the combined Bundle + Recipe string to group siblings)
+                                                let baseName = fullName
+                                                    .replace(/\(Serves 2\)/gi, '')
+                                                    .replace(/\(Keto\)/gi, '')
+                                                    .replace(/\(Single\)/gi, '')
+                                                    .replace(/\s+/g, ' ')
+                                                    .replace(/\s-\s$/, '')
+                                                    .trim();
 
                                                 if (!groups[baseName]) {
                                                     groups[baseName] = { baseName, tasks: {}, allIds: [] };

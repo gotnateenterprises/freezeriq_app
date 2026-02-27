@@ -34,7 +34,7 @@ export async function GET() {
         const productionOrders = await prisma.order.findMany({
             where: {
                 business_id: businessId,
-                status: { in: ['APPROVED', 'IN_PRODUCTION'] as any }
+                status: { in: ['APPROVED', 'IN_PRODUCTION', 'READY_TO_SHIP'] as any } // Must include READY_TO_SHIP as some items might still be prepping
             },
             include: {
                 items: {
@@ -58,11 +58,16 @@ export async function GET() {
             }
         });
 
-        // 3. Fetch COMPLETED orders (Delivery Queue)
-        const completedOrders = await prisma.order.findMany({
+        // 3. Fetch Delivery Queue Orders (Orders with at least one READY_TO_SHIP or DELIVERED item)
+        const deliveryOrders = await prisma.order.findMany({
             where: {
                 business_id: businessId,
-                status: OrderStatus.completed
+                items: {
+                    some: {
+                        production_status: { in: ['READY_TO_SHIP', 'DELIVERED'] }
+                    }
+                },
+                status: { not: OrderStatus.completed } // Once the whole order is COMPLETED via manifest, it drops off
             },
             include: {
                 customer: {
@@ -76,10 +81,10 @@ export async function GET() {
                     }
                 }
             },
-            orderBy: { created_at: 'asc' } // Oldest first for delivery
+            orderBy: { created_at: 'asc' }
         });
 
-        // Aggregate for Prep List - Group by Bundle AND Status
+        // Aggregate for Prep List - Group by Bundle AND Item Production Status
         const prepMap = new Map<string, {
             bundle_id: string;
             bundle_name: string;
@@ -93,8 +98,11 @@ export async function GET() {
         productionOrders.forEach(order => {
             order.items.forEach(item => {
                 if (!item.bundle) return;
+                // Exclude items that are already ready to ship or delivered from the kitchen prep list
+                if (item.production_status === 'READY_TO_SHIP' || item.production_status === 'DELIVERED') return;
+
                 const bid = item.bundle.id;
-                const status = order.status; // Group by usage status
+                const status = item.production_status; // Group by ITEM status, not order status
                 const key = `${bid}-${status}`;
 
                 if (!prepMap.has(key)) {
@@ -123,7 +131,7 @@ export async function GET() {
         return NextResponse.json({
             pending: pendingOrders,
             prep: Array.from(prepMap.values()),
-            completed: completedOrders
+            completed: deliveryOrders // Renaming the payload value to "completed" to avoid breaking old frontend code that expects it, but containing deliveryOrders
         });
 
     } catch (e) {

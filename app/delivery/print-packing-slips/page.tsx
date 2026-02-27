@@ -27,7 +27,8 @@ export default function PrintPackingSlipsPage() {
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
     const [logo, setLogo] = useState<string | null>(null);
-    const [customQr, setCustomQr] = useState<string | null>(null);
+    const [customQrImage, setCustomQrImage] = useState<string | null>(null);
+    const [customQrTarget, setCustomQrTarget] = useState<string | null>(null);
     const [businessName, setBusinessName] = useState<string>('Freezer Chef');
     const [tagline, setTagline] = useState<string>('Deliciously Easy, home-cooked meals prepared fresh and frozen for your convenience.');
     const [thankYouNote, setThankYouNote] = useState<string>('Dear Friend, We just wanted to take a moment to send a giant, freezer-packed THANK YOU! Every time you choose {businessName}, you\'re doing more than just making dinnertime easier (and tastier)—you\'re supporting a small, local business with a big heart. Whether you\'re stocking your freezer for a busy week, gifting meals to someone special, or just giving yourself a well-deserved break from cooking—we’re so grateful to be part of your home.');
@@ -37,8 +38,16 @@ export default function PrintPackingSlipsPage() {
     useEffect(() => {
         const fetchData = async () => {
             try {
+                // Determine if we are fetching a batch or a single order
+                const searchParams = new URLSearchParams(window.location.search);
+                const orderId = searchParams.get('orderId');
+
                 // Fetch Orders
-                const ordersRes = await fetch('/api/orders?status=pending,production_ready&include_details=true');
+                const apiUrl = orderId
+                    ? `/api/orders?id=${orderId}&include_details=true`
+                    : '/api/orders?status=pending,production_ready&include_details=true';
+
+                const ordersRes = await fetch(apiUrl);
                 const ordersData = await ordersRes.json();
                 const sorted = ordersData.sort((a: any, b: any) =>
                     (a.delivery_sequence || 999) - (b.delivery_sequence || 999)
@@ -50,7 +59,11 @@ export default function PrintPackingSlipsPage() {
                 if (brandingRes.ok) {
                     const branding = await brandingRes.json();
                     if (branding.logo_url) setLogo(branding.logo_url);
-                    if (branding.review_qr_url) setCustomQr(branding.review_qr_url);
+                    if (branding.packing_slip_qr?.url_target) {
+                        setCustomQrTarget(branding.packing_slip_qr.url_target);
+                    } else if (branding.review_qr_url) {
+                        setCustomQrImage(branding.review_qr_url);
+                    }
                     if (branding.business_name) setBusinessName(branding.business_name);
                     if (branding.tagline) setTagline(branding.tagline);
                     if (branding.thank_you_note) setThankYouNote(branding.thank_you_note);
@@ -91,7 +104,7 @@ export default function PrintPackingSlipsPage() {
 
                     <div className="flex items-center gap-4">
                         <div className="text-sm text-slate-500 font-medium">
-                            {orders.length} Orders • {orders.reduce((acc, o) => acc + o.items.length, 0)} Items
+                            {orders.length} Orders • {orders.reduce((acc, o) => acc + o.items.reduce((sum, item) => sum + item.quantity, 0), 0)} Bundles
                         </div>
                         <button
                             onClick={() => window.print()}
@@ -118,16 +131,34 @@ export default function PrintPackingSlipsPage() {
                 `}} />
 
                 {orders.flatMap(order => {
-                    // ... existing flatMap logic ...
-                    return order.items.flatMap((item, itemIdx) => {
-                        const slips = [];
-                        for (let i = 0; i < item.quantity; i++) {
-                            slips.push({ order, item, itemIdx, copyIndex: i });
-                        }
-                        return slips;
+                    // Group items into functional boxes based on bundle characteristics.
+                    // New logic: 1 physical box = 1 bundle instance
+                    const boxes: { order: Order, boxIndex: number, totalBoxes: number, item: any, type: string }[] = [];
+
+                    let totalBoxesForOrder = 0;
+                    order.items.forEach(item => {
+                        totalBoxesForOrder += item.quantity;
                     });
-                }).map((slip, uniqueKey) => {
-                    const { order, item } = slip;
+
+                    let currentBoxNum = 1;
+
+                    order.items.forEach(item => {
+                        for (let i = 0; i < item.quantity; i++) {
+                            const isSmall = item.variant_size === 'serves_2' || item.bundle?.name?.toLowerCase().includes('serves 2');
+                            boxes.push({
+                                order,
+                                boxIndex: currentBoxNum,
+                                totalBoxes: totalBoxesForOrder,
+                                item,
+                                type: isSmall ? 'Small Box' : 'Large Box'
+                            });
+                            currentBoxNum++;
+                        }
+                    });
+
+                    return boxes;
+                }).map((box, uniqueKey) => {
+                    const { order, boxIndex, totalBoxes, item, type } = box;
                     const bundle = item.bundle;
                     const contents = bundle?.contents || [];
 
@@ -145,7 +176,7 @@ export default function PrintPackingSlipsPage() {
                     }
 
                     return (
-                        <div key={`${order.id}-${slip.itemIdx}-${slip.copyIndex}`} className="page-break bg-white w-[8.5in] h-[11in] mx-auto p-[0.4in] relative box-border mb-8 print:mb-0 shadow-lg print:shadow-none flex flex-col">
+                        <div key={`${order.id}-${uniqueKey}`} className="page-break bg-white w-[8.5in] h-[11in] mx-auto p-[0.4in] relative box-border mb-8 print:mb-0 shadow-lg print:shadow-none flex flex-col">
 
                             {/* Header: Centered Logo & Slogan */}
                             <div className="flex flex-col items-center border-b border-slate-100 pb-2 mb-2">
@@ -185,11 +216,14 @@ export default function PrintPackingSlipsPage() {
                             </div>
 
                             {/* Contents List */}
-                            <div className="flex-1 min-h-0 overflow-visible">
-                                <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2 uppercase tracking-wider border-b border-slate-100 pb-1">
-                                    <Box size={14} className="text-indigo-500" />
-                                    Box Contents
+                            <div className="flex-1 min-h-0 overflow-visible mt-2">
+                                <h3 className="text-base font-black text-slate-900 mb-1 flex items-center gap-2 tracking-wide">
+                                    <Box size={18} className="text-indigo-500" />
+                                    Bundle Content: <span className="text-indigo-700">{bundle?.name || 'Bundle'}</span>
                                 </h3>
+                                <div className="text-xs text-slate-500 font-bold mb-3 border-b border-slate-200 pb-2">
+                                    {bundle?.sku}
+                                </div>
 
                                 {contents.length > 0 ? (
                                     <table className="w-full text-xs">
@@ -247,8 +281,10 @@ export default function PrintPackingSlipsPage() {
                                     </p>
 
                                     <div className="flex justify-center items-center gap-1 pt-2">
-                                        {customQr ? (
-                                            <img src={customQr} alt="Review QR" className="w-16 h-16 object-contain" />
+                                        {customQrTarget ? (
+                                            <QRCodeSVG value={customQrTarget} size={64} />
+                                        ) : customQrImage ? (
+                                            <img src={customQrImage} alt="Review QR" className="w-16 h-16 object-contain" />
                                         ) : (
                                             <QRCodeSVG value="https://www.facebook.com/FreezerChef/reviews" size={64} />
                                         )}

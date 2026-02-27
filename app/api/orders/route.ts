@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
+import { InventoryEngine } from '@/lib/inventory_engine';
 
 
 export async function GET(req: NextRequest) {
     try {
         const { searchParams } = new URL(req.url);
         const status = searchParams.get('status');
+        const id = searchParams.get('id');
 
         const whereClause: any = {};
+
+        if (id) {
+            whereClause.id = id;
+        }
+
         if (status) {
             // Handle multiple statuses like ?status=pending,production_ready
             const statuses = status.split(',');
@@ -24,6 +31,11 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
         whereClause.business_id = session.user.businessId;
+
+        const includeFundraisers = searchParams.get('include_fundraisers') === 'true';
+        if (!includeFundraisers) {
+            whereClause.campaign_id = null;
+        }
 
         const includeDetails = searchParams.get('include_details') === 'true';
 
@@ -79,7 +91,8 @@ export async function GET(req: NextRequest) {
                         id: true,
                         name: true,
                         contact_email: true,
-                        type: true
+                        type: true,
+                        delivery_address: true,
                     }
                 },
                 campaign: {
@@ -249,7 +262,7 @@ export async function DELETE(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
     try {
         const body = await req.json();
-        const { id, status } = body;
+        const { id, status, delivery_signature } = body;
 
         if (!id || !status) {
             return NextResponse.json({ error: 'Missing ID or status' }, { status: 400 });
@@ -282,7 +295,15 @@ export async function PATCH(req: NextRequest) {
             // Update the order status
             const updatedOrder = await tx.order.update({
                 where: { id: existingOrder.id },
-                data: { status }
+                data: {
+                    status,
+                    ...(delivery_signature && {
+                        // @ts-ignore - Stale Prisma Client
+                        delivery_signature,
+                        // @ts-ignore
+                        delivered_at: new Date()
+                    })
+                }
             });
 
             // SYNC LINKED INVOICE
@@ -324,6 +345,13 @@ export async function PATCH(req: NextRequest) {
 
             return updatedOrder;
         });
+
+        if (status === 'completed' || status === 'delivered') {
+            const engine = new InventoryEngine(session.user.businessId);
+            engine.deductOrderInventory(existingOrder.id).catch(err => {
+                console.error(`Inventory deduction failed for ${existingOrder.id}:`, err);
+            });
+        }
 
         return NextResponse.json(result);
     } catch (e: any) {

@@ -79,19 +79,19 @@ export default function CartDrawer({ primaryColor, businessId, slug, campaignId,
                                     <p className="text-xs text-slate-500 uppercase tracking-wide font-medium mb-3">{item.serving_tier}</p>
 
                                     <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-3 bg-slate-50 dark:bg-slate-800 rounded-lg p-1">
+                                        <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 rounded-xl p-1.5 border border-slate-100 dark:border-slate-700">
                                             <button
                                                 onClick={() => updateQuantity(item.bundleId, item.quantity - 1)}
-                                                className="p-1 hover:bg-white dark:hover:bg-slate-700 rounded-md shadow-sm transition-all"
+                                                className="w-10 h-10 flex items-center justify-center hover:bg-white dark:hover:bg-slate-700 rounded-lg shadow-sm transition-all active:scale-95"
                                             >
-                                                <Minus className="w-3 h-3" />
+                                                <Minus className="w-4 h-4 text-slate-600 dark:text-slate-300" />
                                             </button>
-                                            <span className="text-sm font-bold w-4 text-center">{item.quantity}</span>
+                                            <span className="text-base font-black w-6 text-center text-slate-900 dark:text-white">{item.quantity}</span>
                                             <button
                                                 onClick={() => updateQuantity(item.bundleId, item.quantity + 1)}
-                                                className="p-1 hover:bg-white dark:hover:bg-slate-700 rounded-md shadow-sm transition-all"
+                                                className="w-10 h-10 flex items-center justify-center hover:bg-white dark:hover:bg-slate-700 rounded-lg shadow-sm transition-all active:scale-95"
                                             >
-                                                <Plus className="w-3 h-3" />
+                                                <Plus className="w-4 h-4 text-slate-600 dark:text-slate-300" />
                                             </button>
                                         </div>
                                         <p className="font-black text-slate-900 dark:text-white">
@@ -105,17 +105,25 @@ export default function CartDrawer({ primaryColor, businessId, slug, campaignId,
                 </div>
 
                 {items.length > 0 && (
-                    <div className="p-6 border-t border-white/40 dark:border-slate-800/50 space-y-4 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md">
+                    <div className="p-6 pb-12 md:pb-6 border-t border-white/40 dark:border-slate-800/50 space-y-5 bg-white/50 dark:bg-slate-900/50 backdrop-blur-3xl shadow-[0_-16px_48px_-16px_rgba(0,0,0,0.1)]">
                         <div className="flex justify-between items-end">
                             <span className="text-slate-500 font-medium">Subtotal</span>
                             <span className="text-2xl font-black text-slate-900 dark:text-white">${cartTotal.toFixed(2)}</span>
                         </div>
                         <button
                             onClick={() => setIsCheckoutOpen(true)}
-                            className={`w-full py-4 rounded-xl font-black text-lg shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 ${getContrastTextClass(primaryColor)}`}
+                            className={`w-full py-5 rounded-2xl font-black text-xl shadow-xl hover:shadow-2xl hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 ${getContrastTextClass(primaryColor)}`}
                             style={{ backgroundColor: primaryColor }}
                         >
-                            Checkout <ArrowRight className="w-5 h-5" />
+                            <ShoppingBag className="w-5 h-5" />
+                            Checkout
+                            <ArrowRight className="w-5 h-5 opacity-50 ml-1" />
+                        </button>
+                        <button
+                            onClick={() => setIsCartOpen(false)}
+                            className="w-full py-3 rounded-2xl font-bold text-slate-500 hover:bg-white/50 dark:hover:bg-slate-800/50 transition-colors"
+                        >
+                            Continue Shopping
                         </button>
                     </div>
                 )}

@@ -8,6 +8,7 @@ import { useSession } from 'next-auth/react';
 import { STATUS_LABELS, STATUS_COLORS, type CustomerStatus } from '@/lib/statusConstants';
 import UpgradeRequired from '@/components/UpgradeRequired';
 import EmailComposeModal from '@/components/crm/EmailComposeModal';
+import SmsComposeModal from '@/components/crm/SmsComposeModal';
 import AddOrderModal from '@/components/AddOrderModal';
 
 
@@ -20,6 +21,9 @@ interface Customer {
     last_order: string;
     order_count: number;
     email?: string;
+    contact_phone?: string | null;
+    stripe_subscription_id?: string | null;
+    subscription_status?: string | null;
     source?: 'Square' | 'QBO' | 'Manual';
     status: CustomerStatus;
     archived: boolean;
@@ -49,7 +53,7 @@ function CustomersContent() {
     const hasAccess = userPlan === 'ENTERPRISE' || userPlan === 'ULTIMATE' || userPlan === 'FREE' || isSuperAdmin;
 
     const [searchTerm, setSearchTerm] = useState('');
-    const [activeType, setActiveType] = useState<'All' | 'Individual' | 'Completed' | 'Archived' | 'Waitlist'>('All');
+    const [activeType, setActiveType] = useState<'All' | 'Individual' | 'Completed' | 'Archived' | 'Waitlist' | 'Subscribers'>('All');
     const [activeStatus, setActiveStatus] = useState<'All' | 'LEAD' | 'ACTIVE' | 'PRODUCTION' | 'IN_PROGRESS_VIEW'>('All');
 
     // New Customer Modal State
@@ -70,6 +74,12 @@ function CustomersContent() {
     const [emailDraft, setEmailDraft] = useState({ subject: '', html: '' });
     const [blastRecipients, setBlastRecipients] = useState<string[]>([]);
     const [blastCount, setBlastCount] = useState(0);
+
+    // SMS Modal State
+    const [isSmsModalOpen, setIsSmsModalOpen] = useState(false);
+    const [smsDraft, setSmsDraft] = useState({ message: '' });
+    const [smsBlastRecipients, setSmsBlastRecipients] = useState<string[]>([]);
+    const [smsBlastCount, setSmsBlastCount] = useState(0);
 
     const [weeklyRevenue, setWeeklyRevenue] = useState(0);
     const [inProgressOrders, setInProgressOrders] = useState(0);
@@ -115,7 +125,10 @@ function CustomersContent() {
                     source: c.source || 'Square',
                     status: (c.status as CustomerStatus) || 'LEAD',
                     archived: c.archived || false,
-                    email: c.email || '',
+                    email: c.email || c.contact_email || '',
+                    contact_phone: c.contact_phone || '',
+                    stripe_subscription_id: c.stripe_subscription_id || null,
+                    subscription_status: c.subscription_status || null,
                     tags: c.tags || []
                 }));
                 setCustomers(enhancedData);
@@ -220,6 +233,11 @@ function CustomersContent() {
     };
 
     const filtered = customers.filter(c => {
+        // Exclude Fundraiser profiles from Retail CRM
+        if (c.type === 'Fundraiser' || c.type === 'Organization') {
+            return false;
+        }
+
         // Handle Type Filters (Tabs)
         if (activeType === 'Archived') {
             if (!c.archived) return false;
@@ -227,6 +245,8 @@ function CustomersContent() {
             if (c.status !== 'COMPLETE' || c.archived) return false;
         } else if (activeType === 'Waitlist') {
             if (!c.tags?.includes('surplus_waitlist')) return false;
+        } else if (activeType === 'Subscribers') {
+            if (!c.stripe_subscription_id) return false;
         } else {
             if (c.archived) return false;
 
@@ -259,7 +279,7 @@ function CustomersContent() {
         weeklyRevenue: weeklyRevenue,
         inProgressOrders: inProgressOrders,
         individuals: customers.filter(c => !c.archived && c.type === 'Individual').length,
-        leads: customers.filter(c => !c.archived && c.status === 'LEAD').length
+        leads: customers.filter(c => !c.archived && c.status === 'LEAD' && c.type !== 'Fundraiser' && c.type !== 'Organization').length
     };
 
     return (
@@ -417,7 +437,7 @@ function CustomersContent() {
                 {/* Visual Filter Bar */}
                 <div className="flex flex-col lg:flex-row gap-4">
                     <div className="flex-1 glass-panel p-1 rounded-2xl flex gap-1 bg-white dark:bg-slate-800 border border-slate-200/50 shadow-sm overflow-x-auto no-scrollbar">
-                        {['Individual', 'Waitlist', 'All', 'Completed', 'Archived'].map(type => (
+                        {['Individual', 'Subscribers', 'Waitlist', 'All', 'Completed', 'Archived'].map(type => (
                             <button
                                 key={type}
                                 onClick={() => setActiveType(type as any)}
@@ -438,33 +458,60 @@ function CustomersContent() {
                         />
                     </div>
 
-                    {/* Blast Waitlist Button */}
+                    {/* Blast Waitlist Buttons */}
                     {activeType === 'Waitlist' && (
-                        <button
-                            onClick={() => {
-                                const waitlistEmails = customers
-                                    .filter(c => c.tags?.includes('surplus_waitlist') && c.email)
-                                    .map(c => c.email!)
-                                    .filter(email => email.length > 0); // Ensure valid emails
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => {
+                                    const waitlistPhones = customers
+                                        .filter(c => c.tags?.includes('surplus_waitlist') && c.contact_phone)
+                                        .map(c => c.contact_phone!)
+                                        .filter(phone => phone.length > 0);
 
-                                if (waitlistEmails.length === 0) {
-                                    alert("No valid emails found in waitlist.");
-                                    return;
-                                }
+                                    if (waitlistPhones.length === 0) {
+                                        alert("No valid phone numbers found in waitlist.");
+                                        return;
+                                    }
 
-                                setBlastRecipients(waitlistEmails);
-                                setBlastCount(waitlistEmails.length);
-                                setEmailDraft({
-                                    subject: "Surplus Meals Dropped! 🍲",
-                                    html: `<p>Hi there!</p><p>Great news! We just dropped new surplus meals in the shop.</p><p><a href="https://freezeriq.com/shop">Click here to grab them before they're gone!</a></p><p>Warmly,<br>The Freezer Chef Team</p>`
-                                });
-                                setIsEmailModalOpen(true);
-                            }}
-                            className="flex items-center gap-2 px-4 py-2 bg-rose-500 hover:bg-rose-600 active:bg-rose-700 text-white font-bold rounded-xl shadow-md transform transition-all hover:-translate-y-0.5"
-                        >
-                            <Mail size={18} />
-                            Email Waitlist
-                        </button>
+                                    setSmsBlastRecipients(waitlistPhones);
+                                    setSmsBlastCount(waitlistPhones.length);
+                                    setSmsDraft({
+                                        message: "Surplus Meals Dropped! 🍲 Grab them before they sell out at freezeriq.com/shop"
+                                    });
+                                    setIsSmsModalOpen(true);
+                                }}
+                                className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white font-bold rounded-xl shadow-md transform transition-all hover:-translate-y-0.5 whitespace-nowrap"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+                                Text Waitlist
+                            </button>
+
+                            <button
+                                onClick={() => {
+                                    const waitlistEmails = customers
+                                        .filter(c => c.tags?.includes('surplus_waitlist') && c.email)
+                                        .map(c => c.email!)
+                                        .filter(email => email.length > 0);
+
+                                    if (waitlistEmails.length === 0) {
+                                        alert("No valid emails found in waitlist.");
+                                        return;
+                                    }
+
+                                    setBlastRecipients(waitlistEmails);
+                                    setBlastCount(waitlistEmails.length);
+                                    setEmailDraft({
+                                        subject: "Surplus Meals Dropped! 🍲",
+                                        html: `<p>Hi there!</p><p>Great news! We just dropped new surplus meals in the shop.</p><p><a href="https://freezeriq.com/shop">Click here to grab them before they're gone!</a></p><p>Warmly,<br>The Freezer Chef Team</p>`
+                                    });
+                                    setIsEmailModalOpen(true);
+                                }}
+                                className="flex items-center gap-2 px-4 py-2 bg-rose-500 hover:bg-rose-600 active:bg-rose-700 text-white font-bold rounded-xl shadow-md transform transition-all hover:-translate-y-0.5 whitespace-nowrap"
+                            >
+                                <Mail size={18} />
+                                Email Waitlist
+                            </button>
+                        </div>
                     )}
                 </div>
 
@@ -506,8 +553,7 @@ function CustomersContent() {
                                         >
                                             <td className="py-6 px-8">
                                                 <div className="flex items-center gap-4">
-                                                    <div className={`w-12 h-12 rounded-[1rem] flex items-center justify-center text-white font-black text-lg transition-transform group-hover:scale-110 shadow-lg ${(c.type === 'Fundraiser' || c.type === 'Organization') ? 'bg-gradient-to-br from-indigo-500 to-purple-600' : 'bg-gradient-to-br from-blue-400 to-indigo-500'
-                                                        }`}>
+                                                    <div className="w-12 h-12 rounded-[1rem] flex items-center justify-center text-white font-black text-lg transition-transform group-hover:scale-110 shadow-lg bg-gradient-to-br from-blue-400 to-indigo-500">
                                                         {c.name.charAt(0)}
                                                     </div>
                                                     <div>
@@ -617,6 +663,41 @@ function CustomersContent() {
                 initialSubject={emailDraft.subject}
                 initialHtml={emailDraft.html}
                 recipientEmail={blastCount > 0 ? `Waitlist (${blastCount} people)` : ''}
+            />
+
+            {/* SMS Modal */}
+            <SmsComposeModal
+                isOpen={isSmsModalOpen}
+                onClose={() => setIsSmsModalOpen(false)}
+                onSend={async (message) => {
+                    if (smsBlastRecipients.length === 0) return;
+
+                    try {
+                        const res = await fetch('/api/public/send-text', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                to: smsBlastRecipients,
+                                message: message
+                            })
+                        });
+
+                        // Note: Depending on your Twilio/SMS API route structure,
+                        // you might need to adjust the fetch URL or payload above.
+
+                        if (res.ok) {
+                            alert(`Text message sent to ${smsBlastCount} people!`);
+                            setIsSmsModalOpen(false);
+                        } else {
+                            const err = await res.json();
+                            alert("Failed to send text: " + (err.error || "Unknown error"));
+                        }
+                    } catch (e) {
+                        alert("Error sending text message");
+                    }
+                }}
+                initialMessage={smsDraft.message}
+                recipientPhoneNumbers={smsBlastCount > 0 ? `Waitlist (${smsBlastCount} people)` : ''}
             />
 
             <AddOrderModal

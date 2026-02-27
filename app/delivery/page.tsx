@@ -311,7 +311,7 @@ export default function DeliveryDashboard() {
             const [itemsRes, statsRes, routesRes, labelsRes] = await Promise.all([
                 fetch('/api/delivery/inventory'),
                 fetch('/api/delivery/stats'),
-                fetch('/api/orders?status=pending,production_ready'),
+                fetch('/api/orders?status=APPROVED,IN_PRODUCTION,COMPLETED'),
                 fetch('/api/delivery/labels')
             ]);
 
@@ -644,6 +644,10 @@ export default function DeliveryDashboard() {
                                 <span className="font-bold">{stats?.smallBoxesNeeded || 0}</span>
                             </div>
                         </div>
+
+                        <Link href="/delivery/run" className="block w-full bg-indigo-500 text-white font-bold py-3 rounded-xl text-center hover:bg-indigo-400 transition-colors shadow-sm mb-4 text-sm flex items-center justify-center gap-2">
+                            <Truck size={18} /> Start Delivery Run
+                        </Link>
 
                         <Link href="/delivery/print-batch" className="block w-full bg-white text-indigo-900 font-bold py-2.5 rounded-xl text-center hover:bg-indigo-50 transition-colors shadow-sm mb-2">
                             Print Labels

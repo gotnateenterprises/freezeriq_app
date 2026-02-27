@@ -33,6 +33,7 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
             stock_on_hand: initialData.stock_on_hand || 0,
             is_active: initialData.is_active ?? true,
             show_on_storefront: initialData.show_on_storefront ?? false,
+            is_donation: initialData.is_donation ?? false,
             order_cutoff_date: initialData.order_cutoff_date ? new Date(initialData.order_cutoff_date).toISOString().split('T')[0] : '',
             contents: initialData.contents.map((c: any) => ({
                 recipe_id: c.recipe_id,
@@ -50,6 +51,7 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
             stock_on_hand: 0,
             is_active: true,
             show_on_storefront: false,
+            is_donation: false,
             order_cutoff_date: '',
             contents: []
         }
@@ -647,6 +649,23 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
                                 </label>
                                 <span className="ml-auto text-xs text-slate-400 font-medium">
                                     {watch('is_active') ? 'Enabled/Unlocked' : 'Archived/Hidden'}
+                                </span>
+                            </div>
+
+                            <hr className="border-slate-200 dark:border-slate-800" />
+
+                            <div className="flex items-center gap-3">
+                                <input
+                                    {...register('is_donation')}
+                                    type="checkbox"
+                                    id="is_donation"
+                                    className="w-5 h-5 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer accent-indigo-600"
+                                />
+                                <label htmlFor="is_donation" className="text-sm font-bold text-slate-700 dark:text-slate-200 cursor-pointer select-none">
+                                    Is Donation (Digital Only)
+                                </label>
+                                <span className="ml-auto text-xs text-slate-400 font-medium">
+                                    {watch('is_donation') ? 'No physical delivery' : 'Standard Bundle'}
                                 </span>
                             </div>
 

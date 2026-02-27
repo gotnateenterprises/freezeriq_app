@@ -60,7 +60,7 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
     };
 
     const shareOnWhatsApp = () => {
-        const text = encodeURIComponent(`Check out this fundraiser for ${campaign?.customer?.name || 'a great cause'}! We've already raised $${campaign?.total_sales}. Support us here: ${window.location.href}`);
+        const text = encodeURIComponent(`Check out this fundraiser for ${campaign?.customer?.name || 'a great cause'}! We've already raised $${impactRaised.toFixed(2)}. Support us here: ${window.location.href}`);
         window.open(`https://wa.me/?text=${text}`, '_blank');
     };
 
@@ -82,7 +82,8 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
         );
     }
 
-    const progress = Math.min(((campaign.total_sales || 0) / (campaign.goal_amount || 1)) * 100, 100);
+    const impactRaised = (campaign.total_sales || 0) * 0.20;
+    const progress = Math.min((impactRaised / (campaign.goal_amount || 1)) * 100, 100);
 
     return (
         <div className="min-h-screen bg-[#FDFCFB] text-slate-900 selection:bg-indigo-100">
@@ -109,8 +110,8 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
                 {/* Scoreboard Card */}
                 <div className="bg-white rounded-[2.5rem] p-10 shadow-2xl shadow-indigo-600/10 border border-slate-100 text-center">
                     <div className="space-y-2 mb-8">
-                        <p className="text-6xl font-black tracking-tighter text-slate-900">${campaign.total_sales || 0}</p>
-                        <p className="text-sm font-black text-slate-400 uppercase tracking-widest">Raised So Far</p>
+                        <p className="text-6xl font-black tracking-tighter text-slate-900">${impactRaised.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        <p className="text-sm font-black text-slate-400 uppercase tracking-widest">Impact Raised</p>
                     </div>
 
                     {/* Progress Bar */}
@@ -128,7 +129,7 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
                         </div>
                         <div className="flex justify-between mt-3 px-1">
                             <span className="text-xs font-black text-slate-300 uppercase tracking-widest">$0</span>
-                            <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Goal: ${campaign.goal_amount}</span>
+                            <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Goal: ${(campaign.goal_amount || 0).toLocaleString()}</span>
                         </div>
                     </div>
 

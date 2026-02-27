@@ -36,6 +36,7 @@ interface Fundraiser {
     business_slug: string;
     is_placeholder?: boolean;
     portal_token?: string;
+    bundle_stats?: { name: string, count: number }[];
 }
 
 export default function FundraisersPage() {
@@ -193,7 +194,11 @@ export default function FundraisersPage() {
                                     <td colSpan={6} className="px-8 py-20 text-center text-slate-400 italic">No fundraisers found.</td>
                                 </tr>
                             ) : filtered.map(item => (
-                                <tr key={item.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
+                                <tr
+                                    key={item.id}
+                                    className="group hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors cursor-pointer"
+                                    onClick={() => window.location.href = `/fundraisers/${item.customer_id}`}
+                                >
                                     <td className="px-8 py-6">
                                         <div className="flex items-center gap-4">
                                             <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center text-indigo-600 group-hover:scale-110 transition-transform">
@@ -241,45 +246,53 @@ export default function FundraisersPage() {
                                                     style={{ width: `${Math.min(((item.sales_total || 0) / (item.goal_amount || 1)) * 100, 100)}%` }}
                                                 />
                                             </div>
+                                            {/* Live Bundle Sales Counters */}
+                                            {item.bundle_stats && item.bundle_stats.length > 0 && (
+                                                <div className="flex flex-wrap justify-end gap-1 mt-1 w-full">
+                                                    {item.bundle_stats.map((stat, idx) => (
+                                                        <span key={idx} className="px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded text-[9px] font-black tracking-wide border border-indigo-100 dark:border-indigo-800">
+                                                            {stat.name} - {stat.count}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                     </td>
-                                    <td className="px-8 py-6 text-right">
-                                        <div className="flex items-center justify-end gap-2">
+                                    <td className="px-4 xl:px-8 py-6 text-right" onClick={(e) => e.stopPropagation()}>
+                                        <div className="flex items-center justify-end gap-1.5">
                                             {!item.is_placeholder && (
                                                 <Link
                                                     href={`/shop/${item.business_slug}/fundraiser/${item.id}`}
                                                     target="_blank"
-                                                    className="p-3 hover:bg-white dark:hover:bg-slate-700 rounded-2xl text-slate-400 hover:text-pink-600 transition-all shadow-sm border border-transparent hover:border-pink-100 dark:hover:border-pink-900/30"
+                                                    className="p-2.5 hover:bg-white dark:hover:bg-slate-700 rounded-xl text-slate-400 hover:text-pink-600 transition-all shadow-sm border border-transparent hover:border-pink-100 dark:hover:border-pink-900/30"
                                                     title="View Public Page"
                                                 >
-                                                    <ExternalLink size={20} />
+                                                    <ExternalLink size={18} />
                                                 </Link>
                                             )}
                                             {!item.is_placeholder && item.portal_token && (
                                                 <Link
                                                     href={`/coordinator/${item.portal_token}`}
                                                     target="_blank"
-                                                    className="p-3 hover:bg-white dark:hover:bg-slate-700 rounded-2xl text-slate-400 hover:text-purple-600 transition-all shadow-sm border border-transparent hover:border-purple-100 dark:hover:border-purple-900/30 inline-flex items-center gap-2 group/btn"
+                                                    className="p-2.5 hover:bg-white dark:hover:bg-slate-700 rounded-xl text-slate-400 hover:text-purple-600 transition-all shadow-sm border border-transparent hover:border-purple-100 dark:hover:border-purple-900/30 inline-flex items-center justify-center"
                                                     title="Coordinator Portal Sneak Peek"
                                                 >
-                                                    <span className="text-[10px] font-black uppercase tracking-widest opacity-0 group-hover/btn:opacity-100 transition-opacity whitespace-nowrap">Portal</span>
-                                                    <Users size={20} />
+                                                    <Users size={18} />
                                                 </Link>
                                             )}
                                             <Link
                                                 href={`/customers/${item.customer_id}?tab=fundraisers`}
-                                                className="p-3 hover:bg-white dark:hover:bg-slate-700 rounded-2xl text-slate-400 hover:text-indigo-600 transition-all shadow-sm border border-transparent hover:border-slate-100 inline-flex items-center gap-2 group/btn"
+                                                className="p-2.5 hover:bg-white dark:hover:bg-slate-700 rounded-xl text-slate-400 hover:text-indigo-600 transition-all shadow-sm border border-transparent hover:border-indigo-100 dark:hover:border-indigo-900/30 inline-flex items-center justify-center"
+                                                title="Manage Fundraiser"
                                             >
-                                                <span className="text-[10px] font-black uppercase tracking-widest opacity-0 group-hover/btn:opacity-100 transition-opacity">Manage</span>
-                                                <ChevronRight size={20} />
+                                                <ChevronRight size={18} />
                                             </Link>
                                             <Link
                                                 href={`/invoices?action=new&customerId=${item.customer_id}`}
-                                                className="p-3 hover:bg-white dark:hover:bg-slate-700 rounded-2xl text-slate-400 hover:text-emerald-600 transition-all shadow-sm border border-transparent hover:border-slate-100 inline-flex items-center gap-2 group/btn"
+                                                className="p-2.5 hover:bg-white dark:hover:bg-slate-700 rounded-xl text-slate-400 hover:text-emerald-600 transition-all shadow-sm border border-transparent hover:border-emerald-100 dark:hover:border-emerald-900/30 inline-flex items-center justify-center"
                                                 title="Create Invoice"
                                             >
-                                                <span className="text-[10px] font-black uppercase tracking-widest opacity-0 group-hover/btn:opacity-100 transition-opacity">Invoice</span>
-                                                <Receipt size={20} />
+                                                <Receipt size={18} />
                                             </Link>
                                         </div>
                                     </td>

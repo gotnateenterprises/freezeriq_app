@@ -2,13 +2,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
+import { revalidatePath } from 'next/cache';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
     try {
         const data = await req.json();
-        const { name, type, yield_qty, yield_unit, container_type, items, allergens, instructions, label_text, image_url, description, cook_time } = data;
+        const { name, type, yield_qty, yield_unit, container_type, items, allergens, instructions, label_text, image_url, description, cook_time, is_subscriber_only } = data;
 
         const session = await auth();
         console.log('GET /api/recipes - Session Business ID:', session?.user?.businessId);
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
                 instructions: instructions || null,
                 label_text: label_text || null,
                 macros: data.macros || null,
+                is_subscriber_only: is_subscriber_only || false,
                 business_id: session.user.businessId
             } as any
         });
@@ -124,6 +126,7 @@ export async function POST(req: NextRequest) {
             }
         }
 
+        revalidatePath('/recipes');
         return NextResponse.json({ success: true, recipe });
 
     } catch (e: any) {

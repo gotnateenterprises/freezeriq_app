@@ -56,8 +56,8 @@ export async function POST(request: Request) {
 
             // 2. Map prepTasks to ProductionTask format
             // KitchenEngine returns prepTasks as a Record<RecipeName, {qty, id, unit...}>
-            tasks = Object.values(plan.prepTasks).map((t: any) => ({
-                item_id: t.id, // Recipe ID
+            tasks = Object.entries(plan.prepTasks).map(([key, t]: any) => ({
+                item_id: key, // Recipe/Task Descriptive Name
                 item_type: 'recipe',
                 total_qty_needed: t.qty,
                 unit: t.unit,

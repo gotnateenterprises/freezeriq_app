@@ -17,7 +17,7 @@ export async function POST(req: Request) {
         const ExcelJS = (await import('exceljs')).default;
 
         // Load Template
-        const templatePath = path.resolve('./templates/tracking_sheet.xlsx');
+        const templatePath = path.join(process.cwd(), 'templates', 'tracking_sheet.xlsx');
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.readFile(templatePath);
 

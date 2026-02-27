@@ -38,6 +38,7 @@ import MarketingAssetGenerator from '@/components/marketing/MarketingAssetGenera
 import Leaderboard from '@/components/coordinator/Leaderboard';
 import ProgressThermometer from '@/components/coordinator/ProgressThermometer';
 import ShareAction from '@/components/coordinator/ShareAction';
+import LiveTallySheet from '@/components/coordinator/LiveTallySheet';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 
@@ -158,11 +159,12 @@ export default function CoordinatorPortal() {
                 setSelectedItems([]);
                 fetchCampaign(); // Refresh data
             } else {
-                toast.error("Failed to save order");
+                const data = await res.json();
+                toast.error(`Failed to save order: ${data.error || 'Unknown'}`);
             }
-        } catch (err) {
+        } catch (err: any) {
             console.error("Failed to add order", err);
-            toast.error("An error occurred");
+            toast.error(`An error occurred: ${err.message || 'Unknown'}`);
         } finally {
             setIsSubmitting(false);
         }
@@ -268,6 +270,16 @@ export default function CoordinatorPortal() {
                     />
                 </div>
 
+                {/* Live Tally Tracking Sheet */}
+                <div className="mt-8 mb-8">
+                    <LiveTallySheet
+                        orders={campaign.orders || []}
+                        availableBundles={campaign.availableBundles || []}
+                        token={token}
+                        onUpdate={fetchCampaign}
+                    />
+                </div>
+
                 {/* Marketing Tools */}
                 <div className="bg-white rounded-[2rem] p-6 border border-slate-200 shadow-sm space-y-4">
                     <h2 className="text-lg font-black flex items-center gap-2">
@@ -339,40 +351,6 @@ export default function CoordinatorPortal() {
                     </div>
                 </div>
 
-                {/* Recent Activity */}
-                <div className="space-y-4 pb-20">
-                    <h2 className="text-lg font-black px-2 flex items-center justify-between">
-                        Recent Orders
-                        <span className="bg-slate-200 px-2 py-0.5 rounded-full text-[10px] text-slate-600">
-                            {(campaign.orders || []).length}
-                        </span>
-                    </h2>
-                    {(campaign.orders || []).length === 0 ? (
-                        <div className="bg-white rounded-3xl p-10 text-center border-2 border-dashed border-slate-200">
-                            <p className="text-slate-400 font-bold italic">No orders yet. Add your first offline order!</p>
-                        </div>
-                    ) : (
-                        (campaign.orders || []).map((order: any) => (
-                            <div key={order.id} className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex justify-between items-center group">
-                                <div className="flex items-center gap-4">
-                                    <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 font-black">
-                                        {order.customer_name?.[0] || 'O'}
-                                    </div>
-                                    <div>
-                                        <p className="font-black text-slate-900">{order.customer_name || 'Anonymous'}</p>
-                                        <p className="text-xs font-bold text-slate-400">
-                                            {format(new Date(order.created_at), 'MMM d, h:mm a')}
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="text-right">
-                                    <p className="font-black text-lg text-slate-900">${order.total_amount}</p>
-                                    <span className="text-[10px] font-black uppercase text-slate-300 tracking-tighter">{order.source}</span>
-                                </div>
-                            </div>
-                        ))
-                    )}
-                </div>
             </main>
 
             {/* Offline Order Modal */}
@@ -399,7 +377,7 @@ export default function CoordinatorPortal() {
                         <form onSubmit={handleAddOrder} className="space-y-6">
                             {/* Bundle Selection Section */}
                             <div className="space-y-3">
-                                <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Select Items Sold</label>
+                                <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Select Items Ordered</label>
                                 <div className="grid grid-cols-2 gap-2">
                                     {(campaign.availableBundles || []).map((bundle: any) => {
                                         const isSelected = selectedItems.find(i => i.id === bundle.id);
@@ -412,9 +390,9 @@ export default function CoordinatorPortal() {
                                                     : 'border-slate-100 bg-slate-50 hover:border-slate-300'
                                                     }`}
                                             >
-                                                <div className="flex justify-between items-start mb-1">
-                                                    <p className="text-xs font-black truncate max-w-[80%]">{bundle.name}</p>
-                                                    <span className="text-[10px] font-black opacity-40">${bundle.price}</span>
+                                                <div className="flex justify-between items-start mb-1 gap-2">
+                                                    <p className="text-xs font-black truncate flex-1">{bundle.name}</p>
+                                                    <span className="text-[10px] font-black opacity-40 shrink-0">${bundle.price}</span>
                                                 </div>
                                                 {isSelected && (
                                                     <div className="flex items-center gap-2 mt-2" onClick={e => e.stopPropagation()}>
@@ -501,6 +479,20 @@ export default function CoordinatorPortal() {
                                                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                                             />
                                         </div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Email (Optional)</label>
+                                    <div className="relative">
+                                        <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                        <input
+                                            type="email"
+                                            placeholder="jane@example.com"
+                                            className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500/20 font-bold"
+                                            value={formData.email}
+                                            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                        />
                                     </div>
                                 </div>
 

@@ -42,7 +42,8 @@ export async function GET(req: NextRequest) {
                         phone: true,
                         address: true
                     }
-                }
+                },
+                packing_slip_qr: true
             },
             orderBy: { created_at: 'asc' }
         });
@@ -107,6 +108,7 @@ export async function POST(req: NextRequest) {
         const thankYouNote = formData.get('thank_you_note') as string;
         const reviewPrompt = formData.get('review_prompt') as string;
         const signOff = formData.get('sign_off') as string;
+        const packingSlipQrId = formData.get('packing_slip_qr_id') as string | null;
 
         const logoFile = formData.get('logo') as File | null;
         const reviewQrFile = formData.get('review_qr') as File | null;
@@ -146,7 +148,8 @@ export async function POST(req: NextRequest) {
                 review_prompt: reviewPrompt,
                 sign_off: signOff,
                 logo_url: logoUrl,
-                review_qr_url: reviewQrUrl
+                review_qr_url: reviewQrUrl,
+                packing_slip_qr_id: packingSlipQrId || null
             },
             update: {
                 business_name: businessName,
@@ -159,6 +162,7 @@ export async function POST(req: NextRequest) {
                 sign_off: signOff,
                 ...(logoUrl && { logo_url: logoUrl }),
                 ...(reviewQrUrl && { review_qr_url: reviewQrUrl }),
+                ...(formData.has('packing_slip_qr_id') && { packing_slip_qr_id: packingSlipQrId || null })
             }
         });
 

@@ -46,6 +46,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
                     serving_tier: data.serving_tier,
                     is_active: data.is_active,
                     show_on_storefront: data.show_on_storefront,
+                    is_donation: data.is_donation,
                     order_cutoff_date: data.order_cutoff_date ? new Date(data.order_cutoff_date) : null,
                     price: data.price ? Number(data.price) : null,
                     catalog_id: data.catalog_id || null // Ensure null if empty string

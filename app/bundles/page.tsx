@@ -76,7 +76,10 @@ export default function BundlesPage() {
     const fetchRecipes = async () => {
         try {
             const res = await fetch('/api/recipes');
-            if (res.ok) setRecipes(await res.json());
+            if (res.ok) {
+                const data = await res.json();
+                setRecipes(data.recipes || (Array.isArray(data) ? data : []));
+            }
         } catch (e) { console.error(e); }
     };
 

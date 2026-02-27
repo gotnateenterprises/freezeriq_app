@@ -38,8 +38,35 @@ export default function ShareAction({ url, title = 'Support our Fundraiser!', te
         }
     };
 
-    const fallbackCopy = () => {
-        navigator.clipboard.writeText(url);
+    const fallbackCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(url);
+            showSuccess();
+        } catch (err) {
+            // Fallback for when document is not focused or clipboard API fails
+            try {
+                const textArea = document.createElement("textarea");
+                textArea.value = url;
+                textArea.style.position = "fixed";
+                textArea.style.left = "-999999px";
+                textArea.style.top = "-999999px";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                const successful = document.execCommand('copy');
+                textArea.remove();
+                if (successful) {
+                    showSuccess();
+                } else {
+                    toast.error("Could not copy automatically. The link is: " + url);
+                }
+            } catch (fallbackErr) {
+                toast.error("Could not copy automatically. The link is: " + url);
+            }
+        }
+    };
+
+    const showSuccess = () => {
         setCopied(true);
         toast.success("Link copied to clipboard!");
         setTimeout(() => setCopied(false), 2000);

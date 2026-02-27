@@ -78,7 +78,7 @@ export async function GET(
             // SAFE: IDs are passed as parameters, placeholders are indices
             const placeholders = recipeIds.map((_, i) => `$${i + 1}`).join(',');
             const recipesRaw: any[] = await prisma.$queryRawUnsafe(
-                `SELECT id, image_url, base_yield_qty, base_yield_unit, cook_time, container_type, description FROM recipes WHERE id IN (${placeholders})`,
+                `SELECT id, image_url, base_yield_qty, base_yield_unit, cook_time, container_type, description, macros, allergens FROM recipes WHERE id IN (${placeholders})`,
                 ...recipeIds
             );
 
@@ -125,6 +125,8 @@ export async function GET(
                     yield_unit: img.base_yield_unit,
                     cook_time: img.cook_time,
                     container_type: img.container_type,
+                    macros: img.macros,
+                    allergens: img.allergens,
                     categories: recipeCategoriesMap[img.id] || [],
                     items: recipeItemsMap[img.id] || []
                 };

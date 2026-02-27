@@ -222,13 +222,14 @@ export async function GET() {
         }
 
         // 4. Production Demand (Active Queue Breakdown)
-        // Note: For "Production Demand", we specifically care about items not yet delivered.
+        // Note: For "Production Demand", we specifically care about items not yet ready to ship.
         const demandAgg = await prisma.orderItem.groupBy({
             by: ['variant_size'],
             _sum: { quantity: true },
             where: {
+                production_status: { in: ['PENDING', 'PREPPING'] },
                 order: {
-                    status: { in: ['pending', 'production_ready'] as any },
+                    status: { notIn: ['COMPLETED', 'DELIVERED'] as any },
                     business_id: businessId
                 }
             }
@@ -237,7 +238,7 @@ export async function GET() {
         // Count orders that HAVE those statuses but NO items (fallback to sizing based on price)
         const unmappedOrders = await prisma.order.findMany({
             where: {
-                status: { in: ['pending', 'production_ready'] as any },
+                status: { in: ['APPROVED', 'IN_PRODUCTION', 'PENDING'] as any },
                 items: { none: {} },
                 business_id: businessId
             },
@@ -275,27 +276,54 @@ export async function GET() {
         // 5. Calculate Theoretical Food Cost (This Week vs Last Week)
         const dbAdapter = new PrismaAdapter(businessId);
         const engine = new KitchenEngine(dbAdapter);
-        const bundleCostCache = new Map<string, number>();
 
         const calculateCOGS = async (orders: any[]) => {
-            let totalCOGS = 0;
-            for (const order of orders) {
-                for (const item of order.items) {
-                    if (!item.bundle_id) continue;
-                    const cacheKey = `${item.bundle_id}-${item.variant_size}`;
-                    let unitCost = bundleCostCache.get(cacheKey);
-                    if (unitCost === undefined) {
-                        try {
-                            unitCost = await engine.calculateBundleCost(item.bundle_id, item.variant_size);
-                            bundleCostCache.set(cacheKey, unitCost);
-                        } catch (e) {
-                            unitCost = 0;
-                        }
+            if (orders.length === 0) return 0;
+
+            // 1. Map orders to Kitchen Engine format
+            const engineOrders: { bundle_id: string, quantity: number, variant_size: any }[] = [];
+            orders.forEach(o => {
+                o.items?.forEach((item: any) => {
+                    if (item.bundle_id) {
+                        engineOrders.push({
+                            bundle_id: item.bundle_id,
+                            quantity: item.quantity || 1,
+                            variant_size: item.variant_size || 'serves_5'
+                        });
                     }
-                    totalCOGS += (unitCost * item.quantity);
-                }
+                });
+            });
+
+            if (engineOrders.length === 0) return 0;
+
+            // 2. Explode the recipes for the entire week
+            try {
+                const plan = await engine.generateProductionRun(engineOrders);
+                let totalCOGS = 0;
+
+                // 3. Apply the exact Math.ceil PO logic from the Shopping List
+                Object.values(plan.rawIngredients).forEach((val: any) => {
+                    const needed = val.qty || 0;
+                    // For theoretical food cost tracking over time, we ignore current onHand inventory,
+                    // otherwise weeks with lots of legacy stock will look artificially "free"
+                    const toBuy = needed;
+
+                    const purchaseQuantity = val.purchaseQuantity;
+
+                    if (toBuy > 0 && purchaseQuantity && purchaseQuantity > 0 && val.purchaseCost !== undefined) {
+                        const casesToOrder = Math.ceil(toBuy / purchaseQuantity);
+                        totalCOGS += (casesToOrder * val.purchaseCost);
+                    } else {
+                        // Fallback strictly to unit cost if no purchase params defined
+                        totalCOGS += (toBuy * (val.costPerUnit || 0));
+                    }
+                });
+
+                return totalCOGS;
+            } catch (e) {
+                console.error("Failed to calculate explicit COGS:", e);
+                return 0;
             }
-            return totalCOGS;
         };
 
         const cogsThisWeek = await calculateCOGS(ordersThisWeek);

@@ -61,14 +61,14 @@ export default function InvoiceComposeModal({
                 setItems(invoiceToEdit.items.map((i: any) => ({
                     bundle_id: i.bundle_id,
                     description: i.description,
-                    quantity: Number(i.quantity),
-                    unit_price: Number(i.unit_price),
-                    total: Number(i.total)
+                    quantity: Number.isNaN(Number(i.quantity)) ? 1 : Number(i.quantity),
+                    unit_price: Number.isNaN(Number(i.unit_price)) ? 0 : Number(i.unit_price),
+                    total: Number.isNaN(Number(i.total)) ? 0 : Number(i.total)
                 })));
-                setTaxAmount(Number(invoiceToEdit.tax_amount));
+                setTaxAmount(Number.isNaN(Number(invoiceToEdit.tax_amount)) ? 0 : Number(invoiceToEdit.tax_amount));
                 setDueDate(invoiceToEdit.due_date ? new Date(invoiceToEdit.due_date).toISOString().split('T')[0] : '');
                 setPaymentMethod(invoiceToEdit.payment_method || 'check');
-                setProfitPercent(Number(invoiceToEdit.fundraiser_profit_percent) || 0);
+                setProfitPercent(Number.isNaN(Number(invoiceToEdit.fundraiser_profit_percent)) ? 0 : Number(invoiceToEdit.fundraiser_profit_percent));
                 setIsTaxExempt(Number(invoiceToEdit.tax_amount) === 0);
             } else if (preselectedCustomerId) {
                 setSelectedCustomerId(preselectedCustomerId);
@@ -300,8 +300,8 @@ export default function InvoiceComposeModal({
                                         <label className="block text-[10px] font-black text-slate-300 uppercase mb-1">Qty</label>
                                         <input
                                             type="number"
-                                            value={item.quantity}
-                                            onChange={(e) => handleUpdateItem(index, { quantity: Number(e.target.value) })}
+                                            value={Number.isNaN(item.quantity) ? '' : item.quantity}
+                                            onChange={(e) => handleUpdateItem(index, { quantity: parseFloat(e.target.value) || 0 })}
                                             className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-indigo-500/20 focus:ring-0 text-sm font-bold text-center"
                                         />
                                     </div>
@@ -311,8 +311,8 @@ export default function InvoiceComposeModal({
                                             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
                                             <input
                                                 type="number"
-                                                value={item.unit_price}
-                                                onChange={(e) => handleUpdateItem(index, { unit_price: Number(e.target.value) })}
+                                                value={Number.isNaN(item.unit_price) ? '' : item.unit_price}
+                                                onChange={(e) => handleUpdateItem(index, { unit_price: parseFloat(e.target.value) || 0 })}
                                                 className="w-full pl-8 pr-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-indigo-500/20 focus:ring-0 text-sm font-bold"
                                             />
                                         </div>
@@ -370,8 +370,8 @@ export default function InvoiceComposeModal({
                                     <div className="relative">
                                         <input
                                             type="number"
-                                            value={profitPercent}
-                                            onChange={(e) => setProfitPercent(Number(e.target.value))}
+                                            value={Number.isNaN(profitPercent) ? '' : profitPercent}
+                                            onChange={(e) => setProfitPercent(parseFloat(e.target.value) || 0)}
                                             className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border-none focus:ring-2 focus:ring-indigo-500/20 text-sm font-bold"
                                         />
                                         <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">%</span>
@@ -408,8 +408,8 @@ export default function InvoiceComposeModal({
                                 <span className="font-bold text-slate-500 uppercase tracking-widest text-[10px]">Tax Amount</span>
                                 <input
                                     type="number"
-                                    value={taxAmount}
-                                    onChange={(e) => setTaxAmount(Number(e.target.value))}
+                                    value={Number.isNaN(taxAmount) ? '' : taxAmount}
+                                    onChange={(e) => setTaxAmount(parseFloat(e.target.value) || 0)}
                                     className="w-24 text-right bg-transparent border-b border-slate-200 dark:border-slate-700 focus:border-indigo-500 focus:ring-0 text-sm font-bold p-0"
                                 />
                             </div>

@@ -99,7 +99,8 @@ export async function POST(req: Request) {
                 order_cutoff_date: data.order_cutoff_date ? new Date(data.order_cutoff_date) : null,
                 price: data.price ? Number(data.price) : null,
                 catalog_id: data.catalog_id || null, // Added catalog_id
-                business_id: session.user.businessId
+                business_id: session.user.businessId,
+                is_donation: data.is_donation ?? false
             }
         });
 

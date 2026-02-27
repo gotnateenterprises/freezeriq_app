@@ -17,6 +17,16 @@ import LayoutWrapper from '@/components/LayoutWrapper';
 export const metadata = {
     title: 'FreezerIQ™',
     description: 'Intelligence for your Kitchen.',
+    manifest: '/manifest.json',
+    appleWebApp: {
+        capable: true,
+        statusBarStyle: 'default',
+        title: 'Freezer Chef',
+    },
+};
+
+export const viewport = {
+    themeColor: '#1e293b',
 };
 
 export default async function RootLayout({
@@ -28,8 +38,8 @@ export default async function RootLayout({
     const hasSession = !!session?.user;
 
     return (
-        <html lang="en">
-            <body className={`${jakarta.variable} ${dmSerif.variable} ${outfit.variable} antialiased bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 h-screen overflow-hidden transition-colors duration-300`}>
+        <html lang="en" suppressHydrationWarning>
+            <body suppressHydrationWarning className={`${jakarta.variable} ${dmSerif.variable} ${outfit.variable} antialiased bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 h-screen overflow-hidden transition-colors duration-300`}>
                 <ThemeProvider>
                     <TenantThemeProvider />
                     <AuthProvider session={session}>

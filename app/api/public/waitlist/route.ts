@@ -4,7 +4,7 @@ import { prisma } from '@/lib/db';
 
 export async function POST(req: Request) {
     try {
-        const { name, email, businessId, slug } = await req.json();
+        const { name, email, phone, businessId, slug } = await req.json();
 
         if (!email || !businessId) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -21,11 +21,12 @@ export async function POST(req: Request) {
         if (existingCustomer) {
             // Update existing customer with tag if not present
             const currentTags = existingCustomer.tags || [];
-            if (!currentTags.includes('surplus_waitlist')) {
+            if (!currentTags.includes('surplus_waitlist') || (phone && !existingCustomer.contact_phone)) {
                 await prisma.customer.update({
                     where: { id: existingCustomer.id },
                     data: {
-                        tags: [...currentTags, 'surplus_waitlist']
+                        tags: currentTags.includes('surplus_waitlist') ? currentTags : [...currentTags, 'surplus_waitlist'],
+                        contact_phone: existingCustomer.contact_phone || phone || null
                     }
                 });
             }
@@ -37,6 +38,7 @@ export async function POST(req: Request) {
                     name: name || 'Waitlist Lead', // Name is required
                     contact_name: name,
                     contact_email: email,
+                    contact_phone: phone || null,
                     type: 'direct_customer', // Correct enum value
                     status: 'LEAD',
                     tags: ['surplus_waitlist']

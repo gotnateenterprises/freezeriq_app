@@ -27,7 +27,7 @@ export default function StorefrontHowItWorks({ content }: StorefrontHowItWorksPr
         },
         {
             icon: UtensilsCrossed,
-            title: "Pour & Enjoy",
+            title: "Cook & Enjoy",
             desc: "No prep needed. Just put in your crockpot, Insta-pot or oven, and dinner is served!",
             color: "text-brand-teal",
             bg: "bg-teal-50/50 dark:bg-teal-900/10",

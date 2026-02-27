@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useState } from 'react';
-import html2canvas from 'html2canvas';
+import html2canvas from 'html2canvas-pro';
 import jsPDF from 'jspdf';
 import { QRCodeSVG } from 'qrcode.react';
 import { Loader2, Share2, FileText, Instagram } from 'lucide-react';

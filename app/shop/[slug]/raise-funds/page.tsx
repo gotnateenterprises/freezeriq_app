@@ -16,27 +16,47 @@ export default function RaiseFundsPage() {
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
             {/* Hero */}
-            <div className="relative overflow-hidden bg-slate-900 text-white min-h-[500px] flex items-center justify-center">
-                <div className="absolute inset-0 opacity-20 bg-[url('https://images.unsplash.com/photo-1574960309172-29775dd364df?q=80&w=2070')] bg-cover bg-center" />
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-900 to-transparent" />
+            <div className="relative overflow-hidden bg-slate-950 text-white min-h-[85vh] flex flex-col justify-center items-center">
+                {/* Background Image / Soft Overlay */}
+                <div className="absolute inset-0 z-0">
+                    <img
+                        src="https://images.unsplash.com/photo-1547592180-85f173990554?q=80&w=2670&auto=format&fit=crop"
+                        alt="Delicious food background"
+                        className="w-full h-full object-cover opacity-30 mix-blend-overlay scale-110 blur-sm pointer-events-none"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-b from-indigo-900/50 via-slate-950/80 to-slate-950" />
+                    <div className="absolute inset-0 opacity-[0.1]" style={{
+                        backgroundImage: 'radial-gradient(circle at 2px 2px, #ffffff 1px, transparent 0)',
+                        backgroundSize: '32px 32px'
+                    }} />
 
-                <div className="relative z-10 max-w-4xl mx-auto px-6 text-center space-y-6">
-                    <div className="inline-flex items-center gap-2 bg-indigo-500/20 backdrop-blur border border-indigo-500/50 px-4 py-1.5 rounded-full text-indigo-300 font-bold text-xs uppercase tracking-widest">
-                        <Heart size={14} className="text-pink-500" /> Community Fundraising
+                    {/* Glowing Orbs */}
+                    <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500/30 rounded-full blur-[100px] pointer-events-none mix-blend-screen" />
+                    <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-pink-500/20 rounded-full blur-[100px] pointer-events-none mix-blend-screen" />
+                </div>
+
+                <div className="relative z-10 max-w-5xl mx-auto px-6 text-center space-y-8 mt-12">
+                    <div className="inline-flex items-center gap-2 bg-gradient-to-r from-pink-500/20 to-indigo-500/20 backdrop-blur-md border border-white/10 px-6 py-2 rounded-full text-indigo-100 font-black text-xs uppercase tracking-widest shadow-xl shadow-pink-500/10">
+                        <Heart size={14} className="text-pink-400 fill-pink-400 animate-pulse" /> Easy Community Fundraising
                     </div>
-                    <h1 className="text-5xl md:text-7xl font-black tracking-tight leading-tight">
+                    <h1 className="text-6xl md:text-8xl font-black tracking-tighter leading-[1.05] drop-shadow-2xl">
                         Raise Money with <br />
-                        <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-indigo-500">Delicious Meals</span>
+                        <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-pink-400 to-indigo-400 animate-gradient-x">
+                            Delicious Meals
+                        </span>
                     </h1>
-                    <p className="text-xl md:text-2xl text-slate-300 max-w-2xl mx-auto leading-relaxed font-medium">
-                        Stop selling wrapping paper. Sell healthy, family-friendly freezer meals that your community actually wants.
+                    <p className="text-xl md:text-3xl text-indigo-100/90 max-w-3xl mx-auto leading-relaxed font-medium drop-shadow-md">
+                        Tired of the same old products? Sell healthy, family-friendly freezer meals that your community <span className="text-white font-black border-b-2 border-pink-500 pb-1">actually wants.</span>
                     </p>
-                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
-                        <button className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-xl font-black text-lg transition-all shadow-lg shadow-indigo-500/25 flex items-center gap-2">
-                            Start a Fundraiser
-                            <ArrowRight size={20} />
-                        </button>
-                        <Link href={`/shop/${slug}`} className="px-8 py-4 rounded-xl font-bold text-slate-300 hover:text-white transition-colors">
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-6 pt-10">
+                        <a href="#contact-form" className="group relative inline-flex items-center justify-center px-10 py-5 font-black text-white transition-all duration-300 bg-gradient-to-br from-pink-500 to-indigo-600 rounded-[2rem] hover:scale-105 hover:shadow-[0_20px_40px_-10px_rgba(236,72,153,0.5)] overflow-hidden">
+                            <span className="absolute inset-0 w-full h-full -mt-1 rounded-lg opacity-30 bg-gradient-to-b from-transparent via-transparent to-black pointer-events-none"></span>
+                            <span className="relative flex items-center gap-3 text-lg uppercase tracking-widest">
+                                Start a Fundraiser
+                                <ArrowRight size={24} className="group-hover:translate-x-1 transition-transform" />
+                            </span>
+                        </a>
+                        <Link href={`/shop/${slug}`} className="px-8 py-5 rounded-[2rem] font-black text-white hover:text-indigo-200 transition-colors uppercase tracking-widest hover:bg-white/5 backdrop-blur-sm border border-transparent hover:border-white/10">
                             View Current Sales
                         </Link>
                     </div>
@@ -97,7 +117,7 @@ export default function RaiseFundsPage() {
                         {[
                             { title: 'Schedule Your Fundraiser', desc: 'Choose your delivery date (Tue, Wed, or Thu) and location. Contact us to book.' },
                             { title: 'Pick Your Menu', desc: 'Choose 2 meal bundles. Each bundle has 5 dinners (3 slow-cooker, 2 oven-ready). Customize to suit your audience.' },
-                            { title: 'Set Deadlines & Promote', desc: 'Collect orders usually 2 weeks prior to delivery. We provide marketing materials. You collect payments (checks to your org).' },
+                            { title: 'Set Deadlines & Promote', desc: 'Collect orders usually 2 weeks prior to delivery. We provide a custom Coordinator dashboard, Marketing tools and Donor facing webpage where you can easily manage your fundraiser online and off.' },
                             { title: 'Delivery & Distribution', desc: 'We arrive 15–30 mins early. Have volunteers ready to help unload. Families pick up their fresh meals.' },
                             { title: 'Enjoy Your Profits', desc: 'Your organization keeps 20% of the proceeds. Simple as that!' }
                         ].map((step, i) => (

@@ -35,10 +35,11 @@ export async function GET(request: Request) {
                 type: true,
                 contact_email: true,
                 contact_name: true,
-                source: true,
                 status: true,
                 archived: true,
                 tags: true,
+                stripe_subscription_id: true,
+                subscription_status: true,
                 orders: {
                     select: {
                         created_at: true,
@@ -73,8 +74,10 @@ export async function GET(request: Request) {
         let organizationsToProcess: any[] = [];
         if (filterType === 'organization') {
             organizationsToProcess = orgs.filter(o => o.type === 'fundraiser_org' || o.type === 'organization');
-        } else if (!filterType || filterType === 'individual') {
+        } else if (filterType === 'individual') {
             organizationsToProcess = orgs.filter(o => o.type === 'direct_customer');
+        } else {
+            organizationsToProcess = orgs;
         }
 
         // Process Orgs
@@ -88,10 +91,11 @@ export async function GET(request: Request) {
                     org.type === 'organization' ? 'Organization' : 'Fundraiser',
                 email: org.contact_email || '', // Standardize on 'email' for frontend
                 contact_email: org.contact_email || '', // Keep for compatibility
-                source: orgAny.source || 'Manual',
                 status: orgAny.status || 'ACTIVE',
                 archived: orgAny.archived || false,
                 tags: orgAny.tags || [],
+                stripe_subscription_id: orgAny.stripe_subscription_id || null,
+                subscription_status: orgAny.subscription_status || null,
                 total_spend: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
                     orgAny.orders.reduce((sum: number, o: any) => sum + (Number(o.total_amount) || 0), 0)
                 ),

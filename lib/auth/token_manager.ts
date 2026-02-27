@@ -4,7 +4,7 @@ export class TokenManager {
     private provider: string;
     private businessId: string;
 
-    constructor(provider: 'square' | 'qbo' | 'meta' | 'instagram', businessId: string) {
+    constructor(provider: 'qbo' | 'meta' | 'instagram', businessId: string) {
         this.provider = provider;
         this.businessId = businessId;
     }

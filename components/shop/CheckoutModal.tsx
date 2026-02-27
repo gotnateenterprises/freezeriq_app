@@ -25,7 +25,7 @@ interface CheckoutModalProps {
 type CheckoutStep = 'bag' | 'details' | 'confirm' | 'success';
 
 export default function CheckoutModal({ isOpen, onClose, primaryColor, businessId, slug, items, cartTotal, onSuccess, campaignId, campaignParticipantLabel, storefrontConfig }: CheckoutModalProps) {
-    const [step, setStep] = useState<CheckoutStep>('bag');
+    const [step, setStep] = useState<CheckoutStep>('details');
     const [loading, setLoading] = useState(false);
     const [paymentData, setPaymentData] = useState<any>(null);
     const [formData, setFormData] = useState({
@@ -38,29 +38,59 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
 
     const { addToCart } = useCart();
 
-    if (!isOpen) return null;
-
     const handleSubmit = async () => {
         setLoading(true);
         try {
-            const res = await fetch('/api/public/order', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    items,
-                    customer: formData,
-                    businessId,
-                    slug,
-                    campaignId
-                })
-            });
+            if (campaignId) {
+                // Use manual order route for fundraisers
+                const res = await fetch('/api/public/order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        businessId,
+                        slug,
+                        campaignId,
+                        items,
+                        customer: {
+                            name: formData.name,
+                            email: formData.email,
+                            phone: formData.phone,
+                            participantCode: formData.participantCode,
+                            notes: formData.notes
+                        }
+                    })
+                });
 
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Failed to place order');
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to submit order');
 
-            setPaymentData(data.paymentData);
-            setStep('success');
-            toast.success('Order placed successfully!');
+                setPaymentData(data.paymentData);
+                setStep('success');
+            } else {
+                // Call the universal checkout engine to spawn the Stripe Session
+                const res = await fetch('/api/checkout/session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        businessId,
+                        items,
+                        orderTotal: cartTotal,
+                        customerNotes: formData.notes,
+                        customerName: formData.name,
+                        customerEmail: formData.email,
+                        customerPhone: formData.phone,
+                    })
+                });
+
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to initialize checkout');
+
+                if (data.url) {
+                    window.location.href = data.url;
+                } else {
+                    toast.error('Could not load Stripe checkout.');
+                }
+            }
         } catch (err: any) {
             toast.error(err.message);
         } finally {
@@ -169,15 +199,13 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
                     <User className="w-6 h-6 text-slate-400" />
                     <h3 className="text-3xl font-serif text-slate-800">Your Details</h3>
                 </div>
-                <button onClick={() => setStep('bag')} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400">
-                    <ArrowLeft className="w-5 h-5" />
-                </button>
             </div>
 
             <div className="space-y-5">
                 <div className="relative">
                     <input
                         required placeholder="Full Name"
+                        autoComplete="name"
                         className="w-full px-6 py-4 rounded-2xl bg-slate-50 border-none outline-none focus:ring-2 focus:ring-slate-200 transition-all font-medium text-lg placeholder:text-slate-300"
                         value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })}
                     />
@@ -185,11 +213,13 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <input
                         required type="email" placeholder="Email Address"
+                        autoComplete="email" inputMode="email"
                         className="w-full px-6 py-4 rounded-2xl bg-slate-50 border-none outline-none focus:ring-2 focus:ring-slate-200 transition-all font-medium text-lg placeholder:text-slate-300"
                         value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })}
                     />
                     <input
                         required type="tel" placeholder="Phone Number"
+                        autoComplete="tel" inputMode="tel"
                         className="w-full px-6 py-4 rounded-2xl bg-slate-50 border-none outline-none focus:ring-2 focus:ring-slate-200 transition-all font-medium text-lg placeholder:text-slate-300"
                         value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })}
                     />
@@ -266,7 +296,7 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
                     {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <>Complete My Order <Heart className="w-5 h-5 fill-white" /></>}
                 </button>
                 <p className="text-center text-xs text-slate-400 px-8 leading-relaxed">
-                    By confirming, you agree to receive order updates. No payment is required until pickup/delivery is confirmed.
+                    By confirming, you agree to receive order updates. You will be redirected to our secure payment portal.
                 </p>
             </div>
         </motion.div>
@@ -334,24 +364,39 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
     );
 
     return (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-md z-[60] flex items-center justify-center p-4">
-            <div className="relative bg-white rounded-[3rem] w-full max-w-xl shadow-[0_32px_96px_-12px_rgba(0,0,0,0.1)] overflow-hidden transition-all duration-300 max-h-[92vh] flex flex-col">
-                <button
-                    onClick={onClose}
-                    className="absolute top-8 right-8 p-2 hover:bg-slate-50 rounded-full transition-colors text-slate-300 z-50"
-                >
-                    <X className="w-6 h-6" />
-                </button>
+        <AnimatePresence>
+            {isOpen && (
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-md z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4">
+                    <motion.div
+                        initial={{ y: "100%", opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        exit={{ y: "100%", opacity: 0 }}
+                        transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                        className="relative bg-white rounded-t-[3rem] sm:rounded-[3rem] w-full max-w-xl shadow-[0_-32px_96px_-12px_rgba(0,0,0,0.15)] overflow-hidden max-h-[92vh] flex flex-col"
+                    >
+                        <button
+                            onClick={onClose}
+                            className="absolute top-6 right-6 p-2 bg-slate-100/50 hover:bg-slate-100 rounded-full transition-colors text-slate-400 z-[70] backdrop-blur-md"
+                        >
+                            <X className="w-6 h-6" />
+                        </button>
 
-                <div className="p-12 py-10 overflow-y-auto scrollbar-hide">
-                    <AnimatePresence mode="wait">
-                        {step === 'bag' && renderBagStep()}
-                        {step === 'details' && renderDetailsStep()}
-                        {step === 'confirm' && renderConfirmStep()}
-                        {step === 'success' && renderSuccessStep()}
-                    </AnimatePresence>
+                        {/* Mobile handle indicator */}
+                        <div className="w-full flex justify-center pt-4 pb-2 sm:hidden absolute top-0 z-[60]">
+                            <div className="w-12 h-1.5 rounded-full bg-slate-200" />
+                        </div>
+
+                        <div className="p-8 sm:p-12 pt-14 sm:pt-10 overflow-y-auto scrollbar-hide">
+                            <AnimatePresence mode="wait">
+                                {step === 'bag' && renderBagStep()}
+                                {step === 'details' && renderDetailsStep()}
+                                {step === 'confirm' && renderConfirmStep()}
+                                {step === 'success' && renderSuccessStep()}
+                            </AnimatePresence>
+                        </div>
+                    </motion.div>
                 </div>
-            </div>
-        </div>
+            )}
+        </AnimatePresence>
     );
 }

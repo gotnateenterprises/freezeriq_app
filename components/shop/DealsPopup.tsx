@@ -111,8 +111,8 @@ export default function DealsPopup({ businessName, primaryColor, onCapture }: De
                         <p className="text-slate-500 mb-8">
                             Welcome to the family. Use the code below at checkout to save $10 on your first order.
                         </p>
-                        <div className="bg-slate-100 dark:bg-slate-900 p-8 rounded-3xl border-2 border-dashed border-indigo-200 dark:border-indigo-800">
-                            <span className="text-4xl font-black tracking-widest text-indigo-600 select-all">
+                        <div className="bg-slate-100 dark:bg-slate-900 p-6 md:p-8 rounded-3xl border-2 border-dashed border-indigo-200 dark:border-indigo-800 break-words items-center justify-center flex">
+                            <span className="text-2xl md:text-4xl font-black tracking-widest text-indigo-600 select-all text-center">
                                 WELCOME10
                             </span>
                         </div>

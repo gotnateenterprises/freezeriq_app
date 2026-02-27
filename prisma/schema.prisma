@@ -13,34 +13,40 @@ model Business {
   slug                   String             @unique
   logo_url               String?
   created_at             DateTime           @default(now())
-  current_period_end     DateTime?
-  plan                   SubscriptionPlan   @default(BASE)
-  stripe_customer_id     String?            @unique
-  stripe_subscription_id String?            @unique
-  subscription_status    SubscriptionStatus @default(trialing)
-  trial_ends_at          DateTime?
-  google_calendar_url    String?
-  activities             Activity[]
-  bundles                Bundle[]
-  catalogs               Catalog[]
-  categories             Category[]
-  customers              Customer[]
-  discount_codes         DiscountCode[]
-  document_templates     DocumentTemplate[]
-  documents              Document[]
-  ingredients            Ingredient[]
-  integrations           Integration[]
-  invoices               Invoice[]
-  label_templates        LabelTemplate[]
-  orders                 Order[]
-  packaging_items        PackagingItem[]
-  production_runs        ProductionRun[]
-  recipes                Recipe[]
-  storefrontConfig       StorefrontConfig?
-  suppliers              Supplier[]
-  settings               SystemSetting[]
-  training_resources     TrainingResource[]
-  users                  User[]
+  current_period_end         DateTime?
+  plan                       SubscriptionPlan   @default(BASE)
+  stripe_customer_id         String?            @unique
+  stripe_subscription_id     String?            @unique
+  subscription_status        SubscriptionStatus @default(trialing)
+  stripe_account_id          String?            @unique
+  stripe_onboarding_complete Boolean            @default(false)
+  charges_enabled            Boolean            @default(false)
+  platform_fee_percent       Int                @default(2)
+  trial_ends_at              DateTime?
+  google_calendar_url        String?
+  activities                 Activity[]
+  bundles                    Bundle[]
+  catalogs                   Catalog[]
+  categories                 Category[]
+  customers                  Customer[]
+  discount_codes             DiscountCode[]
+  document_templates         DocumentTemplate[]
+  documents                  Document[]
+  ingredients                Ingredient[]
+  integrations               Integration[]
+  invoices                   Invoice[]
+  label_templates            LabelTemplate[]
+  orders                     Order[]
+  packaging_items            PackagingItem[]
+  production_runs            ProductionRun[]
+  recipes                    Recipe[]
+  storefrontConfig           StorefrontConfig?
+  subscription_tiers         SubscriptionTier[]
+  suppliers                  Supplier[]
+  settings                   SystemSetting[]
+  training_resources         TrainingResource[]
+  users                      User[]
+  qr_codes                   QRCode[]
 
   @@map("businesses")
 }
@@ -93,23 +99,38 @@ model User {
 }
 
 model TenantBranding {
-  id              Int      @id @default(autoincrement())
-  user_id         String   @unique
-  business_name   String   @default("Freezer Chef")
-  logo_url        String?
-  primary_color   String   @default("#10b981")
-  secondary_color String   @default("#6366f1")
-  accent_color    String   @default("#f59e0b")
-  tagline         String?
-  review_qr_url   String?
-  thank_you_note  String?
-  review_prompt   String?
-  sign_off        String?
-  created_at      DateTime @default(now())
-  updated_at      DateTime @default(now()) @updatedAt
-  user            User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  id                 Int      @id @default(autoincrement())
+  user_id            String   @unique
+  business_name      String   @default("Freezer Chef")
+  logo_url           String?
+  primary_color      String   @default("#10b981")
+  secondary_color    String   @default("#6366f1")
+  accent_color       String   @default("#f59e0b")
+  tagline            String?
+  review_qr_url      String?
+  thank_you_note     String?
+  review_prompt      String?
+  sign_off           String?
+  packing_slip_qr_id String?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @default(now()) @updatedAt
+  user               User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  packing_slip_qr    QRCode?  @relation("PackingSlipQR", fields: [packing_slip_qr_id], references: [id])
 
   @@map("tenant_branding")
+}
+
+model QRCode {
+  id          String           @id @default(uuid())
+  business_id String?
+  name        String
+  url_target  String
+  created_at  DateTime         @default(now())
+  updated_at  DateTime         @updatedAt
+  business    Business?        @relation(fields: [business_id], references: [id])
+  brandings   TenantBranding[] @relation("PackingSlipQR")
+
+  @@map("qr_codes")
 }
 
 model Supplier {
@@ -193,6 +214,8 @@ model Recipe {
   image_url            String?
   description          String?
   cook_time            String?
+  is_subscriber_only   Boolean         @default(false)
+  is_published         Boolean         @default(false)
   business             Business?       @relation(fields: [business_id], references: [id])
   categories           Category[]      @relation("CategoryToRecipe")
 
@@ -243,6 +266,8 @@ model Bundle {
   show_on_storefront Boolean            @default(false)
   stock_on_hand      Decimal            @default(0) @db.Decimal(10, 2)
   is_surplus         Boolean            @default(false)
+  is_donation        Boolean            @default(false)
+  is_subscriber_only Boolean            @default(false)
   order_cutoff_date  DateTime?          @db.Date
   contents           BundleContent[]
   invoice_items      InvoiceItem[]
@@ -250,6 +275,7 @@ model Bundle {
   catalog            Catalog?           @relation(fields: [catalog_id], references: [id])
   order_items        OrderItem[]
   storefront_configs StorefrontConfig[]
+  campaigns          FundraiserCampaign[]
 
   @@map("bundles")
 }
@@ -264,6 +290,23 @@ model BundleContent {
   recipe    Recipe @relation(fields: [recipe_id], references: [id])
 
   @@map("bundle_contents")
+}
+
+model SubscriptionTier {
+  id                     String   @id @default(uuid())
+  business_id            String
+  name                   String
+  stripe_price_id        String   @unique
+  stripe_product_id      String
+  meal_credits_per_cycle Int      @default(0)
+  price                  Decimal  @db.Decimal(10, 2)
+  is_active              Boolean  @default(true)
+  created_at             DateTime @default(now())
+  updated_at             DateTime @updatedAt
+  business               Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id])
+  @@map("subscription_tiers")
 }
 
 model Customer {
@@ -284,8 +327,13 @@ model Customer {
   tags             String[]             @default([])
   inactive_reason  String?
   fundraiser_info  Json?
-  loyalty_balance  Decimal              @default(0) @db.Decimal(10, 2)
-  business         Business?            @relation(fields: [business_id], references: [id])
+  loyalty_balance        Decimal              @default(0) @db.Decimal(10, 2)
+  stripe_subscription_id String?              @unique
+  subscription_plan_id   String?
+  subscription_status    String?
+  meal_credits           Int                  @default(0)
+  next_delivery_date     DateTime?            @db.Date
+  business               Business?            @relation(fields: [business_id], references: [id])
   documents        Document[]
   campaigns        FundraiserCampaign[]
   invoices         Invoice[]
@@ -296,21 +344,33 @@ model Customer {
 }
 
 model Order {
-  id                String              @id @default(uuid())
-  external_id       String              @unique
-  source            OrderSource
-  customer_name     String?
-  status            OrderStatus         @default(pending)
-  delivery_date     DateTime?           @db.Date
-  created_at        DateTime?           @default(now())
-  total_amount      Decimal             @default(0) @db.Decimal(10, 2)
-  business_id       String?
-  campaign_id       String?
-  customer_id       String?
+  id                    String              @id @default(uuid())
+  external_id           String              @unique
+  source                OrderSource
+  customer_name         String?
+  status                OrderStatus         @default(pending)
+  delivery_date         DateTime?           @db.Date
+  created_at            DateTime?           @default(now())
+  total_amount          Decimal             @default(0) @db.Decimal(10, 2)
+  payment_intent_id     String?             @unique
+  payment_status        String              @default("pending")
+  stripe_receipt_url    String?
+  platform_fee_amount   Decimal             @default(0) @db.Decimal(10, 2)
+  business_id           String?
+  campaign_id           String?
+  customer_id           String?
   invoice_id        String?             @unique
   delivery_address  String?
   delivery_sequence Int?                @default(0)
+  customer_email    String?
+  customer_phone    String?
+  coordinator_paid  Boolean             @default(false)
+  coordinator_check String?
+  coordinator_picked_up Boolean         @default(false)
+  inventory_deducted Boolean            @default(false)
   participant_name  String?             @map("participant_name")
+  delivery_signature String?            @db.Text
+  delivered_at      DateTime?
   items             OrderItem[]
   business          Business?           @relation(fields: [business_id], references: [id])
   campaign          FundraiserCampaign? @relation(fields: [campaign_id], references: [id])
@@ -321,16 +381,17 @@ model Order {
 }
 
 model OrderItem {
-  id           String      @id @default(uuid())
-  order_id     String?
-  bundle_id    String?
-  quantity     Int
-  variant_size VariantSize @default(serves_5)
-  item_name    String?
-  unit_price   Decimal?    @db.Decimal(10, 2)
-  is_subscription Boolean     @default(false)
-  bundle       Bundle?     @relation(fields: [bundle_id], references: [id])
-  order        Order?      @relation(fields: [order_id], references: [id])
+  id                String      @id @default(uuid())
+  order_id          String?
+  bundle_id         String?
+  quantity          Int
+  variant_size      VariantSize @default(serves_5)
+  item_name         String?
+  unit_price        Decimal?    @db.Decimal(10, 2)
+  is_subscription      Boolean     @default(false)
+  production_status String      @default("PENDING")
+  bundle            Bundle?     @relation(fields: [bundle_id], references: [id])
+  order             Order?      @relation(fields: [order_id], references: [id])
 
   @@map("order_items")
 }
@@ -481,6 +542,7 @@ model FundraiserCampaign {
   documents             Document[]
   customer              Customer   @relation(fields: [customer_id], references: [id], onDelete: Cascade)
   orders                Order[]
+  bundles               Bundle[]
 
   @@map("fundraiser_campaigns")
 }
@@ -589,7 +651,21 @@ model LoyaltyPoint {
   created_at  DateTime @default(now())
   customer    Customer @relation(fields: [customer_id], references: [id], onDelete: Cascade)
 
+  @@index([customer_id])
   @@map("loyalty_points")
+}
+
+model MagicLinkToken {
+  id          String   @id @default(uuid())
+  email       String
+  token       String   @unique
+  expires_at  DateTime
+  business_id String
+  created_at  DateTime @default(now())
+
+  @@index([email])
+  @@index([token])
+  @@map("magic_link_tokens")
 }
 
 model DiscountCode {
@@ -677,6 +753,7 @@ enum OrderStatus {
   PENDING
   APPROVED
   IN_PRODUCTION
+  READY_TO_SHIP
   COMPLETED
   DELIVERED
 }
