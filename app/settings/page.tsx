@@ -637,6 +637,20 @@ export default function SettingsPage() {
                                 connectUrl="/api/auth/qbo"
                                 onDisconnect={() => disconnectIntegration('qbo')}
                             />
+                            <IntegrationItem
+                                name="Meta (Facebook)"
+                                logo="f"
+                                isConnected={integrationStatus.meta}
+                                connectUrl="/api/auth/meta"
+                                onDisconnect={() => disconnectIntegration('meta')}
+                            />
+                            <IntegrationItem
+                                name="Instagram"
+                                logo="IG"
+                                isConnected={integrationStatus.instagram}
+                                connectUrl="/api/auth/instagram"
+                                onDisconnect={() => disconnectIntegration('instagram')}
+                            />
                         </div>
                     </div>
                     <AiIntegrationSection />

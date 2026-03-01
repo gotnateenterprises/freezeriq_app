@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import SupplierTable from './commercial/SupplierTable';
 import PackagingTable from './commercial/PackagingTable';
 import IngredientTable from './commercial/IngredientTable';
-import { BulkPasteModal, MergeModal } from './commercial/BulkActionModals';
+import { BulkPasteModal, MergeModal, useBulkPaste, useMerge } from './commercial/BulkActionModals';
 
 
 interface Supplier {
@@ -49,6 +49,7 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
     const [ingredients, setIngredients] = useState(initialIngredients);
     const [packaging, setPackaging] = useState(initialPackaging);
     const [isSaving, setIsSaving] = useState(false);
+    const [isSavingPackaging, setIsSavingPackaging] = useState(false);
     const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
     const [searchQuery, setSearchQuery] = useState('');
     const router = useRouter();
@@ -507,130 +508,49 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
         }
     };
 
-    // Bulk Paste State
-    const [showBulkPaste, setShowBulkPaste] = useState(false);
-    const [pasteContent, setPasteContent] = useState('');
-    const [bulkPreview, setBulkPreview] = useState<{ id: string, name: string, oldCost: number, newCost: number, match: boolean }[]>([]);
-
-    // Merge State
-    const [mergeSource, setMergeSource] = useState<Ingredient | null>(null);
-    const [mergeTargetId, setMergeTargetId] = useState('');
-
-    const handleMerge = async () => {
-        if (!mergeSource || !mergeTargetId) return;
-
-        const targetName = ingredients.find(i => i.id === mergeTargetId)?.name;
-
-        if (!confirm(`MERGE WARNING:\n\nAre you sure you want to merge "${mergeSource.name}" INTO "${targetName}"?\n\n"${mergeSource.name}" will be DELETED and all recipes using it will now use "${targetName}".\n\nThis cannot be undone.`)) {
-            return;
-        }
-
-        setIsSaving(true);
-        try {
-            const res = await fetch('/api/commercial/ingredients/merge', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sourceId: mergeSource.id, targetId: mergeTargetId })
-            });
-
-            const data = await res.json();
-            if (data.error) throw new Error(data.error);
-
-            // Update Local State
-            setIngredients(prev => prev.filter(i => i.id !== mergeSource.id));
-            setMergeSource(null);
-            setMergeTargetId('');
-            alert("Merged successfully!");
+    const savePackaging = async () => {
+        setIsSavingPackaging(true);
+        // Packaging components natively auto-save! This just provides visual relief to the user.
+        setTimeout(() => {
+            setIsSavingPackaging(false);
+            toast.success("Packaging Saved Successfully!");
             router.refresh();
-        } catch (e: any) {
-            alert("Merge failed: " + e.message);
-        } finally {
-            setIsSaving(false);
-        }
+        }, 600);
     };
 
-    const parseBulkData = () => {
-        const lines = pasteContent.split(/\r?\n/).filter(l => l.trim());
-        const preview = [];
+    // Extracted Modal Hooks
+    const bulkPaste = useBulkPaste(ingredients, setIngredients);
+    const merge = useMerge(ingredients, setIngredients, router);
 
-        for (const line of lines) {
-            // Assume Tab Separated (Excel/Sheets default)
-            const cols = line.split('\t').map(c => c.trim());
-            if (cols.length < 2) continue; // Need at least Name and Cost
 
-            // Simple Heuristic: 
-            // If Col 0 is text and Col 1 is number -> Name | Cost
-            // If Col 1 is text and Col 0 is text -> Name | Unit (skip cost?) - Let's stick to Name | Cost
 
-            const name = cols[0];
-            // Remove '$' and ',' if present
-            const costStr = cols[1].replace(/[$,]/g, '');
-            const cost = parseFloat(costStr);
 
-            if (!name || isNaN(cost)) continue;
 
-            // Find Match
-            const match = ingredients.find(i => i.name.toLowerCase() === name.toLowerCase());
 
-            if (match) {
-                preview.push({
-                    id: match.id,
-                    name: match.name,
-                    oldCost: match.cost_per_unit,
-                    newCost: cost,
-                    match: true
-                });
-            } else {
-                preview.push({
-                    id: 'new_' + Math.random(),
-                    name: name,
-                    oldCost: 0,
-                    newCost: cost,
-                    match: false
-                });
-            }
-        }
-        setBulkPreview(preview);
-    };
 
-    const applyBulkData = () => {
-        const updates = new Map(bulkPreview.filter(p => p.match).map(p => [p.id, p]));
 
-        setIngredients(prev => prev.map(ing => {
-            const update = updates.get(ing.id);
-            if (update) {
-                return { ...ing, cost_per_unit: update.newCost };
-            }
-            return ing;
-        }));
-
-        setShowBulkPaste(false);
-        setPasteContent('');
-        setBulkPreview([]);
-        alert(`Updated ${updates.size} ingredients! Don't forget to click "Save Changes".`);
-    };
 
     return (
         <div className="space-y-6">
             <BulkPasteModal
-                showBulkPaste={showBulkPaste}
-                setShowBulkPaste={setShowBulkPaste}
-                pasteContent={pasteContent}
-                setPasteContent={setPasteContent}
-                bulkPreview={bulkPreview}
-                setBulkPreview={setBulkPreview}
-                parseBulkData={parseBulkData}
-                applyBulkData={applyBulkData}
+                showBulkPaste={bulkPaste.showBulkPaste}
+                setShowBulkPaste={bulkPaste.setShowBulkPaste}
+                pasteContent={bulkPaste.pasteContent}
+                setPasteContent={bulkPaste.setPasteContent}
+                bulkPreview={bulkPaste.bulkPreview}
+                setBulkPreview={bulkPaste.setBulkPreview}
+                parseBulkData={bulkPaste.parseBulkData}
+                applyBulkData={bulkPaste.applyBulkData}
             />
 
             <MergeModal
-                mergeSource={mergeSource}
-                setMergeSource={setMergeSource}
-                mergeTargetId={mergeTargetId}
-                setMergeTargetId={setMergeTargetId}
+                mergeSource={merge.mergeSource}
+                setMergeSource={merge.setMergeSource}
+                mergeTargetId={merge.mergeTargetId}
+                setMergeTargetId={merge.setMergeTargetId}
                 ingredients={ingredients}
-                handleMerge={handleMerge}
-                isSaving={isSaving}
+                handleMerge={merge.handleMerge}
+                isSaving={merge.isSavingMerge}
             />
 
             {/* Header / Tabs */}
@@ -696,7 +616,7 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
                     savingIds={savingIds}
                     handleSaveSingle={handleSaveSingle}
                     confirmDelete={confirmDelete}
-                    setMergeSource={setMergeSource}
+                    setMergeSource={merge.setMergeSource}
                     UNIT_OPTIONS={UNIT_OPTIONS}
                 />
             )}
@@ -716,6 +636,8 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
                     updatePackaging={updatePackaging}
                     deletePackaging={deletePackaging}
                     PKG_TYPES={PKG_TYPES}
+                    savePackaging={savePackaging}
+                    isSavingPackaging={isSavingPackaging}
                 />
             )}
 

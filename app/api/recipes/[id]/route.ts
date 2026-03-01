@@ -99,7 +99,7 @@ export async function PUT(
                 });
 
                 if (items && items.length > 0) {
-                    const names: string[] = [...new Set(items.map((i: any) => i.name).filter(Boolean))] as string[];
+                    const names: string[] = [...new Set(items.map((i: any) => i.name?.trim()).filter(Boolean))] as string[];
 
                     // Batch fetch existing ingredients and recipes
                     const [existingIngs, existingRecipes] = await Promise.all([
@@ -111,14 +111,15 @@ export async function PUT(
                         })
                     ]);
 
-                    const ingMap = new Map<string, any>(existingIngs.map((i: any) => [i.name.toLowerCase(), i]));
-                    const recMap = new Map<string, any>(existingRecipes.map((r: any) => [r.name.toLowerCase(), r]));
+                    const ingMap = new Map<string, any>(existingIngs.map((i: any) => [i.name.trim().toLowerCase(), i]));
+                    const recMap = new Map<string, any>(existingRecipes.map((r: any) => [r.name.trim().toLowerCase(), r]));
 
                     const itemsToCreate = [];
 
                     for (const item of items) {
                         if (!item.name) continue;
-                        const nameKey = item.name.toLowerCase();
+                        const trimmedName = item.name.trim();
+                        const nameKey = trimmedName.toLowerCase();
                         const isSub = String(item.is_sub_recipe) === 'true';
 
                         let childRecipeId = null;
@@ -133,8 +134,8 @@ export async function PUT(
                                 // Create ingredient if it doesn't exist
                                 ing = await tx.ingredient.create({
                                     data: {
-                                        name: item.name,
-                                        unit: item.unit || 'units',
+                                        name: trimmedName,
+                                        unit: item.unit ? item.unit.trim().toLowerCase() : 'units',
                                         cost_per_unit: 0,
                                         business_id: session?.user?.businessId,
                                         needs_review: true // Mark for review

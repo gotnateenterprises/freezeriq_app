@@ -40,6 +40,10 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
             salesperson_phone
         } = body;
 
+        console.log(`API PUT TRIGGERED. URL: ${req.url}`);
+        console.log("API PUT ID IS:", typeof id, id);
+        console.log("API PUT NAME IS:", typeof name, name);
+
         const updated = await prisma.supplier.update({
             where: { id },
             data: {

@@ -18,6 +18,8 @@ interface ItemDetails {
     currentStock: number;
     unit: string;
     costPerUnit?: number;
+    purchaseUnit?: string;
+    purchaseQuantity?: number;
 }
 
 export default function MobileScannerPage() {
@@ -29,7 +31,12 @@ export default function MobileScannerPage() {
     const [scannedItem, setScannedItem] = useState<ItemDetails | null>(null);
     const [isFetching, setIsFetching] = useState(false);
 
-    const [adjustmentQty, setAdjustmentQty] = useState<number>(0);
+    // Modes
+    const [scannerMode, setScannerMode] = useState<'receive' | 'audit'>('receive');
+    const [receiveUnit, setReceiveUnit] = useState<'pack' | 'base'>('pack');
+
+    // This value represents either the "amount to add" OR the "new total" depending on scannerMode
+    const [displayQty, setDisplayQty] = useState<number>(1);
     const [isSaving, setIsSaving] = useState(false);
 
     // Authentication Gate
@@ -41,7 +48,7 @@ export default function MobileScannerPage() {
     const parseUrl = (url: string): ScanResult | null => {
         try {
             const parsed = new URL(url);
-            const type = parsed.searchParams.get('type');
+            const type = parsed.searchParams.get('type') as 'recipe' | 'ingredient' | 'supply' | null;
             const id = parsed.searchParams.get('id');
 
             if (id && (type === 'recipe' || type === 'ingredient' || type === 'supply')) {
@@ -57,16 +64,19 @@ export default function MobileScannerPage() {
         setIsFetching(true);
         setScanError('');
         try {
-            // Choose endpoint based on type. For MVP, we assume /api/scanner/lookup
             const res = await fetch(`/api/scanner/lookup?id=${result.id}&type=${result.type}`);
             if (res.ok) {
                 const data = await res.json();
                 setScannedItem(data);
                 setIsScanning(false);
-                setAdjustmentQty(data.currentStock || 0);
+
+                // Defaults
+                setScannerMode('receive');
+                setReceiveUnit(data.purchaseQuantity && data.purchaseQuantity > 1 ? 'pack' : 'base');
+                setDisplayQty(1); // Default to receiving 1 pack/unit
+
             } else {
                 setScanError('Item not found in database.');
-                // allow scanning again
             }
         } catch (error) {
             console.error(error);
@@ -81,7 +91,6 @@ export default function MobileScannerPage() {
 
         const result = parseUrl(text);
 
-        // Only process valid FreezerIQ URLs.
         if (result) {
             setScanError('');
             fetchItemDetails(result);
@@ -93,13 +102,33 @@ export default function MobileScannerPage() {
 
     const handleCloseTray = () => {
         setScannedItem(null);
-        setAdjustmentQty(0);
+        setDisplayQty(1);
         setIsScanning(true);
         setScanError('');
+        setScannerMode('receive');
     };
 
     const handleSaveAdjustment = async () => {
         if (!scannedItem) return;
+
+        // Calculate the actual delta to send to the server
+        let finalAdjustment = 0;
+
+        if (scannerMode === 'audit') {
+            finalAdjustment = displayQty - scannedItem.currentStock;
+        } else {
+            // Receive mode
+            if (receiveUnit === 'pack' && scannedItem.purchaseQuantity) {
+                finalAdjustment = displayQty * scannedItem.purchaseQuantity;
+            } else {
+                finalAdjustment = displayQty;
+            }
+        }
+
+        if (finalAdjustment === 0) {
+            handleCloseTray();
+            return;
+        }
 
         setIsSaving(true);
         try {
@@ -109,12 +138,11 @@ export default function MobileScannerPage() {
                 body: JSON.stringify({
                     id: scannedItem.id,
                     type: scannedItem.type,
-                    newQty: adjustmentQty
+                    adjustment: finalAdjustment
                 })
             });
 
             if (res.ok) {
-                // Success! Close tray and resume scanning
                 handleCloseTray();
             } else {
                 const data = await res.json();
@@ -220,15 +248,61 @@ export default function MobileScannerPage() {
                             </h2>
                         </div>
 
+                        {/* Mode Toggles */}
+                        <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                            <button
+                                onClick={() => {
+                                    setScannerMode('receive');
+                                    setDisplayQty(1);
+                                }}
+                                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${scannerMode === 'receive' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}
+                            >
+                                Receive
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setScannerMode('audit');
+                                    setDisplayQty(scannedItem.currentStock);
+                                }}
+                                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${scannerMode === 'audit' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}
+                            >
+                                Audit Total
+                            </button>
+                        </div>
+
                         {/* Inventory Controls */}
                         <div className="bg-slate-50 dark:bg-slate-800/50 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-4">
-                            <label className="text-sm font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-center block">
-                                Current Stock
-                            </label>
+
+                            <div className="flex justify-between items-end mb-2">
+                                <label className="text-sm font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                                    {scannerMode === 'receive' ? 'Amount to Add' : 'New Total Stock'}
+                                </label>
+                                <span className="text-sm font-semibold text-slate-400 dark:text-slate-500">
+                                    Current: {scannedItem.currentStock} {scannedItem.unit}
+                                </span>
+                            </div>
+
+                            {/* Unit Toggles for Receive Mode */}
+                            {scannerMode === 'receive' && scannedItem.type === 'ingredient' && scannedItem.purchaseQuantity && scannedItem.purchaseQuantity > 1 && (
+                                <div className="flex gap-2 mb-4">
+                                    <button
+                                        onClick={() => setReceiveUnit('pack')}
+                                        className={`flex-1 py-1.5 text-xs font-bold rounded border transition-colors ${receiveUnit === 'pack' ? 'bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-300' : 'bg-transparent border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400'}`}
+                                    >
+                                        By {scannedItem.purchaseUnit || 'Pack'} (x{scannedItem.purchaseQuantity})
+                                    </button>
+                                    <button
+                                        onClick={() => setReceiveUnit('base')}
+                                        className={`flex-1 py-1.5 text-xs font-bold rounded border transition-colors ${receiveUnit === 'base' ? 'bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-300' : 'bg-transparent border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400'}`}
+                                    >
+                                        By {scannedItem.unit || 'Unit'}
+                                    </button>
+                                </div>
+                            )}
 
                             <div className="flex items-center justify-between gap-4">
                                 <button
-                                    onClick={() => setAdjustmentQty(Math.max(0, adjustmentQty - 1))}
+                                    onClick={() => setDisplayQty(Math.max(0, displayQty - 1))}
                                     className="w-16 h-16 flex items-center justify-center bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 rounded-2xl border border-rose-200 dark:border-rose-800 active:scale-95 transition-all outline-none"
                                 >
                                     <Minus size={28} strokeWidth={3} />
@@ -237,26 +311,35 @@ export default function MobileScannerPage() {
                                 <div className="flex-1 flex flex-col items-center justify-center">
                                     <input
                                         type="number"
-                                        value={adjustmentQty}
-                                        onChange={(e) => setAdjustmentQty(Number(e.target.value) || 0)}
+                                        value={displayQty}
+                                        onChange={(e) => setDisplayQty(Number(e.target.value) || 0)}
                                         className="w-full text-center text-5xl font-black text-slate-900 dark:text-white bg-transparent border-none outline-none focus:ring-0 p-0 m-0"
                                     />
-                                    <span className="text-sm font-bold text-slate-400">{scannedItem.unit}</span>
+                                    <span className="text-sm font-bold text-slate-400 dark:text-slate-500 mt-1">
+                                        {scannerMode === 'receive' && receiveUnit === 'pack' ? scannedItem.purchaseUnit : scannedItem.unit}
+                                    </span>
                                 </div>
 
                                 <button
-                                    onClick={() => setAdjustmentQty(adjustmentQty + 1)}
+                                    onClick={() => setDisplayQty(displayQty + 1)}
                                     className="w-16 h-16 flex items-center justify-center bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded-2xl border border-emerald-200 dark:border-emerald-800 active:scale-95 transition-all outline-none"
                                 >
                                     <Plus size={28} strokeWidth={3} />
                                 </button>
                             </div>
+
+                            {/* Summary Math */}
+                            {scannerMode === 'receive' && receiveUnit === 'pack' && scannedItem.purchaseQuantity && displayQty > 0 && (
+                                <div className="text-center text-xs font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 py-2 rounded-lg mt-2">
+                                    Adding {displayQty * scannedItem.purchaseQuantity} {scannedItem.unit} total
+                                </div>
+                            )}
                         </div>
 
                         {/* Save Button */}
                         <button
                             onClick={handleSaveAdjustment}
-                            disabled={isSaving || adjustmentQty === scannedItem.currentStock}
+                            disabled={isSaving || (scannerMode === 'audit' && displayQty === scannedItem.currentStock) || (scannerMode === 'receive' && displayQty === 0)}
                             className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-2xl font-bold text-lg shadow-lg shadow-indigo-600/20 transition-all flex justify-center items-center gap-2 active:scale-[0.98]"
                         >
                             {isSaving ? (
@@ -264,7 +347,8 @@ export default function MobileScannerPage() {
                             ) : (
                                 <>
                                     <Save size={24} />
-                                    {adjustmentQty === scannedItem.currentStock ? 'No Changes' : 'Update Inventory'}
+                                    {scannerMode === 'audit' && displayQty === scannedItem.currentStock ? 'No Changes' :
+                                        scannerMode === 'audit' ? 'Update Total' : 'Add to Inventory'}
                                 </>
                             )}
                         </button>

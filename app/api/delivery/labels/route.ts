@@ -20,7 +20,7 @@ export async function GET(req: Request) {
                     select: { packagingItems: true }
                 }
             },
-            orderBy: { createdAt: 'desc' }
+            orderBy: { created_at: 'desc' }
         });
 
         return NextResponse.json(templates);

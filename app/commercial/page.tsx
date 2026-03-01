@@ -1,6 +1,5 @@
 import { prisma } from '@/lib/db';
 import CommercialManager from '@/components/CommercialManager';
-import ProfitMarginTracker from '@/components/analytics/ProfitMarginTracker';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,8 +56,6 @@ export default async function CommercialPage() {
 
     return (
         <div className="space-y-8">
-            <ProfitMarginTracker />
-
             <div>
                 <div className="mb-6">
                     <h2 className="text-3xl font-bold text-slate-900 dark:text-white text-adaptive">Inventory & Costs</h2>

@@ -113,10 +113,17 @@ export default function Sidebar() {
         };
 
         checkBranding();
-        // Polling interval for updates
-        const interval = setInterval(checkBranding, 5000);
+        // Polling interval for updates (reduced to 5 minutes to prevent network spam)
+        const interval = setInterval(checkBranding, 300000);
 
-        return () => clearInterval(interval);
+        // Also check when window regains focus
+        const handleFocus = () => checkBranding();
+        window.addEventListener('focus', handleFocus);
+
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener('focus', handleFocus);
+        };
     }, [logo, appName, showLogoInHeader]);
 
     const { data: session, status } = useSession();
@@ -161,9 +168,17 @@ export default function Sidebar() {
             }
         };
         checkResume();
-        // Poll for updates (e.g. if I open a recipe in another tab)
-        const interval = setInterval(checkResume, 2000);
-        return () => clearInterval(interval);
+
+        // Listen for storage events (when other tabs update the active recipe)
+        window.addEventListener('storage', checkResume);
+
+        // Also listen for a custom event in case it's updated in the same tab
+        window.addEventListener('recipe-resumed-updated', checkResume);
+
+        return () => {
+            window.removeEventListener('storage', checkResume);
+            window.removeEventListener('recipe-resumed-updated', checkResume);
+        };
     }, []);
 
     const formatBrandName = (name: string) => {

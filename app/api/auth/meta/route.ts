@@ -10,13 +10,12 @@ export async function GET() {
 
     const redirectUri = `${NEXT_PUBLIC_BASE_URL}/api/auth/meta/callback`;
 
-    // Scopes needed for our app: Leads, Messaging, Webhook management
+    // Scopes needed for our app to read and manage business pages
     const scopes = [
         'pages_show_list',
         'pages_messaging',
         'pages_manage_metadata',
-        'leads_retrieval',
-        'pages_read_engagement',
+        'business_management',
         'public_profile'
     ].join(',');
 

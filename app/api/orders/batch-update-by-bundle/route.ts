@@ -17,7 +17,8 @@ export async function POST(req: Request) {
         const itemResult = await prisma.orderItem.updateMany({
             where: {
                 bundle_id: bundleId,
-                production_status: currentStatus || 'PENDING',
+                // Match both APPROVED and PENDING since they are grouped together in the UI
+                production_status: currentStatus === 'APPROVED' ? { in: ['APPROVED', 'PENDING'] } : currentStatus,
                 order: { business_id: session.user.businessId }
             },
             data: { production_status: newStatus === 'COMPLETED' ? 'READY_TO_SHIP' : newStatus }

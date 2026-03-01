@@ -67,7 +67,7 @@ export async function GET() {
                         production_status: { in: ['READY_TO_SHIP', 'DELIVERED'] }
                     }
                 },
-                status: { not: OrderStatus.completed } // Once the whole order is COMPLETED via manifest, it drops off
+                status: { notIn: [OrderStatus.completed, OrderStatus.DELIVERED, OrderStatus.delivered] as any } // Once the order is COMPLETED or DELIVERED, it drops off
             },
             include: {
                 customer: {
@@ -102,7 +102,8 @@ export async function GET() {
                 if (item.production_status === 'READY_TO_SHIP' || item.production_status === 'DELIVERED') return;
 
                 const bid = item.bundle.id;
-                const status = item.production_status; // Group by ITEM status, not order status
+                // Map PENDING to APPROVED for the prep list UI grouping logic
+                const status = item.production_status === 'PENDING' ? 'APPROVED' : item.production_status;
                 const key = `${bid}-${status}`;
 
                 if (!prepMap.has(key)) {

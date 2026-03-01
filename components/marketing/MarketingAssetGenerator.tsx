@@ -4,7 +4,7 @@ import React, { useRef, useState } from 'react';
 import html2canvas from 'html2canvas-pro';
 import jsPDF from 'jspdf';
 import { QRCodeSVG } from 'qrcode.react';
-import { Loader2, Share2, FileText, Instagram } from 'lucide-react';
+import { Loader2, Share2, FileText, Instagram, Copy, CheckCircle2 } from 'lucide-react';
 import { format } from 'date-fns';
 
 interface MarketingAssetGeneratorProps {
@@ -27,6 +27,7 @@ export default function MarketingAssetGenerator({
     baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://freezeriq.com' // Fallback
 }: MarketingAssetGeneratorProps) {
     const [isGenerating, setIsGenerating] = useState(false);
+    const [copiedStates, setCopiedStates] = useState<Record<string, boolean>>({});
 
     const flyerRef = useRef<HTMLDivElement>(null);
     const coordinatorCardRef = useRef<HTMLDivElement>(null);
@@ -90,35 +91,96 @@ export default function MarketingAssetGenerator({
         }
     };
 
+    const handleCopy = (text: string, id: string) => {
+        navigator.clipboard.writeText(text);
+        setCopiedStates({ ...copiedStates, [id]: true });
+        setTimeout(() => {
+            setCopiedStates({ ...copiedStates, [id]: false });
+        }, 2000);
+    };
+
+    const endDateFormatted = campaign.end_date ? format(new Date(campaign.end_date), 'MMMM do') : 'soon';
+
+    const marketingCopy = {
+        sms: `Hi! 👋 I'm raising money for ${organizationName}! We're selling delicious frozen meals. Order here to help us reach our goal: ${publicLink}`,
+        email: `Subject: Support ${organizationName}'s Fundraiser!\n\nHi everyone,\n\nWe are currently raising funds for ${organizationName}, and we need your help to reach our goal of $${Number(campaign.goal_amount || 0).toLocaleString()}!\n\nWe are selling delicious, high-quality frozen meals that are perfect for busy nights. Every order directly supports our mission.\n\nPlease place your orders by ${endDateFormatted} using our official storefront link below:\n\n👉 ${publicLink}\n\nThank you so much for your support!`,
+        social: `🚨 ${organizationName} Fundraiser! 🚨\n\nWe need your help to reach our goal! We're selling amazing frozen meals to raise money for ${campaign.name}.\n\n✅ Easy, delicious dinners\n✅ Directly supports our team\n✅ Order by ${endDateFormatted}\n\nTap the link below to browse the menu and place your order today! 👇\n\n🔗 ${publicLink}\n\n#Fundraiser #SupportLocal #${organizationName.replace(/\s+/g, '')}`
+    };
+
     return (
-        <div className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-                <button
-                    onClick={generatePacket}
-                    disabled={isGenerating}
-                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-2xl font-black transition-all active:scale-95 disabled:opacity-50 shadow-lg shadow-indigo-500/20"
-                >
-                    {isGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileText className="w-5 h-5" />}
-                    Download Coordinator Packet (PDF)
-                </button>
+        <div className="space-y-8">
+            {/* Download Buttons Section */}
+            <div className="space-y-3">
+                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest ml-1">Print & Images</h3>
+                <div className="flex flex-wrap gap-2">
+                    <button
+                        onClick={generatePacket}
+                        disabled={isGenerating}
+                        className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-2xl font-black transition-all active:scale-95 disabled:opacity-50 shadow-lg shadow-indigo-500/20"
+                    >
+                        {isGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileText className="w-5 h-5" />}
+                        Download Coordinator Packet (PDF)
+                    </button>
 
-                <button
-                    onClick={() => downloadSocialImage('square')}
-                    disabled={isGenerating}
-                    className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-3 rounded-2xl font-bold transition-all active:scale-95 disabled:opacity-50 shadow-sm"
-                >
-                    <Instagram className="w-5 h-5 text-pink-600" />
-                    Social Square
-                </button>
+                    <button
+                        onClick={() => downloadSocialImage('square')}
+                        disabled={isGenerating}
+                        className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-3 rounded-2xl font-bold transition-all active:scale-95 disabled:opacity-50 shadow-sm"
+                    >
+                        <Instagram className="w-5 h-5 text-pink-600" />
+                        Social Square
+                    </button>
 
-                <button
-                    onClick={() => downloadSocialImage('story')}
-                    disabled={isGenerating}
-                    className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-3 rounded-2xl font-bold transition-all active:scale-95 disabled:opacity-50 shadow-sm"
-                >
-                    <Share2 className="w-5 h-5 text-purple-600" />
-                    Social Story
-                </button>
+                    <button
+                        onClick={() => downloadSocialImage('story')}
+                        disabled={isGenerating}
+                        className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-3 rounded-2xl font-bold transition-all active:scale-95 disabled:opacity-50 shadow-sm"
+                    >
+                        <Share2 className="w-5 h-5 text-purple-600" />
+                        Social Story
+                    </button>
+                </div>
+            </div>
+
+            {/* Copy & Paste Text Section */}
+            <div className="space-y-4 pt-4 border-t border-slate-100">
+                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest ml-1">Copy & Paste Messages</h3>
+
+                {/* SMS Snippet */}
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                    <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-bold text-slate-500 uppercase">Text Message / SMS</span>
+                        <button onClick={() => handleCopy(marketingCopy.sms, 'sms')} className="text-indigo-600 hover:text-indigo-800 flex items-center gap-1 text-xs font-bold">
+                            {copiedStates['sms'] ? <CheckCircle2 size={14} /> : <Copy size={14} />}
+                            {copiedStates['sms'] ? 'Copied!' : 'Copy'}
+                        </button>
+                    </div>
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{marketingCopy.sms}</p>
+                </div>
+
+                {/* Social Media Snippet */}
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                    <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-bold text-slate-500 uppercase">Facebook / Social Post</span>
+                        <button onClick={() => handleCopy(marketingCopy.social, 'social')} className="text-indigo-600 hover:text-indigo-800 flex items-center gap-1 text-xs font-bold">
+                            {copiedStates['social'] ? <CheckCircle2 size={14} /> : <Copy size={14} />}
+                            {copiedStates['social'] ? 'Copied!' : 'Copy'}
+                        </button>
+                    </div>
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{marketingCopy.social}</p>
+                </div>
+
+                {/* Email Snippet */}
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                    <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-bold text-slate-500 uppercase">Email Draft</span>
+                        <button onClick={() => handleCopy(marketingCopy.email, 'email')} className="text-indigo-600 hover:text-indigo-800 flex items-center gap-1 text-xs font-bold">
+                            {copiedStates['email'] ? <CheckCircle2 size={14} /> : <Copy size={14} />}
+                            {copiedStates['email'] ? 'Copied!' : 'Copy'}
+                        </button>
+                    </div>
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{marketingCopy.email}</p>
+                </div>
             </div>
 
             {/* Hidden render area for capturing */}

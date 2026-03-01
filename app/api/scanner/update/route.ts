@@ -10,10 +10,12 @@ export async function POST(request: Request) {
 
     try {
         const body = await request.json();
-        const { id, type, newQty } = body;
+        const { id, type, adjustment } = body;
 
-        if (!id || !type || typeof newQty !== 'number') {
-            return NextResponse.json({ error: "Missing or invalid parameters" }, { status: 400 });
+        // If 'adjustment' is missing or 0, there is nothing to update, but we shouldn't crash if it's 0.
+        // We ensure it is passed as a number.
+        if (!id || !type || typeof adjustment !== 'number') {
+            return NextResponse.json({ error: "Missing or invalid parameters. 'adjustment' must be a number." }, { status: 400 });
         }
 
         if (type === 'recipe') {
@@ -29,11 +31,13 @@ export async function POST(request: Request) {
                     business_id: session.user.businessId
                 },
                 data: {
-                    stock_quantity: newQty
+                    stock_quantity: {
+                        increment: adjustment
+                    }
                 }
             });
 
-            return NextResponse.json({ success: true });
+            return NextResponse.json({ success: true, adjustment });
         }
 
         return NextResponse.json({ error: "Unsupported scanning type" }, { status: 400 });

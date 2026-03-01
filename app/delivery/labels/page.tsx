@@ -14,7 +14,7 @@ interface LabelTemplate {
     _count?: {
         packagingItems: number;
     };
-    updatedAt: string;
+    updated_at: string;
 }
 
 export default function LabelDashboard() {

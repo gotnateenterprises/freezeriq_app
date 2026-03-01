@@ -1,4 +1,5 @@
 import { Trash2, Merge } from 'lucide-react';
+import { useState } from 'react';
 
 interface Ingredient {
     id: string;
@@ -31,6 +32,73 @@ interface BulkPasteModalProps {
     setBulkPreview: (preview: BulkPreviewItem[]) => void;
     parseBulkData: () => void;
     applyBulkData: () => void;
+}
+
+export function useBulkPaste(ingredients: Ingredient[], setIngredients: React.Dispatch<React.SetStateAction<Ingredient[]>>) {
+    const [showBulkPaste, setShowBulkPaste] = useState(false);
+    const [pasteContent, setPasteContent] = useState('');
+    const [bulkPreview, setBulkPreview] = useState<BulkPreviewItem[]>([]);
+
+    const parseBulkData = () => {
+        const lines = pasteContent.split(/\r?\n/).filter(l => l.trim());
+        const preview = [];
+
+        for (const line of lines) {
+            const cols = line.split('\t').map(c => c.trim());
+            if (cols.length < 2) continue;
+
+            const name = cols[0];
+            const costStr = cols[1].replace(/[$,]/g, '');
+            const cost = parseFloat(costStr);
+
+            if (!name || isNaN(cost)) continue;
+
+            const match = ingredients.find(i => i.name.toLowerCase() === name.toLowerCase());
+
+            if (match) {
+                preview.push({
+                    id: match.id,
+                    name: match.name,
+                    oldCost: match.cost_per_unit,
+                    newCost: cost,
+                    match: true
+                });
+            } else {
+                preview.push({
+                    id: 'new_' + Math.random(),
+                    name: name,
+                    oldCost: 0,
+                    newCost: cost,
+                    match: false
+                });
+            }
+        }
+        setBulkPreview(preview);
+    };
+
+    const applyBulkData = () => {
+        const updates = new Map(bulkPreview.filter(p => p.match).map(p => [p.id, p]));
+
+        setIngredients(prev => prev.map(ing => {
+            const update = updates.get(ing.id);
+            if (update) {
+                return { ...ing, cost_per_unit: update.newCost };
+            }
+            return ing;
+        }));
+
+        setShowBulkPaste(false);
+        setPasteContent('');
+        setBulkPreview([]);
+        alert(`Updated ${updates.size} ingredients! Don't forget to click "Save Changes".`);
+    };
+
+    return {
+        showBulkPaste, setShowBulkPaste,
+        pasteContent, setPasteContent,
+        bulkPreview, setBulkPreview,
+        parseBulkData, applyBulkData
+    };
 }
 
 export function BulkPasteModal({
@@ -148,6 +216,51 @@ interface MergeModalProps {
     ingredients: Ingredient[];
     handleMerge: () => void;
     isSaving: boolean;
+}
+
+export function useMerge(ingredients: Ingredient[], setIngredients: React.Dispatch<React.SetStateAction<Ingredient[]>>, router: any) {
+    const [mergeSource, setMergeSource] = useState<Ingredient | null>(null);
+    const [mergeTargetId, setMergeTargetId] = useState('');
+    const [isSavingMerge, setIsSavingMerge] = useState(false);
+
+    const handleMerge = async () => {
+        if (!mergeSource || !mergeTargetId) return;
+
+        const targetName = ingredients.find((i: Ingredient) => i.id === mergeTargetId)?.name;
+
+        if (!confirm(`MERGE WARNING:\n\nAre you sure you want to merge "${mergeSource.name}" INTO "${targetName}"?\n\n"${mergeSource.name}" will be DELETED and all recipes using it will now use "${targetName}".\n\nThis cannot be undone.`)) {
+            return;
+        }
+
+        setIsSavingMerge(true);
+        try {
+            const res = await fetch('/api/commercial/ingredients/merge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sourceId: mergeSource.id, targetId: mergeTargetId })
+            });
+
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+
+            setIngredients((prev: Ingredient[]) => prev.filter((i: Ingredient) => i.id !== mergeSource.id));
+            setMergeSource(null);
+            setMergeTargetId('');
+            alert("Merged successfully!");
+            router.refresh();
+        } catch (e: any) {
+            alert("Merge failed: " + e.message);
+        } finally {
+            setIsSavingMerge(false);
+        }
+    };
+
+    return {
+        mergeSource, setMergeSource,
+        mergeTargetId, setMergeTargetId,
+        isSavingMerge,
+        handleMerge
+    };
 }
 
 export function MergeModal({

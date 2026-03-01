@@ -359,22 +359,37 @@ export async function GET() {
         });
 
         // Map Social to Activity Format
-        const socialActivities = recentSocial.map((a: any) => ({
-            id: a.id, // Use internal ID
-            external_id: a.external_id,
-            type: a.type,
-            title: a.type === 'comment' ? 'FB Comment' : a.type === 'message' ? 'FB Message' : 'New Lead',
-            customer: a.customer_name || 'Anonymous',
-            content: a.content,
-            status: a.status,
-            date: a.timestamp,
-            customerId: a.customer_id,
-            metadata: a.metadata
-        }));
+        const socialActivities = recentSocial.map((a: any) => {
+            const metadataStr = typeof a.metadata === 'string' ? a.metadata : JSON.stringify(a.metadata);
+            let metadataObj: any = {};
+            try {
+                if (metadataStr) metadataObj = JSON.parse(metadataStr);
+            } catch (e) { }
 
-        const allActivity = [...orderActivities, ...socialActivities]
+            const threadId = metadataObj?.recipientId || metadataObj?.senderId || a.customer_id || a.customer_name || 'Unknown';
+
+            return {
+                id: a.id, // Use internal ID
+                external_id: a.external_id,
+                type: a.type,
+                title: a.type === 'comment' ? 'FB Comment' : a.type === 'message' ? 'FB Message' : 'New Lead',
+                customer: a.customer_name || 'Anonymous',
+                content: a.content,
+                status: a.status,
+                date: a.timestamp,
+                customerId: a.customer_id,
+                threadId: threadId,
+                metadata: a.metadata
+            };
+        });
+
+        const recentOrdersActivity = orderActivities
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-            .slice(0, 15);
+            .slice(0, 10);
+
+        const recentSocialActivity = socialActivities
+            .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            .slice(0, 10);
 
         // Calculate Production Progress from DB runs
         const activeRun = await prisma.productionRun.findFirst({
@@ -396,6 +411,12 @@ export async function GET() {
             databaseProductionProgress = Math.round((completedTasks / activeRun.tasks.length) * 100);
         }
 
+        // Check if Meta is connected
+        const metaIntegration = await prisma.integration.findFirst({
+            where: { provider: 'meta', business_id: businessId }
+        });
+        const metaConnected = !!metaIntegration;
+
         return NextResponse.json({
             metrics: {
                 activeOrders: inProgressThisWeek,
@@ -410,7 +431,9 @@ export async function GET() {
             weeklyRevenue: weeklyBreakdown,
             lowStock,
             productionDemand: demandBreakdown,
-            recentActivity: allActivity,
+            recentActivity: recentOrdersActivity,
+            socialFeed: recentSocialActivity,
+            metaConnected: metaConnected,
             calendarUrl: businessParams?.google_calendar_url || ''
         });
     } catch (e) {

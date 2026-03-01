@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
 
         // 2. Process Items
         if (items && Array.isArray(items) && items.length > 0) {
-            const names: string[] = [...new Set(items.map((i: any) => i.name).filter(Boolean))] as string[];
+            const names: string[] = [...new Set(items.map((i: any) => i.name?.trim()).filter(Boolean))] as string[];
 
             // Batch fetch existing ingredients and recipes
             const [existingIngs, existingRecipes] = await Promise.all([
@@ -71,8 +71,8 @@ export async function POST(req: NextRequest) {
                 })
             ]);
 
-            const ingMap = new Map(existingIngs.map(i => [i.name.toLowerCase(), i]));
-            const recMap = new Map(existingRecipes.map(r => [r.name.toLowerCase(), r]));
+            const ingMap = new Map(existingIngs.map(i => [i.name.trim().toLowerCase(), i]));
+            const recMap = new Map(existingRecipes.map(r => [r.name.trim().toLowerCase(), r]));
 
             const recipeItemsData = [];
 
@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
                         ing = await prisma.ingredient.create({
                             data: {
                                 name: trimmedName,
-                                unit: item.unit || 'unit',
+                                unit: item.unit ? item.unit.trim().toLowerCase() : 'unit',
                                 cost_per_unit: 0,
                                 business_id: session.user.businessId,
                                 needs_review: true // Mark for review since it's auto-created
@@ -167,13 +167,14 @@ export async function GET() {
 
         const recipesWithCost = recipes.map(recipe => {
             let totalCost = 0;
+
             recipe.child_items.forEach(item => {
+                const qty = Number(item.quantity) || 0;
+
                 if (item.child_ingredient) {
                     const ing = item.child_ingredient;
-                    const qty = Number(item.quantity) || 0;
                     const costPerUnit = Number(ing.cost_per_unit) || 0;
 
-                    // Simple unit check
                     let lineCost = qty * costPerUnit;
                     if (item.unit !== ing.unit) {
                         try {
@@ -185,19 +186,38 @@ export async function GET() {
                     }
                     totalCost += lineCost;
                 } else if (item.child_recipe) {
-                    // One level of sub-recipe support: look for the sub-recipe in our current list
-                    const subRecipe = recipes.find(r => r.id === item.child_recipe_id);
+                    const subRecipe = recipes.find(r => r.id === item.child_recipe?.id);
                     if (subRecipe) {
-                        // Recursively calculate cost for the sub-recipe (simplified)
                         let subTotal = 0;
                         subRecipe.child_items.forEach(subItem => {
                             if (subItem.child_ingredient) {
-                                subTotal += (Number(subItem.quantity) * Number(subItem.child_ingredient.cost_per_unit || 0));
+                                const subQty = Number(subItem.quantity) || 0;
+                                const subIng = subItem.child_ingredient;
+                                const subCostPerUnit = Number(subIng.cost_per_unit || 0);
+
+                                let subLineCost = subQty * subCostPerUnit;
+                                if (subItem.unit !== subIng.unit) {
+                                    try {
+                                        const subConv = convertUnit(1, subItem.unit, subIng.unit, subRecipe.name);
+                                        subLineCost = (subQty * subConv) * subCostPerUnit;
+                                    } catch (e) { }
+                                }
+                                subTotal += subLineCost;
                             }
                         });
+
                         const subYield = Number(subRecipe.base_yield_qty) || 1;
                         const subCostPerUnit = subTotal / subYield;
-                        totalCost += (Number(item.quantity) * subCostPerUnit);
+
+                        let lineCost = qty * subCostPerUnit;
+                        if (item.unit !== subRecipe.base_yield_unit) {
+                            try {
+                                const conversionRate = convertUnit(1, item.unit, subRecipe.base_yield_unit, subRecipe.name);
+                                lineCost = (qty * conversionRate) * subCostPerUnit;
+                            } catch (e) { }
+                        }
+
+                        totalCost += lineCost;
                     }
                 }
             });

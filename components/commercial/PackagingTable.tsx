@@ -1,4 +1,4 @@
-import { Plus, Minus, Package, Trash2, ExternalLink } from 'lucide-react';
+import { Plus, Minus, Package, Trash2, ExternalLink, Save, Loader2 } from 'lucide-react';
 
 interface PackagingItem {
     id: string;
@@ -25,6 +25,8 @@ interface PackagingTableProps {
     updatePackaging: (id: string, updates: Partial<PackagingItem>) => void;
     deletePackaging: (id: string, name: string) => void;
     PKG_TYPES: { value: string; label: string }[];
+    savePackaging: () => void;
+    isSavingPackaging: boolean;
 }
 
 export default function PackagingTable({
@@ -40,7 +42,9 @@ export default function PackagingTable({
     addPackaging,
     updatePackaging,
     deletePackaging,
-    PKG_TYPES
+    PKG_TYPES,
+    savePackaging,
+    isSavingPackaging
 }: PackagingTableProps) {
     return (
         <>
@@ -110,7 +114,16 @@ export default function PackagingTable({
                             <th className="px-6 py-5 text-right text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">Cost ($)</th>
                             <th className="px-6 py-5 text-center text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">Stock Qty</th>
                             <th className="px-6 py-5 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">Reorder URL</th>
-                            <th className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 text-right"></th>
+                            <th className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 text-right">
+                                <button
+                                    onClick={savePackaging}
+                                    disabled={isSavingPackaging}
+                                    className="inline-flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-bold shadow-md shadow-indigo-600/20 text-xs whitespace-nowrap transition-all transform hover:scale-105"
+                                >
+                                    {isSavingPackaging ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                                    {isSavingPackaging ? 'Saving' : 'Save'}
+                                </button>
+                            </th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">

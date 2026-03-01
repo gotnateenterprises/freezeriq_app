@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model Business {
@@ -456,7 +457,7 @@ model PackagingItem {
   reorderUrl        String?
   lowStockThreshold Int            @default(10)
   type              String         @default("other")
-  updatedAt         DateTime       @updatedAt
+  updated_at        DateTime       @updatedAt
   defaultLabelId    String?
   business_id       String?
   cost_per_unit     Decimal        @default(0.00) @db.Decimal(10, 2)
@@ -474,8 +475,8 @@ model LabelTemplate {
   height         Float
   elements       Json
   isDefault      Boolean         @default(false)
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  created_at     DateTime        @default(now())
+  updated_at     DateTime        @updatedAt
   business_id    String?
   business       Business?       @relation(fields: [business_id], references: [id])
   packagingItems PackagingItem[] @relation("BoxDefaultLabel")
@@ -588,8 +589,8 @@ model StorefrontConfig {
   upsell_title            String?
   upsell_description      String?
   upsell_discount_percent Int      @default(0)
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  created_at              DateTime @default(now())
+  updated_at              DateTime @updatedAt
   manual_upsell_image     String?
   manual_upsell_name      String?
   manual_upsell_price     Decimal? @db.Decimal(10, 2)

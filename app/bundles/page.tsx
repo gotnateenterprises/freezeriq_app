@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Package, Plus, ChevronRight, Search, Copy, BookOpen, Calendar, Trash2, X, Loader2, Archive, ArchiveRestore } from 'lucide-react';
 import DashboardImporter from '@/components/DashboardImporter';
+import ProfitMarginTracker from '@/components/analytics/ProfitMarginTracker';
 
 export default function BundlesPage() {
     const [activeTab, setActiveTab] = useState<'bundles' | 'catalogs' | 'surplus'>('bundles');
@@ -342,6 +343,12 @@ export default function BundlesPage() {
                             <button onClick={handleCreateCatalog} className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 dark:shadow-none">Create Catalog</button>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {activeTab === 'bundles' && (
+                <div className="mt-12 pt-8 border-t border-slate-200 dark:border-slate-700">
+                    <ProfitMarginTracker />
                 </div>
             )}
         </div>

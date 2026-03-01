@@ -42,9 +42,33 @@ export async function GET() {
             }
         });
 
-        // 4. Revenue (Mocked for SaaS Demo)
-        // In reality, this would query a Subscription table or Stripe API
-        const monthlyRecurringRevenue = totalBusinesses * 99; // Assume $99/mo plan
+        // 4. Revenue (Dynamic MRR Calculation)
+        // Group businesses by their active subscription plan
+        const planPricing: Record<string, number> = {
+            FREE: 0,
+            BASE: 99,
+            PRO: 199,
+            ULTIMATE: 299,
+            ENTERPRISE: 499
+        };
+
+        const businessesByPlan = await prisma.business.groupBy({
+            by: ['plan'],
+            _count: {
+                id: true
+            },
+            where: {
+                // Assuming trailing/canceled businesses shouldn't count towards active MRR
+                subscription_status: { in: ['active', 'trialing'] }
+            }
+        });
+
+        let monthlyRecurringRevenue = 0;
+        businessesByPlan.forEach(group => {
+            const planKey = group.plan as string;
+            const price = planPricing[planKey] || 0;
+            monthlyRecurringRevenue += price * group._count.id;
+        });
 
         return NextResponse.json({
             metrics: {

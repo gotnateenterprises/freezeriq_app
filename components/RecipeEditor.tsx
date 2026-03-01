@@ -350,8 +350,9 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
             }
         }
 
-        // Track this as the active recipe for sidebar stickiness
+        // Persist the active recipe ID so the sidebar knows what to resume
         localStorage.setItem('active_recipe_id', initialData?.id || 'new');
+        window.dispatchEvent(new Event('recipe-resumed-updated'));
     }, [draftKey, reset, initialData?.id]);
 
     // 2. Auto-Save Draft
@@ -370,6 +371,7 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
     const clearDraft = () => {
         localStorage.removeItem(draftKey);
         localStorage.removeItem('active_recipe_id');
+        window.dispatchEvent(new Event('recipe-resumed-updated'));
     };
 
     const watchedYield = watch('yield_qty');
@@ -383,15 +385,24 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
 
         (watchedItems || []).forEach(item => {
             if (!item.name) return;
+            const currentBatch = Number(item.section_batch) || 1;
+            const itemQty = Number(item.qty) * currentBatch;
 
             if (item.is_sub_recipe) {
                 const subRec = allRecipes.find(r => r.name.toLowerCase() === item.name.toLowerCase());
                 if (subRec) {
-                    const subCostPerUnit = (subRec as any).cost_per_unit || 0;
+                    const subCostPerUnit = (subRec as any).cost_per_unit || (subRec as any).calculated_cost || 0;
                     if (subCostPerUnit === 0) isAccurate = false;
 
-                    const conversion = convertUnit(1, item.unit, subRec.base_yield_unit || 'servings', subRec.name);
-                    totalCost += Number(item.qty) * conversion * subCostPerUnit;
+                    let lineCost = itemQty * subCostPerUnit;
+                    try {
+                        const conversion = convertUnit(1, item.unit, subRec.base_yield_unit || 'servings', subRec.name);
+                        lineCost = (itemQty * conversion) * subCostPerUnit;
+                    } catch (e) {
+                        // Fallback is basic multiplication
+                    }
+
+                    totalCost += lineCost;
                 } else {
                     isAccurate = false;
                 }
@@ -401,8 +412,14 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
                     const costPerUnit = Number(ing.cost_per_unit || 0);
                     if (costPerUnit === 0) isAccurate = false;
 
-                    const conversion = convertUnit(1, item.unit, ing.unit, ing.name);
-                    totalCost += Number(item.qty) * conversion * costPerUnit;
+                    let lineCost = itemQty * costPerUnit;
+                    try {
+                        const conversion = convertUnit(1, item.unit, ing.unit, ing.name);
+                        lineCost = (itemQty * conversion) * costPerUnit;
+                    } catch (e) {
+                        // Fallback
+                    }
+                    totalCost += lineCost;
                 } else {
                     isAccurate = false;
                 }
@@ -773,8 +790,9 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
             items: currentData.items.map((item: any) => ({
                 ...item,
                 qty: (Number(item.qty) || 0) / 2,
-                // Also halve batch size if it's a sub-recipe section
-                section_batch: item.section_batch ? Number(item.section_batch) / 2 : 1
+                // DO NOT halve batch size. Halving the qty is sufficient.
+                // Halving both causes a quadratic reduction in total calculated need.
+                section_batch: item.section_batch ? Number(item.section_batch) : 1
             }))
         };
 

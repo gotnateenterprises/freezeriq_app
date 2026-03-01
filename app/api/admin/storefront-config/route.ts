@@ -86,7 +86,7 @@ export async function POST(request: Request) {
                 footer_text, marketing_video_url, trust_badges, testimonials,
                 upsell_bundle_id, upsell_title, upsell_description, 
                 upsell_discount_percent, upsell_type, manual_upsell_name, 
-                manual_upsell_price, manual_upsell_image, "updatedAt"
+                manual_upsell_price, manual_upsell_image, "updated_at"
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW()
             )
@@ -109,7 +109,7 @@ export async function POST(request: Request) {
                 manual_upsell_name = EXCLUDED.manual_upsell_name,
                 manual_upsell_price = EXCLUDED.manual_upsell_price,
                 manual_upsell_image = EXCLUDED.manual_upsell_image,
-                "updatedAt" = NOW()
+                "updated_at" = NOW()
             RETURNING *
         `;
 

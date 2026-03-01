@@ -53,15 +53,18 @@ export async function POST(req: NextRequest) {
         // Create a new activity for the outgoing message
         await prisma.activity.create({
             data: {
+                business_id: businessId,
                 external_id: fbData.message_id || `sent-${Date.now()}`,
                 type: 'message',
-                content: `Reply: ${message}`,
+                customer_name: 'Kitchen',
+                content: message,
                 status: 'sent',
                 metadata: {
                     recipientId,
                     direction: 'outgoing',
                     fb_mid: fbData.message_id
-                }
+                },
+                timestamp: new Date()
             }
         });
 

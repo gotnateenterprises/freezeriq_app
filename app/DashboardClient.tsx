@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import StatCard from '@/components/StatCard';
-import { ChefHat, DollarSign, TrendingUp, Package, AlertTriangle, Clock } from 'lucide-react';
+import { ChefHat, DollarSign, TrendingUp, Package, AlertTriangle, Clock, Truck } from 'lucide-react';
 import Link from 'next/link';
 
 import RevenueModal from '@/components/RevenueModal';
@@ -52,8 +52,12 @@ function ActivityItem({ activity, onRefresh }: { activity: any; onRefresh: () =>
                     <div>
                         <div className="flex items-center gap-2">
                             <p className="font-bold text-slate-900 dark:text-slate-100 text-adaptive text-lg">
-                                {activity.customerId ? (
+                                {activity.type === 'order' && activity.customerId ? (
                                     <Link href={`/customers/${activity.customerId}`} className="hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-all">
+                                        {activity.customer}
+                                    </Link>
+                                ) : (activity.type === 'message' || activity.type === 'comment') ? (
+                                    <Link href={`/inbox?thread=${activity.threadId || activity.customerId || ''}`} className="hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-all">
                                         {activity.customer}
                                     </Link>
                                 ) : (
@@ -73,11 +77,11 @@ function ActivityItem({ activity, onRefresh }: { activity: any; onRefresh: () =>
                         <p className="text-xs text-slate-500 dark:text-slate-400 text-adaptive-subtle font-medium">{activity.type === 'order' ? `Order #${activity.id}` : activity.title} • {new Date(activity.date).toLocaleDateString()}</p>
                     </div>
                 </div>
-                <div className="text-right">
-                    <p className="font-black text-xl text-slate-900 dark:text-white text-adaptive tracking-tight">
-                        {activity.amount || (activity.content?.length > 30 ? activity.content.slice(0, 30) + '...' : activity.content)}
+                <div className="text-right shrink-0">
+                    <p className="font-black text-lg text-slate-900 dark:text-white text-adaptive tracking-tight">
+                        {activity.amount || (activity.content?.length > 20 ? activity.content.slice(0, 18) + '...' : activity.content)}
                     </p>
-                    <p className="text-xs font-bold uppercase tracking-wide text-slate-400 group-hover:text-indigo-500 transition-colors">{(activity.status || 'NEW').replace('_', ' ')}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 group-hover:text-indigo-500 transition-colors">{(activity.status || 'NEW').replace('_', ' ')}</p>
                 </div>
             </div>
 
@@ -248,17 +252,17 @@ export default function DashboardClient({ session }: { session: any }) {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Recent Activity */}
-                <div className="lg:col-span-2 glass-panel rounded-3xl overflow-hidden p-1 dark:bg-slate-800/50 bg-adaptive">
-                    <div className="p-6 border-b border-slate-100/50 dark:border-slate-700/50 flex justify-between items-center">
-                        <h3 className="text-lg font-black text-slate-900 dark:text-indigo-300 text-adaptive flex items-center gap-2 tracking-tight">
-                            <Clock size={20} className="text-indigo-500 dark:text-indigo-400" /> Recent Activity
+                {/* Recent Orders (Internal) */}
+                <div className="glass-panel rounded-3xl overflow-hidden p-1 dark:bg-slate-800/50 bg-adaptive flex flex-col h-[500px]">
+                    <div className="p-5 border-b border-slate-100/50 dark:border-slate-700/50 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/80">
+                        <h3 className="text-base font-black text-slate-900 dark:text-indigo-300 text-adaptive flex items-center gap-2 tracking-tight">
+                            <Truck size={18} className="text-indigo-500 dark:text-indigo-400" /> Recent Orders
                         </h3>
-                        <Link href="/customers" className="text-indigo-600 text-sm font-bold hover:bg-indigo-50 px-3 py-1 rounded-full transition-colors">View All</Link>
+                        <Link href="/orders" className="text-indigo-600 text-xs font-bold hover:bg-indigo-50 px-3 py-1 rounded-full transition-colors">View All</Link>
                     </div>
-                    <div className="divide-y divide-slate-50">
+                    <div className="divide-y divide-slate-50 overflow-y-auto flex-1 no-scrollbar">
                         {(!data?.recentActivity || data.recentActivity.length === 0) ? (
-                            <p className="p-8 text-slate-400 text-center font-medium">No recent activity.</p>
+                            <p className="p-8 text-slate-400 text-center font-medium text-sm">No recent orders.</p>
                         ) : (
                             <div className="divide-y divide-slate-50 dark:divide-slate-700/50">
                                 {data.recentActivity.map((activity: any, i: number) => (
@@ -273,31 +277,57 @@ export default function DashboardClient({ session }: { session: any }) {
                     </div>
                 </div>
 
+                {/* Social Feed (Facebook/Meta) */}
+                <div className="glass-panel rounded-3xl overflow-hidden p-1 dark:bg-slate-800/50 bg-adaptive flex flex-col h-[500px]">
+                    <div className="p-5 border-b border-blue-100/50 dark:border-blue-900/50 flex justify-between items-center bg-blue-50/50 dark:bg-blue-900/20">
+                        <h3 className="text-base font-black text-slate-900 dark:text-blue-300 text-adaptive flex items-center gap-2 tracking-tight">
+                            <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs" style={{ fontFamily: 'sans-serif' }}>f</span> Messenger Leads
+                        </h3>
+                        <Link href="/inbox" className="text-blue-600 text-xs font-bold hover:bg-blue-50 px-3 py-1 rounded-full transition-colors dark:hover:bg-blue-900/30">Inbox</Link>
+                    </div>
+                    <div className="divide-y divide-slate-50 overflow-y-auto flex-1 no-scrollbar">
+                        {(!data?.socialFeed || data.socialFeed.length === 0) ? (
+                            <p className="p-8 text-slate-400 text-center font-medium text-sm text-balance">
+                                No incoming messages.
+                                {!data?.metaConnected && <><br />Connect your Facebook Page in Settings.</>}
+                            </p>
+                        ) : (
+                            <div className="divide-y divide-slate-50 dark:divide-slate-700/50">
+                                {data.socialFeed.map((activity: any, i: number) => (
+                                    <ActivityItem key={activity.id || i} activity={activity} onRefresh={() => {
+                                        fetch('/api/dashboard')
+                                            .then(res => res.json())
+                                            .then(d => setData(d));
+                                    }} />
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
                 {/* Production Demand (Queue) */}
-                <div className="bg-white rounded-3xl shadow-soft overflow-hidden border border-slate-100/50 dark:bg-slate-800/50 bg-adaptive">
-                    <div className="p-6 border-b border-indigo-100 bg-indigo-50/50 dark:bg-indigo-900/10 dark:border-indigo-900/20">
-                        <h3 className="text-lg font-black text-indigo-900 dark:text-indigo-300 flex items-center gap-2 tracking-tight">
-                            <Package size={20} className="text-indigo-500" /> Production Demand
+                <div className="bg-white rounded-3xl shadow-soft overflow-hidden border border-slate-100/50 dark:bg-slate-800/50 bg-adaptive flex flex-col h-[500px]">
+                    <div className="p-5 border-b border-indigo-100 bg-indigo-50/50 dark:bg-indigo-900/10 dark:border-indigo-900/20 shrink-0">
+                        <h3 className="text-base font-black text-indigo-900 dark:text-indigo-300 flex items-center gap-2 tracking-tight">
+                            <Package size={18} className="text-indigo-500" /> Production Demand
                         </h3>
                     </div>
 
-                    <div className="p-8 text-center border-b border-slate-100 dark:border-slate-700/50">
-                        <div className="text-5xl font-black text-slate-900 dark:text-white tracking-tighter mb-1">
+                    <div className="p-6 text-center border-b border-slate-100 dark:border-slate-700/50 shrink-0">
+                        <div className="text-4xl font-black text-slate-900 dark:text-white tracking-tighter mb-1">
                             {(() => {
                                 const total = data.productionDemand ? data.productionDemand.total : 0;
                                 const progress = realProductionProgress || 0;
-                                // Simple logic: Reduce demand by % completed
-                                // E.g. 25 demand, 20% done -> Show 20
                                 const remaining = Math.round(total * (1 - progress / 100));
                                 return remaining;
                             })()}
                         </div>
-                        <p className="text-sm font-bold text-slate-400 uppercase tracking-wide">
-                            {realProductionProgress && realProductionProgress > 0 ? 'Remaining to Pack' : 'Total Bundles Queued'}
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wide">
+                            {realProductionProgress && realProductionProgress > 0 ? 'Remaining to Pack' : 'Total Queued'}
                         </p>
                     </div>
 
-                    <div className="p-6 space-y-4">
+                    <div className="p-5 space-y-3 flex-1 overflow-y-auto no-scrollbar">
                         {/* Family Breakdown */}
                         <div className="flex items-center justify-between group">
                             <div className="flex items-center gap-3">

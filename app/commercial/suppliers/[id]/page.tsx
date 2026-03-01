@@ -1,14 +1,15 @@
 
 "use client";
 
-import { useState, useEffect, use } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useParams } from 'next/navigation';
 import { ArrowLeft, Save, Globe, Phone, Mail, MapPin, User, Store } from 'lucide-react';
 import Link from 'next/link';
 
-export default function SupplierDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default function SupplierDetailPage() {
     const router = useRouter();
-    const { id } = use(params);
+    const params = useParams();
+    const id = params?.id as string;
     const [supplier, setSupplier] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);

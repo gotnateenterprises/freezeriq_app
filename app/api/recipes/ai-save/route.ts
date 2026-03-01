@@ -2,10 +2,16 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
+import { auth } from '@/auth';
 
 export async function POST(req: Request) {
     try {
         const { recipe } = await req.json();
+
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
 
         if (!recipe || !recipe.name) {
             return NextResponse.json({ error: "Invalid recipe data" }, { status: 400 });
@@ -19,7 +25,8 @@ export async function POST(req: Request) {
                 base_yield_qty: 1, // Default yield
                 base_yield_unit: 'Batch',
                 instructions: recipe.instructions.join('\n'),
-                label_text: recipe.description
+                label_text: recipe.description,
+                business_id: session.user.businessId
             }
         });
 
@@ -43,8 +50,12 @@ export async function POST(req: Request) {
 
                 // If not matched by ID, try to find by name or create new
                 if (!ingredientId) {
+                    const trimmedName = ing.name.trim();
                     const existing = await prisma.ingredient.findFirst({
-                        where: { name: ing.name }
+                        where: {
+                            business_id: session.user.businessId,
+                            name: { equals: trimmedName, mode: 'insensitive' }
+                        }
                     });
 
                     if (existing) {
@@ -53,16 +64,12 @@ export async function POST(req: Request) {
                         // Create new Ingredient
                         const newIng = await prisma.ingredient.create({
                             data: {
-                                name: ing.name,
-                                unit: ing.unit || 'units',
+                                name: trimmedName,
+                                unit: ing.unit ? ing.unit.trim().toLowerCase() : 'units',
                                 cost_per_unit: 0,
-                                business_id: newRecipe.business_id // Inherit if needed, or rely on default? Schema check might be needed but let's assume valid.
-                                // Actually, Recipe doesn't have business_id in the create above? 
-                                // Let's check schema. Ingredient usually needs business_id if multi-tenant.
-                                // Assuming single tenant context or optional. 
-                                // Wait, the previous code didn't use business_id. Let's look at schema if errors pop up. 
-                                // For now, simple create.
-                            }
+                                business_id: session.user.businessId,
+                                needs_review: true // Mark for review since it's auto-created
+                            } as any
                         });
                         ingredientId = newIng.id;
                     }

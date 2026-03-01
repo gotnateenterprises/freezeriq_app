@@ -55,7 +55,9 @@ export async function GET(request: Request) {
                 type: 'ingredient',
                 currentStock: ingredient.stock_quantity ? Number(ingredient.stock_quantity) : 0,
                 unit: ingredient.unit || 'units',
-                costPerUnit: ingredient.cost_per_unit || 0
+                costPerUnit: ingredient.cost_per_unit || 0,
+                purchaseUnit: ingredient.purchase_unit || ingredient.unit || 'units',
+                purchaseQuantity: ingredient.purchase_quantity || 1
             });
         }
         else if (type === 'supply') {
