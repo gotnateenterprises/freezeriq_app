@@ -11,11 +11,13 @@ export async function GET(request: Request) {
             return NextResponse.json({ error: "Admin nate475@gmail.com not found!" }, { status: 404 });
         }
 
-        // Find the business that was just imported (FreezerIQ)
-        const fallback = await prisma.business.findFirst();
+        // Find the business that was just imported (My Freezer Chef)
+        const fallback = await prisma.business.findFirst({
+            where: { name: 'My Freezer Chef' }
+        });
 
         if (!fallback) {
-            return NextResponse.json({ error: "No businesses exist in the database!" }, { status: 404 });
+            return NextResponse.json({ error: "My Freezer Chef business not found!" }, { status: 404 });
         }
 
         await prisma.user.update({
