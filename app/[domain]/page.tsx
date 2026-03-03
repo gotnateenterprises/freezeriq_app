@@ -6,15 +6,16 @@ import { notFound } from 'next/navigation';
 export async function generateMetadata({ params }: { params: Promise<{ domain: string }> }): Promise<Metadata> {
     const { domain } = await params;
 
-    // Attempt to decode the domain just in case
     const decodedDomain = decodeURIComponent(domain);
-
+    // In our current schema, custom domains aren't fully supported yet, 
+    // but the `[domain]` route is catching our Vercel URL.
+    // So we'll try to find a business by slug as a fallback or return the default.
     const business = await prisma.business.findFirst({
-        where: { custom_domain: decodedDomain } as any
+        where: { slug: decodedDomain }
     });
 
     if (!business) {
-        return { title: 'Not Found | FreezerIQ' };
+        return { title: 'FreezerIQ' };
     }
 
     const brandingRecords: any[] = await prisma.$queryRaw`
@@ -35,10 +36,13 @@ export default async function CustomDomainPage({ params }: { params: Promise<{ d
     const decodedDomain = decodeURIComponent(domain);
 
     const business = await prisma.business.findFirst({
-        where: { custom_domain: decodedDomain } as any
+        where: { slug: decodedDomain }
     });
 
     if (!business) {
+        // We'll redirect to the main login or dashboard instead of 404ing the whole app
+        // since [domain] acts as a catch-all on the root depending on middleware.
+        // For now, let's just render the default storefront if possible or 404.
         notFound();
     }
 
