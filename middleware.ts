@@ -12,7 +12,8 @@ export default auth((req) => {
 
     // Define what constitutes our core SaaS platform
     const isLocalhost = hostname.includes("localhost");
-    const isSaaSApp = hostname === "freezeriq.com" || hostname === "www.freezeriq.com" || isLocalhost;
+    const isVercel = hostname.includes("vercel.app");
+    const isSaaSApp = hostname === "freezeriq.com" || hostname === "www.freezeriq.com" || isLocalhost || isVercel;
 
     // For local testing, we can simulate custom domains by using local subdomains
     // But for now, localhost resolves as the SaaS app.
