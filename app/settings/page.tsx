@@ -314,7 +314,7 @@ function CustomDomainSection() {
         fetch('/api/business')
             .then(res => res.json())
             .then(data => {
-                if (data.custom_domain) setDomain(data.custom_domain);
+                // custom_domain removed from DB schema
                 setLoading(false);
             })
             .catch(console.error);

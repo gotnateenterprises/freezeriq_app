@@ -24,7 +24,7 @@ export async function POST(req: Request) {
 
         if (!business) return NextResponse.json({ error: 'Business not found' }, { status: 404 });
 
-        const oldDomain = (business as any).custom_domain;
+        const oldDomain = null; // custom_domain removed from DB schema
 
         // 2. Call Vercel API if configured
         const projectId = process.env.VERCEL_PROJECT_ID;
@@ -65,13 +65,8 @@ export async function POST(req: Request) {
         }
 
         // 3. Update Database
-        // Note: Using `as any` because local prisma client is missing the custom_domain field until regenerated
-        const updated = await prisma.business.update({
-            where: { id: businessId },
-            data: { custom_domain: cleanDomain } as any
-        });
-
-        return NextResponse.json({ success: true, custom_domain: (updated as any).custom_domain || cleanDomain });
+        // Custom domain DB field removed, disable update
+        return NextResponse.json({ success: true, message: "Custom domains are currently disabled in the DB schema." });
 
     } catch (error: any) {
         console.error("Domain Add Error:", error);
