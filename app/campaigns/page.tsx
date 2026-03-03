@@ -25,6 +25,8 @@ interface AudienceCounts {
     all: number;
     individual: number;
     organization: number;
+    waitlist: number;
+    subscribers: number;
 }
 
 function CampaignsContent() {
@@ -38,13 +40,13 @@ function CampaignsContent() {
     const hasAccess = userPlan === 'ENTERPRISE' || userPlan === 'ULTIMATE' || userPlan === 'FREE' || isSuperAdmin;
     const [isLoading, setIsLoading] = useState(true);
     const [isSending, setIsSending] = useState(false);
-    const [counts, setCounts] = useState<AudienceCounts>({ all: 0, individual: 0, organization: 0 });
+    const [counts, setCounts] = useState<AudienceCounts>({ all: 0, individual: 0, organization: 0, waitlist: 0, subscribers: 0 });
 
     // Form State
     const [subject, setSubject] = useState('');
     const [body, setBody] = useState('');
     const [channel, setChannel] = useState<'email' | 'sms'>('email');
-    const [audienceType, setAudienceType] = useState<'all' | 'individual' | 'organization' | 'single'>('all');
+    const [audienceType, setAudienceType] = useState<'all' | 'individual' | 'organization' | 'waitlist' | 'subscribers' | 'single'>('all');
     const [targetRecipient, setTargetRecipient] = useState('');
     const [targetName, setTargetName] = useState('');
 
@@ -192,6 +194,8 @@ function CampaignsContent() {
                                         >
                                             <option value="all">Everyone ({counts.all})</option>
                                             <option value="individual">Individuals ({counts.individual})</option>
+                                            <option value="subscribers">Subscribers ({counts.subscribers})</option>
+                                            <option value="waitlist">Surplus Waitlist ({counts.waitlist})</option>
                                             <option value="organization">Organizations ({counts.organization})</option>
                                             <option value="single">Single Customer</option>
                                         </select>

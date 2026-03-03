@@ -50,9 +50,8 @@ export const authConfig = {
         },
         authorized({ auth, request: { nextUrl } }) {
             const isLoggedIn = !!auth?.user;
-            const isOnDashboard = nextUrl.pathname === '/' ||
+            const isOnDashboard = nextUrl.pathname.startsWith('/dashboard') ||
                 nextUrl.pathname.startsWith('/orders') ||
-                nextUrl.pathname.startsWith('/dashboard') ||
                 nextUrl.pathname.startsWith('/settings') ||
                 nextUrl.pathname.startsWith('/admin') ||
                 nextUrl.pathname.startsWith('/recipes') ||
@@ -68,7 +67,7 @@ export const authConfig = {
                 if (isLoggedIn) return true;
                 return false; // Redirect unauthenticated users to login page
             } else if (isLoggedIn && nextUrl.pathname === '/login') {
-                return Response.redirect(new URL('/', nextUrl)); // Redirect to dashboard if already logged in
+                return Response.redirect(new URL('/dashboard', nextUrl)); // Redirect to dashboard if already logged in
             }
             return true;
         },

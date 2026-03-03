@@ -305,6 +305,92 @@ function CalendarSettingsSection() {
     );
 }
 
+function CustomDomainSection() {
+    const [domain, setDomain] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        fetch('/api/business')
+            .then(res => res.json())
+            .then(data => {
+                if (data.custom_domain) setDomain(data.custom_domain);
+                setLoading(false);
+            })
+            .catch(console.error);
+    }, []);
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        try {
+            const res = await fetch('/api/admin/domains', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ domain })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                alert("Domain saved successfully!");
+            } else {
+                alert(data.error || "Failed to save domain");
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Error saving domain");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    return (
+        <div className="bg-white dark:bg-slate-800 bg-adaptive rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-8 mt-8">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white text-adaptive mb-6 flex items-center gap-2">
+                <Globe size={20} className="text-indigo-600 dark:text-indigo-400" />
+                Custom Domain Link
+            </h3>
+
+            <div className="space-y-4">
+                <div>
+                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
+                        Your Custom Domain (e.g., myfreezerchef.com)
+                    </label>
+                    <div className="flex gap-2 mb-4">
+                        <input
+                            type="text"
+                            value={domain}
+                            onChange={(e) => setDomain(e.target.value)}
+                            className="flex-1 px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                            placeholder="myfreezerchef.com"
+                        />
+                        <button
+                            onClick={handleSave}
+                            disabled={isSaving || loading}
+                            className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold transition-all shadow-md disabled:opacity-50 whitespace-nowrap"
+                        >
+                            {isSaving ? 'Saving...' : 'Connect Domain'}
+                        </button>
+                    </div>
+                    {domain && (
+                        <div className="p-4 bg-emerald-50 dark:bg-emerald-900/30 rounded-lg border border-emerald-100 dark:border-emerald-800">
+                            <p className="text-sm font-bold text-emerald-800 dark:text-emerald-300 mb-2">
+                                Domain saved! To complete the setup, please add the following DNS record to your domain provider (GoDaddy, Namecheap, etc.):
+                            </p>
+                            <div className="font-mono text-[10px] md:text-sm bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2 select-all text-slate-700 dark:text-slate-300">
+                                <div><strong>Type:</strong> A Record</div>
+                                <div><strong>Name:</strong> @</div>
+                                <div><strong>Value:</strong> 76.76.21.21</div>
+                            </div>
+                            <p className="text-[10px] font-bold text-emerald-600/70 dark:text-emerald-400/50 mt-3 uppercase tracking-widest">
+                                * DNS propagation may take up to 24 hours to fully update across the globe.
+                            </p>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function DataManagementSection() {
     const handleBundleExport = () => {
         window.location.href = '/api/bundles/export';
@@ -527,16 +613,17 @@ export default function SettingsPage() {
 
     const handleStripeConnect = async () => {
         try {
-            const res = await fetch('/api/stripe/connect', { method: 'POST' });
+            const res = await fetch('/api/stripe/link');
             const data = await res.json();
-            if (data.url) {
+
+            if (res.ok && data.url) {
                 window.location.href = data.url;
             } else {
-                alert('Failed to initialize Stripe Onboarding.');
+                alert(data.error || 'Failed to initialize Stripe Connection.');
             }
         } catch (e) {
             console.error(e);
-            alert('Failed to connect to Stripe.');
+            alert('Encountered a network error initializing Stripe.');
         }
     };
 
@@ -655,6 +742,7 @@ export default function SettingsPage() {
                     </div>
                     <AiIntegrationSection />
                     <CalendarSettingsSection />
+                    <CustomDomainSection />
                 </div>
             </div>
 

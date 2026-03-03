@@ -8,19 +8,20 @@ import { useRouter } from 'next/navigation';
 
 interface Order {
     id: string;
-    customer: {
-        name: string;
-        type: string;
+    customer?: {
+        name?: string;
+        type?: string;
         address?: string;
         city?: string;
         match_zip?: string;
+        delivery_address?: string;
     };
     created_at: string;
     items: {
         quantity: number;
-        variant_size: string;
-        production_status: string;
-        bundle: { id: string; name: string; sku: string };
+        variant_size?: string;
+        production_status?: string;
+        bundle?: { id: string; name: string; sku: string };
     }[];
 }
 
@@ -87,32 +88,27 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
 
     const handlePrintLabel = (order: Order) => {
         // Construct label URL - Using existing /labels route or similar logic
-        // The /production/page.tsx had specific logic for this.
-        // We'll redirect to /labels with params
-        // Assuming we print one label per order-bundle? Or a shipping label?
-        // Prompt says "Box Label Printing".
-        // Let's assume we want to print a label for the order contents.
-
         // Simple heuristic: Take the first bundle to generate a label preview
-        if (order.items.length === 0) return;
-        const item = order.items[0];
+        if (!order.items || order.items.length === 0) return;
+        const item = order.items.find(i => i.bundle);
+        if (!item || !item.bundle) return;
 
         const params = new URLSearchParams({
-            recipeId: item.bundle.id, // Using bundle ID as recipe ID proxy for label? check /labels
+            recipeId: item.bundle.id,
             qty: item.quantity.toString(),
             unit: 'ea',
             bundleHint: item.bundle.name,
             printQty: item.quantity.toString(),
             sku: item.bundle.sku,
-            customer: order.customer.name,
-            address: order.customer.address || '',
+            customer: order.customer?.name || 'Unknown',
+            address: order.customer?.delivery_address || order.customer?.address || '',
             orderId: order.id.slice(0, 8)
         });
 
         router.push(`/labels?${params.toString()}`);
     };
 
-    if (orders.length === 0) {
+    if (!orders || orders.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center p-12 bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 text-center animate-in fade-in">
                 <div className="w-16 h-16 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center mb-4 text-slate-400">
@@ -162,15 +158,16 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                             </div>
                             <div className="flex-1">
                                 <div className="flex justify-between items-start">
-                                    <h4 className="font-black text-slate-900 dark:text-white text-lg">{order.customer.name}</h4>
+                                    <h4 className="font-black text-slate-900 dark:text-white text-lg">{order.customer?.name || "Unknown Customer"}</h4>
 
                                     {/* Box Calculator Badges */}
                                     <div className="flex gap-2">
                                         {(() => {
                                             let familyCount = 0;
                                             let smallCount = 0;
-                                            order.items.forEach(item => {
-                                                const isSmall = item.variant_size === 'serves_2' || item.bundle.name.toLowerCase().includes('serves 2');
+                                            (order.items || []).forEach(item => {
+                                                const bundleName = item.bundle?.name || '';
+                                                const isSmall = item.variant_size === 'serves_2' || bundleName.toLowerCase().includes('serves 2');
                                                 if (isSmall) {
                                                     smallCount += item.quantity;
                                                 } else {
@@ -198,19 +195,19 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                                     </div>
                                 </div>
                                 <div className="text-sm text-slate-500 flex flex-col">
-                                    <span>#{order.id.slice(0, 8)} • {format(new Date(order.created_at), 'MMM d')}</span>
-                                    {order.customer.address && (
+                                    <span>#{order.id.slice(0, 8)} • {order.created_at ? format(new Date(order.created_at), 'MMM d') : ''}</span>
+                                    {(order.customer?.delivery_address || order.customer?.address) && (
                                         <span className="font-medium text-slate-600 dark:text-slate-400 mt-1">
-                                            {order.customer.address}, {order.customer.city} {order.customer.match_zip}
+                                            {order.customer?.delivery_address || order.customer?.address}{order.customer?.city ? `, ${order.customer.city}` : ''} {order.customer?.match_zip || ''}
                                         </span>
                                     )}
                                 </div>
                                 <div className="flex flex-col gap-2 mt-3">
-                                    {order.items.map((item, i) => (
+                                    {(order.items || []).map((item, i) => (
                                         <div key={i} className="flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 p-2 rounded-lg border border-slate-100 dark:border-slate-700/50">
                                             <span className="text-sm font-bold text-slate-700 dark:text-slate-300">
-                                                {item.quantity}x {item.bundle.name}
-                                                <span className="ml-2 text-xs text-slate-400 font-normal">({item.bundle.sku})</span>
+                                                {item.quantity}x {item.bundle?.name || 'Unknown Bundle'}
+                                                {item.bundle?.sku && <span className="ml-2 text-xs text-slate-400 font-normal">({item.bundle.sku})</span>}
                                             </span>
                                             <span className={`text-[10px] uppercase font-black px-2 py-1 rounded-md ${item.production_status === 'DELIVERED'
                                                 ? 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'

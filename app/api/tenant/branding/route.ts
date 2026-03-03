@@ -169,7 +169,9 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(branding);
 
     } catch (error: any) {
-        console.error('[BrandingAPI] Error:', error);
-        return NextResponse.json({ error: 'Server Error', details: error.message }, { status: 500 });
+        console.error('[BrandingAPI] Error Object:', error);
+        console.error('[BrandingAPI] Error Message:', error.message);
+        console.error('[BrandingAPI] Error Stack:', error.stack);
+        return NextResponse.json({ error: 'Server Error', details: error.message, stack: error.stack }, { status: 500 });
     }
 }

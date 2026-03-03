@@ -9,11 +9,12 @@ datasource db {
 }
 
 model Business {
-  id                     String             @id @default(uuid())
-  name                   String
-  slug                   String             @unique
-  logo_url               String?
-  created_at             DateTime           @default(now())
+  id                         String             @id @default(uuid())
+  name                       String
+  slug                       String             @unique
+  custom_domain              String?            @unique
+  logo_url                   String?
+  created_at                 DateTime           @default(now())
   current_period_end         DateTime?
   plan                       SubscriptionPlan   @default(BASE)
   stripe_customer_id         String?            @unique
@@ -254,26 +255,26 @@ model Catalog {
 }
 
 model Bundle {
-  id                 String             @id @default(uuid())
+  id                 String               @id @default(uuid())
   catalog_id         String?
   name               String
-  sku                String             @unique
+  sku                String               @unique
   description        String?
-  serving_tier       String             @default("family")
-  is_active          Boolean            @default(true)
-  price              Decimal?           @db.Decimal(10, 2)
+  serving_tier       String               @default("family")
+  is_active          Boolean              @default(true)
+  price              Decimal?             @db.Decimal(10, 2)
   business_id        String?
   image_url          String?
-  show_on_storefront Boolean            @default(false)
-  stock_on_hand      Decimal            @default(0) @db.Decimal(10, 2)
-  is_surplus         Boolean            @default(false)
-  is_donation        Boolean            @default(false)
-  is_subscriber_only Boolean            @default(false)
-  order_cutoff_date  DateTime?          @db.Date
+  show_on_storefront Boolean              @default(false)
+  stock_on_hand      Decimal              @default(0) @db.Decimal(10, 2)
+  is_surplus         Boolean              @default(false)
+  is_donation        Boolean              @default(false)
+  is_subscriber_only Boolean              @default(false)
+  order_cutoff_date  DateTime?            @db.Date
   contents           BundleContent[]
   invoice_items      InvoiceItem[]
-  business           Business?          @relation(fields: [business_id], references: [id])
-  catalog            Catalog?           @relation(fields: [catalog_id], references: [id])
+  business           Business?            @relation(fields: [business_id], references: [id])
+  catalog            Catalog?             @relation(fields: [catalog_id], references: [id])
   order_items        OrderItem[]
   storefront_configs StorefrontConfig[]
   campaigns          FundraiserCampaign[]
@@ -311,23 +312,23 @@ model SubscriptionTier {
 }
 
 model Customer {
-  id               String               @id @default(uuid())
-  business_id      String?
-  name             String
-  contact_name     String?
-  contact_email    String?
-  contact_phone    String?
-  type             OrgType              @default(fundraiser_org)
-  delivery_address String?
-  notes            String?
-  external_id      String?              @unique
-  source           String?              @default("Manual")
-  status           CustomerStatus       @default(LEAD)
-  archived         Boolean              @default(false)
-  archived_at      DateTime?
-  tags             String[]             @default([])
-  inactive_reason  String?
-  fundraiser_info  Json?
+  id                     String               @id @default(uuid())
+  business_id            String?
+  name                   String
+  contact_name           String?
+  contact_email          String?
+  contact_phone          String?
+  type                   OrgType              @default(fundraiser_org)
+  delivery_address       String?
+  notes                  String?
+  external_id            String?              @unique
+  source                 String?              @default("Manual")
+  status                 CustomerStatus       @default(LEAD)
+  archived               Boolean              @default(false)
+  archived_at            DateTime?
+  tags                   String[]             @default([])
+  inactive_reason        String?
+  fundraiser_info        Json?
   loyalty_balance        Decimal              @default(0) @db.Decimal(10, 2)
   stripe_subscription_id String?              @unique
   subscription_plan_id   String?
@@ -335,11 +336,11 @@ model Customer {
   meal_credits           Int                  @default(0)
   next_delivery_date     DateTime?            @db.Date
   business               Business?            @relation(fields: [business_id], references: [id])
-  documents        Document[]
-  campaigns        FundraiserCampaign[]
-  invoices         Invoice[]
-  loyalty_points   LoyaltyPoint[]
-  orders           Order[]
+  documents              Document[]
+  campaigns              FundraiserCampaign[]
+  invoices               Invoice[]
+  loyalty_points         LoyaltyPoint[]
+  orders                 Order[]
 
   @@map("customers")
 }
@@ -360,23 +361,23 @@ model Order {
   business_id           String?
   campaign_id           String?
   customer_id           String?
-  invoice_id        String?             @unique
-  delivery_address  String?
-  delivery_sequence Int?                @default(0)
-  customer_email    String?
-  customer_phone    String?
-  coordinator_paid  Boolean             @default(false)
-  coordinator_check String?
-  coordinator_picked_up Boolean         @default(false)
-  inventory_deducted Boolean            @default(false)
-  participant_name  String?             @map("participant_name")
-  delivery_signature String?            @db.Text
-  delivered_at      DateTime?
-  items             OrderItem[]
-  business          Business?           @relation(fields: [business_id], references: [id])
-  campaign          FundraiserCampaign? @relation(fields: [campaign_id], references: [id])
-  customer          Customer?           @relation(fields: [customer_id], references: [id])
-  invoice           Invoice?            @relation(fields: [invoice_id], references: [id])
+  invoice_id            String?             @unique
+  delivery_address      String?
+  delivery_sequence     Int?                @default(0)
+  customer_email        String?
+  customer_phone        String?
+  coordinator_paid      Boolean             @default(false)
+  coordinator_check     String?
+  coordinator_picked_up Boolean             @default(false)
+  inventory_deducted    Boolean             @default(false)
+  participant_name      String?             @map("participant_name")
+  delivery_signature    String?             @db.Text
+  delivered_at          DateTime?
+  items                 OrderItem[]
+  business              Business?           @relation(fields: [business_id], references: [id])
+  campaign              FundraiserCampaign? @relation(fields: [campaign_id], references: [id])
+  customer              Customer?           @relation(fields: [customer_id], references: [id])
+  invoice               Invoice?            @relation(fields: [invoice_id], references: [id])
 
   @@map("orders")
 }
@@ -389,7 +390,7 @@ model OrderItem {
   variant_size      VariantSize @default(serves_5)
   item_name         String?
   unit_price        Decimal?    @db.Decimal(10, 2)
-  is_subscription      Boolean     @default(false)
+  is_subscription   Boolean     @default(false)
   production_status String      @default("PENDING")
   bundle            Bundle?     @relation(fields: [bundle_id], references: [id])
   order             Order?      @relation(fields: [order_id], references: [id])
@@ -610,22 +611,22 @@ model StorefrontConfig {
 }
 
 model Invoice {
-  id             String        @id @default(uuid())
-  business_id    String
-  customer_id    String
-  status         InvoiceStatus @default(PENDING)
-  payment_method String?       @default("check")
-  total_amount   Decimal       @db.Decimal(10, 2)
-  tax_amount     Decimal?      @default(0) @db.Decimal(10, 2)
-  created_at     DateTime      @default(now())
-  updated_at     DateTime      @updatedAt
-  due_date                 DateTime?
+  id                        String        @id @default(uuid())
+  business_id               String
+  customer_id               String
+  status                    InvoiceStatus @default(PENDING)
+  payment_method            String?       @default("check")
+  total_amount              Decimal       @db.Decimal(10, 2)
+  tax_amount                Decimal?      @default(0) @db.Decimal(10, 2)
+  created_at                DateTime      @default(now())
+  updated_at                DateTime      @updatedAt
+  due_date                  DateTime?
   fundraiser_profit_percent Decimal?      @default(0) @db.Decimal(5, 2)
   fundraiser_profit_amount  Decimal?      @default(0) @db.Decimal(10, 2)
-  items                    InvoiceItem[]
-  order                    Order?
-  business       Business      @relation(fields: [business_id], references: [id], onDelete: Cascade)
-  customer       Customer      @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  items                     InvoiceItem[]
+  order                     Order?
+  business                  Business      @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  customer                  Customer      @relation(fields: [customer_id], references: [id], onDelete: Cascade)
 
   @@map("invoices")
 }

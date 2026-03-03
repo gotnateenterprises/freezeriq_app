@@ -20,16 +20,20 @@ export async function GET() {
             return NextResponse.json({ error: "Upgrade Now" }, { status: 403 });
         }
 
-        const [total, individuals, organizations] = await Promise.all([
+        const [total, individuals, organizations, waitlist, subscribers] = await Promise.all([
             prisma.customer.count({ where: { business_id: businessId, archived: false } }),
             prisma.customer.count({ where: { business_id: businessId, type: 'direct_customer', archived: false } }),
             prisma.customer.count({ where: { business_id: businessId, type: { in: ['fundraiser_org', 'organization'] }, archived: false } }),
+            prisma.customer.count({ where: { business_id: businessId, tags: { has: 'surplus_waitlist' }, archived: false } }),
+            prisma.customer.count({ where: { business_id: businessId, stripe_subscription_id: { not: null }, archived: false } }),
         ]);
 
         return NextResponse.json({
             all: total,
             individual: individuals,
-            organization: organizations
+            organization: organizations,
+            waitlist: waitlist,
+            subscribers: subscribers
         });
     } catch (e: any) {
         return NextResponse.json({ error: e.message }, { status: 500 });

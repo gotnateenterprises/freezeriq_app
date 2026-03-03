@@ -20,9 +20,9 @@ export async function uploadToS3(fileBuffer: Buffer, fileName: string, contentTy
     // Create a unique filename to prevent overwriting
     const uniqueFileName = `${timestamp}-${fileName}`;
 
-    // Development Fallback: If no S3 bucket is configured, save locally
-    if (!bucketName) {
-        console.warn(`[S3 Utility] S3_BUCKET_NAME is not set. Falling back to local storage for ${fileName}.`);
+    // Development Fallback: If no S3 bucket or credentials are configured, save locally
+    if (!bucketName || !accessKeyId) {
+        console.warn(`[S3 Utility] Incomplete S3 config (missing bucket or access key). Falling back to local storage for ${fileName}.`);
         const { writeFile, mkdir } = await import('fs/promises');
         const { join } = await import('path');
 

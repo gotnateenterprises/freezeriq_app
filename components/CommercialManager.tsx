@@ -595,62 +595,63 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
                 </div>
             </div>
 
-            {activeTab === 'ingredients' && (
-                <IngredientTable
-                    ingredients={ingredients}
-                    suppliers={suppliers}
-                    newIngName={newIngName}
-                    setNewIngName={setNewIngName}
-                    newIngSku={newIngSku}
-                    setNewIngSku={setNewIngSku}
-                    newIngCost={newIngCost}
-                    setNewIngCost={setNewIngCost}
-                    newIngUnit={newIngUnit}
-                    setNewIngUnit={setNewIngUnit}
-                    addIngredient={addIngredient}
-                    searchQuery={searchQuery}
-                    setSearchQuery={setSearchQuery}
-                    handleUpdateIngredient={handleUpdateIngredient}
-                    saveChanges={saveChanges}
-                    isSaving={isSaving}
-                    savingIds={savingIds}
-                    handleSaveSingle={handleSaveSingle}
-                    confirmDelete={confirmDelete}
-                    setMergeSource={merge.setMergeSource}
-                    UNIT_OPTIONS={UNIT_OPTIONS}
-                />
-            )}
+            <div className="w-full overflow-hidden pb-12">
+                {activeTab === 'ingredients' && (
+                    <IngredientTable
+                        ingredients={ingredients}
+                        suppliers={suppliers}
+                        newIngName={newIngName}
+                        setNewIngName={setNewIngName}
+                        newIngSku={newIngSku}
+                        setNewIngSku={setNewIngSku}
+                        newIngCost={newIngCost}
+                        setNewIngCost={setNewIngCost}
+                        newIngUnit={newIngUnit}
+                        setNewIngUnit={setNewIngUnit}
+                        addIngredient={addIngredient}
+                        searchQuery={searchQuery}
+                        setSearchQuery={setSearchQuery}
+                        handleUpdateIngredient={handleUpdateIngredient}
+                        saveChanges={saveChanges}
+                        isSaving={isSaving}
+                        savingIds={savingIds}
+                        handleSaveSingle={handleSaveSingle}
+                        confirmDelete={confirmDelete}
+                        setMergeSource={merge.setMergeSource}
+                        UNIT_OPTIONS={UNIT_OPTIONS}
+                    />
+                )}
 
-            {activeTab === 'packaging' && (
-                <PackagingTable
-                    packaging={packaging}
-                    newPkgName={newPkgName}
-                    setNewPkgName={setNewPkgName}
-                    newPkgType={newPkgType}
-                    setNewPkgType={setNewPkgType}
-                    newPkgCost={newPkgCost}
-                    setNewPkgCost={setNewPkgCost}
-                    newPkgStock={newPkgStock}
-                    setNewPkgStock={setNewPkgStock}
-                    addPackaging={addPackaging}
-                    updatePackaging={updatePackaging}
-                    deletePackaging={deletePackaging}
-                    PKG_TYPES={PKG_TYPES}
-                    savePackaging={savePackaging}
-                    isSavingPackaging={isSavingPackaging}
-                />
-            )}
+                {activeTab === 'packaging' && (
+                    <PackagingTable
+                        packaging={packaging}
+                        newPkgName={newPkgName}
+                        setNewPkgName={setNewPkgName}
+                        newPkgType={newPkgType}
+                        setNewPkgType={setNewPkgType}
+                        newPkgCost={newPkgCost}
+                        setNewPkgCost={setNewPkgCost}
+                        newPkgStock={newPkgStock}
+                        setNewPkgStock={setNewPkgStock}
+                        addPackaging={addPackaging}
+                        updatePackaging={updatePackaging}
+                        deletePackaging={deletePackaging}
+                        PKG_TYPES={PKG_TYPES}
+                        savePackaging={savePackaging}
+                        isSavingPackaging={isSavingPackaging}
+                    />
+                )}
 
-            {activeTab === 'suppliers' && (
-                <SupplierTable
-                    suppliers={suppliers}
-                    newSupplierName={newSupplierName}
-                    setNewSupplierName={setNewSupplierName}
-                    addSupplier={addSupplier}
-                    deleteSupplier={deleteSupplier}
-                />
-            )}
-
+                {activeTab === 'suppliers' && (
+                    <SupplierTable
+                        suppliers={suppliers}
+                        newSupplierName={newSupplierName}
+                        setNewSupplierName={setNewSupplierName}
+                        addSupplier={addSupplier}
+                        deleteSupplier={deleteSupplier}
+                    />
+                )}
+            </div>
         </div>
     );
 }
