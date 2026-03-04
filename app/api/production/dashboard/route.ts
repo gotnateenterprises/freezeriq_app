@@ -37,6 +37,9 @@ export async function GET() {
                 status: { in: ['APPROVED', 'IN_PRODUCTION', 'READY_TO_SHIP'] as any } // Must include READY_TO_SHIP as some items might still be prepping
             },
             include: {
+                customer: {
+                    select: { id: true, name: true, type: true }
+                },
                 items: {
                     include: {
                         bundle: {
@@ -84,7 +87,7 @@ export async function GET() {
             orderBy: { created_at: 'asc' }
         });
 
-        // Aggregate for Prep List - Group by Bundle AND Item Production Status
+        // Aggregate for Prep List - Group by Customer, Bundle AND Item Production Status
         const prepMap = new Map<string, {
             bundle_id: string;
             bundle_name: string;
@@ -92,6 +95,9 @@ export async function GET() {
             total_quantity: number;
             order_count: number;
             status: string;
+            customer_id?: string;
+            customer_name?: string;
+            customer_type?: string;
             recipes: { id: string, name: string, quantity: number, label_text?: string | null }[];
         }>();
 
@@ -104,7 +110,8 @@ export async function GET() {
                 const bid = item.bundle.id;
                 // Map PENDING to APPROVED for the prep list UI grouping logic
                 const status = item.production_status === 'PENDING' ? 'APPROVED' : item.production_status;
-                const key = `${bid}-${status}`;
+                const cid = order.customer?.id || 'none';
+                const key = `${cid}-${bid}-${status}`;
 
                 if (!prepMap.has(key)) {
                     prepMap.set(key, {
@@ -114,6 +121,9 @@ export async function GET() {
                         total_quantity: 0,
                         order_count: 0,
                         status: status,
+                        customer_id: order.customer?.id,
+                        customer_name: order.customer?.name || 'Unknown',
+                        customer_type: order.customer?.type || 'Customer',
                         recipes: (item.bundle.contents || []).map(c => ({
                             id: c.recipe?.id || 'unknown',
                             name: c.recipe?.name || 'Unknown Recipe',

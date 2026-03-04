@@ -7,7 +7,7 @@ export async function POST(req: Request) {
         const session = await auth();
         if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-        const { bundleId, currentStatus, newStatus } = await req.json();
+        const { bundleId, currentStatus, newStatus, customerId } = await req.json();
 
         if (!bundleId || !newStatus) {
             return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
@@ -19,7 +19,10 @@ export async function POST(req: Request) {
                 bundle_id: bundleId,
                 // Match both APPROVED and PENDING since they are grouped together in the UI
                 production_status: currentStatus === 'APPROVED' ? { in: ['APPROVED', 'PENDING'] } : currentStatus,
-                order: { business_id: session.user.businessId }
+                order: {
+                    business_id: session.user.businessId,
+                    ...(customerId !== undefined ? { customer_id: customerId || null } : {})
+                }
             },
             data: { production_status: newStatus === 'COMPLETED' ? 'READY_TO_SHIP' : newStatus }
         });
@@ -30,6 +33,7 @@ export async function POST(req: Request) {
                 where: {
                     business_id: session.user.businessId,
                     status: { in: ['APPROVED', 'PENDING', 'pending'] as any },
+                    ...(customerId !== undefined ? { customer_id: customerId || null } : {}),
                     items: {
                         some: { bundle_id: bundleId }
                     }
