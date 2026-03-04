@@ -39,8 +39,7 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
         return acc;
     }, {} as Record<string, PrepItem[]>);
 
-    const approvedItems = groups['APPROVED'] || [];
-    const productionItems = groups['IN_PRODUCTION'] || [];
+    const approvedItems = groups['APPROVED'] || items;
 
     const handlePrint = async () => {
         setIsPrinting(true);
@@ -181,70 +180,7 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
                 </div>
             )}
 
-            {/* Section 2: In Production */}
-            {productionItems.length > 0 && (
-                <div className="space-y-6">
-                    <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                        <div className="w-2 h-6 bg-emerald-500 rounded-full" />
-                        In Production
-                    </h3>
-                    {Object.entries(
-                        productionItems.reduce((acc: Record<string, PrepItem[]>, item: PrepItem) => {
-                            const name = item.customer_name || 'Retail Orders';
-                            if (!acc[name]) acc[name] = [];
-                            acc[name].push(item);
-                            return acc;
-                        }, {} as Record<string, PrepItem[]>)
-                    ).map(([customerName, itemsList]) => (
-                        <div key={customerName} className="bg-slate-50/50 dark:bg-slate-900/20 p-6 rounded-3xl border border-slate-100 dark:border-slate-700/50 space-y-4">
-                            <h4 className="text-md font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                                {customerName}
-                            </h4>
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                                {(itemsList as PrepItem[]).map((item: PrepItem) => (
-                                    <div key={`${item.customer_id}-${item.bundle_id}`} className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-3xl border border-emerald-200 dark:border-emerald-900/30 shadow-sm relative overflow-hidden">
-                                        <div className="relative z-10">
-                                            <div className="flex justify-between items-start mb-4">
-                                                <span className="px-3 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-black uppercase tracking-widest">
-                                                    {item.sku}
-                                                </span>
-                                                <span className="text-xs font-bold text-emerald-600/60">
-                                                    Cooking Now
-                                                </span>
-                                            </div>
-                                            <h3 className="text-xl font-black text-slate-900 dark:text-white mb-2 leading-tight">
-                                                {item.bundle_name}
-                                            </h3>
-                                            <div className="flex gap-2 mb-6">
-                                                <div className="flex-1">
-                                                    <span className="text-4xl font-black text-emerald-600 dark:text-emerald-500">
-                                                        {item.total_quantity}
-                                                    </span>
-                                                    <span className="text-lg font-bold text-slate-400 ml-2">units</span>
-                                                </div>
-                                                <button
-                                                    onClick={() => openPrintModal(item)}
-                                                    className="p-3 bg-white dark:bg-slate-800 border border-emerald-200 dark:border-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-all shadow-sm"
-                                                    title="Print Labels for all meals in this bundle"
-                                                >
-                                                    <Printer size={20} />
-                                                </button>
-                                            </div>
-                                            <button
-                                                onClick={() => handleUpdateStatus(item.bundle_id, 'IN_PRODUCTION', 'COMPLETED', item.customer_id)}
-                                                className="w-full flex items-center justify-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700 py-3 rounded-xl font-bold transition-all shadow-lg shadow-emerald-200 dark:shadow-none"
-                                            >
-                                                <CheckCircle2 size={18} />
-                                                Mark Done
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
+
             {/* Print Selection Modal */}
             {selectedPrintBundle && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">

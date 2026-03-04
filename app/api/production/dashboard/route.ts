@@ -87,7 +87,7 @@ export async function GET() {
             orderBy: { created_at: 'asc' }
         });
 
-        // Aggregate for Prep List - Group by Customer, Bundle AND Item Production Status
+        // Aggregate for Prep List - Group by Customer, Bundle AND Item Production Status (Only for APPROVED/PENDING)
         const prepMap = new Map<string, {
             bundle_id: string;
             bundle_name: string;
@@ -104,8 +104,9 @@ export async function GET() {
         productionOrders.forEach(order => {
             order.items.forEach(item => {
                 if (!item.bundle) return;
-                // Exclude items that are already ready to ship or delivered from the kitchen prep list
-                if (item.production_status === 'READY_TO_SHIP' || item.production_status === 'DELIVERED') return;
+                // Exclude items that are already ready to ship, delivered, or IN_PRODUCTION
+                // IN_PRODUCTION items will now be handled separately in the new InProductionArea
+                if (item.production_status === 'READY_TO_SHIP' || item.production_status === 'DELIVERED' || item.production_status === 'IN_PRODUCTION') return;
 
                 const bid = item.bundle.id;
                 // Map PENDING to APPROVED for the prep list UI grouping logic
@@ -139,9 +140,36 @@ export async function GET() {
             });
         });
 
+        // 4. Fetch In Production Orders
+        const inProductionOrders = await prisma.order.findMany({
+            where: {
+                business_id: businessId,
+                items: {
+                    some: {
+                        production_status: 'IN_PRODUCTION'
+                    }
+                },
+                status: { notIn: [OrderStatus.completed, OrderStatus.DELIVERED, OrderStatus.delivered] as any }
+            },
+            include: {
+                customer: {
+                    select: { name: true, type: true, delivery_address: true }
+                },
+                items: {
+                    include: {
+                        bundle: {
+                            select: { id: true, name: true, sku: true }
+                        }
+                    }
+                }
+            },
+            orderBy: { created_at: 'asc' }
+        });
+
         return NextResponse.json({
             pending: pendingOrders,
             prep: Array.from(prepMap.values()),
+            in_production: inProductionOrders,
             completed: deliveryOrders // Renaming the payload value to "completed" to avoid breaking old frontend code that expects it, but containing deliveryOrders
         });
 

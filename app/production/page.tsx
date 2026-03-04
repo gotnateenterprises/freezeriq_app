@@ -6,10 +6,11 @@ import HoldingArea from '@/components/production/HoldingArea';
 import PrepList from '@/components/production/PrepList';
 import ProductionCalculator from '@/components/production/ProductionCalculator';
 import DeliveryQueue from '@/components/production/DeliveryQueue';
+import InProductionArea from '@/components/production/InProductionArea';
 
 export default function ProductionPage() {
     const [activeTab, setActiveTab] = useState<'dashboard' | 'planner'>('dashboard');
-    const [data, setData] = useState<{ pending: any[], prep: any[], completed: any[] } | null>(null);
+    const [data, setData] = useState<{ pending: any[], prep: any[], in_production: any[], completed: any[] } | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
     const refreshData = async () => {
@@ -50,8 +51,8 @@ export default function ProductionPage() {
                             <button
                                 onClick={() => setActiveTab('dashboard')}
                                 className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'dashboard'
-                                        ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
-                                        : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
                                     }`}
                             >
                                 <LayoutDashboard size={16} />
@@ -60,8 +61,8 @@ export default function ProductionPage() {
                             <button
                                 onClick={() => setActiveTab('planner')}
                                 className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'planner'
-                                        ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
-                                        : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
                                     }`}
                             >
                                 <Calculator size={16} />
@@ -76,9 +77,9 @@ export default function ProductionPage() {
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                 {activeTab === 'dashboard' ? (
                     <div className="space-y-8">
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
                             {/* Left Column: Holding Area (Pending) */}
-                            <div className="lg:col-span-1 space-y-6">
+                            <div className="xl:col-span-1 space-y-6">
                                 <div className="flex items-center justify-between">
                                     <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
                                         <div className="w-2 h-8 bg-indigo-500 rounded-full" />
@@ -106,27 +107,46 @@ export default function ProductionPage() {
                                 )}
                             </div>
 
-                            {/* Right Column: Prep List (Approved/Production) */}
-                            <div className="lg:col-span-2 space-y-6">
-                                <div className="flex items-center justify-between">
-                                    <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
-                                        <div className="w-2 h-8 bg-amber-500 rounded-full" />
-                                        Production Queue
-                                    </h2>
+                            {/* Right Column: Prep List & In Production */}
+                            <div className="xl:col-span-2 space-y-8">
+                                <div className="space-y-6">
+                                    <div className="flex items-center justify-between">
+                                        <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+                                            <div className="w-2 h-8 bg-amber-500 rounded-full" />
+                                            Kitchen Prep List
+                                        </h2>
+                                    </div>
+
+                                    {isLoading && !data ? (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            {[1, 2, 3, 4].map(i => (
+                                                <div key={i} className="h-48 bg-slate-200 dark:bg-slate-800 rounded-3xl animate-pulse" />
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <PrepList
+                                            items={data?.prep || []}
+                                            onRefresh={refreshData}
+                                        />
+                                    )}
                                 </div>
 
-                                {isLoading && !data ? (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        {[1, 2, 3, 4].map(i => (
-                                            <div key={i} className="h-48 bg-slate-200 dark:bg-slate-800 rounded-3xl animate-pulse" />
-                                        ))}
+                                <div className="space-y-6">
+                                    <div className="flex items-center justify-between">
+                                        <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+                                            <div className="w-2 h-8 bg-emerald-500 rounded-full" />
+                                            In Production
+                                        </h2>
                                     </div>
-                                ) : (
-                                    <PrepList
-                                        items={data?.prep || []}
-                                        onRefresh={refreshData}
-                                    />
-                                )}
+                                    {isLoading && !data ? (
+                                        <div className="h-48 bg-slate-200 dark:bg-slate-800 rounded-3xl animate-pulse" />
+                                    ) : (
+                                        <InProductionArea
+                                            orders={data?.in_production || []}
+                                            onRefresh={refreshData}
+                                        />
+                                    )}
+                                </div>
                             </div>
                         </div>
 
