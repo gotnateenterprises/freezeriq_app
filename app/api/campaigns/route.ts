@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 
+export const dynamic = 'force-dynamic';
+
 
 // Helper to safely serialize BigInt
 function safeJSON(data: any) {
