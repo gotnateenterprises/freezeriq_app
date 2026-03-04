@@ -232,126 +232,136 @@ export default function BundlesPage() {
                 )}
             </div>
 
-            {activeTab === 'bundles' && (
-                <BundlesList bundles={filteredBundles} isLoading={isLoadingBundles} refresh={fetchBundles} />
-            )}
+            {
+                activeTab === 'bundles' && (
+                    <BundlesList bundles={filteredBundles} isLoading={isLoadingBundles} refresh={fetchBundles} />
+                )
+            }
 
-            {activeTab === 'catalogs' && (
-                <CatalogsList catalogs={catalogs} isLoading={isLoadingCatalogs} />
-            )}
+            {
+                activeTab === 'catalogs' && (
+                    <CatalogsList catalogs={catalogs} isLoading={isLoadingCatalogs} />
+                )
+            }
 
-            {activeTab === 'surplus' as any && (
-                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                    {/* Add New Surplus Form */}
-                    <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
-                        <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Add Surplus Item</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                            <div className="col-span-2">
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Recipe / Meal</label>
-                                <select
-                                    className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"
-                                    value={newSurplus.recipeId}
-                                    onChange={e => setNewSurplus({ ...newSurplus, recipeId: e.target.value })}
+            {
+                activeTab === 'surplus' as any && (
+                    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        {/* Add New Surplus Form */}
+                        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
+                            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Add Surplus Item</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                                <div className="col-span-2">
+                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Recipe / Meal</label>
+                                    <select
+                                        className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"
+                                        value={newSurplus.recipeId}
+                                        onChange={e => setNewSurplus({ ...newSurplus, recipeId: e.target.value })}
+                                    >
+                                        <option value="">Select a recipe...</option>
+                                        {recipes.map(r => (
+                                            <option key={r.id} value={r.id}>{r.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Price ($)</label>
+                                    <input
+                                        type="number"
+                                        className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"
+                                        placeholder="0.00"
+                                        value={newSurplus.price}
+                                        onChange={e => setNewSurplus({ ...newSurplus, price: e.target.value })}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Quantity</label>
+                                    <input
+                                        type="number"
+                                        className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"
+                                        placeholder="0"
+                                        value={newSurplus.stock}
+                                        onChange={e => setNewSurplus({ ...newSurplus, stock: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+                            <div className="mt-4 flex justify-end">
+                                <button
+                                    onClick={handleCreateSurplus}
+                                    className="px-6 py-2 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-colors"
                                 >
-                                    <option value="">Select a recipe...</option>
-                                    {recipes.map(r => (
-                                        <option key={r.id} value={r.id}>{r.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Price ($)</label>
-                                <input
-                                    type="number"
-                                    className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"
-                                    placeholder="0.00"
-                                    value={newSurplus.price}
-                                    onChange={e => setNewSurplus({ ...newSurplus, price: e.target.value })}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Quantity</label>
-                                <input
-                                    type="number"
-                                    className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"
-                                    placeholder="0"
-                                    value={newSurplus.stock}
-                                    onChange={e => setNewSurplus({ ...newSurplus, stock: e.target.value })}
-                                />
+                                    Add to Inventory
+                                </button>
                             </div>
                         </div>
-                        <div className="mt-4 flex justify-end">
-                            <button
-                                onClick={handleCreateSurplus}
-                                className="px-6 py-2 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-colors"
-                            >
-                                Add to Inventory
-                            </button>
-                        </div>
-                    </div>
 
-                    {/* Surplus List */}
-                    <BundlesList bundles={surplusItems} isLoading={isLoadingSurplus} refresh={fetchSurplus} />
-                </div>
-            )}
+                        {/* Surplus List */}
+                        <BundlesList bundles={surplusItems} isLoading={isLoadingSurplus} refresh={fetchSurplus} />
+                    </div>
+                )
+            }
 
             {/* Create Catalog Modal */}
-            {isCreatingCatalog && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-                    <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl p-8 w-full max-w-md animate-in fade-in zoom-in duration-200">
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-2xl font-black text-slate-900 dark:text-white">New Catalog</h3>
-                            <button onClick={() => setIsCreatingCatalog(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors">
-                                <X size={24} className="text-slate-400" />
-                            </button>
-                        </div>
-
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Catalog Name</label>
-                                <input
-                                    value={newCatalog.name}
-                                    onChange={e => setNewCatalog({ ...newCatalog, name: e.target.value })}
-                                    placeholder="e.g. Spring 2026 Fundraiser"
-                                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
-                                />
+            {
+                isCreatingCatalog && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+                        <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl p-8 w-full max-w-md animate-in fade-in zoom-in duration-200">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-2xl font-black text-slate-900 dark:text-white">New Catalog</h3>
+                                <button onClick={() => setIsCreatingCatalog(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors">
+                                    <X size={24} className="text-slate-400" />
+                                </button>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
+
+                            <div className="space-y-4">
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Start Date</label>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Catalog Name</label>
                                     <input
-                                        type="date"
-                                        value={newCatalog.start_date}
-                                        onChange={e => setNewCatalog({ ...newCatalog, start_date: e.target.value })}
+                                        value={newCatalog.name}
+                                        onChange={e => setNewCatalog({ ...newCatalog, name: e.target.value })}
+                                        placeholder="e.g. Spring 2026 Fundraiser"
                                         className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
                                     />
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">End Date</label>
-                                    <input
-                                        type="date"
-                                        value={newCatalog.end_date}
-                                        onChange={e => setNewCatalog({ ...newCatalog, end_date: e.target.value })}
-                                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
-                                    />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Start Date</label>
+                                        <input
+                                            type="date"
+                                            value={newCatalog.start_date}
+                                            onChange={e => setNewCatalog({ ...newCatalog, start_date: e.target.value })}
+                                            className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">End Date</label>
+                                        <input
+                                            type="date"
+                                            value={newCatalog.end_date}
+                                            onChange={e => setNewCatalog({ ...newCatalog, end_date: e.target.value })}
+                                            className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
+                                        />
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <div className="mt-8 flex justify-end gap-3">
-                            <button onClick={() => setIsCreatingCatalog(false)} className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors">Cancel</button>
-                            <button onClick={handleCreateCatalog} className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 dark:shadow-none">Create Catalog</button>
+                            <div className="mt-8 flex justify-end gap-3">
+                                <button onClick={() => setIsCreatingCatalog(false)} className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors">Cancel</button>
+                                <button onClick={handleCreateCatalog} className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 dark:shadow-none">Create Catalog</button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-            {activeTab === 'bundles' && (
-                <div className="mt-12 pt-8 border-t border-slate-200 dark:border-slate-700">
-                    <ProfitMarginTracker />
-                </div>
-            )}
-        </div>
+            {
+                activeTab === 'bundles' && (
+                    <div className="mt-12 pt-8 border-t border-slate-200 dark:border-slate-700">
+                        <ProfitMarginTracker />
+                    </div>
+                )
+            }
+        </div >
     );
 }
 
@@ -436,68 +446,70 @@ function BundlesList({ bundles, isLoading, refresh }: { bundles: any[], isLoadin
                         <p className="text-slate-500 dark:text-slate-400 mb-6">Change your filter or create a new bundle.</p>
                     </div>
                 ) : (
-                    <table className="w-full">
-                        <thead className="bg-slate-50 dark:bg-slate-900 bg-adaptive text-slate-500 dark:text-slate-400 text-xs font-semibold uppercase tracking-wider text-left border-b border-slate-200 dark:border-slate-700">
-                            <tr>
-                                <th className="px-6 py-3 pl-6">Name</th>
-                                <th className="px-6 py-3">SKU</th>
-                                <th className="px-6 py-3 text-center">Recipes</th>
-                                <th className="px-6 py-3 text-center">Storefront</th>
-                                <th className="px-6 py-3 text-right">Price</th>
-                                <th className="px-6 py-3 text-center">Status</th>
-                                <th className="px-6 py-3"></th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                            {bundles.map((bundle) => (
-                                <tr key={bundle.id} className="group hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center">
-                                                <Package size={20} />
-                                            </div>
-                                            <div>
-                                                <div className="font-medium text-slate-900 dark:text-white text-adaptive">{bundle.name}</div>
-                                                <div className="text-xs text-slate-500 dark:text-slate-400 text-adaptive-subtle truncate max-w-xs">{bundle.description || 'No description'}</div>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <span className="font-mono text-sm text-slate-600 dark:text-slate-400">{bundle.sku}</span>
-                                    </td>
-                                    <td className="px-6 py-4 text-center text-sm text-slate-600 dark:text-slate-400">
-                                        {bundle._count?.contents || 0} items
-                                    </td>
-                                    <td className="px-6 py-4 text-center">
-                                        <button
-                                            onClick={() => toggleStorefront(bundle)}
-                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${bundle.show_on_storefront ? 'bg-indigo-600' : 'bg-slate-200 dark:bg-slate-700'}`}
-                                        >
-                                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${bundle.show_on_storefront ? 'translate-x-6' : 'translate-x-1'}`} />
-                                        </button>
-                                    </td>
-                                    <td className="px-6 py-4 text-right text-sm font-medium text-slate-900 dark:text-white">
-                                        ${Number(bundle.menu_price || 0).toFixed(2)}
-                                    </td>
-                                    <td className="px-6 py-4 text-center">
-                                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${bundle.is_active !== false ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                                            {bundle.is_active !== false ? 'Active' : 'Inactive'}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4 text-right flex items-center justify-end gap-3">
-                                        <button
-                                            onClick={() => toggleStatus(bundle)}
-                                            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
-                                            title={bundle.is_active !== false ? "Archive Bundle" : "Activate Bundle"}
-                                        >
-                                            {bundle.is_active !== false ? <Archive size={18} /> : <ArchiveRestore size={18} />}
-                                        </button>
-                                        <Link href={`/bundles/${bundle.id}`} className="text-indigo-600 font-medium text-sm hover:underline">Edit</Link>
-                                    </td>
+                    <div className="overflow-x-auto w-full">
+                        <table className="w-full">
+                            <thead className="bg-slate-50 dark:bg-slate-900 bg-adaptive text-slate-500 dark:text-slate-400 text-xs font-semibold uppercase tracking-wider text-left border-b border-slate-200 dark:border-slate-700">
+                                <tr>
+                                    <th className="px-6 py-3 pl-6">Name</th>
+                                    <th className="px-6 py-3">SKU</th>
+                                    <th className="px-6 py-3 text-center">Recipes</th>
+                                    <th className="px-6 py-3 text-center">Storefront</th>
+                                    <th className="px-6 py-3 text-right">Price</th>
+                                    <th className="px-6 py-3 text-center">Status</th>
+                                    <th className="px-6 py-3"></th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                                {bundles.map((bundle) => (
+                                    <tr key={bundle.id} className="group hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                                        <td className="px-6 py-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+                                                    <Package size={20} />
+                                                </div>
+                                                <div>
+                                                    <div className="font-medium text-slate-900 dark:text-white text-adaptive">{bundle.name}</div>
+                                                    <div className="text-xs text-slate-500 dark:text-slate-400 text-adaptive-subtle truncate max-w-xs">{bundle.description || 'No description'}</div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <span className="font-mono text-sm text-slate-600 dark:text-slate-400">{bundle.sku}</span>
+                                        </td>
+                                        <td className="px-6 py-4 text-center text-sm text-slate-600 dark:text-slate-400">
+                                            {bundle._count?.contents || 0} items
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <button
+                                                onClick={() => toggleStorefront(bundle)}
+                                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${bundle.show_on_storefront ? 'bg-indigo-600' : 'bg-slate-200 dark:bg-slate-700'}`}
+                                            >
+                                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${bundle.show_on_storefront ? 'translate-x-6' : 'translate-x-1'}`} />
+                                            </button>
+                                        </td>
+                                        <td className="px-6 py-4 text-right text-sm font-medium text-slate-900 dark:text-white">
+                                            ${Number(bundle.menu_price || 0).toFixed(2)}
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${bundle.is_active !== false ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                                                {bundle.is_active !== false ? 'Active' : 'Inactive'}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-right flex items-center justify-end gap-3">
+                                            <button
+                                                onClick={() => toggleStatus(bundle)}
+                                                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+                                                title={bundle.is_active !== false ? "Archive Bundle" : "Activate Bundle"}
+                                            >
+                                                {bundle.is_active !== false ? <Archive size={18} /> : <ArchiveRestore size={18} />}
+                                            </button>
+                                            <Link href={`/bundles/${bundle.id}`} className="text-indigo-600 font-medium text-sm hover:underline">Edit</Link>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
             </div>
         </div>
