@@ -49,6 +49,11 @@ export class MockDB implements DBAdapter {
         return { serving_tier: 'family' }; // Default mock return
     }
 
+    async getAllRecipes(): Promise<Recipe[]> {
+        this.loadData();
+        return this.recipes;
+    }
+
     async getBundles(): Promise<Bundle[]> {
         return this.bundles;
     }

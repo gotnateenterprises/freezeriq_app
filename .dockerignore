@@ -1,13 +1,13 @@
 
-node_modules
-.next
 .git
+.next
+node_modules
+npm-debug.log
+Dockerfile
+.dockerignore
 .env
 .env.local
-backups
-.vscode
-npm-debug.log
+.env.production
+.eslintrc.json
 README.md
-INSTRUCTIONS.md
-*.bat
-*.ps1
+scripts/backup_full.ps1

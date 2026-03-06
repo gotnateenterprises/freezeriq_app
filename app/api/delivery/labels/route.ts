@@ -7,7 +7,14 @@ const prisma = new PrismaClient();
 // List all label templates
 export async function GET() {
     try {
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
         const templates = await prisma.labelTemplate.findMany({
+            where: {
+                business_id: session.user.businessId
+            },
             include: {
                 _count: {
                     select: { packagingItems: true }
@@ -27,6 +34,10 @@ export async function GET() {
 // Create a new label template
 export async function POST(req: Request) {
     try {
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
         const body = await req.json();
         const { name, width, height, elements, isDefault, packagingItemId } = body;
 
@@ -37,7 +48,8 @@ export async function POST(req: Request) {
                 width,
                 height,
                 elements: elements || [], // Default empty array if no elements provided
-                isDefault: isDefault || false
+                isDefault: isDefault || false,
+                business_id: session.user.businessId
             }
         });
 

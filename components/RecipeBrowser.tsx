@@ -7,8 +7,8 @@ import Link from 'next/link';
 import { Plus, Search, BookOpen, Clock, Users, ArrowRight, Upload, Folder, ChevronRight, ArrowLeft, FolderPlus, X, Trash, FileText, Download, DollarSign, GripVertical } from 'lucide-react';
 import RecipeImporter from './RecipeImporter';
 import { Recipe, Category } from '@/types';
-import { DndContext, DragOverlay, DragEndEvent, DragStartEvent } from '@dnd-kit/core';
-import { DroppableFolder, DraggableHandle, DraggableRecipe } from './DraggableComponents';
+import { DndContext, DragOverlay, DragEndEvent, DragStartEvent, PointerSensor, useSensor, useSensors, pointerWithin, rectIntersection, closestCenter } from '@dnd-kit/core';
+import { DroppableFolder, DraggableRecipe, DraggableFolderItem } from './DraggableComponents';
 import { ClientOnly } from './ClientOnly';
 
 // Helper to find category path
@@ -54,6 +54,14 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
     const [activeId, setActiveId] = useState<string | null>(null);
     const [isDragging, setIsDragging] = useState(false);
 
+    const sensors = useSensors(
+        useSensor(PointerSensor, {
+            activationConstraint: {
+                distance: 8,
+            },
+        })
+    );
+
     const handleCreateFolder = async () => {
         if (!newFolderName.trim()) return;
         try {
@@ -65,6 +73,7 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
             if (res.ok) {
                 setNewFolderName('');
                 setIsCreatingFolder(false);
+                console.log(`[DnD] Folder created successfully.`);
                 router.refresh();
             } else {
                 alert('Failed to create folder');
@@ -94,6 +103,27 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
         }
     };
 
+    const handleDeleteRecipe = async (e: React.MouseEvent, id: string, name: string) => {
+        e.preventDefault(); // Prevent Link navigation
+        e.stopPropagation();
+        if (!confirm(`Are you sure you want to delete "${name}"? This cannot be undone.`)) return;
+
+        try {
+            const res = await fetch(`/api/recipes/${id}`, {
+                method: 'DELETE'
+            });
+
+            if (res.ok) {
+                router.refresh();
+            } else {
+                const data = await res.json();
+                alert(data.error || 'Failed to delete recipe');
+            }
+        } catch (e) {
+            alert('Error deleting recipe');
+        }
+    };
+
     const handleDragStart = (event: DragStartEvent) => {
         setActiveId(event.active.id as string);
         setIsDragging(true);
@@ -113,16 +143,32 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
         // Recipe dropped onto category
         if (activeData?.type === 'recipe' && overData?.type === 'category') {
             const recipeId = active.id as string;
-            const categoryId = over.id as string;
+            // Parse actual ID from prefixed ID
+            const rawOverId = over.id as string;
+            const categoryId = rawOverId.replace('folder-drop-', '');
+
+            console.log(`[DnD] Recipe ${recipeId} dropped onto Category ${categoryId}`);
 
             const recipe = recipes.find(r => r.id === recipeId);
-            if (!recipe) return;
+            if (!recipe) {
+                console.error(`[DnD] Recipe ${recipeId} not found in current list!`);
+                return;
+            }
 
-            // Get current category IDs and add new one
-            const currentCategoryIds = recipe.categories?.map(c => c.id) || [];
-            if (currentCategoryIds.includes(categoryId)) return;
+            console.log(`[DnD] Recipe categories at drop:`, JSON.stringify(recipe.categories, null, 2));
 
-            const newCategoryIds = [...currentCategoryIds, categoryId];
+            // NEW Logic: If we are in a folder view, REPLACE that folder with the target
+            // This turns "Add Category" into "Move to Category"
+            let newCategoryIds: string[] = [];
+            if (currentCategoryId) {
+                const otherCategories = (recipe.categories || []).filter(c => c.id !== currentCategoryId).map(c => c.id);
+                newCategoryIds = [...new Set([...otherCategories, categoryId])];
+            } else {
+                const currentIds = (recipe.categories || []).map(c => c.id);
+                newCategoryIds = [...new Set([...currentIds, categoryId])];
+            }
+
+            console.log(`[DnD] Submitting new category IDs:`, newCategoryIds);
 
             try {
                 const res = await fetch(`/api/recipes/${recipeId}/categories`, {
@@ -132,6 +178,7 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
                 });
 
                 if (res.ok) {
+                    console.log(`[DnD] Recipe updated successfully.`);
                     router.refresh();
                 } else {
                     const data = await res.json();
@@ -159,6 +206,7 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
                 });
 
                 if (res.ok) {
+                    console.log(`[DnD] Category moved successfully.`);
                     router.refresh();
                 } else {
                     const data = await res.json();
@@ -181,6 +229,7 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
                 });
 
                 if (res.ok) {
+                    console.log(`[DnD] Recipe uncategorized successfully.`);
                     router.refresh();
                 } else {
                     alert('Failed to uncategorize recipe');
@@ -235,10 +284,33 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
             .sort((a, b) => b.score - a.score); // Highest score first
 
     } else {
-        // Find Current Category Object
-        const currentCategory = currentCategoryId
-            ? categories.flatMap(c => [c, ...(c.children || []).flatMap(d => [d, ...(d.children || [])])]).find(c => c.id === currentCategoryId)
-            : null;
+        // Recursive function to get all descendant category IDs
+        const getAllChildCategoryIds = (catId: string): string[] => {
+            const findNode = (nodes: Category[]): Category | null => {
+                for (const node of nodes) {
+                    if (node.id === catId) return node;
+                    if (node.children) {
+                        const found = findNode(node.children);
+                        if (found) return found;
+                    }
+                }
+                return null;
+            };
+            const node = findNode(categories);
+            if (!node) return [catId];
+
+            const ids: string[] = [node.id];
+            const collect = (cats: Category[]) => {
+                for (const c of cats) {
+                    ids.push(c.id);
+                    if (c.children) collect(c.children);
+                }
+            };
+            if (node.children) collect(node.children);
+            return ids;
+        };
+
+        const targetCategoryIds = currentCategoryId ? getAllChildCategoryIds(currentCategoryId) : [];
 
         // Determine what folders to show
         if (!currentCategoryId) {
@@ -247,7 +319,7 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
             displayRecipes = recipes.filter(r => !r.categories || r.categories.length === 0) as ScoredRecipe[];
         } else {
             // Inside Category
-            // Re-find in tree to ensure we have children populated
+            // Find current node for folders list
             const findNode = (nodes: Category[]): Category | null => {
                 for (const node of nodes) {
                     if (node.id === currentCategoryId) return node;
@@ -262,11 +334,14 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
 
             displayFolders = activeNode?.children || [];
 
-            // Filter by Category (Support M-N and Legacy 1-N)
-            displayRecipes = recipes.filter(r =>
-                (r.categories && r.categories.some(c => c.id === currentCategoryId)) ||
-                r.category_id === currentCategoryId
-            ) as ScoredRecipe[];
+            // Filter by Category (Direct Match only to ensure "Move" results in removal from current list)
+            displayRecipes = recipes.filter(r => {
+                const recipeCatIds = [
+                    ...(r.categories?.map(c => c.id) || []),
+                    ...(r.category_id ? [r.category_id] : [])
+                ];
+                return recipeCatIds.includes(currentCategoryId);
+            }) as ScoredRecipe[];
         }
     }
 
@@ -278,7 +353,12 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
     return (
         <>
             <ClientOnly>
-                <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+                <DndContext
+                    sensors={sensors}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    collisionDetection={closestCenter}
+                >
                     <div className="space-y-8">
                         {/* Header */}
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
@@ -360,74 +440,88 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
                             </div>
                         )}
 
-                        {/* Uncategorized Drop Zone - only show when dragging */}
-                        {isDragging && (
-                            <DroppableFolder id="root-uncategorized">
-                                <div className="p-6 border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-3xl bg-slate-50 dark:bg-slate-800/50 text-center">
-                                    <p className="text-slate-500 dark:text-slate-400 font-bold">
-                                        Drop here to remove from all categories
-                                    </p>
-                                </div>
-                            </DroppableFolder>
-                        )}
+
 
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                             {/* Folders */}
                             {!isSearching && displayFolders.map(folder => (
-                                <DroppableFolder key={folder.id} id={folder.id}>
-                                    <div
-                                        role="button"
-                                        tabIndex={0}
-                                        onClick={() => setCurrentCategoryId(folder.id)}
-                                        onKeyDown={(e) => e.key === 'Enter' && setCurrentCategoryId(folder.id)}
-                                        className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 p-6 rounded-3xl hover:scale-[1.02] hover:shadow-lg transition-all duration-300 group flex items-center gap-4 text-left cursor-pointer"
-                                    >
-                                        <DraggableHandle id={folder.id} type="category">
-                                            <div className="p-2 text-slate-400 group-hover:text-indigo-600 transition-colors">
-                                                <GripVertical size={20} />
-                                            </div>
-                                        </DraggableHandle>
-                                        <div className="p-4 bg-white dark:bg-indigo-900/50 rounded-2xl shadow-sm group-hover:bg-indigo-600 group-hover:text-white transition-colors text-indigo-500">
-                                            <Folder size={32} strokeWidth={2} />
-                                        </div>
-                                        <div>
-                                            <h3 className="text-xl font-black text-indigo-900 dark:text-indigo-100 group-hover:text-indigo-700 dark:group-hover:text-white transition-colors">
-                                                {folder.name}
-                                            </h3>
-                                            <p className="text-sm text-indigo-400 dark:text-indigo-300 font-bold group-hover:text-indigo-500 dark:group-hover:text-indigo-200">
-                                                {folder.children && folder.children.length > 0
-                                                    ? `${folder.children.length} Sub-folders`
-                                                    : `${(folder as any)._count?.recipes || 0} Recipes`
-                                                }
-                                            </p>
-                                        </div>
-                                        <div className="ml-auto flex items-center gap-2">
-                                            <button
-                                                onClick={(e) => handleDeleteFolder(e, folder.id)}
-                                                className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                                                title="Delete Folder"
+                                <DroppableFolder key={folder.id} id={`folder-drop-${folder.id}`}>
+                                    <DraggableFolderItem id={folder.id}>
+                                        {({ attributes, listeners }) => (
+                                            <div
+                                                role="button"
+                                                tabIndex={0}
+                                                onClick={() => setCurrentCategoryId(folder.id)}
+                                                onKeyDown={(e) => e.key === 'Enter' && setCurrentCategoryId(folder.id)}
+                                                className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 p-6 rounded-3xl hover:scale-[1.02] hover:shadow-lg transition-all duration-300 group flex items-center gap-4 text-left cursor-pointer"
                                             >
-                                                <Trash size={18} />
-                                            </button>
-                                            <ChevronRight size={24} strokeWidth={3} className="text-indigo-400" />
-                                        </div>
-                                    </div>
+                                                <div {...attributes} {...listeners} className="p-2 text-slate-400 group-hover:text-indigo-600 transition-colors cursor-move">
+                                                    <GripVertical size={20} />
+                                                </div>
+                                                <div className="p-4 bg-white dark:bg-indigo-900/50 rounded-2xl shadow-sm group-hover:bg-indigo-600 group-hover:text-white transition-colors text-indigo-500">
+                                                    <Folder size={32} strokeWidth={2} />
+                                                </div>
+                                                <div>
+                                                    <h3 className="text-xl font-black text-indigo-900 dark:text-indigo-100 group-hover:text-indigo-700 dark:group-hover:text-white transition-colors">
+                                                        {folder.name}
+                                                    </h3>
+                                                    <p className="text-sm text-indigo-400 dark:text-indigo-300 font-bold group-hover:text-indigo-500 dark:group-hover:text-indigo-200">
+                                                        {folder.children && folder.children.length > 0
+                                                            ? `${folder.children.length} Sub-folders`
+                                                            : `${(folder as any)._count?.recipes || 0} Recipes`
+                                                        }
+                                                    </p>
+                                                </div>
+                                                <div className="ml-auto flex items-center gap-2">
+                                                    <button
+                                                        onClick={(e) => handleDeleteFolder(e, folder.id)}
+                                                        className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                                        title="Delete Folder"
+                                                    >
+                                                        <Trash size={18} />
+                                                    </button>
+                                                    <ChevronRight size={24} strokeWidth={3} className="text-indigo-400" />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </DraggableFolderItem>
                                 </DroppableFolder>
                             ))}
+
+
 
                             {/* Recipes */}
                             {displayRecipes.map((recipe) => (
                                 <DraggableRecipe key={recipe.id} id={recipe.id}>
-                                    {({ ref, attributes, listeners }) => (
+                                    {({ attributes, listeners }) => (
                                         <Link
                                             href={`/recipes/${recipe.id}`}
                                             className="glass-panel p-6 rounded-3xl hover:scale-[1.02] hover:shadow-xl transition-all duration-300 group border border-white/40 dark:border-slate-700/50 flex flex-col relative overflow-hidden bg-white dark:bg-slate-800/40 bg-adaptive"
                                         >
-                                            <div ref={ref} {...attributes} {...listeners} className="absolute top-2 left-2 p-2 text-slate-300 group-hover:text-indigo-500 transition-colors z-10 cursor-move">
+                                            <div {...attributes} {...listeners} className="absolute top-2 left-2 p-2 text-slate-300 group-hover:text-indigo-500 transition-colors z-30 cursor-move">
                                                 <GripVertical size={20} />
                                             </div>
-                                            <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:opacity-20 group-hover:scale-110 transition-all">
-                                                <FileText size={120} className="text-indigo-900 dark:text-indigo-400" />
+                                            <button
+                                                onClick={(e) => handleDeleteRecipe(e, recipe.id, recipe.name)}
+                                                className="absolute top-2 right-2 p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-full transition-all z-30 opacity-0 group-hover:opacity-100"
+                                                title="Delete Recipe"
+                                            >
+                                                <Trash size={18} />
+                                            </button>
+                                            {/* Photo Placeholder/Preview */}
+                                            <div className="h-40 -mx-6 -mt-6 mb-4 relative overflow-hidden bg-slate-100 dark:bg-slate-700">
+                                                {recipe.image_url ? (
+                                                    <img
+                                                        src={recipe.image_url}
+                                                        alt={recipe.name}
+                                                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                                                    />
+                                                ) : (
+                                                    <div className="w-full h-full flex items-center justify-center opacity-20">
+                                                        <FileText size={48} className="text-indigo-900 dark:text-indigo-400" />
+                                                    </div>
+                                                )}
+                                                <div className="absolute inset-0 bg-linear-to-t from-black/40 to-transparent" />
                                             </div>
 
                                             <div className="flex justify-between items-start mb-4 relative z-10">
@@ -495,55 +589,96 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
                                 <p className="text-slate-400 dark:text-slate-600 text-lg font-bold">No recipes found matching "{searchTerm}"</p>
                             </div>
                         )}
+                    </div>
 
-
-                        {/* New Folder Modal */}
-                        {
-                            isCreatingFolder && (
-                                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                                    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md p-6 animate-in fade-in zoom-in duration-200">
-                                        <div className="flex justify-between items-center mb-6">
-                                            <h3 className="text-xl font-bold text-slate-900 dark:text-white">Create New Folder</h3>
-                                            <button onClick={() => setIsCreatingFolder(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
-                                                <X size={24} />
-                                            </button>
-                                        </div>
-                                        <div className="space-y-4">
-                                            <div>
-                                                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Folder Name</label>
-                                                <input
-                                                    autoFocus
-                                                    value={newFolderName}
-                                                    onChange={e => setNewFolderName(e.target.value)}
-                                                    placeholder="e.g. Seasonal Menu"
-                                                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-                                                    onKeyDown={e => e.key === 'Enter' && handleCreateFolder()}
-                                                />
+                    <DragOverlay dropAnimation={null}>
+                        {activeId ? (
+                            <div className="opacity-80 scale-105 shadow-2xl pointer-events-none">
+                                {activeItem && (
+                                    <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border-2 border-indigo-500 flex items-center gap-4 w-[350px]">
+                                        {'children' in activeItem ? (
+                                            <div className="p-4 bg-indigo-100 dark:bg-indigo-900/50 rounded-2xl text-indigo-500">
+                                                <Folder size={32} />
                                             </div>
-                                            <div className="flex justify-end gap-3 pt-2">
-                                                <button
-                                                    onClick={() => setIsCreatingFolder(false)}
-                                                    className="px-4 py-2 text-slate-600 dark:text-slate-400 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl"
-                                                >
-                                                    Cancel
-                                                </button>
-                                                <button
-                                                    onClick={handleCreateFolder}
-                                                    disabled={!newFolderName.trim()}
-                                                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-xl font-bold shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    Create Folder
-                                                </button>
+                                        ) : (
+                                            <div className="p-4 bg-indigo-50 dark:bg-indigo-900/30 rounded-2xl text-indigo-500">
+                                                <FileText size={32} />
                                             </div>
+                                        )}
+                                        <div>
+                                            <h3 className="text-xl font-black text-indigo-900 dark:text-indigo-100 truncate">
+                                                {(activeItem as any).name}
+                                            </h3>
+                                            <p className="text-sm text-indigo-400 font-bold uppercase">
+                                                {'children' in activeItem ? 'Folder' : 'Recipe'}
+                                            </p>
                                         </div>
                                     </div>
-                                </div>
-                            )
-                        }
-                    </div>
+                                )}
+                            </div>
+                        ) : null}
+                    </DragOverlay>
                 </DndContext>
             </ClientOnly>
 
+            {/* New Folder Modal */}
+            {isCreatingFolder && (
+                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md p-6 animate-in fade-in zoom-in duration-200">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold text-slate-900 dark:text-white">Create New Folder</h3>
+                            <button onClick={() => setIsCreatingFolder(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                                <X size={24} />
+                            </button>
+                        </div>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Folder Name</label>
+                                <input
+                                    autoFocus
+                                    value={newFolderName}
+                                    onChange={e => setNewFolderName(e.target.value)}
+                                    placeholder="e.g. Seasonal Menu"
+                                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                                    onKeyDown={e => e.key === 'Enter' && handleCreateFolder()}
+                                />
+                            </div>
+                            <div className="flex justify-end gap-3 pt-2">
+                                <button
+                                    onClick={() => setIsCreatingFolder(false)}
+                                    className="px-4 py-2 text-slate-600 dark:text-slate-400 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleCreateFolder}
+                                    disabled={!newFolderName.trim()}
+                                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-xl font-bold shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    Create Folder
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Fixed Uncategorize Drop Zone */}
+            {isDragging && (
+                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 w-full max-w-md px-4 animate-in slide-in-from-bottom-10 fade-in duration-300">
+                    <DroppableFolder id="root-uncategorized">
+                        <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl border-4 border-dashed border-rose-500/50 p-8 rounded-[2.5rem] flex items-center justify-center gap-6 text-center shadow-2xl hover:border-rose-500 hover:scale-105 transition-all">
+                            <div className="p-4 bg-rose-50 dark:bg-rose-900/30 rounded-2xl text-rose-500 shadow-sm">
+                                <X size={40} strokeWidth={3} />
+                            </div>
+                            <div className="text-left">
+                                <h3 className="text-2xl font-black text-slate-900 dark:text-white leading-tight">Drop to Uncategorize</h3>
+                                <p className="text-slate-500 dark:text-slate-400 font-bold">Move back to Main List</p>
+                            </div>
+                        </div>
+                    </DroppableFolder>
+                </div>
+            )}
         </>
     );
 }

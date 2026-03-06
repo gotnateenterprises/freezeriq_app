@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server';
 import { KitchenEngine } from '@/lib/kitchen_engine';
 import { PrismaAdapter } from '@/lib/prisma_adapter';
+import { auth } from '@/auth';
 
 export async function POST(request: Request) {
     try {
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const requestBody = await request.json();
 
         if (!requestBody.use_live_orders && !requestBody.orders && (!requestBody.bundle_id || !requestBody.quantity)) {
@@ -14,7 +20,7 @@ export async function POST(request: Request) {
         }
 
         // Initialize Engine
-        const db = new PrismaAdapter();
+        const db = new PrismaAdapter(session.user.businessId);
         const engine = new KitchenEngine(db);
 
         let orders = [];

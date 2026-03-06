@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, CheckCircle, Circle, Trash2, Plus, Loader2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Circle, Trash2, Plus, Loader2, Printer } from 'lucide-react';
 
 interface ProductionTask {
     id: string;
@@ -161,12 +161,23 @@ export default function RunDetail() {
                                         </div>
                                     </div>
                                 </div>
-                                <button
-                                    onClick={() => deleteTask(task.id)}
-                                    className="p-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"
-                                >
-                                    <Trash2 size={18} />
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    {task.item_type === 'recipe' && (
+                                        <Link
+                                            href={`/labels?recipeId=${task.item_id}&printQty=${task.total_qty_needed}`}
+                                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
+                                            title="Print Labels"
+                                        >
+                                            <Printer size={18} />
+                                        </Link>
+                                    )}
+                                    <button
+                                        onClick={() => deleteTask(task.id)}
+                                        className="p-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"
+                                    >
+                                        <Trash2 size={18} />
+                                    </button>
+                                </div>
                             </div>
                         ))}
                     </div>

@@ -26,11 +26,20 @@ interface LabelTemplate {
 interface Stats {
     largeBoxesNeeded: number;
     smallBoxesNeeded: number;
+    packaging?: {
+        largeTrays: number;
+        largeLids: number;
+        smallTrays: number;
+        smallLids: number;
+        gallonBags: number;
+        quartBags: number;
+    };
 }
 
 // --- PRINT COMPONENT ---
-function PrintedLabel({ template, scale = 1 }: { template: LabelTemplate, scale?: number }) {
-    const UNITS_PER_INCH = 100; // Must match Label Editor's ZOOM constant
+function PrintedLabel({ template, scale = 1 }: { template: LabelTemplate | null, scale?: number }) {
+    if (!template) return null; // Logic handles null slots elsewhere, but safety first
+    const UNITS_PER_INCH = 100;
     return (
         <div
             style={{
@@ -75,10 +84,8 @@ function PrintedLabel({ template, scale = 1 }: { template: LabelTemplate, scale?
     );
 }
 
-function Avery5821Page({ labels }: { labels: LabelTemplate[] }) {
+function Avery5821Page({ labels, onSlotClick }: { labels: (LabelTemplate | null)[], onSlotClick: (index: number) => void }) {
     // Avery 5821: 8.5 x 11 sheet. 2 columns, 4 rows.
-    // Label: 4.0 x 2.5
-    // Top Margin: 0.5", Side Margin: 0.25"
     return (
         <div className="avery-page bg-white shadow-xl mb-12 print:mb-0 print:shadow-none relative" style={{
             width: '8.5in',
@@ -88,7 +95,6 @@ function Avery5821Page({ labels }: { labels: LabelTemplate[] }) {
             overflow: 'hidden',
             boxSizing: 'border-box'
         }}>
-            {/* The Grid / Slots */}
             <div style={{
                 position: 'absolute',
                 top: '0.5in',
@@ -103,52 +109,43 @@ function Avery5821Page({ labels }: { labels: LabelTemplate[] }) {
                     const label = labels[i];
                     return (
                         <div key={i}
-                            style={{
-                                width: '4in',
-                                height: '2.5in',
-                                boxSizing: 'border-box',
-                                border: '1px solid rgba(0,0,0,0.05)',
-                                position: 'relative',
-                                overflow: 'hidden'
-                            }}
-                            className="print:border-none"
+                            style={{ width: '4in', height: '2.5in', boxSizing: 'border-box', border: '1px solid rgba(0,0,0,0.05)', position: 'relative', overflow: 'hidden' }}
+                            className="print:border-none group cursor-pointer hover:bg-rose-50/20 transition-colors"
+                            onClick={() => onSlotClick(i)}
+                            title={label ? "Click to Remove Label" : "Click to Add Filler Label"}
                         >
-                            {label && (
-                                <div style={{
-                                    position: 'absolute',
-                                    top: 0,
-                                    left: 0,
-                                    width: `${label.width}in`,
-                                    height: `${label.height}in`,
-                                    transformOrigin: '0 0',
-                                    transform: (() => {
-                                        // Decide if we need to rotate portrait -> landscape
-                                        const shouldRotate = label.height > label.width;
-                                        const actualW = shouldRotate ? label.height : label.width;
-                                        const actualH = shouldRotate ? label.width : label.height;
-
-                                        // Calculate best fit scale
-                                        const scaleX = 4 / actualW;
-                                        const scaleY = 2.5 / actualH;
-                                        const scale = Math.min(scaleX, scaleY);
-
-                                        // Rotation math: Rotate 90deg CW, then move right by Height to bring back to (+X) quadrant
-                                        const rotationStr = shouldRotate ? `translateX(${label.height}in) rotate(90deg)` : '';
-                                        return `scale(${scale}) ${rotationStr}`;
-                                    })()
-                                }}>
-                                    <PrintedLabel template={label} />
+                            {label ? (
+                                <div className="relative w-full h-full">
+                                    <div style={{
+                                        position: 'absolute', top: 0, left: 0, width: `${label.width}in`, height: `${label.height}in`, transformOrigin: '0 0',
+                                        transform: (() => {
+                                            const shouldRotate = label.height > label.width;
+                                            const actualW = shouldRotate ? label.height : label.width;
+                                            const actualH = shouldRotate ? label.width : label.height;
+                                            const scaleX = 4 / actualW;
+                                            const scaleY = 2.5 / actualH;
+                                            const scale = Math.min(scaleX, scaleY);
+                                            const rotationStr = shouldRotate ? `translateX(${label.height}in) rotate(90deg)` : '';
+                                            return `scale(${scale}) ${rotationStr}`;
+                                        })()
+                                    }}>
+                                        <PrintedLabel template={label} />
+                                    </div>
+                                    {/* Hover Remove Overlay (Print Hidden) */}
+                                    <div className="absolute inset-0 bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-opacity print:hidden flex items-center justify-center">
+                                        <div className="bg-white text-rose-600 px-2 py-1 rounded shadow-sm text-xs font-bold border border-rose-100">Click to Remove</div>
+                                    </div>
                                 </div>
-                            )}
-                            {!label && (
-                                <div className="absolute inset-0 flex items-center justify-center text-[8px] text-slate-300 font-bold uppercase tracking-tighter print:hidden">
-                                    Empty Slot {i + 1}
+                            ) : (
+                                <div className="absolute inset-0 flex items-center justify-center text-[10px] text-slate-300 font-bold uppercase tracking-tighter print:hidden hover:bg-slate-50 transition-colors">
+                                    <span className="opacity-0 group-hover:opacity-100 text-indigo-500 font-bold">+ Add Filler</span>
                                 </div>
                             )}
                         </div>
                     );
                 })}
             </div>
+            <div className="print:hidden text-center text-xs text-brand-secondary mt-2">Page Break (Avery 5821)</div>
         </div>
     );
 }
@@ -158,7 +155,14 @@ export default function BatchPrintPage() {
     const router = useRouter();
     const [isLoading, setIsLoading] = useState(true);
     const [jobs, setJobs] = useState<{ template: LabelTemplate, count: number, typeName: string }[]>([]);
+    const [allSlots, setAllSlots] = useState<(LabelTemplate | null)[]>([]); // Flattened view for pagination
     const [errors, setErrors] = useState<string[]>([]);
+    const [stats, setStats] = useState<Stats | null>(null);
+
+    // Filler Modal
+    const [showFillerModal, setShowFillerModal] = useState(false);
+    const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
+    const [templates, setTemplates] = useState<LabelTemplate[]>([]);
 
     useEffect(() => {
         loadData();
@@ -166,57 +170,55 @@ export default function BatchPrintPage() {
 
     const loadData = async () => {
         try {
-            // 1. Fetch Stats & Inventory
             const [statsRes, invRes, labelsRes] = await Promise.all([
                 fetch('/api/delivery/stats'),
                 fetch('/api/delivery/inventory'),
                 fetch('/api/delivery/labels')
             ]);
-
-            const stats: Stats = await statsRes.json();
+            const s: Stats = await statsRes.json();
             const items: PackagingItem[] = await invRes.json();
-            const templates: LabelTemplate[] = await labelsRes.json();
+            const tpls: LabelTemplate[] = await labelsRes.json();
 
-            // 2. Identify Box Items
+            setStats(s);
+            setTemplates(tpls);
+
             const largeBox = items.find(i => i.type === 'large_box' || i.name.toLowerCase().includes('large'));
             const smallBox = items.find(i => i.type === 'small_box' || i.name.toLowerCase().includes('small'));
 
             const newJobs = [];
             const newErrors = [];
+            const newSlots: (LabelTemplate | null)[] = [];
 
-            // 3. Match Large Boxes
-            if (stats.largeBoxesNeeded > 0) {
+            if (s.largeBoxesNeeded > 0) {
                 if (largeBox?.defaultLabelId) {
-                    const tpl = templates.find(t => t.id === largeBox.defaultLabelId);
+                    const tpl = tpls.find(t => t.id === largeBox.defaultLabelId);
                     if (tpl) {
-                        newJobs.push({ template: tpl, count: stats.largeBoxesNeeded, typeName: 'Large Box' });
-                    } else {
-                        newErrors.push("Large Box label template not found.");
-                    }
-                } else {
-                    newErrors.push("No label assigned to Large Box.");
-                }
+                        newJobs.push({ template: tpl, count: s.largeBoxesNeeded, typeName: 'Large Box' });
+                        for (let k = 0; k < s.largeBoxesNeeded; k++) newSlots.push(tpl);
+                    } else newErrors.push("Large Box label template not found.");
+                } else newErrors.push("No label assigned to Large Box.");
             }
 
-            // 4. Match Small Boxes
-            if (stats.smallBoxesNeeded > 0) {
+            if (s.smallBoxesNeeded > 0) {
                 if (smallBox?.defaultLabelId) {
-                    const tpl = templates.find(t => t.id === smallBox.defaultLabelId);
+                    const tpl = tpls.find(t => t.id === smallBox.defaultLabelId);
                     if (tpl) {
-                        newJobs.push({ template: tpl, count: stats.smallBoxesNeeded, typeName: 'Small Box' });
-                    } else {
-                        newErrors.push("Small Box label template not found.");
-                    }
-                } else {
-                    newErrors.push("No label assigned to Small Box.");
-                }
+                        newJobs.push({ template: tpl, count: s.smallBoxesNeeded, typeName: 'Small Box' });
+                        for (let k = 0; k < s.smallBoxesNeeded; k++) newSlots.push(tpl);
+                    } else newErrors.push("Small Box label template not found.");
+                } else newErrors.push("No label assigned to Small Box.");
+            }
+
+            // Fill remaining page slots with nulls to complete the page visually for user interaction
+            const totalLabels = newSlots.length;
+            const remainder = totalLabels % 8;
+            if (remainder > 0) {
+                for (let k = 0; k < (8 - remainder); k++) newSlots.push(null);
             }
 
             setJobs(newJobs);
+            setAllSlots(newSlots);
             setErrors(newErrors);
-
-            console.log("Load complete. Jobs:", newJobs.length, "Errors:", newErrors.length);
-
         } catch (e) {
             console.error(e);
             setErrors(["Failed to load print data."]);
@@ -225,11 +227,88 @@ export default function BatchPrintPage() {
         }
     };
 
-    const handlePrint = () => {
+    const handleSlotClick = (pageIndex: number, slotInPage: number) => {
+        const absoluteIndex = (pageIndex * 8) + slotInPage;
+
+        // If slot is occupied, remove it
+        if (allSlots[absoluteIndex]) {
+            const newSlots = [...allSlots];
+            newSlots[absoluteIndex] = null;
+            setAllSlots(newSlots);
+            return;
+        }
+
+        // If slot is empty, open filler modal
+        setSelectedSlotIndex(absoluteIndex);
+        setShowFillerModal(true);
+    };
+
+    const applyFiller = (template: LabelTemplate) => {
+        if (selectedSlotIndex === null) return;
+        const newSlots = [...allSlots];
+        newSlots[selectedSlotIndex] = template;
+        setAllSlots(newSlots);
+        setShowFillerModal(false);
+    };
+
+    const handlePrint = async () => {
         window.print();
+
+        // After print dialog closes (browser blocking behavior dependent, but we show confirm dialogue anyway)
+        // Wait a small delay to ensure print dialog is fully dismissed if non-blocking
+        setTimeout(async () => {
+            const pack = stats?.packaging;
+            const deductionMsg = pack ?
+                `This will deduct:\n` +
+                `- Sheets & Tape\n` +
+                (pack.largeTrays ? `- ${pack.largeTrays} Large Trays & Lids\n` : '') +
+                (pack.smallTrays ? `- ${pack.smallTrays} Small Containers & Lids\n` : '') +
+                (pack.gallonBags ? `- ${pack.gallonBags} Gallon Bags\n` : '') +
+                (pack.quartBags ? `- ${pack.quartBags} Quart Bags\n` : '')
+                : 'Click OK to deduct Inventory (Sheets & Tape).';
+
+            if (confirm(`Did the labels print successfully?\n\n${deductionMsg}\nClick Cancel if printing failed.`)) {
+                try {
+                    // Calculate totals
+                    // Tape: derived from stats (boxes)
+                    // Sheets: derived from allSlots length (printed pages)
+                    const large = stats?.largeBoxesNeeded || 0;
+                    const small = stats?.smallBoxesNeeded || 0;
+                    const pages = Math.ceil(allSlots.length / 8);
+
+                    const res = await fetch('/api/delivery/record-print-job', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            largeBoxes: large,
+                            smallBoxes: small,
+                            sheetsUsed: pages,
+                            packaging: pack // Pass the calculated packaging stats
+                        })
+                    });
+
+                    if (res.ok) {
+                        const data = await res.json();
+                        alert(`Inventory Updated!\nDeducted:\n` +
+                            JSON.stringify(data.deducted.details || {}, null, 2).replace(/[\{\}"]/g, ''));
+                        router.push('/delivery');
+                    } else {
+                        alert('Failed to update inventory.');
+                    }
+                } catch (e) {
+                    alert('Network error updating inventory.');
+                }
+            }
+        }, 500);
     };
 
     if (isLoading) return <div className="p-12 text-center text-slate-500">Loading print job...</div>;
+
+    // Pagination of slots
+    const pages = [];
+    for (let i = 0; i < allSlots.length; i += 8) {
+        pages.push(allSlots.slice(i, i + 8));
+    }
 
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-900 print:bg-white">
@@ -247,13 +326,15 @@ export default function BatchPrintPage() {
                     </div>
                     <div className="flex flex-col items-end gap-2">
                         <span className="text-[10px] uppercase font-bold text-slate-400">Avery 5821 (8.5" x 11")</span>
-                        <button
-                            onClick={handlePrint}
-                            disabled={jobs.length === 0}
-                            className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            <Printer size={20} /> Print {jobs.reduce((a, b) => a + b.count, 0)} Labels
-                        </button>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={handlePrint}
+                                disabled={allSlots.every(s => s === null)}
+                                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <Printer size={20} /> Print & Update Inventory
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -265,18 +346,16 @@ export default function BatchPrintPage() {
                             <ul className="list-disc pl-5 space-y-1 text-sm mt-1">
                                 {errors.map((e, i) => <li key={i}>{e}</li>)}
                             </ul>
-                            <p className="text-sm mt-2 text-amber-700">Go back to the Dashboard and assign labels to your box counters.</p>
                         </div>
                     </div>
                 )}
 
-                {jobs.length === 0 && errors.length === 0 && (
-                    <div className="text-center py-12 bg-white rounded-2xl border border-slate-200">
-                        <p className="text-slate-500 font-bold">No labels needed right now!</p>
-                    </div>
-                )}
+                <p className="text-sm text-slate-500 mb-4 bg-blue-50 text-blue-800 p-3 rounded-lg border border-blue-100 flex items-center gap-2">
+                    ℹ Tip: Click empty slots to Add Filler. Click occupied slots to Remove.
+                </p>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    {/* Job Summary */}
                     {jobs.map((job, i) => (
                         <div key={i} className="bg-white p-4 rounded-xl border border-slate-200">
                             <h4 className="font-bold text-slate-700 mb-2 border-b border-slate-100 pb-2 flex justify-between">
@@ -291,66 +370,52 @@ export default function BatchPrintPage() {
                 </div>
             </div>
 
-            {/* PRINT & PREVIEW UI (Combined for WYSIWYG) */}
+            {/* PRINT & PREVIEW UI */}
             <div className="py-8 bg-slate-200 dark:bg-slate-800 print:bg-white min-h-screen">
                 <style dangerouslySetInnerHTML={{
                     __html: `
                     @media print {
-                        @page { 
-                            margin: 0 !important; 
-                            size: 8.5in 11in !important; 
-                        }
-                        body { 
-                            background: white !important; 
-                            margin: 0 !important; 
-                            padding: 0 !important; 
-                        }
-                        .print-hidden { 
-                            display: none !important; 
-                        }
-                        .avery-page {
-                            margin: 0 !important;
-                            box-shadow: none !important;
-                            border: none !important;
-                        }
+                        @page { margin: 0 !important; size: 8.5in 11in !important; }
+                        body { background: white !important; margin: 0 !important; padding: 0 !important; }
+                        .print-hidden { display: none !important; }
+                        .avery-page { margin: 0 !important; box-shadow: none !important; border: none !important; }
                         .bg-slate-200 { background: white !important; }
-                        /* Ensure text is black for printing */
                         * { -webkit-print-color-adjust: exact; }
                     }
                 `}} />
 
-                {/* Chunk labels into pages of 8 */}
-                {(() => {
-                    const allLabels: LabelTemplate[] = [];
-                    jobs.forEach(job => {
-                        for (let k = 0; k < job.count; k++) {
-                            allLabels.push(job.template);
-                        }
-                    });
-
-                    // DEBUG: Log if we are rendering labels
-                    console.log(`Rendering ${allLabels.length} total labels across ${Math.ceil(allLabels.length / 8)} pages`);
-
-                    const pages = [];
-                    for (let i = 0; i < allLabels.length; i += 8) {
-                        pages.push(allLabels.slice(i, i + 8));
-                    }
-
-                    if (pages.length === 0 && !isLoading) {
-                        return (
-                            <div className="text-center py-24 print-hidden">
-                                <AlertTriangle size={48} className="mx-auto text-slate-300 mb-4" />
-                                <p className="text-slate-500 font-bold text-xl">No labels in the print queue.</p>
-                                <p className="text-slate-400 mt-2">Check your orders and ensure labels are assigned to boxes.</p>
-                            </div>
-                        );
-                    }
-
-                    return pages.map((pageLabels, i) => (
-                        <Avery5821Page key={i} labels={pageLabels} />
-                    ));
-                })()}
+                {pages.map((pageLabels, i) => (
+                    <Avery5821Page key={i} labels={pageLabels} onSlotClick={(slotIndex) => handleSlotClick(i, slotIndex)} />
+                ))}
             </div>
+
+            {/* Filler Modal */}
+            {showFillerModal && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:hidden">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 animate-in zoom-in-95 duration-200">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xl font-bold">Select Filler Label</h3>
+                            <button onClick={() => setShowFillerModal(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto">
+                            {templates.map(t => (
+                                <button
+                                    key={t.id}
+                                    onClick={() => applyFiller(t)}
+                                    className="border border-slate-200 p-2 rounded-lg hover:border-indigo-500 hover:bg-slate-50 text-left transition-all"
+                                >
+                                    <div className="font-bold text-sm mb-1 truncate">{t.name}</div>
+                                    <div className="aspect-[4/2.5] bg-white border border-slate-100 relative overflow-hidden">
+                                        <div className="scale-[0.25] origin-top-left absolute top-0 left-0 w-full h-full">
+                                            <PrintedLabel template={t} />
+                                        </div>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

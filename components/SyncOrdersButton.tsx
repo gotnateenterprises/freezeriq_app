@@ -17,11 +17,17 @@ export function SyncOrdersButton() {
 
             if (res.ok) {
                 const data = await res.json();
-                console.log('Sync Complete:', data);
-                router.refresh(); // Refresh server components
-                alert(`Sync Complete! ${data.results?.errors?.length ? 'With Errors: ' + data.results.errors.join(', ') : 'Success'}`);
+                console.log('Sync Results:', data);
+                router.refresh();
+
+                if (data.success) {
+                    alert("Sync Successful!");
+                } else {
+                    const errorList = data.results?.errors?.join('\n• ') || 'Unknown error';
+                    alert(`Sync completed with issues:\n• ${errorList}\n\nSquare orders may have still updated if only QuickBooks failed.`);
+                }
             } else {
-                alert('Sync failed. Check console.');
+                alert('Connection error. Please try again.');
             }
 
         } catch (e) {

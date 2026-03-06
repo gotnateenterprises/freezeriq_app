@@ -31,25 +31,81 @@ interface PackagingItem {
     lowStockThreshold: number;
     type: string; // 'large_box', 'small_box', 'other'
     defaultLabelId?: string;
+    cost_per_unit?: number;
 }
 
 interface Stats {
     largeBoxesNeeded: number;
     smallBoxesNeeded: number;
-    totalActiveOrders: number;
 }
 
 interface DeliveryLocation {
     id: string;
+    externalId: string;
     customerName: string;
     address: string;
     orderCount: number;
     bundles: string[];
+    sequence: number;
     index: number;
 }
 
-// --- DRAGGABLE ITEM COMPONENT ---
-function SortableItem({ loc, openGoogleMaps }: { loc: DeliveryLocation, openGoogleMaps: (addr: string) => void }) {
+// ... existing code ...
+
+// --- SUB-COMPONENTS ---
+const InventoryItem = ({ item, onUpdate }: { item: PackagingItem, onUpdate: (id: string, delta: number, isAutoDeduct?: boolean, updates?: any) => void }) => {
+    const [amount, setAmount] = useState('1');
+    const [cost, setCost] = useState(item.cost_per_unit || 0);
+
+    const handleUpdate = (multiplier: number) => {
+        const val = parseInt(amount) || 1;
+        onUpdate(item.id, val * multiplier);
+        setAmount('1');
+    };
+
+    const handleCostBlur = () => {
+        if (cost !== item.cost_per_unit) {
+            onUpdate(item.id, 0, false, { cost_per_unit: Number(cost) });
+        }
+    };
+
+    return (
+        <div className="p-3 flex items-center justify-between group hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+            <div className="min-w-0 pr-2 flex-1">
+                <div className="font-bold text-sm text-slate-700 dark:text-slate-300 truncate">{item.name}</div>
+                {item.reorderUrl && <a href={item.reorderUrl} target="_blank" className="text-[10px] text-indigo-500 hover:underline flex items-center gap-1"><ExternalLink size={10} /> Reorder</a>}
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+                {/* Cost Input */}
+                <div className="relative group/cost">
+                    <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
+                    <input
+                        type="number"
+                        step="0.01"
+                        value={cost}
+                        onChange={(e) => setCost(parseFloat(e.target.value))}
+                        onBlur={handleCostBlur}
+                        className="w-16 pl-3 pr-1 py-0.5 text-xs border border-slate-200 dark:border-slate-700 rounded bg-transparent focus:bg-white focus:ring-1 focus:ring-indigo-500 text-right text-slate-600"
+                        placeholder="0.00"
+                    />
+                </div>
+
+                <input
+                    type="number"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    className="w-10 h-6 text-center text-xs bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded focus:ring-1 focus:ring-indigo-500 p-0 text-slate-900 dark:text-white"
+                />
+                <button onClick={() => handleUpdate(-1)} className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-500 font-bold flex items-center justify-center text-sm">-</button>
+                <span className={`w-8 text-center text-sm font-bold ${item.quantity < item.lowStockThreshold ? 'text-rose-500' : ''}`}>{item.quantity}</span>
+                <button onClick={() => handleUpdate(1)} className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-500 font-bold flex items-center justify-center text-sm">+</button>
+            </div>
+        </div>
+    );
+};
+
+const SortableItem = ({ loc, openGoogleMaps, onDeliver }: { loc: any, openGoogleMaps: (addr: string) => void, onDeliver: (id: string) => void }) => {
     const {
         attributes,
         listeners,
@@ -62,88 +118,45 @@ function SortableItem({ loc, openGoogleMaps }: { loc: DeliveryLocation, openGoog
     const style = {
         transform: CSS.Transform.toString(transform),
         transition,
-        zIndex: isDragging ? 20 : 1,
-        opacity: isDragging ? 0.5 : 1,
-        position: 'relative' as 'relative' // Fix for drag positioning
+        zIndex: isDragging ? 50 : 'auto',
+        opacity: isDragging ? 0.8 : 1,
     };
 
     return (
-        <div
-            ref={setNodeRef}
-            style={style}
-            className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2 group"
-        >
-            <div className="flex items-center gap-3 flex-1 overflow-hidden">
-                {/* Drag Handle */}
-                <button
-                    {...attributes}
-                    {...listeners}
-                    className="p-1.5 text-slate-400 hover:text-indigo-600 cursor-move touch-none bg-slate-50 dark:bg-slate-900 rounded-md"
-                    title="Drag to reorder"
-                >
-                    <GripVertical size={18} />
-                </button>
+        <div ref={setNodeRef} style={style} className="bg-white dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-3 group hover:border-indigo-300 transition-colors">
+            {/* Drag Handle */}
+            <div {...attributes} {...listeners} className="cursor-grab hover:text-indigo-500 text-slate-400 p-1">
+                <GripVertical size={20} />
+            </div>
 
-                <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                        <span className="bg-slate-100 dark:bg-slate-700 text-slate-500 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                            #{loc.index + 1}
-                        </span>
-                        <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white truncate">{loc.customerName}</h3>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 mt-0.5 text-xs sm:text-sm truncate">
-                        <MapPin size={14} className="text-rose-500 shrink-0" />
-                        <span className="truncate">{loc.address}</span>
-                    </div>
+            {/* Index Badge */}
+            <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center font-bold text-slate-500 text-sm">
+                {loc.index + 1}
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 min-w-0">
+                <div className="font-bold text-slate-900 dark:text-white truncate">{loc.customerName}</div>
+                <div onClick={() => openGoogleMaps(loc.address)} className="text-xs text-slate-500 truncate hover:text-indigo-500 cursor-pointer flex items-center gap-1">
+                    <MapPin size={10} /> {loc.address}
                 </div>
             </div>
 
-            <div className="flex items-center gap-3 pl-10 sm:pl-0 shrink-0">
-                <div className="hidden sm:flex flex-wrap gap-1">
-                    {loc.bundles.slice(0, 2).map((b, i) => (
-                        <span key={i} className="text-[10px] font-bold bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded text-slate-600 dark:text-slate-300">
-                            {b}
-                        </span>
-                    ))}
-                    {loc.bundles.length > 2 && <span className="text-[10px] text-slate-400">+{loc.bundles.length - 2}</span>}
-                </div>
+            {/* Info */}
+            <div className="text-right flex flex-col items-end gap-1">
                 <button
-                    onClick={() => openGoogleMaps(loc.address)}
-                    className="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 px-3 py-1.5 rounded-lg font-bold flex items-center justify-center gap-1.5 transition-colors text-xs"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        // Use onMouseDown to prevent drag interference if needed, but onClick usually fine here
+                        if (confirm('Mark this order as DELIVERED? It will be removed from the list.')) {
+                            onDeliver(loc.id);
+                        }
+                    }}
+                    className="bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider transition-colors"
                 >
-                    <Navigation size={14} /> Navigate
+                    Mark Delivered
                 </button>
-            </div>
-        </div>
-    );
-}
-
-// --- SUB-COMPONENTS ---
-const InventoryItem = ({ item, onUpdate }: { item: PackagingItem, onUpdate: (id: string, delta: number) => void }) => {
-    const [amount, setAmount] = useState('1');
-
-    const handleUpdate = (multiplier: number) => {
-        const val = parseInt(amount) || 1;
-        onUpdate(item.id, val * multiplier);
-        setAmount('1');
-    };
-
-    return (
-        <div className="p-3 flex items-center justify-between group hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-            <div className="min-w-0 pr-2 flex-1">
-                <div className="font-bold text-sm text-slate-700 dark:text-slate-300 truncate">{item.name}</div>
-                {item.reorderUrl && <a href={item.reorderUrl} target="_blank" className="text-[10px] text-indigo-500 hover:underline flex items-center gap-1"><ExternalLink size={10} /> Reorder</a>}
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-                <input
-                    type="number"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    className="w-10 h-6 text-center text-xs bg-slate-50 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 p-0"
-                />
-                <button onClick={() => handleUpdate(-1)} className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-500 font-bold flex items-center justify-center text-sm">-</button>
-                <span className={`w-8 text-center text-sm font-bold ${item.quantity < item.lowStockThreshold ? 'text-rose-500' : ''}`}>{item.quantity}</span>
-                <button onClick={() => handleUpdate(1)} className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-500 font-bold flex items-center justify-center text-sm">+</button>
+                <div className="text-[10px] text-slate-400 uppercase font-bold">Stop #{loc.index + 1}</div>
             </div>
         </div>
     );
@@ -159,6 +172,13 @@ const BoxCounter = ({ title, needed, item, type, onUpdate, onCreate, templates }
     templates: { id: string, name: string }[]
 }) => {
     const [addQty, setAddQty] = useState<string>('');
+    const [cost, setCost] = useState(item?.cost_per_unit || 0);
+
+    // Sync cost state if item updates externally
+    useEffect(() => {
+        if (item) setCost(item.cost_per_unit || 0);
+    }, [item?.cost_per_unit]);
+
     const onHand = item?.quantity || 0;
     const remaining = onHand - needed;
 
@@ -178,11 +198,15 @@ const BoxCounter = ({ title, needed, item, type, onUpdate, onCreate, templates }
         }
     };
 
+    const handleCostBlur = () => {
+        if (item && cost !== item.cost_per_unit) {
+            onUpdate(item.id, 0, false, { cost_per_unit: Number(cost) });
+        }
+    };
+
     return (
         <div className={`p-4 rounded-2xl border ${remaining < 0 ? 'bg-rose-50 border-rose-200 dark:bg-rose-900/20 dark:border-rose-800' : 'bg-white border-slate-200 dark:bg-slate-800 dark:border-slate-700'} flex flex-col justify-between relative group`}>
-            {/* Settings / Label Selector */}
-
-
+            {/* Header */}
             <div className="flex justify-between items-start mb-2">
                 <div>
                     <h3 className="font-bold text-slate-500 text-xs uppercase tracking-wider">{title}</h3>
@@ -190,8 +214,24 @@ const BoxCounter = ({ title, needed, item, type, onUpdate, onCreate, templates }
                         {remaining > 0 ? remaining : 0}
                     </div>
                 </div>
-                <div className="bg-slate-100 dark:bg-slate-700 p-2 rounded-lg">
-                    <Package size={20} className="text-slate-500" />
+                <div className="flex flex-col items-end gap-1">
+                    <div className="bg-slate-100 dark:bg-slate-700 p-2 rounded-lg mb-1">
+                        <Package size={20} className="text-slate-500" />
+                    </div>
+                    {item && (
+                        <div className="relative group/cost">
+                            <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400">$</span>
+                            <input
+                                type="number"
+                                step="0.01"
+                                value={cost}
+                                onChange={(e) => setCost(parseFloat(e.target.value))}
+                                onBlur={handleCostBlur}
+                                className="w-14 pl-3 pr-1 py-0.5 text-[10px] border border-transparent hover:border-slate-200 dark:hover:border-slate-600 rounded bg-transparent text-right text-slate-400 hover:text-slate-600 focus:bg-white focus:text-slate-900 focus:ring-1 focus:ring-indigo-500"
+                                placeholder="0.00"
+                            />
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -207,23 +247,27 @@ const BoxCounter = ({ title, needed, item, type, onUpdate, onCreate, templates }
                     {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
             </div>
+
+            {/* Stats Row */}
             <div className="flex gap-2 mb-3">
                 <div className="flex-1 bg-slate-50 dark:bg-slate-900 p-2 rounded text-center">
                     <div className="text-[10px] text-slate-400 uppercase font-bold">Stock</div>
-                    <div className="font-bold text-sm">{onHand}</div>
+                    <div className="font-bold text-sm text-slate-900 dark:text-white">{onHand}</div>
                 </div>
                 <div className="flex-1 bg-slate-50 dark:bg-slate-900 p-2 rounded text-center">
                     <div className="text-[10px] text-slate-400 uppercase font-bold">Need</div>
                     <div className="font-bold text-sm text-amber-600">{needed}</div>
                 </div>
             </div>
+
+            {/* Actions */}
             <div className="flex gap-2">
                 <input
                     type="number"
                     value={addQty}
                     onChange={(e) => setAddQty(e.target.value)}
                     placeholder="1"
-                    className="w-16 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-center font-bold text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    className="w-16 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-center font-bold text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900 dark:text-white"
                     onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
                 />
                 <button
@@ -254,11 +298,11 @@ export default function DeliveryDashboard() {
         })
     );
 
-    // Initial load for origin address
-    useEffect(() => {
-        const saved = localStorage.getItem('delivery_origin');
-        if (saved) setOriginAddress(saved);
-    }, []);
+    // Initial load for origin address - REMOVED to force empty default
+    // useEffect(() => {
+    //     const saved = localStorage.getItem('delivery_origin');
+    //     if (saved) setOriginAddress(saved);
+    // }, []);
 
     // Fetch Data (All in one go)
     const refreshData = async () => {
@@ -293,8 +337,9 @@ export default function DeliveryDashboard() {
             const mappedRoutes = orders
                 .map((o: any) => ({
                     id: o.id,
+                    externalId: o.external_id,
                     customerName: o.customer_name || o.organization?.name || 'Unknown Customer',
-                    address: o.shipping_address || o.organization?.shipping_address || 'No Address Provided',
+                    address: o.delivery_address || o.organization?.delivery_address || 'No Address Provided',
                     orderCount: o.items?.length || 0,
                     bundles: o.items?.map((i: any) => i.bundle?.name || 'Item'),
                     sequence: o.delivery_sequence || 0
@@ -443,6 +488,28 @@ export default function DeliveryDashboard() {
         window.open(url, '_blank');
     };
 
+    const handleMarkDelivered = async (id: string) => {
+        try {
+            const res = await fetch('/api/orders', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: id, status: 'delivered' })
+            });
+
+            if (res.ok) {
+                // Optimistic remove
+                setLocations(prev => prev.filter(l => l.id !== id));
+                // Refresh effectively
+                refreshData();
+            } else {
+                alert('Failed to update status');
+            }
+        } catch (e) {
+            console.error(e);
+            alert('Error updating status');
+        }
+    };
+
     // Derived State
     const largeBoxItem = items.find(i => i.type === 'large_box') || items.find(i => i.name.toLowerCase().includes('large'));
     const smallBoxItem = items.find(i => i.type === 'small_box') || items.find(i => i.name.toLowerCase().includes('small'));
@@ -547,7 +614,7 @@ export default function DeliveryDashboard() {
                                         <p className="font-bold text-slate-500">No pending orders.</p>
                                     </div>
                                 ) : locations.map((loc) => (
-                                    <SortableItem key={loc.id} loc={loc} openGoogleMaps={openGoogleMaps} />
+                                    <SortableItem key={loc.id} loc={loc} openGoogleMaps={openGoogleMaps} onDeliver={handleMarkDelivered} />
                                 ))}
                             </div>
                         </SortableContext>
@@ -578,9 +645,20 @@ export default function DeliveryDashboard() {
                             </div>
                         </div>
 
-                        <Link href="/delivery/print-batch" className="block w-full bg-white text-indigo-900 font-bold py-2.5 rounded-xl text-center hover:bg-indigo-50 transition-colors shadow-sm">
-                            Print All Labels
+                        <Link href="/delivery/print-batch" className="block w-full bg-white text-indigo-900 font-bold py-2.5 rounded-xl text-center hover:bg-indigo-50 transition-colors shadow-sm mb-2">
+                            Print Labels
                         </Link>
+                        <div className="grid grid-cols-2 gap-2">
+                            <Link href="/delivery/print-manifest" className="bg-white border-2 border-indigo-100 text-indigo-700 font-bold py-2 rounded-xl text-center hover:bg-indigo-50 transition-colors text-xs flex items-center justify-center gap-1 shadow-sm">
+                                Manifest
+                            </Link>
+                            <Link href="/delivery/print-packing-slips" className="relative bg-white border-2 border-indigo-100 text-indigo-700 font-bold py-2 rounded-xl text-center hover:bg-indigo-50 transition-colors text-xs flex items-center justify-center gap-1 shadow-sm">
+                                Slips
+                                <span className="absolute -top-2 -right-2 bg-amber-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm">
+                                    {(stats?.largeBoxesNeeded || 0) + (stats?.smallBoxesNeeded || 0)}
+                                </span>
+                            </Link>
+                        </div>
                     </div>
 
                     {/* Box Counters */}

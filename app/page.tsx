@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import StatCard from '@/components/StatCard';
 import { ChefHat, DollarSign, TrendingUp, Package, AlertTriangle, Clock } from 'lucide-react';
 import Link from 'next/link';
@@ -9,7 +10,111 @@ import Link from 'next/link';
 import RevenueModal from '@/components/RevenueModal';
 import CalendarWidget from '@/components/CalendarWidget';
 
+function ActivityItem({ activity, onRefresh }: { activity: any; onRefresh: () => void }) {
+    const [isReplying, setIsReplying] = useState(false);
+    const [replyText, setReplyText] = useState('');
+    const [isSending, setIsSending] = useState(false);
+
+    const handleSendReply = async () => {
+        if (!replyText.trim()) return;
+        setIsSending(true);
+        try {
+            const res = await fetch('/api/integrations/meta/reply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    recipientId: activity.metadata?.senderId,
+                    message: replyText,
+                    activityId: activity.id
+                })
+            });
+            if (res.ok) {
+                setIsReplying(false);
+                setReplyText('');
+                onRefresh();
+            } else {
+                const err = await res.json();
+                alert(`Failed to send: ${err.error}`);
+            }
+        } catch (e) {
+            alert("Failed to send reply");
+        } finally {
+            setIsSending(false);
+        }
+    };
+
+    return (
+        <div className="group">
+            <div className="p-5 hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition flex items-center justify-between cursor-default">
+                <div className="flex items-center gap-4">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xs shadow-sm ${activity.status === 'production_ready' || activity.status === 'Ready' || activity.status === 'replied' ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>
+                        {activity.type === 'order' ? 'ORD' : activity.type?.toUpperCase().slice(0, 3) || 'ACT'}
+                    </div>
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <p className="font-bold text-slate-900 dark:text-slate-100 text-adaptive text-lg">
+                                {activity.customerId ? (
+                                    <Link href={`/customers/${activity.customerId}`} className="hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-all">
+                                        {activity.customer}
+                                    </Link>
+                                ) : (
+                                    activity.customer
+                                )}
+                            </p>
+                            {activity.type === 'message' && activity.status !== 'replied' && (
+                                <button
+                                    onClick={() => setIsReplying(!isReplying)}
+                                    className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
+                                    title="Quick Reply"
+                                >
+                                    <ChefHat size={14} />
+                                </button>
+                            )}
+                        </div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 text-adaptive-subtle font-medium">{activity.type === 'order' ? `Order #${activity.id}` : activity.title} • {new Date(activity.date).toLocaleDateString()}</p>
+                    </div>
+                </div>
+                <div className="text-right">
+                    <p className="font-black text-xl text-slate-900 dark:text-white text-adaptive tracking-tight">
+                        {activity.amount || (activity.content?.length > 30 ? activity.content.slice(0, 30) + '...' : activity.content)}
+                    </p>
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-400 group-hover:text-indigo-500 transition-colors">{(activity.status || 'NEW').replace('_', ' ')}</p>
+                </div>
+            </div>
+
+            {isReplying && (
+                <div className="px-5 pb-5 animate-in slide-in-from-top-2 duration-200">
+                    <div className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl p-3 border border-slate-200 dark:border-slate-700">
+                        <textarea
+                            placeholder="Type your reply..."
+                            className="w-full bg-transparent border-none focus:ring-0 text-sm font-medium text-slate-700 dark:text-slate-300 placeholder-slate-400 resize-none h-20"
+                            value={replyText}
+                            onChange={(e) => setReplyText(e.target.value)}
+                        />
+                        <div className="flex justify-end gap-2 mt-2">
+                            <button
+                                onClick={() => setIsReplying(false)}
+                                className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:text-slate-700 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                disabled={isSending || !replyText.trim()}
+                                onClick={handleSendReply}
+                                className="bg-indigo-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                            >
+                                {isSending ? <div className="w-3 h-3 border-2 border-white border-t-transparent animate-spin rounded-full" /> : 'Send Reply'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function Dashboard() {
+    const { data: session } = useSession() as { data: any };
     const [data, setData] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isRevenueModalOpen, setIsRevenueModalOpen] = useState(false);
@@ -17,17 +122,22 @@ export default function Dashboard() {
     const [startFoodCost, setStartFoodCost] = useState<number | null>(null);
 
     const updateProductionMetrics = () => {
+        const businessId = session?.user?.businessId;
+        if (!businessId) return;
+
         try {
-            const savedCompleted = localStorage.getItem('productionCompleted');
-            const savedResult = localStorage.getItem('productionResult');
-            const savedShoppingTotal = localStorage.getItem('shoppingListTotal');
+            const savedCompleted = localStorage.getItem(`${businessId}_productionCompleted`);
+            const savedResult = localStorage.getItem(`${businessId}_productionResult`);
+            const savedShoppingTotal = localStorage.getItem(`${businessId}_shoppingListTotal`);
 
             if (savedCompleted && savedResult) {
                 const completedSet = new Set(JSON.parse(savedCompleted));
                 const result = JSON.parse(savedResult);
 
-                // Calculate Total Tasks (Prep + Assembly ?? Just Prep for now based on user request)
-                const totalTasks = result.prepTasks ? Object.keys(result.prepTasks).length : 0;
+                // Calculate Total Tasks (Prep + Assembly)
+                const prepTasksCount = result.prepTasks ? Object.keys(result.prepTasks).length : 0;
+                const assemblyTasksCount = result.assemblyTasks ? Object.keys(result.assemblyTasks).length : 0;
+                const totalTasks = prepTasksCount + assemblyTasksCount;
 
                 if (totalTasks > 0) {
                     setRealProductionProgress(Math.round((completedSet.size / totalTasks) * 100));
@@ -37,10 +147,14 @@ export default function Dashboard() {
             } else if (savedResult && !savedCompleted) {
                 // Plan exists but nothing checked
                 setRealProductionProgress(0);
+            } else {
+                setRealProductionProgress(null);
             }
 
             if (savedShoppingTotal) {
                 setStartFoodCost(parseFloat(savedShoppingTotal));
+            } else {
+                setStartFoodCost(null);
             }
         } catch (e) { console.error(e); }
     };
@@ -61,7 +175,7 @@ export default function Dashboard() {
         // Listen for storage updates (optional, for cross-tab sync)
         window.addEventListener('storage', updateProductionMetrics);
         return () => window.removeEventListener('storage', updateProductionMetrics);
-    }, []);
+    }, [session]);
 
     if (isLoading) return <div className="p-12 text-center text-slate-500">Loading Dashboard...</div>;
 
@@ -83,26 +197,36 @@ export default function Dashboard() {
             />
 
             <div>
-                <h2 className="text-3xl font-bold text-slate-900 dark:text-indigo-100 text-adaptive">Dashboard</h2>
-                <p className="text-slate-500 dark:text-slate-400 mt-1 text-adaptive-subtle">Kitchen Overview</p>
+                <div className="flex justify-between items-end mb-1">
+                    <div>
+                        <h2 className="text-3xl font-bold text-slate-900 dark:text-indigo-100 text-adaptive">Dashboard</h2>
+                        <p className="text-slate-500 dark:text-slate-400 mt-1 text-adaptive-subtle">Kitchen Overview</p>
+                    </div>
+                </div>
             </div>
 
             {/* Metrics Row */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <StatCard
-                    title="Active Orders"
+                    title="Weekly In Progress"
                     value={data?.metrics?.activeOrders?.toString() || '0'}
-                    subtitle="In Queue"
+                    subtitle="Last 7 Days"
                     icon={Package}
-                    trend={{ value: 12, isPositive: true }}
+                    trend={{
+                        value: Math.abs(data?.metrics?.activeOrdersGrowth || 0),
+                        isPositive: (data?.metrics?.activeOrdersGrowth || 0) >= 0
+                    }}
                     href="/orders"
                 />
                 <StatCard
-                    title="Total Revenue"
+                    title={`${data?.metrics?.currentMonth || 'Monthly'} Revenue`}
                     value={`$${(data?.metrics?.revenue || 0).toLocaleString()}`}
-                    subtitle="All Time"
+                    subtitle="Current Month"
                     icon={DollarSign}
-                    trend={{ value: 5, isPositive: true }}
+                    trend={{
+                        value: Math.abs(data?.metrics?.revenueGrowth || 0),
+                        isPositive: (data?.metrics?.revenueGrowth || 0) >= 0
+                    }}
                     onClick={() => setIsRevenueModalOpen(true)}
                 />
                 <StatCard
@@ -117,8 +241,11 @@ export default function Dashboard() {
                     value={`${foodCostPercentage}%`}
                     subtitle={foodCostSubtitle}
                     icon={TrendingUp}
-                    trend={{ value: 2, isPositive: true }}
-                    href="/commercial"
+                    trend={{
+                        value: Math.abs(data?.metrics?.foodCostGrowth || 0),
+                        isPositive: (data?.metrics?.foodCostGrowth || 0) <= 0 // Lower food cost is "positive" for business
+                    }}
+                    href="/production/shopping-list"
                 />
             </div>
 
@@ -135,31 +262,15 @@ export default function Dashboard() {
                         {(!data?.recentActivity || data.recentActivity.length === 0) ? (
                             <p className="p-8 text-slate-400 text-center font-medium">No recent activity.</p>
                         ) : (
-                            data.recentActivity.map((order: any, i: number) => (
-                                <div key={i} className="p-5 hover:bg-slate-50/80 transition flex items-center justify-between group cursor-default">
-                                    <div className="flex items-center gap-4">
-                                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xs shadow-sm ${order.status === 'production_ready' || order.status === 'Ready' ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>
-                                            {order.type === 'order' ? 'ORD' : order.type?.toUpperCase().slice(0, 3) || 'ACT'}
-                                        </div>
-                                        <div>
-                                            <p className="font-bold text-slate-900 dark:text-slate-100 text-adaptive text-lg">
-                                                {order.customerId ? (
-                                                    <Link href={`/customers/${order.customerId}`} className="hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-all">
-                                                        {order.customer}
-                                                    </Link>
-                                                ) : (
-                                                    order.customer
-                                                )}
-                                            </p>
-                                            <p className="text-xs text-slate-500 dark:text-slate-400 text-adaptive-subtle font-medium">{order.type === 'order' ? `Order #${order.id}` : order.title} • {new Date(order.date).toLocaleDateString()}</p>
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className="font-black text-slate-900 dark:text-white text-adaptive text-lg tracking-tight">{order.amount || order.content?.slice(0, 15) + '...'}</p>
-                                        <p className="text-xs font-bold uppercase tracking-wide text-slate-400 group-hover:text-indigo-500 transition-colors">{(order.status || 'NEW').replace('_', ' ')}</p>
-                                    </div>
-                                </div>
-                            ))
+                            <div className="divide-y divide-slate-50 dark:divide-slate-700/50">
+                                {data.recentActivity.map((activity: any, i: number) => (
+                                    <ActivityItem key={activity.id || i} activity={activity} onRefresh={() => {
+                                        fetch('/api/dashboard')
+                                            .then(res => res.json())
+                                            .then(d => setData(d));
+                                    }} />
+                                ))}
+                            </div>
                         )}
                     </div>
                 </div>
@@ -230,7 +341,7 @@ export default function Dashboard() {
 
             {/* Calendar Widget */}
             <div className="mt-8">
-                <CalendarWidget />
+                <CalendarWidget initialUrl={data?.calendarUrl} hideSettings={true} />
             </div>
         </div>
     );

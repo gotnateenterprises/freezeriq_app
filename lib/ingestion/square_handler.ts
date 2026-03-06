@@ -2,12 +2,13 @@
 import { SquareWrapper } from './clients/square_client';
 import { SquareOrderPayload } from '../../types/integrations';
 import { DB } from '../ingestion_db';
+import { prisma } from '../db';
 
 export class SquareOrderHandler {
     private square: SquareWrapper;
 
-    constructor(private db: DB) {
-        this.square = new SquareWrapper();
+    constructor(private db: DB, businessId: string) {
+        this.square = new SquareWrapper(businessId);
     }
 
     async syncOrders(limit = 50) {
@@ -24,7 +25,10 @@ export class SquareOrderHandler {
                 query: {
                     sort: { sortField: 'CREATED_AT', sortOrder: 'DESC' },
                     filter: {
-                        stateFilter: { states: ['OPEN', 'COMPLETED'] }
+                        stateFilter: { states: ['OPEN', 'COMPLETED'] },
+                        dateTimeFilter: {
+                            createdAt: { startAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString() }
+                        }
                     }
                 }
             });
@@ -37,15 +41,53 @@ export class SquareOrderHandler {
             console.log(`Found ${orders.length} orders from Square.`);
 
             for (const order of orders) {
-                // Map Square Order to our Payload format
+                // Determine Customer Details
+                let customerName = "Walk-in";
+                let customerEmail = "";
+                let customerPhone = "";
+                let customerIdStr = order.customerId || "";
+
+                // 1. Try fulfillments (recipient details)
+                const fulfillmentRecip = order.fulfillments?.[0]?.shipmentDetails?.recipient || order.fulfillments?.[0]?.pickupDetails?.recipient;
+                if (fulfillmentRecip) {
+                    customerName = fulfillmentRecip.displayName || customerName;
+                    customerEmail = fulfillmentRecip.emailAddress || "";
+                    customerPhone = fulfillmentRecip.phoneNumber || "";
+                }
+
+                // 2. Fetch from Customer API if ID present and name still unknown
+                if (customerIdStr && (customerName === "Walk-in" || !customerEmail)) {
+                    try {
+                        const customerRes = await client.customers.get({ customerId: customerIdStr });
+                        const c = customerRes.customer;
+                        if (c) {
+                            customerName = `${c.givenName || ''} ${c.familyName || ''}`.trim() || c.companyName || customerName;
+                            customerEmail = c.emailAddress || customerEmail;
+                            customerPhone = c.phoneNumber || customerPhone;
+                        }
+                    } catch (e) {
+                        console.error(`[SquareSync] Failed to fetch customer ${customerIdStr}`, e);
+                    }
+                }
+
+                // 3. Fallback to Tender cardholder name (for POS walk-ins)
+                if (customerName === "Walk-in" && order.tenders?.[0]?.cardDetails?.card?.cardholderName) {
+                    customerName = order.tenders[0].cardDetails.card.cardholderName;
+                    console.log(`[SquareSync] Found cardholder name in tender: ${customerName}`);
+                }
+
                 const payload: SquareOrderPayload = {
                     order_id: order.id!,
-                    customer_name: "Unknown Customer", // We might need to fetch customer details if not present
+                    customer_name: customerName,
+                    customer_email: customerEmail,
+                    customer_phone: customerPhone,
+                    customer_id: customerIdStr,
                     created_at: order.createdAt!,
                     line_items: order.lineItems?.map((item: any) => ({
                         uid: item.uid || crypto.randomUUID(),
                         catalog_object_id: item.catalogObjectId,
-                        name: item.name || "Unknown Item",
+                        sku: item.sku || item.note, // Square SKU or fallback to note
+                        name: item.variationName ? `${item.name} (${item.variationName})` : item.name || "Unknown Item",
                         quantity: item.quantity,
                         base_price_money: {
                             amount: Number(item.basePriceMoney?.amount || 0),
@@ -54,21 +96,11 @@ export class SquareOrderHandler {
                     })) || []
                 };
 
-                // Try to resolve customer name if customer_id is present
-                if (order.customerId) {
-                    try {
-                        const customer = await client.customers.get({ customerId: order.customerId });
-                        const c = customer.customer;
-                        if (c) {
-                            payload.customer_name = `${c.givenName || ''} ${c.familyName || ''}`.trim() || c.companyName || "Unknown Customer";
-                        }
-                    } catch (e) {
-                        // Ignore customer fetch error
-                    }
-                }
-
                 await this.handleWebhook(payload);
             }
+
+            // After sync, clean up old broken orders with no items
+            await this.db.deleteOrdersWithNoItems('square');
 
         } catch (e: any) {
             console.error("Square Sync Error:", e);
@@ -77,7 +109,8 @@ export class SquareOrderHandler {
     }
 
     async handleWebhook(payload: SquareOrderPayload) {
-        console.log(`Processing Order: ${payload.order_id}`);
+        console.log(`[SquareSync] Processing Order: ${payload.order_id}`);
+        console.log(`[SquareSync] Payload Item Names: ${payload.line_items.map(i => i.name).join(', ')}`);
 
         // Calculate Total
         const totalCents = payload.line_items.reduce((sum, item) => {
@@ -102,14 +135,20 @@ export class SquareOrderHandler {
         // Real sync needs idempotent behavior.
         // I'll leave the random UUID for now to match interface, but in reality we should fix this.
 
-        const orderId = crypto.randomUUID(); // TODO: Check if order already exists by external_id
+        // Create/Update Customer Record
+        let dbCustomerId: string | null = null;
+        if (payload.customer_name && (payload.customer_name !== 'Walk-in' || payload.customer_id)) {
+            const customer = await this.db.createOrg(payload.customer_name, payload.customer_email || '');
+            dbCustomerId = (customer as any).id;
+        }
 
-        await this.db.createOrder({
-            id: orderId,
+        const persistentOrderId = await this.db.createOrder({
+            id: crypto.randomUUID(),
             external_id: payload.order_id,
             source: 'square',
             created_at: payload.created_at,
             status: 'production_ready',
+            organization_id: dbCustomerId,
             customer_name: payload.customer_name,
             total_amount: totalCents / 100
         });
@@ -123,14 +162,27 @@ export class SquareOrderHandler {
                 bundle = await this.db.findBundleBySku(item.catalog_object_id);
             }
 
-            // Fallback: Fuzzy Name Match
+            // Fallback 1: SKU Match (Direct SKU, Note, or Catalog Object ID)
+            if (!bundle) {
+                const bundles = await prisma.bundle.findMany({ select: { id: true, sku: true } });
+                const match = bundles.find((b: any) => {
+                    const sku = b.sku?.toLowerCase();
+                    if (!sku) return false;
+                    return (item.sku?.toLowerCase() === sku) ||
+                        (item.note?.toLowerCase().includes(sku)) ||
+                        (item.catalog_object_id?.toLowerCase().includes(sku));
+                });
+                if (match) bundle = match;
+            }
+
+            // Fallback 2: Fuzzy Name Match
             if (!bundle) {
                 bundle = await this.db.findBundleByName(item.name);
             }
 
             if (bundle) {
                 await this.db.createOrderLineItem({
-                    order_id: orderId,
+                    order_id: persistentOrderId,
                     bundle_id: bundle.id,
                     quantity: parseInt(item.quantity, 10),
                     variant_size: item.name.toLowerCase().includes('serves 2') ? 'serves_2' : 'serves_5'

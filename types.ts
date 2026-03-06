@@ -19,13 +19,16 @@ export interface Recipe {
     type: 'prep' | 'menu_item';
     base_yield_qty: number;
     base_yield_unit: string;
-
+    container_type?: 'tray' | 'bag';
     category_id?: Uuid;
     categories?: Category[]; // Many-to-Many support
     label_text?: string;
     allergens?: string;
     instructions?: string;
     macros?: string;
+    image_url?: string;
+    description?: string;
+    cook_time?: string;
     items: RecipeItem[];
 }
 
@@ -58,6 +61,8 @@ export interface RecipeItem {
     is_sub_recipe?: boolean;
     section_name?: string;
     section_batch?: number;
+    portal_type?: string;
+    search_url_pattern?: string;
 }
 
 // Commercial Types

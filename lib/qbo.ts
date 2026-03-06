@@ -25,7 +25,7 @@ export function getAuthorizationUrl() {
 }
 
 // 2. Exchange Code for Token
-export async function exchangeCodeForToken(code: string, realmId: string) {
+export async function exchangeCodeForToken(code: string, realmId: string, businessId: string) {
     if (!QBO_CLIENT_ID || !QBO_CLIENT_SECRET) throw new Error("Missing QBO Credentials");
 
     const authHeader = 'Basic ' + Buffer.from(QBO_CLIENT_ID + ':' + QBO_CLIENT_SECRET).toString('base64');
@@ -52,13 +52,20 @@ export async function exchangeCodeForToken(code: string, realmId: string) {
 
     const tokenData = await response.json();
 
-    // Save to DB
-    await prisma.systemSetting.upsert({ where: { key: 'qbo_access_token' }, update: { value: tokenData.access_token }, create: { key: 'qbo_access_token', value: tokenData.access_token } });
-    await prisma.systemSetting.upsert({ where: { key: 'qbo_refresh_token' }, update: { value: tokenData.refresh_token }, create: { key: 'qbo_refresh_token', value: tokenData.refresh_token } });
-    await prisma.systemSetting.upsert({ where: { key: 'qbo_realm_id' }, update: { value: realmId }, create: { key: 'qbo_realm_id', value: realmId } });
+    // Save to DB using TokenManager
+    // TokenManager handles the business_id scoping
+    const { TokenManager } = await import('@/lib/auth/token_manager');
+    const tokenManager = new TokenManager('qbo', businessId);
 
-    // Calculate Expiry (usually 1 hour)
-    // We could store expiry time too, but for MVP we will refresh if fail.
+    // Calculate Expiry
+    const expiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
+
+    await tokenManager.saveTokens(
+        tokenData.access_token,
+        tokenData.refresh_token,
+        expiresAt,
+        realmId
+    );
 
     return tokenData;
 }

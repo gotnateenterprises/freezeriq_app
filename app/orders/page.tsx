@@ -1,12 +1,17 @@
 import Link from 'next/link';
 import { CreditCard, FileText, Search, Filter, Truck } from 'lucide-react';
 import { PrismaAdapter } from '@/lib/prisma_adapter';
+import { prisma } from '@/lib/db';
 import { SyncOrdersButton } from '@/components/SyncOrdersButton';
 import AddManualOrderButton from '@/components/AddManualOrderButton';
 import { OrdersTable } from '@/components/OrdersTable';
+import { auth } from '@/auth';
 
 export default async function OrdersPage() {
-    const adapter = new PrismaAdapter();
+    const session = await auth();
+    if (!session?.user?.businessId) return <div>Unauthorized</div>;
+
+    const adapter = new PrismaAdapter(session.user.businessId);
     const orders = await adapter.getOrders();
     const bundles = await adapter.getBundles();
 
@@ -17,7 +22,12 @@ export default async function OrdersPage() {
         return acc + (isNaN(val) ? 0 : val);
     }, 0);
 
-    const pendingCount = orders.filter(o => o.status === 'Confirmed' || o.status === 'Pending').length;
+    const pendingCount = await prisma.productionRun.count({
+        where: {
+            business_id: session.user.businessId,
+            status: { in: ['planning', 'active'] }
+        }
+    });
 
     return (
         <div className="max-w-7xl mx-auto space-y-8">

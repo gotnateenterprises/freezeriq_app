@@ -4,8 +4,8 @@ import { TokenManager } from '@/lib/auth/token_manager';
 export class SquareWrapper {
     private tokenManager: TokenManager;
 
-    constructor() {
-        this.tokenManager = new TokenManager('square');
+    constructor(businessId: string) {
+        this.tokenManager = new TokenManager('square', businessId);
     }
 
     async getClient(): Promise<SquareClient> {

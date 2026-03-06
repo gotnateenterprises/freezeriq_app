@@ -3,6 +3,8 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Megaphone, Mail, MessageSquare, Send, CheckCircle, BarChart3, Users, ChevronDown, User } from 'lucide-react';
+import { useSession } from 'next-auth/react';
+import UpgradeRequired from '@/components/UpgradeRequired';
 
 interface Campaign {
     id: string;
@@ -26,8 +28,14 @@ interface AudienceCounts {
 }
 
 function CampaignsContent() {
+    const { data: session, status } = useSession();
     const searchParams = useSearchParams();
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+
+    // Plan Gating
+    const userPlan = (session?.user as any)?.plan;
+    const isSuperAdmin = (session?.user as any)?.isSuperAdmin;
+    const hasAccess = userPlan === 'ENTERPRISE' || userPlan === 'ULTIMATE' || userPlan === 'FREE' || isSuperAdmin;
     const [isLoading, setIsLoading] = useState(true);
     const [isSending, setIsSending] = useState(false);
     const [counts, setCounts] = useState<AudienceCounts>({ all: 0, individual: 0, organization: 0 });
@@ -119,6 +127,17 @@ function CampaignsContent() {
             setIsSending(false);
         }
     };
+
+    if (status === 'loading') return <div className="p-12 text-center text-slate-500 font-bold animate-pulse">Checking Plan Access...</div>;
+
+    if (!hasAccess) {
+        return (
+            <UpgradeRequired
+                feature="Marketing Automation"
+                description="Reach your customers via Email or SMS, set up automated seasonal reminders, and track conversion rates."
+            />
+        );
+    }
 
     return (
         <div className="p-8 max-w-7xl mx-auto pb-32 space-y-8">

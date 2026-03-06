@@ -4,14 +4,18 @@ module.exports = {
         "./app/**/*.{js,ts,jsx,tsx,mdx}",
         "./components/**/*.{js,ts,jsx,tsx,mdx}",
     ],
-    darkMode: 'selector',
+    darkMode: 'class',
     theme: {
         extend: {
+            fontFamily: {
+                sans: ['var(--font-jakarta)', 'ui-sans-serif', 'system-ui'],
+                serif: ['var(--font-playfair)', 'ui-serif', 'Georgia'],
+            },
             colors: {
                 background: "var(--background)",
                 foreground: "var(--foreground)",
-                primary: "#10b981", // Emerald 500
-                secondary: "#6366f1", // Indigo 500
+                primary: "var(--primary)",
+                secondary: "var(--secondary)",
             },
         },
     },

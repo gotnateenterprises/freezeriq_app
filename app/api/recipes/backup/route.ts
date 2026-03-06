@@ -8,7 +8,7 @@ export async function GET() {
     try {
         const timestamp = new Date().toISOString().split('T')[0];
 
-        const [recipes, categories, ingredients] = await Promise.all([
+        const [recipes, categories, ingredients, packaging_items, suppliers] = await Promise.all([
             prisma.recipe.findMany({
                 include: {
                     categories: true, // Modern M-N
@@ -18,7 +18,9 @@ export async function GET() {
             prisma.category.findMany({
                 include: { recipes: { select: { id: true } } }
             }),
-            prisma.ingredient.findMany()
+            prisma.ingredient.findMany(),
+            prisma.packagingItem.findMany(),
+            prisma.supplier.findMany()
         ]);
 
         const backupData = {
@@ -30,7 +32,9 @@ export async function GET() {
             data: {
                 categories,
                 recipes,
-                ingredients
+                ingredients,
+                packaging_items,
+                suppliers
             }
         };
 

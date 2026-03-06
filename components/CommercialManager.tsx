@@ -1,9 +1,16 @@
 "use client";
 
-import { useState } from 'react';
-import { Save, Plus, Store, Package, Trash2, ExternalLink, Loader2, Copy, Merge } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Save, Plus, Minus, Search, Store, Package, Trash2, ExternalLink, Loader2, Copy, Merge } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { toast } from 'sonner';
+
+import SupplierTable from './commercial/SupplierTable';
+import PackagingTable from './commercial/PackagingTable';
+import IngredientTable from './commercial/IngredientTable';
+import { BulkPasteModal, MergeModal } from './commercial/BulkActionModals';
+
 
 interface Supplier {
     id: string;
@@ -22,14 +29,28 @@ interface Ingredient {
     purchase_unit?: string | null;
     purchase_quantity?: number | null;
     purchase_cost?: number | null;
+    needs_review?: boolean;
 }
 
-export default function CommercialManager({ initialSuppliers, initialIngredients }: { initialSuppliers: Supplier[], initialIngredients: Ingredient[] }) {
-    const [activeTab, setActiveTab] = useState<'ingredients' | 'suppliers'>('ingredients');
+interface PackagingItem {
+    id: string;
+    name: string;
+    quantity: number;
+    reorderUrl?: string | null;
+    lowStockThreshold: number;
+    type: string;
+    cost_per_unit: number;
+    defaultLabelId?: string | null;
+}
+
+export default function CommercialManager({ initialSuppliers, initialIngredients, initialPackaging }: { initialSuppliers: Supplier[], initialIngredients: Ingredient[], initialPackaging: PackagingItem[] }) {
+    const [activeTab, setActiveTab] = useState<'ingredients' | 'suppliers' | 'packaging'>('ingredients');
     const [suppliers, setSuppliers] = useState(initialSuppliers);
     const [ingredients, setIngredients] = useState(initialIngredients);
+    const [packaging, setPackaging] = useState(initialPackaging);
     const [isSaving, setIsSaving] = useState(false);
     const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
+    const [searchQuery, setSearchQuery] = useState('');
     const router = useRouter();
 
     // State for new supplier
@@ -39,6 +60,37 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
     const [newIngSku, setNewIngSku] = useState('');
     const [newIngCost, setNewIngCost] = useState('');
     const [newIngUnit, setNewIngUnit] = useState('oz');
+
+    // State for new packaging
+    const [newPkgName, setNewPkgName] = useState('');
+    const [newPkgCost, setNewPkgCost] = useState('');
+    const [newPkgType, setNewPkgType] = useState('other');
+
+    // Sync with server if props change (e.g. after save/refresh)
+    useEffect(() => {
+        setSuppliers(initialSuppliers);
+    }, [initialSuppliers]);
+
+    useEffect(() => {
+        setIngredients(initialIngredients);
+    }, [initialIngredients]);
+
+    useEffect(() => {
+        setPackaging(initialPackaging);
+    }, [initialPackaging]);
+    const [newPkgStock, setNewPkgStock] = useState('');
+
+    const PKG_TYPES = [
+        { value: 'other', label: 'Other / General' },
+        { value: 'large_box', label: 'Large Box' },
+        { value: 'small_box', label: 'Small Box' },
+        { value: 'bag', label: 'Bag' },
+        { value: 'tray', label: 'Tray' },
+        { value: 'lid', label: 'Lid' },
+        { value: 'sticker', label: 'Sticker / Label' },
+        { value: 'insulation', label: 'Insulation' },
+        { value: 'ice_pack', label: 'Ice Pack' },
+    ];
 
     // Common Units
     const UNIT_OPTIONS = ['g', 'oz', 'lb', 'kg', 'ml', 'L', 'fl oz', 'cup', 'tbsp', 'tsp', 'each', 'can', 'pack', 'case', 'bunch'];
@@ -166,19 +218,111 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
         reader.onload = async (event) => {
             try {
                 const json = JSON.parse(event.target?.result as string);
-                if (json.ingredients && Array.isArray(json.ingredients)) {
-                    if (confirm(`Found ${json.ingredients.length} ingredients and ${json.suppliers?.length || 0} suppliers.\nReplace current list?`)) {
-                        setIngredients(json.ingredients);
-                        if (json.suppliers) setSuppliers(json.suppliers);
 
-                        // Optional: Auto-save immediately to persist
-                        // await saveChanges(); 
-                        alert("Imported! Click 'Save Changes' to persist to database.");
+                if (json.ingredients && Array.isArray(json.ingredients)) {
+                    if (confirm(`Found ${json.ingredients.length} ingredients and ${json.suppliers?.length || 0} suppliers.\nThis will import them as NEW items for your business.\n\nProceed?`)) {
+
+                        // ID Remapping Maps
+                        const supplierMap = new Map<string, string>(); // Old ID -> New/Existing ID
+
+                        // 1. Process Suppliers (Deduplicate by Name)
+                        const currentSupplierNames = new Map(suppliers.map(s => [s.name.toLowerCase().trim(), s.id]));
+                        const newSuppliers: any[] = [];
+
+                        (json.suppliers || []).forEach((s: any) => {
+                            const normalizedName = s.name.toLowerCase().trim();
+                            if (currentSupplierNames.has(normalizedName)) {
+                                // Exists: Map import ID to existing ID
+                                if (s.id) supplierMap.set(s.id, currentSupplierNames.get(normalizedName)!);
+                            } else {
+                                // New: Generate ID and add to list
+                                const newId = crypto.randomUUID();
+                                if (s.id) supplierMap.set(s.id, newId);
+                                newSuppliers.push({
+                                    ...s,
+                                    id: newId,
+                                    business_id: undefined,
+                                    is_global: false
+                                });
+                                // Add to map to prevent dupes within the import file itself
+                                currentSupplierNames.set(normalizedName, newId);
+                            }
+                        });
+
+                        // 2. Process Ingredients (Deduplicate by Name & Remap Suppliers)
+                        const currentIngredientNames = new Map(ingredients.map(i => [i.name.toLowerCase().trim(), i.id]));
+                        const newIngredients: any[] = [];
+                        const updatedIngredients: any[] = [];
+
+                        // Helper to find existing ingredient by ID (for updates)
+                        const findExisting = (id: string) => ingredients.find(i => i.id === id);
+
+                        json.ingredients.forEach((ing: any) => {
+                            const normalizedName = ing.name.toLowerCase().trim();
+                            const mappedSupplierId = (ing.supplier_id && supplierMap.has(ing.supplier_id))
+                                ? supplierMap.get(ing.supplier_id)
+                                : null;
+
+                            if (currentIngredientNames.has(normalizedName)) {
+                                // Exists: Update fields but keep ID
+                                const existingId = currentIngredientNames.get(normalizedName)!;
+                                updatedIngredients.push({
+                                    ...findExisting(existingId), // Keep existing fields
+                                    ...ing, // Overwrite with import data
+                                    id: existingId, // FORCE existing ID
+                                    business_id: undefined, // Will be set by API on save
+                                    supplier_id: mappedSupplierId // Update supplier link
+                                });
+                            } else {
+                                // New: Create new
+                                const newId = crypto.randomUUID();
+                                newIngredients.push({
+                                    ...ing,
+                                    id: newId,
+                                    business_id: undefined,
+                                    supplier_id: mappedSupplierId
+                                });
+                                currentIngredientNames.set(normalizedName, newId);
+                            }
+                        });
+
+                        // 3. Process Packaging (Simple Dedupe by Name)
+                        const currentPkgNames = new Set(packaging.map(p => p.name.toLowerCase().trim()));
+                        let newPackaging: any[] = [];
+
+                        if (json.packaging && Array.isArray(json.packaging)) {
+                            json.packaging.forEach((p: any) => {
+                                if (!currentPkgNames.has(p.name.toLowerCase().trim())) {
+                                    newPackaging.push({
+                                        ...p,
+                                        id: crypto.randomUUID(),
+                                        business_id: undefined
+                                    });
+                                }
+                            });
+                        }
+
+                        // Update State
+                        setSuppliers(prev => [...prev, ...newSuppliers]);
+
+                        // For ingredients, we need to merge updates into the main list + add new ones
+                        setIngredients(prev => {
+                            const sensitiveUpdates = new Map(updatedIngredients.map(i => [i.id, i]));
+                            return [
+                                ...prev.map(p => sensitiveUpdates.has(p.id) ? sensitiveUpdates.get(p.id) : p),
+                                ...newIngredients
+                            ];
+                        });
+
+                        if (newPackaging.length > 0) setPackaging(prev => [...prev, ...newPackaging]);
+
+                        alert("Import Successful! Items added as new drafts.\n\nPlease click 'Save Changes' to permanently save them to your account.");
                     }
                 } else {
                     alert("Invalid backup file format.");
                 }
             } catch (err) {
+                console.error(err);
                 alert("Failed to parse file.");
             }
         };
@@ -278,6 +422,88 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
             } catch (e) {
                 alert("Failed to delete.");
             }
+        }
+    };
+
+    const deleteSupplier = async (id: string, name: string) => {
+        if (!confirm(`Are you sure you want to delete supplier "${name}"? This cannot be undone.`)) return;
+
+        const res = await fetch(`/api/commercial/suppliers/delete?id=${id}`, {
+            method: 'DELETE'
+        });
+
+        const data = await res.json();
+
+        if (res.ok) {
+            setSuppliers(prev => prev.filter(s => s.id !== id));
+            toast.success('Supplier deleted');
+            router.refresh();
+        } else {
+            alert(data.error || 'Failed to delete supplier');
+        }
+    };
+
+    // --- PACKAGING HANDLERS (Live Edit) ---
+    const addPackaging = async () => {
+        if (!newPkgName.trim()) return;
+        try {
+            const res = await fetch('/api/delivery/inventory', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: newPkgName,
+                    cost_per_unit: Number(newPkgCost),
+                    quantity: Number(newPkgStock),
+                    type: newPkgType
+                })
+            });
+            if (!res.ok) throw new Error("Failed");
+            const newItem = await res.json();
+            // ensure numbers
+            newItem.cost_per_unit = Number(newItem.cost_per_unit || 0);
+            newItem.quantity = Number(newItem.quantity || 0);
+            newItem.lowStockThreshold = Number(newItem.lowStockThreshold || 10);
+
+            setPackaging(prev => [...prev, newItem]);
+            setNewPkgName('');
+            setNewPkgCost('');
+            setNewPkgStock('');
+        } catch (e) {
+            alert("Error adding packaging");
+        }
+    };
+
+    const updatePackaging = async (id: string, updates: Partial<PackagingItem>) => {
+        // Optimistic Update
+        setPackaging(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+
+        // Live Save
+        try {
+            await fetch('/api/delivery/inventory', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id, ...updates })
+            });
+        } catch (e) {
+            console.error("Failed to save packaging update");
+        }
+    };
+
+    const deletePackaging = async (id: string, name: string) => {
+        if (!confirm(`Delete "${name}"?`)) return;
+        try {
+            const res = await fetch('/api/delivery/inventory', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id })
+            });
+            if (res.ok) {
+                setPackaging(prev => prev.filter(p => p.id !== id));
+            } else {
+                alert("Failed to delete.");
+            }
+        } catch (e) {
+            alert("Error deleting.");
         }
     };
 
@@ -386,151 +612,26 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
 
     return (
         <div className="space-y-6">
+            <BulkPasteModal
+                showBulkPaste={showBulkPaste}
+                setShowBulkPaste={setShowBulkPaste}
+                pasteContent={pasteContent}
+                setPasteContent={setPasteContent}
+                bulkPreview={bulkPreview}
+                setBulkPreview={setBulkPreview}
+                parseBulkData={parseBulkData}
+                applyBulkData={applyBulkData}
+            />
 
-            {/* Bulk Paste Modal */}
-            {showBulkPaste && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-                    <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col border border-slate-200 dark:border-slate-700">
-                        <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
-                            <div>
-                                <h3 className="text-xl font-black text-slate-900 dark:text-white">Bulk Update Costs</h3>
-                                <p className="text-sm text-slate-500">Copy 2 columns from Excel: <strong>Name</strong> and <strong>Cost</strong></p>
-                            </div>
-                            <button onClick={() => setShowBulkPaste(false)} className="text-slate-400 hover:text-slate-600">
-                                <Trash2 size={24} className="rotate-45" /> {/* Close Icon Hack */}
-                            </button>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                            {!bulkPreview.length ? (
-                                <div>
-                                    <textarea
-                                        value={pasteContent}
-                                        onChange={(e) => setPasteContent(e.target.value)}
-                                        placeholder={`Example:\nOnions\t0.50\nGarlic\t3.00\nTomatoes\t1.25`}
-                                        className="w-full h-64 p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-sm resize-none focus:ring-2 focus:ring-indigo-500 outline-none"
-                                    />
-                                    <button
-                                        onClick={parseBulkData}
-                                        disabled={!pasteContent.trim()}
-                                        className="mt-4 w-full bg-indigo-600 text-white py-3 rounded-xl font-bold disabled:opacity-50 hover:bg-indigo-700"
-                                    >
-                                        Preview Updates
-                                    </button>
-                                </div>
-                            ) : (
-                                <div>
-                                    <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-xl flex gap-8 mb-4 text-sm font-bold text-indigo-900 dark:text-indigo-200">
-                                        <span>Found matches: {bulkPreview.filter(p => p.match).length}</span>
-                                        <span className="opacity-50">|</span>
-                                        <span className="text-rose-600 dark:text-rose-400">No match: {bulkPreview.filter(p => !p.match).length}</span>
-                                    </div>
-
-                                    <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
-                                        <table className="w-full text-sm text-left">
-                                            <thead className="bg-slate-50 dark:bg-slate-800 font-bold text-slate-500">
-                                                <tr>
-                                                    <th className="p-3">Ingredient</th>
-                                                    <th className="p-3 text-right">Old Cost</th>
-                                                    <th className="p-3 text-right">New Cost</th>
-                                                    <th className="p-3">Status</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                                                {bulkPreview.map((item, i) => (
-                                                    <tr key={i} className={!item.match ? 'bg-rose-50/50 dark:bg-rose-900/10' : ''}>
-                                                        <td className="p-3 font-medium text-slate-900 dark:text-white">{item.name}</td>
-                                                        <td className="p-3 text-right text-slate-400">${item.oldCost.toFixed(2)}</td>
-                                                        <td className="p-3 text-right font-bold text-emerald-600">${item.newCost.toFixed(2)}</td>
-                                                        <td className="p-3">
-                                                            {item.match ? (
-                                                                <span className="text-emerald-600 font-bold text-xs">UPDATE</span>
-                                                            ) : (
-                                                                <span className="text-rose-500 font-bold text-xs">NOT FOUND</span>
-                                                            )}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-
-                                    <div className="flex gap-4 mt-6">
-                                        <button
-                                            onClick={() => setBulkPreview([])}
-                                            className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 py-3 rounded-xl font-bold hover:bg-slate-200"
-                                        >
-                                            Back
-                                        </button>
-                                        <button
-                                            onClick={applyBulkData}
-                                            className="flex-1 bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 shadow-lg shadow-emerald-500/20"
-                                        >
-                                            Apply {bulkPreview.filter(p => p.match).length} Updates
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
-
-
-
-            {/* Merge Modal */}
-            {mergeSource && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-                    <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                        <div className="p-6 border-b border-slate-100 dark:border-slate-700">
-                            <h3 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
-                                <Merge className="text-indigo-500" />
-                                Merge Ingredient
-                            </h3>
-                            <p className="text-slate-500 mt-2">
-                                Merging <strong>{mergeSource.name}</strong>...
-                            </p>
-                        </div>
-                        <div className="p-6 space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Select Target Ingredient</label>
-                                <select
-                                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-medium"
-                                    value={mergeTargetId}
-                                    onChange={(e) => setMergeTargetId(e.target.value)}
-                                >
-                                    <option value="">-- Choose Ingredient to Keep --</option>
-                                    {[...ingredients]
-                                        .filter(i => i.id !== mergeSource.id) // Exclude self
-                                        .sort((a, b) => a.name.localeCompare(b.name))
-                                        .map(i => (
-                                            <option key={i.id} value={i.id}>{i.name}</option>
-                                        ))}
-                                </select>
-                            </div>
-                            <div className="bg-amber-50 dark:bg-amber-900/20 p-4 rounded-xl text-xs text-amber-800 dark:text-amber-200 font-medium leading-relaxed">
-                                <strong className="block mb-1 text-amber-900 dark:text-amber-100 uppercase">Warning</strong>
-                                You are about to merge "{mergeSource.name}" into the selected ingredient. "{mergeSource.name}" will be <strong>permanently deleted</strong>, and any recipes using it will be updated to use the selected ingredient instead.
-                            </div>
-                        </div>
-                        <div className="p-6 bg-slate-50 dark:bg-slate-800/50 flex gap-3 justify-end">
-                            <button
-                                onClick={() => setMergeSource(null)}
-                                className="px-5 py-2.5 font-bold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={handleMerge}
-                                disabled={!mergeTargetId || isSaving}
-                                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center gap-2"
-                            >
-                                {isSaving ? 'Merging...' : 'Confirm Merge'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <MergeModal
+                mergeSource={mergeSource}
+                setMergeSource={setMergeSource}
+                mergeTargetId={mergeTargetId}
+                setMergeTargetId={setMergeTargetId}
+                ingredients={ingredients}
+                handleMerge={handleMerge}
+                isSaving={isSaving}
+            />
 
             {/* Header / Tabs */}
             <div className="flex items-center justify-between border-b border-slate-200 pb-4">
@@ -541,6 +642,13 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
                     >
                         <Package size={18} />
                         Ingredients & Costs
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('packaging')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition ${activeTab === 'packaging' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}
+                    >
+                        <Package size={18} />
+                        Packaging
                     </button>
                     <button
                         onClick={() => setActiveTab('suppliers')}
@@ -567,297 +675,60 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
                 </div>
             </div>
 
-            {/* Ingredients Table */}
-
             {activeTab === 'ingredients' && (
-                <>
-                    {/* Add New Ingredient */}
-                    <div className="glass-panel rounded-3xl p-6 mb-6 bg-white/50 dark:bg-slate-800/40 border border-white/40 dark:border-slate-700/50">
-                        <div className="flex items-center gap-3 mb-6">
-                            <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-                                <Plus size={20} strokeWidth={3} />
-                            </div>
-                            <h3 className="font-black text-xl text-slate-900 dark:text-white text-adaptive">Add New Ingredient</h3>
-                        </div>
-                        <div className="flex flex-col md:flex-row gap-4 items-end">
-                            <div className="flex-1 w-full">
-                                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wide">Name</label>
-                                <input
-                                    value={newIngName}
-                                    onChange={(e) => setNewIngName(e.target.value)}
-                                    placeholder="e.g. Saffron"
-                                    className="w-full px-4 py-3 border border-slate-200 dark:border-slate-600 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 font-medium transition-all"
-                                />
-                            </div>
-                            <div className="w-full md:w-40">
-                                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wide">SKU</label>
-                                <input
-                                    value={newIngSku}
-                                    onChange={(e) => setNewIngSku(e.target.value)}
-                                    placeholder="Optional"
-                                    className="w-full px-4 py-3 border border-slate-200 dark:border-slate-600 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 font-medium transition-all"
-                                />
-                            </div>
-                            <div className="w-full md:w-40">
-                                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wide">Cost ($)</label>
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    value={newIngCost}
-                                    onChange={(e) => setNewIngCost(e.target.value)}
-                                    placeholder="0.00"
-                                    className="w-full px-4 py-3 border border-slate-200 dark:border-slate-600 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 font-medium transition-all"
-                                />
-                            </div>
-                            <div className="w-full md:w-32">
-                                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wide">Unit</label>
-                                <select
-                                    value={newIngUnit}
-                                    onChange={(e) => setNewIngUnit(e.target.value)}
-                                    className="w-full px-4 py-3 border border-slate-200 dark:border-slate-600 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-medium transition-all cursor-pointer"
-                                >
-                                    {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
-                                </select>
-                            </div>
-                            <button
-                                onClick={addIngredient}
-                                className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-emerald-500/20 active:scale-95 transition-all flex items-center justify-center h-[50px] w-full md:w-auto"
-                            >
-                                <Plus size={24} strokeWidth={2.5} />
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="glass-panel rounded-3xl bg-white/80 dark:bg-slate-900/60 border border-white/40 dark:border-slate-700/50 shadow-sm backdrop-blur-xl">
-                        <table className="w-full text-left border-collapse">
-                            {/* Force Refresh Trace: 123 */}
-                            <thead className="bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-20 shadow-md">
-                                <tr>
-                                    <th className="px-6 py-5 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">Ingredient Name</th>
-                                    <th className="px-6 py-5 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">SKU</th>
-                                    <th className="px-6 py-5 text-right text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">Purchase Cost</th>
-                                    <th className="px-6 py-5 text-center text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">Pack Size</th>
-                                    <th className="px-6 py-5 text-right text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">Cost / Unit</th>
-                                    <th className="px-6 py-5 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">Stock Qty</th>
-                                    <th className="px-6 py-5 pl-8 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">Usage Unit</th>
-                                    <th className="px-6 py-5 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">Supplier</th>
-                                    <th className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 text-right">
-                                        <button
-                                            onClick={saveChanges}
-                                            disabled={isSaving}
-                                            className="inline-flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-bold shadow-md shadow-emerald-600/20 text-xs whitespace-nowrap transition-all transform hover:scale-105"
-                                        >
-                                            <Save size={14} />
-                                            {isSaving ? 'Saving' : 'Save'}
-                                        </button>
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                                {[...ingredients].sort((a, b) => a.name.localeCompare(b.name)).map((ing, index) => (
-                                    <tr
-                                        key={ing.id}
-                                        className="hover:bg-indigo-50/50 dark:hover:bg-slate-800/40 transition-colors group"
-                                    >
-                                        <td className="px-6 py-4">
-                                            <input
-                                                type="text"
-                                                value={ing.name}
-                                                onChange={(e) => handleUpdateIngredient(ing.id, 'name', e.target.value)}
-                                                className="w-full px-3 py-2 bg-transparent border border-transparent hover:border-slate-300 dark:hover:border-slate-600 focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-800 rounded-lg outline-none transition font-bold text-slate-700 dark:text-slate-200"
-                                            />
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center gap-2">
-                                                <input
-                                                    type="text"
-                                                    value={ing.sku || ''}
-                                                    onChange={(e) => handleUpdateIngredient(ing.id, 'sku', e.target.value)}
-                                                    placeholder="-"
-                                                    className="w-24 px-3 py-2 bg-transparent border border-transparent hover:border-slate-300 dark:hover:border-slate-600 focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-800 rounded-lg outline-none transition font-medium text-slate-900 dark:text-white"
-                                                />
-                                                {((ing as any).sku) && (
-                                                    <button
-                                                        onClick={() => navigator.clipboard.writeText(ing.sku || '')}
-                                                        className="p-1.5 text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition-all"
-                                                        title="Copy SKU"
-                                                    >
-                                                        <Copy size={14} />
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 text-right">
-                                            <div className="flex items-center justify-end gap-2">
-                                                <span className="text-slate-400 font-medium">$</span>
-                                                <input
-                                                    type="number"
-                                                    step="0.01"
-                                                    value={ing.purchase_cost || ''}
-                                                    onChange={(e) => handleUpdateIngredient(ing.id, 'purchase_cost', e.target.value)}
-                                                    placeholder="0.00"
-                                                    className="w-24 text-right px-3 py-2 border border-slate-200 dark:border-slate-600/50 bg-slate-50/50 dark:bg-slate-800/50 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white font-medium"
-                                                />
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center justify-center gap-2 bg-transparent p-2 rounded-lg border border-slate-200 dark:border-slate-700">
-                                                <span className="text-slate-500 dark:text-slate-400 font-bold text-xs">1</span>
-                                                <input
-                                                    value={ing.purchase_unit || ''}
-                                                    onChange={(e) => handleUpdateIngredient(ing.id, 'purchase_unit', e.target.value)}
-                                                    placeholder="Case"
-                                                    className="w-16 px-2 py-1 bg-transparent border border-slate-200 dark:border-slate-600 rounded text-center text-xs font-medium text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-1 focus:ring-indigo-500 outline-none"
-                                                />
-                                                <span className="text-slate-500 dark:text-slate-400 font-bold text-xs">=</span>
-                                                <input
-                                                    type="number"
-                                                    value={ing.purchase_quantity || ''}
-                                                    onChange={(e) => handleUpdateIngredient(ing.id, 'purchase_quantity', e.target.value)}
-                                                    placeholder="1"
-                                                    className="w-14 px-2 py-1 bg-transparent border border-slate-200 dark:border-slate-600 rounded text-center text-xs font-bold text-indigo-600 dark:text-indigo-400 focus:ring-1 focus:ring-indigo-500 outline-none"
-                                                />
-                                                <span className="text-slate-500 dark:text-slate-400 text-xs font-medium truncate max-w-[40px]" title={ing.unit}>{ing.unit}</span>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 text-right">
-                                            <div className="flex flex-col items-end">
-                                                <span className="font-mono font-bold text-slate-700 dark:text-slate-200">
-                                                    ${Number(ing.cost_per_unit || 0).toFixed(2)}
-                                                </span>
-                                                <span className="text-[10px] text-slate-400 uppercase tracking-wider">
-                                                    Per {ing.unit}
-                                                </span>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <input
-                                                type="number"
-                                                step="0.01"
-                                                value={ing.stock_quantity || 0}
-                                                onChange={(e) => handleUpdateIngredient(ing.id, 'stock_quantity', e.target.value)}
-                                                className="w-24 px-3 py-2 border border-emerald-200 dark:border-emerald-800/50 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-emerald-50/50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 font-bold"
-                                            />
-                                        </td>
-                                        <td className="px-6 py-4 pl-8">
-                                            <select
-                                                value={ing.unit}
-                                                onChange={(e) => handleUpdateIngredient(ing.id, 'unit', e.target.value)}
-                                                className="w-24 px-2 py-2 border border-transparent hover:border-slate-300 dark:hover:border-slate-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-transparent text-slate-600 dark:text-slate-400 font-medium cursor-pointer"
-                                            >
-                                                {UNIT_OPTIONS.map(u => (
-                                                    <option key={u} value={u}>{u}</option>
-                                                ))}
-                                                {!UNIT_OPTIONS.includes(ing.unit) && <option value={ing.unit}>{ing.unit}</option>}
-                                            </select>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center gap-2">
-                                                <select
-                                                    value={ing.supplier_id || ''}
-                                                    onChange={(e) => handleUpdateIngredient(ing.id, 'supplier_id', e.target.value || null)}
-                                                    className="w-full bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-600/50 text-slate-600 dark:text-slate-300 text-sm rounded-lg focus:ring-2 focus:ring-blue-500 block p-2.5 font-medium"
-                                                >
-                                                    <option value="">-- No Supplier --</option>
-                                                    {suppliers.map((s) => (
-                                                        <option key={s.id} value={s.id}>
-                                                            {s.name}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                {(() => {
-                                                    const currentSup = suppliers.find(s => s.id === ing.supplier_id);
-                                                    if (currentSup?.website_url) {
-                                                        return (
-                                                            <a
-                                                                href={currentSup.website_url}
-                                                                target="_blank"
-                                                                rel="noopener noreferrer"
-                                                                className="w-8 h-8 flex items-center justify-center bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition"
-                                                                title={`Go to ${currentSup.name}`}
-                                                            >
-                                                                <ExternalLink size={16} strokeWidth={2.5} />
-                                                            </a>
-                                                        );
-                                                    }
-                                                    return null;
-                                                })()}
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center gap-1">
-                                                <button
-                                                    onClick={() => handleSaveSingle(ing.id)}
-                                                    disabled={savingIds.has(ing.id)}
-                                                    className={`p-2 rounded-lg transition-all ${savingIds.has(ing.id) ? 'text-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' : 'text-slate-300 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'}`}
-                                                    title="Save Changes"
-                                                >
-                                                    {savingIds.has(ing.id) ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                                                </button>
-                                                <button
-                                                    onClick={() => confirmDelete(ing.id, ing.name)}
-                                                    className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all"
-                                                    title="Delete Ingredient"
-                                                >
-                                                    <Trash2 size={18} />
-                                                </button>
-                                                <button
-                                                    onClick={() => setMergeSource(ing)}
-                                                    className="p-2 text-indigo-300 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all"
-                                                    title="Merge into another ingredient"
-                                                >
-                                                    <Merge size={18} />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </>
+                <IngredientTable
+                    ingredients={ingredients}
+                    suppliers={suppliers}
+                    newIngName={newIngName}
+                    setNewIngName={setNewIngName}
+                    newIngSku={newIngSku}
+                    setNewIngSku={setNewIngSku}
+                    newIngCost={newIngCost}
+                    setNewIngCost={setNewIngCost}
+                    newIngUnit={newIngUnit}
+                    setNewIngUnit={setNewIngUnit}
+                    addIngredient={addIngredient}
+                    searchQuery={searchQuery}
+                    setSearchQuery={setSearchQuery}
+                    handleUpdateIngredient={handleUpdateIngredient}
+                    saveChanges={saveChanges}
+                    isSaving={isSaving}
+                    savingIds={savingIds}
+                    handleSaveSingle={handleSaveSingle}
+                    confirmDelete={confirmDelete}
+                    setMergeSource={setMergeSource}
+                    UNIT_OPTIONS={UNIT_OPTIONS}
+                />
             )}
 
+            {activeTab === 'packaging' && (
+                <PackagingTable
+                    packaging={packaging}
+                    newPkgName={newPkgName}
+                    setNewPkgName={setNewPkgName}
+                    newPkgType={newPkgType}
+                    setNewPkgType={setNewPkgType}
+                    newPkgCost={newPkgCost}
+                    setNewPkgCost={setNewPkgCost}
+                    newPkgStock={newPkgStock}
+                    setNewPkgStock={setNewPkgStock}
+                    addPackaging={addPackaging}
+                    updatePackaging={updatePackaging}
+                    deletePackaging={deletePackaging}
+                    PKG_TYPES={PKG_TYPES}
+                />
+            )}
 
-            {/* Suppliers List */}
-            {
-                activeTab === 'suppliers' && (
-                    <div className="max-w-xl">
-                        <div className="bg-white dark:bg-slate-800 bg-adaptive rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 mb-6">
-                            <h3 className="font-bold text-slate-900 dark:text-white text-adaptive mb-4">Add New Supplier</h3>
-                            <div className="flex gap-4">
-                                <input
-                                    value={newSupplierName}
-                                    onChange={(e) => setNewSupplierName(e.target.value)}
-                                    placeholder="Supplier Name (e.g. Sysco)"
-                                    className="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
-                                />
-                                <button
-                                    onClick={addSupplier}
-                                    className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-emerald-700"
-                                >
-                                    <Plus size={20} />
-                                </button>
-                            </div>
-                        </div>
+            {activeTab === 'suppliers' && (
+                <SupplierTable
+                    suppliers={suppliers}
+                    newSupplierName={newSupplierName}
+                    setNewSupplierName={setNewSupplierName}
+                    addSupplier={addSupplier}
+                    deleteSupplier={deleteSupplier}
+                />
+            )}
 
-                        <div className="bg-white dark:bg-slate-800 bg-adaptive rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-                            <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-300">Existing Suppliers</div>
-                            <ul className="divide-y divide-slate-100 dark:divide-slate-700">
-                                {suppliers.map(s => (
-                                    <li key={s.id} className="p-4 flex items-center gap-3">
-                                        <Store size={18} className="text-slate-400" />
-                                        <Link href={`/commercial/suppliers/${s.id}`} className="font-medium text-slate-900 dark:text-white text-adaptive hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline flex-1">
-                                            {s.name}
-                                        </Link>
-                                    </li>
-                                ))}
-                                {suppliers.length === 0 && <li className="p-8 text-center text-slate-400">No suppliers yet.</li>}
-                            </ul>
-                        </div>
-                    </div>
-                )
-            }
-        </div >
+        </div>
     );
 }

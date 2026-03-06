@@ -4,10 +4,26 @@ import { prisma } from '@/lib/db';
 
 export async function GET() {
     try {
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+        const user = session.user as any;
+        const businessId = user.businessId;
+        const plan = user.plan;
+        const isSuperAdmin = user.isSuperAdmin;
+
+        if (!businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+        const hasAccess = plan === 'ENTERPRISE' || plan === 'ULTIMATE' || plan === 'FREE' || isSuperAdmin;
+        if (!hasAccess) {
+            return NextResponse.json({ error: "Upgrade Now" }, { status: 403 });
+        }
+
         const [total, individuals, organizations] = await Promise.all([
-            prisma.organization.count(),
-            prisma.organization.count({ where: { type: 'direct_customer' } }),
-            prisma.organization.count({ where: { type: 'fundraiser_org' } }),
+            prisma.customer.count({ where: { business_id: businessId, archived: false } }),
+            prisma.customer.count({ where: { business_id: businessId, type: 'direct_customer', archived: false } }),
+            prisma.customer.count({ where: { business_id: businessId, type: { in: ['fundraiser_org', 'organization'] }, archived: false } }),
         ]);
 
         return NextResponse.json({

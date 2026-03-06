@@ -1,39 +1,158 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { auth } from '@/auth';
 import { KitchenEngine } from '@/lib/kitchen_engine';
 import { PrismaAdapter } from '@/lib/prisma_adapter';
+import { STATUS_LABELS, type CustomerStatus } from '@/lib/statusConstants';
 
 export async function GET() {
     try {
-        // 1. Metrics
-        const activeOrdersCount = await prisma.order.count({
-            where: { status: { not: 'completed' } }
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        // Fetch business details
+        const business = await prisma.business.findUnique({
+            where: { id: session.user.businessId },
+            select: { plan: true, google_calendar_url: true }
         });
 
-        // 2. Weekly Revenue (Chart Data) & Total Revenue (Metric)
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        sevenDaysAgo.setHours(0, 0, 0, 0);
+        const isUltimate = business?.plan === 'ULTIMATE';
+        const businessId = session.user.businessId;
 
-        // Chart Data (Last 7 Days)
-        const ordersLast7Days = await prisma.order.findMany({
+        if (!isUltimate) {
+            // Return restricted dashboard for non-Ultimate plans
+            return NextResponse.json({
+                metrics: {
+                    activeOrders: 0,
+                    activeOrdersGrowth: 0,
+                    revenue: 0,
+                    revenueGrowth: 0,
+                    productionProgress: 0,
+                    foodCost: 0,
+                    foodCostGrowth: 0,
+                    restricted: true
+                },
+                weeklyRevenue: [],
+                lowStock: [],
+                productionDemand: { family: 0, couple: 0, single: 0, total: 0 },
+                recentActivity: [],
+                calendarUrl: business?.google_calendar_url || ''
+            });
+        }
+
+        // Fetch Business Metadata (Calendar URL)
+        const businessParams = await prisma.business.findUnique({
+            where: { id: businessId },
+            select: { google_calendar_url: true }
+        });
+
+        // 1. Metrics - Active Orders (Now Customers in Production)
+        const activeOrdersCount = await prisma.customer.count({
             where: {
-                created_at: { gte: sevenDaysAgo },
-                status: { not: 'pending' }
-            },
-            select: {
-                created_at: true,
-                total_amount: true
+                status: 'PRODUCTION',
+                business_id: businessId
             }
         });
 
-        // Total Revenue (All Time)
-        // Using aggregate is more efficient than fetching all - matching Orders Page logic (ALL orders)
-        const totalRevenueAgg = await prisma.order.aggregate({
-            _sum: { total_amount: true }
+        // 2. Weekly Revenue (Chart Data) & Weekly In-Progress Orders
+        const now = new Date();
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(now.getDate() - 7);
+        sevenDaysAgo.setHours(0, 0, 0, 0);
+
+        const fourteenDaysAgo = new Date();
+        fourteenDaysAgo.setDate(now.getDate() - 14);
+        fourteenDaysAgo.setHours(0, 0, 0, 0);
+
+        const inProgressStatuses = ['pending', 'production_ready', 'delivered'];
+
+        // This Week's Data (Last 7 Days)
+        const ordersThisWeek = await prisma.order.findMany({
+            where: {
+                created_at: { gte: sevenDaysAgo },
+                business_id: businessId
+                // We fetch all non-deleted orders and filter in code to be consistent
+            },
+            select: {
+                created_at: true,
+                total_amount: true,
+                status: true,
+                items: {
+                    include: { bundle: true }
+                }
+            }
         });
-        // Use optional chaining for safety
-        const revenue = Number(totalRevenueAgg._sum?.total_amount || 0);
+
+        const revenueThisWeek = ordersThisWeek
+            .filter(o => o.status !== 'pending') // Revenue usually doesn't count pending
+            .reduce((sum, o) => sum + Number(o.total_amount), 0);
+
+        const inProgressThisWeek = ordersThisWeek
+            .filter(o => inProgressStatuses.includes((o.status || '').toLowerCase()))
+            .length;
+
+        // Last Week's Data (Days 8-14)
+        const ordersLastWeek = await prisma.order.findMany({
+            where: {
+                created_at: { gte: fourteenDaysAgo, lt: sevenDaysAgo },
+                business_id: businessId
+            },
+            select: {
+                total_amount: true,
+                status: true,
+                items: {
+                    include: { bundle: true }
+                }
+            }
+        });
+
+        const revenueLastWeek = ordersLastWeek
+            .filter(o => o.status !== 'pending')
+            .reduce((sum, o) => sum + Number(o.total_amount), 0);
+
+        const inProgressLastWeek = ordersLastWeek
+            .filter(o => inProgressStatuses.includes((o.status || '').toLowerCase()))
+            .length;
+
+        // Monthly Revenue (Current Month vs Last Month)
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+
+        const ordersThisMonth = await prisma.order.findMany({
+            where: {
+                created_at: { gte: startOfMonth },
+                status: { not: 'pending' },
+                business_id: businessId
+            },
+            select: { total_amount: true }
+        });
+
+        const ordersLastMonth = await prisma.order.findMany({
+            where: {
+                created_at: { gte: startOfLastMonth, lte: endOfLastMonth },
+                status: { not: 'pending' },
+                business_id: businessId
+            },
+            select: { total_amount: true }
+        });
+
+        const revenueThisMonth = ordersThisMonth.reduce((sum, o) => sum + Number(o.total_amount), 0);
+        const revenueLastMonthForGrowth = ordersLastMonth.reduce((sum, o) => sum + Number(o.total_amount), 0);
+
+        // Growth Calculation Helper
+        const calculateGrowth = (current: number, previous: number) => {
+            if (previous === 0) return current > 0 ? 100 : 0;
+            return Math.round(((current - previous) / previous) * 100);
+        };
+
+        const revenueMonthGrowth = calculateGrowth(revenueThisMonth, revenueLastMonthForGrowth);
+        const currentMonthName = now.toLocaleString('default', { month: 'long' });
+
+        const revenueGrowth = calculateGrowth(revenueThisWeek, revenueLastWeek);
+        const ordersGrowth = calculateGrowth(inProgressThisWeek, inProgressLastWeek);
 
         // Bucket by Day for Chart
         const daysMap = new Map<string, { amount: number, orders: number, date: Date }>();
@@ -47,7 +166,7 @@ export async function GET() {
             daysMap.set(key, { amount: 0, orders: 0, date: d });
         }
 
-        ordersLast7Days.forEach(o => {
+        ordersThisWeek.forEach(o => {
             if (!o.created_at) return;
             const dayName = days[o.created_at.getDay()];
             const amount = Number(o.total_amount);
@@ -67,7 +186,10 @@ export async function GET() {
 
         // 2. Low Stock Ingredients (Active Tracking)
         const lowStock = await prisma.ingredient.findMany({
-            where: { stock_quantity: { lt: 20 } }, // Threshold < 20 units
+            where: {
+                stock_quantity: { lt: 20 },
+                business_id: businessId
+            }, // Threshold < 20 units
             take: 5,
             orderBy: { stock_quantity: 'asc' },
             select: { name: true, stock_quantity: true, unit: true, supplier: { select: { name: true } } }
@@ -75,30 +197,51 @@ export async function GET() {
 
         // 3. Recent Activity (Orders + Social)
         const recentOrders = await prisma.order.findMany({
+            where: {
+                status: { not: 'delivered' as any },
+                business_id: businessId
+            },
             take: 5,
             orderBy: { created_at: 'desc' },
-            include: { organization: true }
+            include: { customer: true }
         });
 
         let recentSocial: any[] = [];
         try {
             recentSocial = await prisma.activity.findMany({
-                take: 5,
+                take: 10, // Increased
                 orderBy: { timestamp: 'desc' },
-                where: { status: 'unread' }
+                where: {
+                    type: { in: ['message', 'comment'] },
+                    status: { not: 'archived' }, // Show regular messages even if read/replied
+                    business_id: businessId
+                }
             });
         } catch (e) {
             console.warn("Activity table not found or accessible yet. Skipping social feed.");
         }
 
-
         // 4. Production Demand (Active Queue Breakdown)
+        // Note: For "Production Demand", we specifically care about items not yet delivered.
         const demandAgg = await prisma.orderItem.groupBy({
             by: ['variant_size'],
             _sum: { quantity: true },
             where: {
-                order: { status: { not: 'completed' } }
+                order: {
+                    status: { in: ['pending', 'production_ready'] as any },
+                    business_id: businessId
+                }
             }
+        });
+
+        // Count orders that HAVE those statuses but NO items (fallback to sizing based on price)
+        const unmappedOrders = await prisma.order.findMany({
+            where: {
+                status: { in: ['pending', 'production_ready'] as any },
+                items: { none: {} },
+                business_id: businessId
+            },
+            select: { total_amount: true }
         });
 
         const demandBreakdown = {
@@ -108,97 +251,140 @@ export async function GET() {
             total: 0
         };
 
+        // Add unmapped orders based on price
+        unmappedOrders.forEach(o => {
+            const amount = Number(o.total_amount);
+            demandBreakdown.total += 1;
+            if (amount >= 110) { // $125 threshold
+                demandBreakdown.family += 1;
+            } else if (amount >= 50) { // $60 threshold
+                demandBreakdown.couple += 1;
+            } else {
+                demandBreakdown.family += 1; // Default fallback
+            }
+        });
+
         demandAgg.forEach((group: any) => {
             const qty = group._sum.quantity || 0;
             demandBreakdown.total += qty;
             if (group.variant_size === 'serves_5') demandBreakdown.family += qty;
-            if (group.variant_size === 'serves_2') demandBreakdown.couple += qty;
+            else if (group.variant_size === 'serves_2') demandBreakdown.couple += qty;
+            else demandBreakdown.family += qty; // Fallback for anything else
         });
 
-        // 5. Calculate Theoretical Food Cost (Last 7 Days)
-
-        const ordersForCost = await prisma.order.findMany({
-            where: {
-                created_at: { gte: sevenDaysAgo },
-                status: { not: 'pending' }
-            },
-            include: {
-                items: {
-                    include: { bundle: true }
-                }
-            }
-        });
-
-        let totalCOGS = 0;
-        let totalRevenueForCost = 0;
-
-        const dbAdapter = new PrismaAdapter();
+        // 5. Calculate Theoretical Food Cost (This Week vs Last Week)
+        const dbAdapter = new PrismaAdapter(businessId);
         const engine = new KitchenEngine(dbAdapter);
         const bundleCostCache = new Map<string, number>();
 
-        for (const order of ordersForCost) {
-            totalRevenueForCost += Number(order.total_amount);
-            for (const item of order.items) {
-                if (!item.bundle_id) continue;
-                const cacheKey = `${item.bundle_id}-${item.variant_size}`;
-                let unitCost = bundleCostCache.get(cacheKey);
-                if (unitCost === undefined) {
-                    try {
-                        unitCost = await engine.calculateBundleCost(item.bundle_id, item.variant_size);
-                        bundleCostCache.set(cacheKey, unitCost);
-                    } catch (e) {
-                        unitCost = 0;
+        const calculateCOGS = async (orders: any[]) => {
+            let totalCOGS = 0;
+            for (const order of orders) {
+                for (const item of order.items) {
+                    if (!item.bundle_id) continue;
+                    const cacheKey = `${item.bundle_id}-${item.variant_size}`;
+                    let unitCost = bundleCostCache.get(cacheKey);
+                    if (unitCost === undefined) {
+                        try {
+                            unitCost = await engine.calculateBundleCost(item.bundle_id, item.variant_size);
+                            bundleCostCache.set(cacheKey, unitCost);
+                        } catch (e) {
+                            unitCost = 0;
+                        }
                     }
+                    totalCOGS += (unitCost * item.quantity);
                 }
-                totalCOGS += (unitCost * item.quantity);
             }
-        }
+            return totalCOGS;
+        };
 
-        const foodCostPercentage = totalRevenueForCost > 0
-            ? Math.round((totalCOGS / totalRevenueForCost) * 100)
-            : 0;
+        const cogsThisWeek = await calculateCOGS(ordersThisWeek);
+        const cogsLastWeek = await calculateCOGS(ordersLastWeek);
+
+        const foodCostThisWeek = revenueThisWeek > 0 ? Math.round((cogsThisWeek / revenueThisWeek) * 100) : 0;
+        const foodCostLastWeek = revenueLastWeek > 0 ? Math.round((cogsLastWeek / revenueLastWeek) * 100) : 0;
+
+        const foodCostGrowth = foodCostLastWeek === 0 ? 0 : Math.round(((foodCostThisWeek - foodCostLastWeek) / foodCostLastWeek) * 100);
 
         // Map Orders to Activity Format
-        const orderActivities = recentOrders.map((o: any) => ({
-            id: o.external_id,
-            type: 'order',
-            title: 'New Order',
-            customer: o.organization?.name || o.customer_name || 'Guest',
-            amount: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(o.total_amount) || 0),
-            status: o.status === 'production_ready' ? 'Ready' : (o.status === 'completed' ? 'Completed' : 'Pending'),
-            date: o.created_at,
-            customerId: o.organization?.id || (o.customer_name ? encodeURIComponent(o.customer_name) : undefined)
-        }));
+        const orderActivities = recentOrders.map((o: any) => {
+            let label = 'Pending';
+            if (o.customer?.status) {
+                label = STATUS_LABELS[o.customer.status as CustomerStatus] || o.customer.status;
+            } else {
+                // Better Fallbacks for unlinked orders
+                if (o.status === 'production_ready') label = 'In Progress';
+                else if (o.status === 'completed') label = 'Ready';
+                else if (o.status === 'delivered') label = 'Completed';
+            }
+
+            return {
+                id: o.external_id,
+                type: 'order',
+                title: 'New Order',
+                customer: o.customer?.name || o.customer_name || 'Guest',
+                amount: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(o.total_amount) || 0),
+                status: label,
+                date: o.created_at,
+                customerId: o.customer?.id || (o.customer_name ? encodeURIComponent(o.customer_name) : undefined)
+            };
+        });
 
         // Map Social to Activity Format
         const socialActivities = recentSocial.map((a: any) => ({
-            id: a.external_id,
+            id: a.id, // Use internal ID
+            external_id: a.external_id,
             type: a.type,
             title: a.type === 'comment' ? 'FB Comment' : a.type === 'message' ? 'FB Message' : 'New Lead',
             customer: a.customer_name || 'Anonymous',
             content: a.content,
             status: a.status,
             date: a.timestamp,
-            customerId: a.customer_id
+            customerId: a.customer_id,
+            metadata: a.metadata
         }));
 
         const allActivity = [...orderActivities, ...socialActivities]
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-            .slice(0, 10);
+            .slice(0, 15);
+
+        // Calculate Production Progress from DB runs
+        const activeRun = await prisma.productionRun.findFirst({
+            where: {
+                business_id: businessId,
+                status: { in: ['planning', 'active'] }
+            },
+            include: {
+                tasks: true
+            },
+            orderBy: {
+                run_date: 'desc'
+            }
+        });
+
+        let databaseProductionProgress = 0;
+        if (activeRun && activeRun.tasks.length > 0) {
+            const completedTasks = activeRun.tasks.filter(t => t.status === 'done').length;
+            databaseProductionProgress = Math.round((completedTasks / activeRun.tasks.length) * 100);
+        }
 
         return NextResponse.json({
             metrics: {
-                activeOrders: activeOrdersCount,
-                revenue: revenue,
-                productionProgress: 40,
-                foodCost: foodCostPercentage
+                activeOrders: inProgressThisWeek,
+                activeOrdersGrowth: ordersGrowth,
+                revenue: revenueThisMonth,
+                revenueGrowth: revenueMonthGrowth,
+                currentMonth: currentMonthName,
+                productionProgress: databaseProductionProgress,
+                foodCost: foodCostThisWeek,
+                foodCostGrowth: foodCostGrowth
             },
             weeklyRevenue: weeklyBreakdown,
             lowStock,
             productionDemand: demandBreakdown,
-            recentActivity: allActivity
+            recentActivity: allActivity,
+            calendarUrl: businessParams?.google_calendar_url || ''
         });
-
     } catch (e) {
         console.error("Dashboard API Error:", e);
         return NextResponse.json({ error: "Failed to fetch dashboard stats" }, { status: 500 });

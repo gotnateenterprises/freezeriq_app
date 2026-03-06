@@ -2,7 +2,8 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { RefreshCw, Search, Truck, Building2, Package, Phone, Mail, Trash, Plus } from 'lucide-react';
+import { RefreshCw, Search, Truck, Building2, Package, Phone, Mail, Trash, Plus, Globe, ChevronRight, Settings } from 'lucide-react';
+import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 
 interface Supplier {
@@ -18,10 +19,13 @@ interface Supplier {
 }
 
 export default function SuppliersPage() {
+    const { data: session } = useSession();
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+    const [globalSuppliers, setGlobalSuppliers] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [isCreating, setIsCreating] = useState(false);
+    const [showGlobalPicker, setShowGlobalPicker] = useState(false);
     const [newSupplierName, setNewSupplierName] = useState('');
 
     const fetchSuppliers = async () => {
@@ -57,6 +61,28 @@ export default function SuppliersPage() {
         }
     };
 
+    const handleCreateFromTemplate = async (template: any) => {
+        try {
+            const res = await fetch('/api/suppliers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: template.name,
+                    portal_type: template.portal_type,
+                    search_url_pattern: template.search_url_pattern,
+                    logo_url: template.logo_url,
+                    website_url: template.website_url
+                })
+            });
+            if (res.ok) {
+                const newSupplier = await res.json();
+                window.location.href = `/suppliers/${newSupplier.id}`;
+            }
+        } catch (e) {
+            alert('Failed to import from template');
+        }
+    };
+
     const handleDelete = async (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
         if (!confirm("Are you sure? This will not delete ingredients but will unlink them.")) return;
@@ -73,7 +99,24 @@ export default function SuppliersPage() {
 
     useEffect(() => {
         fetchSuppliers();
+
+        const savedGfsPortal = localStorage.getItem('gfsPortalType');
+        if (savedGfsPortal) setGfsPortalType(savedGfsPortal);
+
+        const savedCustomGfs = localStorage.getItem('customGfsUrl');
+        if (savedCustomGfs) setCustomGfsUrl(savedCustomGfs);
     }, []);
+
+    const [showSettings, setShowSettings] = useState(false);
+    const [gfsPortalType, setGfsPortalType] = useState('gfs_store');
+    const [customGfsUrl, setCustomGfsUrl] = useState('');
+
+    const handleGfsSave = () => {
+        localStorage.setItem('gfsPortalType', gfsPortalType);
+        localStorage.setItem('customGfsUrl', customGfsUrl);
+        alert("Gordon Food Service Settings Saved!");
+        setShowSettings(false);
+    };
 
     const filtered = suppliers.filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
@@ -81,10 +124,26 @@ export default function SuppliersPage() {
         <div className="p-8 max-w-7xl mx-auto pb-32">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-8">
                 <div>
-                    <h1 className="text-4xl font-black text-slate-900 dark:text-white text-adaptive tracking-tight">Supplier CRM</h1>
+                    <h1 className="text-4xl font-black text-slate-900 dark:text-white text-adaptive tracking-tight">Suppliers</h1>
                     <p className="text-slate-500 dark:text-slate-400 text-adaptive-subtle mt-2 text-lg">Manage vendors, account details, and contacts.</p>
                 </div>
                 <div className="flex items-center gap-3">
+                    {(session?.user as any)?.isSuperAdmin && (
+                        <Link
+                            href="/admin/suppliers"
+                            className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-4 py-3 rounded-xl font-bold transition border border-slate-200 dark:border-slate-700"
+                        >
+                            <Globe size={18} />
+                            Manage Global Templates
+                        </Link>
+                    )}
+                    <button
+                        onClick={() => setShowSettings(true)}
+                        className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-4 py-3 rounded-xl font-bold transition border border-slate-200 dark:border-slate-700"
+                    >
+                        <Settings size={18} />
+                        Supplier Settings
+                    </button>
                     <button
                         onClick={() => setIsCreating(true)}
                         className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl font-bold transition shadow-lg shadow-indigo-200 dark:shadow-none hover:scale-105 active:scale-95"
@@ -111,6 +170,63 @@ export default function SuppliersPage() {
                                     placeholder="e.g. US Foods"
                                 />
                             </div>
+
+                            {!showGlobalPicker ? (
+                                <button
+                                    onClick={async () => {
+                                        const res = await fetch('/api/admin/suppliers');
+                                        if (res.ok) {
+                                            const data = await res.json();
+                                            setGlobalSuppliers(data);
+                                            setShowGlobalPicker(true);
+                                        }
+                                    }}
+                                    className="w-full flex items-center justify-between p-4 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/10 transition-all group"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                                            <Globe size={20} />
+                                        </div>
+                                        <div className="text-left">
+                                            <p className="text-sm font-bold text-slate-900 dark:text-white">Import from Global Template</p>
+                                            <p className="text-xs text-slate-500">Pick from pre-configured suppliers</p>
+                                        </div>
+                                    </div>
+                                    <ChevronRight size={18} className="text-slate-400 group-hover:text-indigo-500" />
+                                </button>
+                            ) : (
+                                <div className="space-y-2 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+                                    <p className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Available Templates</p>
+                                    {globalSuppliers.map((gs: any) => (
+                                        <button
+                                            key={gs.id}
+                                            onClick={() => {
+                                                setNewSupplierName(gs.name);
+                                                // We will pass the global ID or data during creation if backend supports it
+                                                // For now, let's just prefill name and we can extend creating from template
+                                                handleCreateFromTemplate(gs);
+                                            }}
+                                            className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-100 dark:border-slate-700 transition"
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                {gs.logo_url ? (
+                                                    <img src={gs.logo_url} className="w-6 h-6 object-contain" />
+                                                ) : (
+                                                    <Truck size={16} className="text-slate-400" />
+                                                )}
+                                                <span className="text-sm font-bold">{gs.name}</span>
+                                            </div>
+                                            <Plus size={14} className="text-indigo-500" />
+                                        </button>
+                                    ))}
+                                    <button
+                                        onClick={() => setShowGlobalPicker(false)}
+                                        className="text-xs text-indigo-600 font-bold hover:underline"
+                                    >
+                                        Back to Manual Entry
+                                    </button>
+                                </div>
+                            )}
                             <div className="pt-4 flex gap-3 justify-end">
                                 <button
                                     onClick={() => setIsCreating(false)}
@@ -225,6 +341,72 @@ export default function SuppliersPage() {
                         </div>
                     )}
                 </div>
+
+                {/* Supplier Settings Modal */}
+                {showSettings && (
+                    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                        <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-lg p-8 animate-in fade-in zoom-in duration-200">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-2xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+                                    <Settings size={22} className="text-indigo-600" />
+                                    Supplier Settings
+                                </h3>
+                                <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600 p-2">
+                                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <div className="space-y-6">
+                                <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-700">
+                                    <div className="flex items-start gap-4">
+                                        <div className="w-12 h-12 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-600 flex items-center justify-center p-2 shrink-0 shadow-sm">
+                                            <span className="font-bold text-red-600 dark:text-red-500">GFS</span>
+                                        </div>
+                                        <div className="flex-1">
+                                            <p className="font-bold text-slate-900 dark:text-white">Gordon Food Service</p>
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Configure deep linking behavior.</p>
+
+                                            <label className="block text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Preferred Portal</label>
+                                            <select
+                                                className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-500 mb-4"
+                                                value={gfsPortalType}
+                                                onChange={(e) => setGfsPortalType(e.target.value)}
+                                            >
+                                                <option value="gfs_store">GFS Store (Public)</option>
+                                                <option value="gordon_ordering">Gordon Ordering (Commercial)</option>
+                                                <option value="gordon_experience">Gordon Experience (Legacy)</option>
+                                                <option value="custom">Custom URL</option>
+                                            </select>
+
+                                            {gfsPortalType === 'custom' && (
+                                                <input
+                                                    type="text"
+                                                    placeholder="https://your-portal.gfs.com"
+                                                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-red-500"
+                                                    value={customGfsUrl}
+                                                    onChange={(e) => setCustomGfsUrl(e.target.value)}
+                                                />
+                                            )}
+
+                                            <p className="text-[10px] text-slate-400 mt-4 leading-relaxed font-medium">
+                                                "Shop" links across the app will redirect to this portal. Make sure you are logged in correctly in your browser.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={handleGfsSave}
+                                    className="w-full py-4 rounded-2xl font-black bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-indigo-200 dark:shadow-none"
+                                >
+                                    Save Configuration
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

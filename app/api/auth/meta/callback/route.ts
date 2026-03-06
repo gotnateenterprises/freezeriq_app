@@ -63,7 +63,14 @@ export async function GET(req: NextRequest) {
         const pageId = targetPage.id;
 
         // 4. Save to DB using TokenManager
-        const tokenManager = new TokenManager('meta');
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+        const businessId = session.user.businessId;
+
+        const tokenManager = new TokenManager('meta', businessId);
         await tokenManager.saveTokens(
             pageAccessToken,
             undefined, // Meta doesn't use refresh tokens for pages in the same way Square/QBO does

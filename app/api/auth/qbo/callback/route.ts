@@ -34,8 +34,15 @@ export async function GET(req: NextRequest) {
         const expiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
         const realmId = searchParams.get('realmId');
 
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+        const businessId = session.user.businessId;
+
         // Save to DB
-        const tokenManager = new TokenManager('qbo');
+        const tokenManager = new TokenManager('qbo', businessId);
         await tokenManager.saveTokens(
             accessToken,
             refreshToken,

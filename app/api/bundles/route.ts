@@ -4,10 +4,15 @@ import { calculateRecipeCost } from '@/lib/cost_engine';
 
 export async function GET(req: Request) {
     try {
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
         const { searchParams } = new URL(req.url);
         const fullDetails = searchParams.get('full') === 'true';
 
         const bundles = await prisma.bundle.findMany({
+            where: { business_id: session.user.businessId },
             include: {
                 _count: {
                     select: { contents: true }
@@ -52,6 +57,17 @@ export async function GET(req: Request) {
             };
         }));
 
+        // If full export, include catalogs
+        if (fullDetails) {
+            const catalogs = await prisma.catalog.findMany({
+                where: { business_id: session.user.businessId }
+            });
+            return NextResponse.json({
+                bundles: enriched,
+                catalogs
+            });
+        }
+
         return NextResponse.json(enriched);
     } catch (e: any) {
         return NextResponse.json({ error: e.message }, { status: 500 });
@@ -60,6 +76,10 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
     try {
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
         const data = await req.json();
 
         // Basic Validation
@@ -75,7 +95,11 @@ export async function POST(req: Request) {
                 description: data.description,
                 serving_tier: data.serving_tier || 'family',
                 is_active: data.is_active ?? true,
-                price: data.price ? Number(data.price) : null
+                show_on_storefront: data.show_on_storefront ?? false,
+                order_cutoff_date: data.order_cutoff_date ? new Date(data.order_cutoff_date) : null,
+                price: data.price ? Number(data.price) : null,
+                catalog_id: data.catalog_id || null, // Added catalog_id
+                business_id: session.user.businessId
             }
         });
 

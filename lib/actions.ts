@@ -3,6 +3,7 @@
 import { signIn } from '@/auth';
 import { AuthError } from 'next-auth';
 import { checkRateLimit } from './auth/rate_limit'; // Adjust path if needed
+import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
 
 export async function authenticate(
@@ -20,6 +21,9 @@ export async function authenticate(
         if (!limitResult.success) {
             return "Too many attempts. Please try again later.";
         }
+
+        // Clear cache for the home page/layout before redirecting
+        revalidatePath('/', 'layout');
 
         await signIn('credentials', formData);
     } catch (error) {

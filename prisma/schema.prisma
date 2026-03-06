@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,264 +7,318 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ==========================================
-// 0. SYSTEM SETTINGS (Key-Value Store)
-// ==========================================
+model Business {
+  id                     String             @id @default(uuid())
+  name                   String
+  slug                   String             @unique
+  logo_url               String?
+  created_at             DateTime           @default(now())
+  current_period_end     DateTime?
+  plan                   SubscriptionPlan   @default(BASE)
+  stripe_customer_id     String?            @unique
+  stripe_subscription_id String?            @unique
+  subscription_status    SubscriptionStatus @default(trialing)
+  trial_ends_at          DateTime?
+  google_calendar_url    String?
+  activities             Activity[]
+  bundles                Bundle[]
+  catalogs               Catalog[]
+  categories             Category[]
+  customers              Customer[]
+  discount_codes         DiscountCode[]
+  document_templates     DocumentTemplate[]
+  documents              Document[]
+  ingredients            Ingredient[]
+  integrations           Integration[]
+  invoices               Invoice[]
+  label_templates        LabelTemplate[]
+  orders                 Order[]
+  packaging_items        PackagingItem[]
+  production_runs        ProductionRun[]
+  recipes                Recipe[]
+  storefrontConfig       StorefrontConfig?
+  suppliers              Supplier[]
+  settings               SystemSetting[]
+  training_resources     TrainingResource[]
+  users                  User[]
+
+  @@map("businesses")
+}
 
 model SystemSetting {
-  key   String @id
-  value String
-  updated_at DateTime @default(now())
+  key         String    @id
+  value       String
+  updated_at  DateTime  @default(now())
+  business_id String?
+  business    Business? @relation(fields: [business_id], references: [id])
 
   @@map("system_settings")
 }
 
 model Integration {
-  provider      String   @id // 'square', 'qbo'
+  provider      String
   access_token  String
   refresh_token String?
   expires_at    DateTime?
-  realm_id      String?  // For QBO Company ID
-  updated_at    DateTime @default(now())
+  realm_id      String?
+  updated_at    DateTime  @default(now())
+  business_id   String
+  business      Business  @relation(fields: [business_id], references: [id], onDelete: Cascade)
 
+  @@id([business_id, provider])
   @@map("integrations")
 }
 
-// ==========================================
-// 1. CORE CULINARY MODULE
-// ==========================================
+model User {
+  id                String                 @id @default(uuid())
+  email             String                 @unique
+  password          String
+  name              String?
+  role              Role                   @default(CHEF)
+  permissions       String[]               @default([])
+  isActive          Boolean                @default(true)
+  created_at        DateTime               @default(now())
+  updated_at        DateTime               @updatedAt
+  address           String?
+  firstName         String?
+  lastName          String?
+  phone             String?
+  business_id       String?
+  is_super_admin    Boolean                @default(false)
+  branding          TenantBranding?
+  training_progress UserTrainingProgress[]
+  business          Business?              @relation(fields: [business_id], references: [id])
+
+  @@map("users")
+}
+
+model TenantBranding {
+  id              Int      @id @default(autoincrement())
+  user_id         String   @unique
+  business_name   String   @default("Freezer Chef")
+  logo_url        String?
+  primary_color   String   @default("#10b981")
+  secondary_color String   @default("#6366f1")
+  accent_color    String   @default("#f59e0b")
+  tagline         String?
+  review_qr_url   String?
+  thank_you_note  String?
+  review_prompt   String?
+  sign_off        String?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @default(now()) @updatedAt
+  user            User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("tenant_branding")
+}
 
 model Supplier {
-  id            String       @id @default(uuid())
-  name          String
-  contact_email String?
-  logo_url      String?
-  
-  // Extended Details
-  website_url       String?
-  phone_number      String?
-  address           String?
-  billing_address   String?
-  account_number    String?
-  payment_terms     String? // e.g. "Net 30"
-  
-  salesperson_name  String?
-  salesperson_email String?
-  salesperson_phone String?
-
-  ingredients   Ingredient[]
+  id                 String       @id @default(uuid())
+  name               String
+  contact_email      String?
+  account_number     String?
+  address            String?
+  billing_address    String?
+  logo_url           String?
+  payment_terms      String?
+  phone_number       String?
+  salesperson_email  String?
+  salesperson_name   String?
+  salesperson_phone  String?
+  website_url        String?
+  business_id        String?
+  is_global          Boolean      @default(false)
+  portal_type        String?      @default("gfs_store")
+  search_url_pattern String?
+  ingredients        Ingredient[]
+  business           Business?    @relation(fields: [business_id], references: [id])
 
   @@map("suppliers")
 }
 
 model Ingredient {
-  id            String    @id @default(uuid())
-  supplier_id   String?
-  name          String
-  sku           String?
-  cost_per_unit Decimal   @db.Decimal(10, 4)
-  unit          String
-  stock_quantity Decimal  @default(0) @db.Decimal(10, 4)
-
-  // Purchase Logic
-  purchase_unit       String?  // e.g. "Case"
-  purchase_quantity   Decimal? @default(1) @db.Decimal(10, 4) // e.g. 20 (lbs per Case)
-  purchase_cost       Decimal? @db.Decimal(10, 4) // e.g. 50.00 (Price per Case)
-  
-  updated_at    DateTime? @default(now())
-
-  supplier Supplier? @relation(fields: [supplier_id], references: [id])
-  used_in  RecipeItem[]
+  id                String       @id @default(uuid())
+  supplier_id       String?
+  name              String
+  sku               String?
+  cost_per_unit     Decimal      @db.Decimal(10, 4)
+  unit              String
+  stock_quantity    Decimal      @default(0) @db.Decimal(10, 4)
+  updated_at        DateTime?    @default(now())
+  purchase_cost     Decimal?     @db.Decimal(10, 4)
+  purchase_quantity Decimal?     @default(1) @db.Decimal(10, 4)
+  purchase_unit     String?
+  business_id       String?
+  needs_review      Boolean      @default(false)
+  business          Business?    @relation(fields: [business_id], references: [id])
+  supplier          Supplier?    @relation(fields: [supplier_id], references: [id])
+  used_in           RecipeItem[]
 
   @@map("ingredients")
 }
 
 model Category {
-  id        String   @id @default(uuid())
-  name      String
-  parent_id String?
-  
-  parent    Category?  @relation("CategoryHierarchy", fields: [parent_id], references: [id])
-  children  Category[] @relation("CategoryHierarchy")
-  recipes   Recipe[]
+  id          String     @id @default(uuid())
+  name        String
+  parent_id   String?
+  business_id String?
+  business    Business?  @relation(fields: [business_id], references: [id])
+  parent      Category?  @relation("CategoryHierarchy", fields: [parent_id], references: [id])
+  children    Category[] @relation("CategoryHierarchy")
+  recipes     Recipe[]   @relation("CategoryToRecipe")
 
   @@map("categories")
 }
 
-enum RecipeType {
-  prep
-  menu_item
-}
-
 model Recipe {
-  id                   String       @id @default(uuid())
+  id                   String          @id @default(uuid())
   name                 String
-  sku                  String?      @unique
   type                 RecipeType
-  base_yield_qty       Decimal      @db.Decimal(10, 2)
+  base_yield_qty       Decimal         @db.Decimal(10, 2)
   base_yield_unit      String
   storage_instructions String?
   shelf_life_days      Int?
-  
-  category_id          String? // Deprecated: Migrating to M-N
-  // category             Category?    @relation(fields: [category_id], references: [id])
-  categories           Category[]
-  
-  // External Integrations
-  dcg_id               String?      @unique // Date Code Genie ID
-
-  label_text           String?      // Flattened ingredients list for labels
-  allergens            String?      // Comma-separated or serialized allergens
-  instructions         String?      // Recipe preparation instructions
-  macros               String?      // Nutritional information (e.g. "Cals: 500...")
-  
-  // Relations
-  parent_items  RecipeItem[] @relation("ChildRecipe")
-  child_items   RecipeItem[] @relation("ParentRecipe")
-  bundle_contents BundleContent[]
+  allergens            String?
+  category_id          String?
+  dcg_id               String?         @unique
+  instructions         String?
+  label_text           String?
+  macros               String?
+  sku                  String?         @unique
+  business_id          String?
+  container_type       ContainerType   @default(tray)
+  bundle_contents      BundleContent[]
+  parent_items         RecipeItem[]    @relation("ChildRecipe")
+  child_items          RecipeItem[]    @relation("ParentRecipe")
+  image_url            String?
+  description          String?
+  cook_time            String?
+  business             Business?       @relation(fields: [business_id], references: [id])
+  categories           Category[]      @relation("CategoryToRecipe")
 
   @@map("recipes")
 }
 
-enum ItemType {
-  ingredient
-  recipe
-}
-
 model RecipeItem {
-  id              String   @id @default(uuid())
-  parent_recipe_id String
-  
-  // Polymorphic Relation: One of these is set, not both
-  child_recipe_id      String?
-  child_ingredient_id  String?
-
-  quantity        Decimal  @db.Decimal(10, 4)
-  unit            String
-
-  // NEW: Sub-Recipe / Batch Sectioning
-  is_sub_recipe   Boolean  @default(false)
-  section_name    String?
-  section_batch   Decimal? @default(1.0) @db.Decimal(10, 2)
-
-  parent_recipe    Recipe      @relation("ParentRecipe", fields: [parent_recipe_id], references: [id])
-  child_recipe     Recipe?     @relation("ChildRecipe", fields: [child_recipe_id], references: [id])
-  child_ingredient Ingredient? @relation(fields: [child_ingredient_id], references: [id])
+  id                  String      @id @default(uuid())
+  parent_recipe_id    String
+  child_recipe_id     String?
+  child_ingredient_id String?
+  quantity            Decimal     @db.Decimal(10, 4)
+  unit                String
+  is_sub_recipe       Boolean     @default(false)
+  section_batch       Decimal?    @default(1.0) @db.Decimal(10, 2)
+  section_name        String?
+  child_ingredient    Ingredient? @relation(fields: [child_ingredient_id], references: [id])
+  child_recipe        Recipe?     @relation("ChildRecipe", fields: [child_recipe_id], references: [id])
+  parent_recipe       Recipe      @relation("ParentRecipe", fields: [parent_recipe_id], references: [id])
 
   @@map("recipe_items")
 }
 
-// ==========================================
-// 2. COMMERCIAL & CATALOG MODULE
-// ==========================================
-
 model Catalog {
-  id         String   @id @default(uuid())
-  name       String
-  start_date DateTime @db.Date
-  end_date   DateTime @db.Date
-  is_active  Boolean  @default(false)
-  bundles    Bundle[]
+  id          String    @id @default(uuid())
+  name        String
+  start_date  DateTime  @db.Date
+  end_date    DateTime  @db.Date
+  is_active   Boolean   @default(false)
+  business_id String?
+  bundles     Bundle[]
+  business    Business? @relation(fields: [business_id], references: [id])
 
   @@map("catalogs")
 }
 
 model Bundle {
-  id          String          @id @default(uuid())
-  catalog_id  String?
-  name        String
-  sku         String          @unique
-  description String?
-  price       Decimal?        @db.Decimal(10, 2)
-  serving_tier String         @default("family") // 'single', 'couple', 'family'
-  is_active    Boolean        @default(true)
-  
-  catalog     Catalog?        @relation(fields: [catalog_id], references: [id])
-  contents    BundleContent[]
-  order_items OrderItem[]
+  id                 String             @id @default(uuid())
+  catalog_id         String?
+  name               String
+  sku                String             @unique
+  description        String?
+  serving_tier       String             @default("family")
+  is_active          Boolean            @default(true)
+  price              Decimal?           @db.Decimal(10, 2)
+  business_id        String?
+  image_url          String?
+  show_on_storefront Boolean            @default(false)
+  stock_on_hand      Decimal            @default(0) @db.Decimal(10, 2)
+  is_surplus         Boolean            @default(false)
+  order_cutoff_date  DateTime?          @db.Date
+  contents           BundleContent[]
+  invoice_items      InvoiceItem[]
+  business           Business?          @relation(fields: [business_id], references: [id])
+  catalog            Catalog?           @relation(fields: [catalog_id], references: [id])
+  order_items        OrderItem[]
+  storefront_configs StorefrontConfig[]
 
   @@map("bundles")
 }
 
 model BundleContent {
   id        String @id @default(uuid())
-  bundle_id     String
-  recipe_id     String
-  position      Int?
-  quantity      Float @default(1.0)
-  
-  bundle Bundle @relation(fields: [bundle_id], references: [id])
-  recipe Recipe @relation(fields: [recipe_id], references: [id])
+  bundle_id String
+  recipe_id String
+  position  Int?
+  quantity  Float  @default(1.0)
+  bundle    Bundle @relation(fields: [bundle_id], references: [id])
+  recipe    Recipe @relation(fields: [recipe_id], references: [id])
 
   @@map("bundle_contents")
 }
 
-// ==========================================
-// 3. ORDERS & SALES MODULE
-// ==========================================
+model Customer {
+  id               String               @id @default(uuid())
+  business_id      String?
+  name             String
+  contact_name     String?
+  contact_email    String?
+  contact_phone    String?
+  secondary_phone  String?
+  type             OrgType              @default(fundraiser_org)
+  delivery_address String?
+  notes            String?
+  external_id      String?              @unique
+  source           String?              @default("Manual")
+  status           CustomerStatus       @default(LEAD)
+  archived         Boolean              @default(false)
+  archived_at      DateTime?
+  tags             String[]             @default([])
+  inactive_reason  String?
+  fundraiser_info  Json?
+  loyalty_balance  Decimal              @default(0) @db.Decimal(10, 2)
+  business         Business?            @relation(fields: [business_id], references: [id])
+  documents        Document[]
+  campaigns        FundraiserCampaign[]
+  invoices         Invoice[]
+  loyalty_points   LoyaltyPoint[]
+  orders           Order[]
 
-enum OrgType {
-  fundraiser_org
-  direct_customer
-}
-
-model Organization {
-  id            String  @id @default(uuid())
-  name          String
-  contact_name  String?
-  contact_email String?
-  contact_phone String?
-  type          OrgType @default(fundraiser_org)
-  shipping_address String?
-  notes         String?
-  orders        Order[]
-
-  // CRM Fields
-  external_id   String?   @unique
-  source        String?   @default("Manual")
-  status        String?   @default("Active")
-  tags          String[]  @default([])
-  inactive_reason String?
-
-
-  @@map("organizations")
-}
-
-enum OrderSource {
-  square
-  qbo
-  manual
-  meta
-}
-
-enum OrderStatus {
-  pending
-  production_ready
-  completed
+  @@map("customers")
 }
 
 model Order {
-  id              String       @id @default(uuid())
-  external_id     String       @unique
-  source          OrderSource
-  organization_id String?
-  customer_name   String?
-  shipping_address String?
-  delivery_sequence Int?      @default(0)
-  status          OrderStatus  @default(pending)
-  delivery_date   DateTime?    @db.Date
-  created_at      DateTime?    @default(now())
-  total_amount    Decimal      @default(0) @db.Decimal(10, 2)
-
-  organization Organization? @relation(fields: [organization_id], references: [id])
-  items        OrderItem[]
+  id                String              @id @default(uuid())
+  external_id       String              @unique
+  source            OrderSource
+  customer_name     String?
+  status            OrderStatus         @default(pending)
+  delivery_date     DateTime?           @db.Date
+  created_at        DateTime?           @default(now())
+  total_amount      Decimal             @default(0) @db.Decimal(10, 2)
+  business_id       String?
+  campaign_id       String?
+  customer_id       String?
+  invoice_id        String?             @unique
+  delivery_address  String?
+  delivery_sequence Int?                @default(0)
+  participant_name  String?             @map("participant_name")
+  items             OrderItem[]
+  business          Business?           @relation(fields: [business_id], references: [id])
+  campaign          FundraiserCampaign? @relation(fields: [campaign_id], references: [id])
+  customer          Customer?           @relation(fields: [customer_id], references: [id])
+  invoice           Invoice?            @relation(fields: [invoice_id], references: [id])
 
   @@map("orders")
-}
-
-enum VariantSize {
-  serves_2
-  serves_5
 }
 
 model OrderItem {
@@ -276,64 +327,53 @@ model OrderItem {
   bundle_id    String?
   quantity     Int
   variant_size VariantSize @default(serves_5)
-
-  order  Order?  @relation(fields: [order_id], references: [id])
-  bundle Bundle? @relation(fields: [bundle_id], references: [id])
+  item_name    String?
+  unit_price   Decimal?    @db.Decimal(10, 2)
+  is_subscription Boolean     @default(false)
+  bundle       Bundle?     @relation(fields: [bundle_id], references: [id])
+  order        Order?      @relation(fields: [order_id], references: [id])
 
   @@map("order_items")
 }
 
-// ==========================================
-// 4. PRODUCTION MODULE
-// ==========================================
-
-enum RunStatus {
-  planning
-  active
-  completed
-}
-
 model ProductionRun {
-  id       String        @id @default(uuid())
-  name     String
-  run_date DateTime      @db.Date
-  status   RunStatus     @default(planning)
-  tasks    ProductionTask[]
+  id          String           @id @default(uuid())
+  name        String
+  run_date    DateTime         @db.Date
+  status      RunStatus        @default(planning)
+  business_id String?
+  business    Business?        @relation(fields: [business_id], references: [id])
+  tasks       ProductionTask[]
 
   @@map("production_runs")
 }
 
-enum TaskStatus {
-  todo
-  in_progress
-  done
-}
-
 model ProductionTask {
-  id                String     @id @default(uuid())
+  id                String         @id @default(uuid())
   production_run_id String?
   item_id           String
   item_type         ItemType
-  total_qty_needed  Decimal?   @db.Decimal(10, 2)
+  total_qty_needed  Decimal?       @db.Decimal(10, 2)
   unit              String?
-  status            TaskStatus @default(todo)
-
-  production_run ProductionRun? @relation(fields: [production_run_id], references: [id])
+  status            TaskStatus     @default(todo)
+  production_run    ProductionRun? @relation(fields: [production_run_id], references: [id])
 
   @@map("production_tasks")
 }
 
 model Activity {
-  id          String   @id @default(uuid())
-  type        String   // 'comment', 'message', 'lead'
-  source      String   @default("meta")
-  external_id String   @unique
-  content     String
+  id            String    @id @default(uuid())
+  type          String
+  source        String    @default("meta")
+  external_id   String    @unique
+  content       String
   customer_name String?
   customer_id   String?
-  timestamp     DateTime @default(now())
-  metadata      Json?    // For things like Post ID, Message ID details
-  status        String   @default("unread") // unread, read, archived
+  timestamp     DateTime  @default(now())
+  metadata      Json?
+  status        String    @default("unread")
+  business_id   String?
+  business      Business? @relation(fields: [business_id], references: [id])
 
   @@map("activities")
 }
@@ -342,52 +382,343 @@ model AiFeedback {
   id            String   @id @default(uuid())
   recipe_name   String
   recipe_json   Json
-  rating        Int      // 1 for Up, -1 for Down
+  rating        Int
   feedback_text String?
   created_at    DateTime @default(now())
 
   @@map("ai_feedback")
 }
 
-// ==========================================
-// 5. DELIVERY & PACKAGING MODULE
-// ==========================================
-
-
 model PackagingItem {
-  id                String   @id @default(cuid())
-  name              String   // e.g. "Large Box (12x12)", "Small Box (8x8)"
-  quantity          Int      @default(0)
-  reorderUrl        String?  // Direct link to supplier
-  lowStockThreshold Int      @default(10)
-  
-  // For smart logic: 'large_box', 'small_box', 'tape', 'ice_pack', 'other'
-  type        String   @default("other") 
-  
-  // Relation to Label Templates (Optional default label for this box type)
-  defaultLabelId    String? 
+  id                String         @id @default(cuid())
+  name              String
+  quantity          Int            @default(0)
+  reorderUrl        String?
+  lowStockThreshold Int            @default(10)
+  type              String         @default("other")
+  updatedAt         DateTime       @updatedAt
+  defaultLabelId    String?
+  business_id       String?
+  cost_per_unit     Decimal        @default(0.00) @db.Decimal(10, 2)
+  business          Business?      @relation(fields: [business_id], references: [id])
   defaultLabel      LabelTemplate? @relation("BoxDefaultLabel", fields: [defaultLabelId], references: [id])
-  
-  updatedAt         DateTime @updatedAt
 
   @@map("packaging_items")
 }
 
 model LabelTemplate {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
-  width       Float    // in inches, e.g. 4.0
-  height      Float    // in inches, e.g. 6.0
-  elements    Json     // Array of Element objects { type, x, y, content, style }
-  isDefault   Boolean  @default(false)
-  
-  // Reverse relation for default link
+  id             String          @id @default(cuid())
+  name           String
+  description    String?
+  width          Float
+  height         Float
+  elements       Json
+  isDefault      Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  business_id    String?
+  business       Business?       @relation(fields: [business_id], references: [id])
   packagingItems PackagingItem[] @relation("BoxDefaultLabel")
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
 
   @@map("label_templates")
 }
 
+model DocumentTemplate {
+  id          String    @id @default(uuid())
+  name        String
+  content     String
+  category    String    @default("General")
+  isGlobal    Boolean   @default(false)
+  business_id String?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+  business    Business? @relation(fields: [business_id], references: [id])
+
+  @@map("document_templates")
+}
+
+model Document {
+  id            String              @id @default(uuid())
+  name          String
+  content       String?
+  status        String              @default("Draft")
+  customer_id   String
+  business_id   String
+  created_at    DateTime            @default(now())
+  updated_at    DateTime            @updatedAt
+  external_link String?
+  campaign_id   String?
+  business      Business            @relation(fields: [business_id], references: [id])
+  campaign      FundraiserCampaign? @relation(fields: [campaign_id], references: [id])
+  customer      Customer            @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+
+  @@map("documents")
+}
+
+model FundraiserCampaign {
+  id                    String     @id @default(uuid())
+  name                  String
+  status                String     @default("Lead")
+  start_date            DateTime?  @db.Date
+  end_date              DateTime?  @db.Date
+  delivery_date         DateTime?  @db.Date
+  pickup_location       String?
+  checks_payable        String?
+  goal_amount           Decimal?   @db.Decimal(10, 2)
+  total_sales           Decimal    @default(0) @db.Decimal(10, 2)
+  customer_id           String
+  created_at            DateTime   @default(now())
+  updated_at            DateTime   @updatedAt
+  checklist             Json?
+  about_text            String?
+  external_payment_link String?
+  mission_text          String?
+  payment_instructions  String?
+  portal_token          String?    @unique @default(cuid())
+  public_token          String?    @unique @default(cuid())
+  participant_label     String     @default("Seller")
+  group_label           String?
+  is_group_enabled      Boolean    @default(false)
+  documents             Document[]
+  customer              Customer   @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  orders                Order[]
+
+  @@map("fundraiser_campaigns")
+}
+
+model TrainingResource {
+  id            String                 @id @default(uuid())
+  title         String
+  description   String?
+  type          ResourceType
+  category      String
+  url           String?                @map("url")
+  content       String?
+  thumbnail     String?
+  isActive      Boolean                @default(true)
+  created_at    DateTime               @default(now())
+  updated_at    DateTime               @updatedAt
+  business_id   String?
+  order         Int                    @default(0)
+  business      Business?              @relation(fields: [business_id], references: [id])
+  user_progress UserTrainingProgress[]
+
+  @@map("training_resources")
+}
+
+model UserTrainingProgress {
+  id           String           @id @default(uuid())
+  user_id      String
+  resource_id  String
+  completed_at DateTime         @default(now())
+  resource     TrainingResource @relation(fields: [resource_id], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, resource_id])
+  @@map("user_training_progress")
+}
+
+model StorefrontConfig {
+  id                      String   @id @default(cuid())
+  business_id             String   @unique
+  hero_headline           String   @default("Welcome to Our Shop")
+  hero_subheadline        String   @default("Delicious meals made fresh for you.")
+  upsell_bundle_id        String?
+  upsell_title            String?
+  upsell_description      String?
+  upsell_discount_percent Int      @default(0)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  manual_upsell_image     String?
+  manual_upsell_name      String?
+  manual_upsell_price     Decimal? @db.Decimal(10, 2)
+  upsell_type             String   @default("bundle")
+  our_story_content       String?
+  our_story_headline      String?
+  hero_image_url          String?
+  how_it_works_content    String?
+  footer_text             String?
+  marketing_video_url     String?
+  trust_badges            Json?
+  testimonials            Json?
+  business                Business @relation(fields: [business_id], references: [id])
+  upsell_bundle           Bundle?  @relation(fields: [upsell_bundle_id], references: [id])
+
+  @@map("storefront_configs")
+}
+
+model Invoice {
+  id             String        @id @default(uuid())
+  business_id    String
+  customer_id    String
+  status         InvoiceStatus @default(PENDING)
+  payment_method String?       @default("check")
+  total_amount   Decimal       @db.Decimal(10, 2)
+  tax_amount     Decimal?      @default(0) @db.Decimal(10, 2)
+  created_at     DateTime      @default(now())
+  updated_at     DateTime      @updatedAt
+  due_date                 DateTime?
+  fundraiser_profit_percent Decimal?      @default(0) @db.Decimal(5, 2)
+  fundraiser_profit_amount  Decimal?      @default(0) @db.Decimal(10, 2)
+  items                    InvoiceItem[]
+  order                    Order?
+  business       Business      @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  customer       Customer      @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String  @id @default(uuid())
+  invoice_id  String
+  bundle_id   String?
+  description String
+  quantity    Decimal @db.Decimal(10, 2)
+  unit_price  Decimal @db.Decimal(10, 2)
+  total       Decimal @db.Decimal(10, 2)
+  invoice     Invoice @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  bundle      Bundle? @relation(fields: [bundle_id], references: [id])
+
+  @@map("invoice_items")
+}
+
+model LoyaltyPoint {
+  id          String   @id @default(uuid())
+  customer_id String
+  points      Decimal  @db.Decimal(10, 2)
+  reason      String?
+  created_at  DateTime @default(now())
+  customer    Customer @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+
+  @@map("loyalty_points")
+}
+
+model DiscountCode {
+  id            String    @id @default(uuid())
+  business_id   String
+  code          String    @unique
+  amount        Decimal   @db.Decimal(10, 2)
+  is_percentage Boolean   @default(false)
+  expires_at    DateTime?
+  is_active     Boolean   @default(true)
+  created_at    DateTime  @default(now())
+  business      Business  @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@map("discount_codes")
+}
+
+model BusinessLead {
+  id         String   @id @default(uuid())
+  name       String
+  email      String
+  type       String
+  status     String   @default("NEW")
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("business_leads")
+}
+
+enum SubscriptionPlan {
+  FREE
+  BASE
+  PRO
+  ULTIMATE
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  active
+  past_due
+  canceled
+  unpaid
+  trialing
+}
+
+enum Role {
+  ADMIN
+  CHEF
+  DRIVER
+}
+
+enum RecipeType {
+  prep
+  menu_item
+}
+
+enum ContainerType {
+  tray
+  bag
+}
+
+enum ItemType {
+  ingredient
+  recipe
+}
+
+enum OrgType {
+  fundraiser_org
+  direct_customer
+  organization
+}
+
+enum OrderSource {
+  square
+  qbo
+  manual
+  meta
+  storefront
+}
+
+enum OrderStatus {
+  pending          @map("pending")
+  production_ready @map("production_ready")
+  completed        @map("completed")
+  delivered        @map("delivered")
+  PENDING
+  APPROVED
+  IN_PRODUCTION
+  COMPLETED
+  DELIVERED
+}
+
+enum VariantSize {
+  serves_2
+  serves_5
+}
+
+enum RunStatus {
+  planning
+  active
+  completed
+}
+
+enum TaskStatus {
+  todo
+  in_progress
+  done
+}
+
+enum CustomerStatus {
+  LEAD
+  SEND_INFO
+  FLYERS
+  ACTIVE
+  PRODUCTION
+  DELIVERY
+  COMPLETE
+  INACTIVE
+}
+
+enum ResourceType {
+  VIDEO
+  SOP
+  FAQ
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELED
+}

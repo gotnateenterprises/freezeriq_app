@@ -1,12 +1,17 @@
 # Full Backup Script for FreezerIQ App (PostgreSQL)
 # Creates backup of database and code
 
-$timestamp = Get-Date -Format "yyyy-MM-dd_HHmmss"
-$backupDir = "backups/backup_$timestamp"
+$dayOfWeek = (Get-Date).DayOfWeek.ToString().ToLower()
+$timestamp = Get-Date -Format "yyyy-MM-dd_HHmm"
+$backupDir = "backups/rotating/$dayOfWeek"
 
-Write-Host "Creating backup: $backupDir" -ForegroundColor Green
+Write-Host "Creating rotating backup for: $dayOfWeek" -ForegroundColor Green
+Write-Host "Path: $backupDir" -ForegroundColor Gray
 
-# Create backup directory structure
+# Create backup directory structure (Clean start for the day)
+if (Test-Path $backupDir) {
+    Remove-Item -Path $backupDir -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path "$backupDir/database" | Out-Null
 New-Item -ItemType Directory -Force -Path "$backupDir/code" | Out-Null
 
@@ -15,10 +20,30 @@ Write-Host "Exporting PostgreSQL database..." -ForegroundColor Yellow
 
 $dbFile = "$backupDir/database/freezeriq_backup.sql"
 
-# Use pg_dump to export database
-$env:PGPASSWORD = "postgres"
+# Try to get password from .env
+$envFile = ".env"
+if (Test-Path $envFile) {
+    $envContent = Get-Content $envFile
+    $envMatches = [regex]::Match($envContent, 'DATABASE_URL="postgresql://.*?:(.*?)@')
+    if ($envMatches.Success) {
+        $rawPwd = $envMatches.Groups[1].Value
+        # Decode URL encoded password (simplified)
+        $env:PGPASSWORD = $rawPwd.Replace('%2C', ',')
+    }
+}
+
+$pgDumpPath = "C:\Program Files\PostgreSQL\17\bin\pg_dump.exe"
+if (-not (Test-Path $pgDumpPath)) {
+    $pgDumpPath = "C:\Program Files\PostgreSQL\16\bin\pg_dump.exe"
+}
+
 try {
-    & pg_dump -h localhost -p 5432 -U postgres -d freezer_iq -f $dbFile 2>&1 | Out-Null
+    if (Test-Path $pgDumpPath) {
+        & $pgDumpPath -h localhost -p 5432 -U postgres -d freezer_iq -f $dbFile 2>&1 | Out-Null
+    }
+    else {
+        & pg_dump -h localhost -p 5432 -U postgres -d freezer_iq -f $dbFile 2>&1 | Out-Null
+    }
     if (Test-Path $dbFile) {
         Write-Host "Database exported successfully" -ForegroundColor Green
     }
@@ -71,7 +96,26 @@ $manifest = @{
 
 $manifest | ConvertTo-Json | Out-File "$backupDir/manifest.json"
 
-Write-Host ""
+# duplicate to external drives
+Write-Host "Duplicating backup to external drives..." -ForegroundColor Cyan
+
+$destinations = @("C:\FreezerIQ_Backups", "D:\FreezerIQ_Backups")
+
+foreach ($dest in $destinations) {
+    # Check if drive letter exists (e.g. D:\)
+    $driveRoot = $dest.Substring(0, 3)
+    if (Test-Path $driveRoot) {
+        $finalDest = "$dest\backup_$timestamp"
+        if (!(Test-Path $finalDest)) {
+            New-Item -ItemType Directory -Force -Path $finalDest | Out-Null
+        }
+        Copy-Item -Path "$backupDir\*" -Destination $finalDest -Recurse -Force
+        Write-Host "  Backup duplicated to: $finalDest" -ForegroundColor Green
+    }
+    else {
+        Write-Host "  Skipping $dest (Drive not found)" -ForegroundColor DarkGray
+    }
+}
 Write-Host "========================================"  -ForegroundColor Cyan
 Write-Host "Backup Complete!" -ForegroundColor Green
 Write-Host "Location: $backupDir" -ForegroundColor Cyan

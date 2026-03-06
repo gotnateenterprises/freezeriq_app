@@ -49,20 +49,52 @@ export function DraggableHandle({ id, type, children }: DraggableHandleProps) {
 
 interface DraggableRecipeProps {
     id: string;
-    children: (dragHandleProps: { ref: any; attributes: any; listeners: any }) => ReactNode;
+    children: (dragHandleProps: { attributes: any; listeners: any }) => ReactNode;
 }
 
 export function DraggableRecipe({ id, children }: DraggableRecipeProps) {
-    const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    const { attributes, listeners, setNodeRef, isDragging, transform } = useDraggable({
         id,
         data: { type: 'recipe' }
     });
 
-    console.log('🔧 DraggableRecipe rendered:', { id, isDragging, hasRef: !!setNodeRef });
+    const style = transform ? {
+        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+    } : undefined;
 
     return (
-        <div className={`transition-all duration-200 ${isDragging ? 'opacity-40 scale-95' : ''}`}>
-            {children({ ref: setNodeRef, attributes, listeners })}
+        <div
+            ref={setNodeRef}
+            style={style}
+            className={`${isDragging ? 'opacity-40 scale-95 z-50 pointer-events-none' : 'transition-all duration-200'}`}
+        >
+            {children({ attributes, listeners })}
+        </div>
+    );
+}
+
+interface DraggableFolderProps {
+    id: string;
+    children: (dragHandleProps: { attributes: any; listeners: any }) => ReactNode;
+}
+
+export function DraggableFolderItem({ id, children }: DraggableFolderProps) {
+    const { attributes, listeners, setNodeRef, isDragging, transform } = useDraggable({
+        id,
+        data: { type: 'category' }
+    });
+
+    const style = transform ? {
+        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+    } : undefined;
+
+    return (
+        <div
+            ref={setNodeRef}
+            style={style}
+            className={`${isDragging ? 'opacity-40 scale-95 z-50 pointer-events-none' : 'transition-all duration-200'}`}
+        >
+            {children({ attributes, listeners })}
         </div>
     );
 }

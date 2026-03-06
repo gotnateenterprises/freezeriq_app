@@ -7,6 +7,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
 import { Printer, Save, AlertTriangle, Eye, Settings, Trash2, Plus, Package, ArrowLeft, CheckCircle } from 'lucide-react';
 import LabelRichText from '@/components/LabelRichText';
+import LabelTemplate from '@/components/LabelTemplate';
+import { useSession } from 'next-auth/react';
 
 export default function LabelsPage() {
     const router = useRouter();
@@ -21,7 +23,8 @@ export default function LabelsPage() {
         showNotes: false,
         showQRCode: false,
         printerProfileId: '',
-        locationId: ''
+        locationId: '',
+        labelSize: '2x6' as '2x6' | '4x6'
     });
 
     // Printing State
@@ -53,6 +56,8 @@ export default function LabelsPage() {
     const [qrCodes, setQrCodes] = useState<{ id: string, name: string, data: string }[]>([]);
     const [selectedQrId, setSelectedQrId] = useState('');
 
+    const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+
     const [labelContent, setLabelContent] = useState({
         name: "Spicy Marinara Base",
         ingredients: "Tomatoes, Onions, Garlic, Olive Oil, Basil, Red Pepper Flakes, Salt, Black Pepper",
@@ -62,6 +67,20 @@ export default function LabelsPage() {
         instructions: "Preheat oven to 375°F. Remove film. Bake for 20-25 minutes until bubbling. Let stand for 2 minutes.",
         macros: ""
     });
+
+    // Tenant Branding State
+    const [branding, setBranding] = useState<any>(null);
+
+    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setUploadedImage(reader.result as string);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
 
     // Instructions Style State
     // (Styles are now inline via rich text)
@@ -85,25 +104,62 @@ export default function LabelsPage() {
         }
     };
 
+    const { data: session } = useSession();
+
+    // Helper to namespace storage keys
+    const getStorageKey = (key: string) => {
+        if (!session?.user?.businessId) return null; // Don't save/load if no business
+        return `${session.user.businessId}_${key}`;
+    };
+
+    // Help with dynamic instruction replacement
+    const formatInstructions = (text: string, cookTime?: string) => {
+        if (!text) return text;
+        let formatted = text;
+        if (formatted.includes('{cook_time}')) {
+            formatted = formatted.replace(/{cook_time}/g, cookTime || 'specified time');
+        }
+        return formatted;
+    };
+
+    // Store fetched recipe for manual set changes
+    const [activeRecipe, setActiveRecipe] = useState<any>(null);
+
     // Load Settings, Logo, & Draft Content
     useEffect(() => {
-        const savedConfig = localStorage.getItem('labelConfig');
-        if (savedConfig) {
-            setConfig(JSON.parse(savedConfig));
+        if (!session?.user?.businessId) return; // Wait for session
+
+        const configKey = getStorageKey('labelConfig');
+        const logoKey = getStorageKey('kitchenLogo');
+        const setsKey = getStorageKey('instructionSets');
+        const draftKey = getStorageKey('draftLabel');
+        const qrKey = getStorageKey('qrCodes');
+
+        if (configKey) {
+            const savedConfig = localStorage.getItem(configKey);
+            if (savedConfig) setConfig(JSON.parse(savedConfig));
         }
-        const savedLogo = localStorage.getItem('kitchenLogo');
-        if (savedLogo) setLogo(savedLogo);
+
+        if (logoKey) {
+            const savedLogo = localStorage.getItem(logoKey);
+            if (savedLogo) setLogo(savedLogo);
+        }
 
         // Load Instruction Sets FIRST (before recipe fetch needs them)
-        const savedSets = localStorage.getItem('instructionSets');
-        const defaultSets = [
-            { name: "Oven - Serves 2", text: "Preheat oven to 375°F. Remove film. Bake for 20-25 minutes." },
-            { name: "Oven - Family", text: "Preheat oven to 375°F. Remove film. Bake for 45-50 minutes." },
-            { name: "Microwave - Serves 2", text: "Pierce film. Microwave on High for 3-4 minutes." }
-        ];
-        const parsedSets = savedSets ? JSON.parse(savedSets) : defaultSets;
-        setInstructionSets(parsedSets);
-        loadedSetsRef.current = parsedSets;
+        let parsedSets: any[] = [];
+        if (setsKey) {
+            const savedSets = localStorage.getItem(setsKey);
+            const defaultSets = [
+                { name: "Oven - Serves 2", text: "Preheat oven to 375°F. Remove film. Bake for {cook_time}." },
+                { name: "Oven - Family", text: "Preheat oven to 375°F. Remove film. Bake for {cook_time}." },
+                { name: "Crock Pot - Serves 2", text: "Place in Crock Pot. Cook on Low for {cook_time}." },
+                { name: "Crock Pot - Family", text: "Place in Crock Pot. Cook on Low for {cook_time}." },
+                { name: "Microwave - Serves 2", text: "Pierce film. Microwave on High for {cook_time}." }
+            ];
+            parsedSets = savedSets ? JSON.parse(savedSets) : defaultSets;
+            setInstructionSets(parsedSets);
+            loadedSetsRef.current = parsedSets;
+        }
 
         const params = new URLSearchParams(window.location.search);
         const recipeId = params.get('recipeId');
@@ -120,8 +176,6 @@ export default function LabelsPage() {
 
         if (recipeId) {
             // Fetch Recipe Data
-            // UUIDs have dashes, so don't split by dash blindly!
-            // If we strictly use UUIDs, pass directly.
             fetch(`/api/recipes/${recipeId}`)
                 .then(res => res.json())
                 .then(data => {
@@ -129,9 +183,11 @@ export default function LabelsPage() {
                         console.error("Recipe API Error:", data.error);
                         return;
                     }
-                    const ingreds = data.child_items?.map((item: any) =>
+                    setActiveRecipe(data);
+                    const ingredsArr = data.child_items?.map((item: any) =>
                         item.child_ingredient?.name || item.child_recipe?.name
-                    ).filter(Boolean).join(', ') || '';
+                    ).filter(Boolean) || [];
+                    const ingredsString = ingredsArr.join(', ');
 
                     setLabelContent(prev => {
                         // Priority 0: Bundle Hint (Strongest)
@@ -150,52 +206,63 @@ export default function LabelsPage() {
                         // SKU Based Logic (Overrides generic)
                         if (skuParam) {
                             const upperSku = skuParam.toUpperCase();
-                            console.log('SKU Detection:', { skuParam, upperSku });
                             if (upperSku.endsWith('FSK')) detectedSize = 'Family Size (Keto)';
                             else if (upperSku.endsWith('S2K')) detectedSize = 'Serves 2 (Keto)';
                             else if (upperSku.endsWith('FS')) detectedSize = 'Family Size';
                             else if (upperSku.endsWith('S2')) detectedSize = 'Serves 2';
-                            console.log('Detected Size from SKU:', detectedSize);
                         }
 
                         // Fallback logic
                         if (!detectedSize || detectedSize === 'batch') {
-                            // If we have a unit param (e.g. "ea", "tray"), use it.
                             if (unitParam && unitParam !== 'batch') detectedSize = unitParam;
-                            // Otherwise default to "1 Batch" (instead of "5 Batches" which confusingly implies the whole run is in one container)
                             else detectedSize = '1 Batch';
                         }
 
+                        // Allergen detection logic
+                        const keywordMap: Record<string, string> = {
+                            "peanut": "Peanut", "soy": "Soy", "wheat": "Gluten", "gluten": "Gluten",
+                            "egg": "Egg", "fish": "Fish", "shellfish": "Shellfish", "crab": "Shellfish",
+                            "lobster": "Shellfish", "shrimp": "Shellfish", "tree nut": "Tree Nut",
+                            "almond": "Tree Nut", "walnut": "Tree Nut", "cashew": "Tree Nut",
+                            "pecan": "Tree Nut", "sesame": "Sesame", "milk": "Dairy", "dairy": "Dairy",
+                            "butter": "Dairy", "cheese": "Dairy", "cream": "Dairy", "yogurt": "Dairy",
+                            "half n half": "Dairy", "half-n-half": "Dairy", "half and half": "Dairy",
+                            "whey": "Dairy", "casein": "Dairy", "lactose": "Dairy"
+                        };
+                        const ingredientsLower = ingredsString.toLowerCase();
+                        const detectedSet = new Set<string>();
+                        Object.keys(keywordMap).forEach(key => {
+                            if (ingredientsLower.includes(key)) detectedSet.add(keywordMap[key]);
+                        });
+                        const detectedAllergens = Array.from(detectedSet).sort().join(", ");
 
-                        // Auto-Populate Instructions from Set if available and detectedSize is known
-                        // (Only if recipe instructions are empty OR user explicitly wants SKU to drive it?)
-                        let instructions = data.instructions || '';
+                        // Preparation Selection Logic - PULL FROM label_text (Customer Facing)
+                        let instructions = data.label_text || '';
+                        const cookTime = data.cook_time || '';
 
-                        // Heuristic: If we have a detected size, check for sets matching that size
-                        if (detectedSize) {
-                            // Clean size for matching (e.g. "Family Size" -> "Family")
+                        // If no hardcoded label text on recipe OR if it contains placeholder
+                        if (!instructions || instructions.includes('{cook_time}')) {
                             const sizeKeyword = detectedSize.includes('Family') ? 'Family' : (detectedSize.includes('Serves 2') ? 'Serves 2' : '');
+                            const methodKeyword = data.container_type === 'tray' ? 'Oven' : (data.container_type === 'bag' ? 'Crock Pot' : '');
 
-                            console.log('Instruction Matching:', { detectedSize, sizeKeyword, skuParam, availableSets: loadedSetsRef.current });
+                            const bestSet = loadedSetsRef.current.find((s: { name: string, text: string }) =>
+                                (sizeKeyword && s.name.includes(sizeKeyword)) &&
+                                (methodKeyword && s.name.includes(methodKeyword))
+                            );
 
-                            if (sizeKeyword) {
-                                // Look for exact match first, then partial
-                                // Existing sets are like "Oven - Serves 2"
-                                // We prefer "Oven" sets as default
-                                const bestSet = loadedSetsRef.current.find((s: { name: string, text: string }) => s.name.includes(sizeKeyword) && s.name.includes('Oven'));
-                                console.log('Best Set Found:', bestSet);
-                                if (bestSet && skuParam) {
-                                    instructions = bestSet.text;
-                                    console.log('Instructions set to:', instructions);
-                                }
+                            if (bestSet) {
+                                instructions = bestSet.text;
                             }
                         }
+
+                        // Use helper for placeholder replacement
+                        instructions = formatInstructions(instructions, cookTime);
 
                         return {
                             ...prev,
                             name: data.name,
-                            ingredients: ingreds,
-                            allergens: data.allergens || '',
+                            ingredients: ingredsString,
+                            allergens: data.allergens || detectedAllergens,
                             mealSize: detectedSize,
                             macros: data.macros || '',
                             instructions
@@ -203,68 +270,84 @@ export default function LabelsPage() {
                     });
                 })
                 .catch(e => console.error("Failed to fetch recipe", e));
-        } else {
+        }
+        else {
             // Fallback: Check for Draft Label (passed from Production Hub)
-            const draftLabel = localStorage.getItem('draftLabel');
-            if (draftLabel) {
-                try {
-                    const parsed = JSON.parse(draftLabel);
-                    setLabelContent({
-                        name: parsed.name || '',
-                        ingredients: parsed.ingredients || '',
-                        allergens: parsed.allergens || '',
-                        expiry: parsed.expiry || defaultExpiry.toLocaleDateString(),
-                        mealSize: parsed.mealSize || '',
-                        instructions: parsed.instructions || '',
-                        macros: parsed.macros || ''
-                    });
-                } catch (e) {
-                    console.error("Failed to parse draft label");
+            if (draftKey) {
+                const draftLabel = localStorage.getItem(draftKey);
+                if (draftLabel) {
+                    try {
+                        const parsed = JSON.parse(draftLabel);
+                        setLabelContent({
+                            name: parsed.name || '',
+                            ingredients: parsed.ingredients || '',
+                            allergens: parsed.allergens || '',
+                            expiry: parsed.expiry || defaultExpiry.toLocaleDateString(),
+                            mealSize: parsed.mealSize || '',
+                            instructions: parsed.instructions || '',
+                            macros: parsed.macros || ''
+                        });
+                    } catch (e) {
+                        console.error("Failed to parse draft label");
+                    }
                 }
             }
         }
 
         // Poll for logo updates
         const interval = setInterval(() => {
-            const current = localStorage.getItem('kitchenLogo');
-            if (current !== logo) setLogo(current);
+            if (logoKey) {
+                const current = localStorage.getItem(logoKey);
+                if (current !== logo) setLogo(current);
+            }
         }, 1000);
 
         // Load QR Codes
-        const savedQrs = localStorage.getItem('qrCodes');
-        if (savedQrs) {
-            try {
-                const parsed = JSON.parse(savedQrs);
-                setQrCodes(parsed);
-                if (parsed.length > 0) setSelectedQrId(parsed[0].id);
-            } catch (e) {
-                console.error("Failed to parse QR codes");
+        if (qrKey) {
+            const savedQrs = localStorage.getItem(qrKey);
+            if (savedQrs) {
+                try {
+                    const parsed = JSON.parse(savedQrs);
+                    setQrCodes(parsed);
+                    if (parsed.length > 0) setSelectedQrId(parsed[0].id);
+                } catch (e) {
+                    console.error("Failed to parse QR codes");
+                }
             }
         }
 
         // Load inventory
         fetchInventory();
 
+        // Fetch branding settings
+        fetch('/api/tenant/branding').then(res => res.json()).then(data => {
+            setBranding(data);
+        }).catch(err => console.error('Error fetching branding:', err));
+
         return () => clearInterval(interval);
-    }, []); // Run once on mount to read URL params
+    }, [session?.user?.businessId]); // Rerun when businessId loads
 
     const handleSetSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
         const setName = e.target.value;
         setSelectedSet(setName);
         const set = instructionSets.find(s => s.name === setName);
         if (set) {
-            setLabelContent(prev => ({ ...prev, instructions: set.text }));
+            // Use formatInstructions with the active recipe's cook_time
+            const formatted = formatInstructions(set.text, activeRecipe?.cook_time);
+            setLabelContent(prev => ({ ...prev, instructions: formatted }));
         }
     };
 
     const saveSets = (newSets: { name: string, text: string }[]) => {
         setInstructionSets(newSets);
-        localStorage.setItem('instructionSets', JSON.stringify(newSets));
+        const key = getStorageKey('instructionSets');
+        if (key) localStorage.setItem(key, JSON.stringify(newSets));
     };
 
     const handleSave = () => {
         setIsSaving(true);
-        localStorage.setItem('labelConfig', JSON.stringify(config));
+        const key = getStorageKey('labelConfig');
+        if (key) localStorage.setItem(key, JSON.stringify(config));
         setTimeout(() => setIsSaving(false), 500);
     };
 
@@ -292,6 +375,12 @@ export default function LabelsPage() {
                         allergens: config.showAllergens ? labelContent.allergens : '',
                         notes: config.showNotes ? 'Test Label' : '',
                         isFinalLabel: true,
+                        // Tenant Branding
+                        businessName: branding?.business_name,
+                        logoUrl: branding?.logo_url,
+                        primaryColor: branding?.primary_color,
+                        secondaryColor: branding?.secondary_color,
+                        accentColor: branding?.accent_color,
                         metadata: {
                             mealSize: labelContent.mealSize,
                             instructions: labelContent.instructions
@@ -381,6 +470,9 @@ export default function LabelsPage() {
             "cheese": "Dairy",
             "cream": "Dairy",
             "yogurt": "Dairy",
+            "half n half": "Dairy",
+            "half-n-half": "Dairy",
+            "half and half": "Dairy",
             "whey": "Dairy",
             "casein": "Dairy",
             "lactose": "Dairy"
@@ -422,7 +514,7 @@ export default function LabelsPage() {
                             position: absolute;
                             top: 0;
                             left: 0;
-                            width: 2in;
+                            width: ${config.labelSize === '4x6' ? '4in' : '2in'};
                             height: 6in;
                             margin: 0;
                             padding: 0;
@@ -436,12 +528,12 @@ export default function LabelsPage() {
                         
                         /* Page settings */
                         @page {
-                            size: 2in 6in;
+                            size: ${config.labelSize === '4x6' ? '4in 6in' : '2in 6in'};
                             margin: 0;
                         }
                         
                         html, body {
-                            width: 2in;
+                            width: ${config.labelSize === '4x6' ? '4in' : '2in'};
                             height: 6in;
                             margin: 0;
                             padding: 0;
@@ -495,7 +587,7 @@ export default function LabelsPage() {
                             min="1"
                             value={printQty}
                             onChange={(e) => setPrintQty(Number(e.target.value))}
-                            className="w-20 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 rounded-lg font-bold text-center"
+                            className="w-20 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 rounded-lg font-bold text-center text-slate-900 dark:text-white"
                         />
                     </div>
                     <div className="flex items-center gap-2">
@@ -520,6 +612,17 @@ export default function LabelsPage() {
                                 B/W
                             </button>
                         </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Label Size:</label>
+                        <select
+                            value={config.labelSize}
+                            onChange={(e) => setConfig({ ...config, labelSize: e.target.value as any })}
+                            className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                            <option value="2x6">2" x 6" (Standard)</option>
+                            <option value="4x6">4" x 6" (Nutrition Facts)</option>
+                        </select>
                     </div>
                     <div className="text-sm text-slate-500">
                         Ready to print <strong>{printQty}</strong> label{printQty !== 1 ? 's' : ''}.
@@ -556,119 +659,16 @@ export default function LabelsPage() {
                     </h3>
 
                     {/* The Label Mockup: 2" Wide x 6" Tall (1:3 Ratio) */}
-                    <div
-                        className="label-print-container aspect-[1/3] w-full max-w-[240px] mx-auto bg-white rounded-md shadow-2xl border border-slate-300 p-4 flex flex-col relative overflow-hidden transform transition-all hover:scale-[1.01]"
-                        style={{
-                            filter: colorMode === 'bw' ? 'grayscale(100%)' : 'none',
-                            transition: 'filter 0.3s ease'
-                        }}
-                    >
-
-                        {/* Header */}
-                        {/* Header */}
-                        <div className="flex flex-col items-center border-b-2 border-slate-900 pb-3 mb-3 text-center">
-                            {logo ? (
-                                <div className="w-12 h-12 mb-2 rounded-xl overflow-hidden border border-slate-200">
-                                    <img src={logo} alt="Logo" className="w-full h-full object-cover" />
-                                </div>
-                            ) : (
-                                <div className="w-12 h-12 bg-slate-900 rounded-xl flex items-center justify-center text-white font-black text-[10px] mb-2">
-                                    LOGO
-                                </div>
-                            )}
-                            <h2 className="text-xl font-black text-slate-900 uppercase leading-tight text-center break-words w-full">{labelContent.name}</h2>
-                            <p className="text-[10px] font-bold text-slate-500 mt-1 uppercase tracking-wider">{new Date().toLocaleDateString()}</p>
-                        </div>
-
-                        <div className="flex-1 space-y-6 overflow-hidden">
-                            {/* Ingredients */}
-                            {config.showIngredients && (
-                                <div>
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Ingredients</p>
-                                    <div
-                                        className="text-[10px] font-bold text-slate-800 leading-tight"
-                                        dangerouslySetInnerHTML={{ __html: labelContent.ingredients }}
-                                    />
-                                </div>
-                            )}
-
-                            {/* Allergens - Only show if content exists */}
-                            {config.showAllergens && labelContent.allergens && (
-                                <div className="bg-amber-50 border border-amber-200 rounded p-2 flex items-start gap-2">
-                                    <AlertTriangle size={14} className="text-amber-600 shrink-0 mt-0.5" />
-                                    <div>
-                                        <p className="text-[10px] font-black text-amber-800 uppercase tracking-wider mb-0.5">Allergens</p>
-                                        <p className="text-[10px] font-bold text-amber-900 leading-tight">{labelContent.allergens}</p>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Notes */}
-                            {config.showNotes && (
-                                <div className="bg-yellow-100 p-3 rounded-lg border-2 border-yellow-200 border-dashed text-yellow-900 font-bold text-sm text-center">
-                                    Includes Custom Notes
-                                </div>
-                            )}
-
-                            {/* Cooking Instructions - Now part of main flow, larger font */}
-                            {labelContent.instructions && (
-                                <div className="pt-2">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Preparation</p>
-                                    <div
-                                        className={`text-sm text-slate-900 leading-snug whitespace-pre-wrap`}
-                                        dangerouslySetInnerHTML={{ __html: labelContent.instructions }}
-                                    />
-                                </div>
-                            )}
-
-                            {/* Macros - Compact Footer */}
-                            {labelContent.macros && (
-                                <div className="pt-2 border-t border-slate-200 mt-2">
-                                    <div
-                                        className="text-[8px] font-mono text-slate-500 leading-tight whitespace-pre-wrap"
-                                        dangerouslySetInnerHTML={{ __html: labelContent.macros }}
-                                    />
-                                </div>
-                            )}
-                        </div>
-
-                        {/* QR Code - Between Content and Footer */}
-                        {config.showQRCode && (
-                            <div className="flex justify-center mb-2">
-                                {selectedQrId && qrCodes.find(q => q.id === selectedQrId) ? (
-                                    <div className="w-12 h-12 relative">
-                                        <img
-                                            src={qrCodes.find(q => q.id === selectedQrId)?.data}
-                                            alt="QR"
-                                            className="w-full h-full object-contain"
-                                        />
-                                    </div>
-                                ) : (
-                                    <div className="w-12 h-12 bg-slate-900/10 rounded border border-slate-900/20 flex items-center justify-center text-[8px] font-mono text-slate-400">
-                                        {qrCodes.length === 0 ? "NO QR" : "SELECT"}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Footer */}
-                        {config.showDates && (
-                            <div className="mt-auto border-t-2 border-slate-900 border-dashed pt-4 mb-8">
-                                <div className="flex justify-between items-end mb-2">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase">Best By</p>
-                                    <p className="text-sm font-black text-slate-900">{labelContent.expiry}</p>
-                                </div>
-                                <div className="flex justify-between items-end">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase">Size</p>
-                                    <p className="text-sm font-black text-slate-900">{labelContent.mealSize}</p>
-                                </div>
-                            </div>
-                        )}
-
-
-
-
-                    </div>
+                    <LabelTemplate
+                        content={labelContent}
+                        config={config}
+                        logoUrl={branding?.logo_url || logo}
+                        uploadedImage={uploadedImage}
+                        qrCodeUrl={selectedQrId ? qrCodes.find(q => q.id === selectedQrId)?.data : null}
+                        colorMode={colorMode}
+                        onClearUpload={() => setUploadedImage(null)}
+                        labelSize={config.labelSize}
+                    />
 
                     <p className="text-center text-xs text-slate-400 font-medium">
                         * Previewing 2" x 6" Vertical Layout (Standard Container Strip)
@@ -679,7 +679,7 @@ export default function LabelsPage() {
                 <div className="space-y-8">
 
                     {/* Visual Toggles */}
-                    <div className="glass-panel p-8 rounded-3xl bg-white/50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700">
+                    <div className="glass-panel p-8 rounded-3xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
                         <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
                             <Settings size={20} className="text-indigo-500" />
                             Layout Options
@@ -734,11 +734,36 @@ export default function LabelsPage() {
                     </div>
 
                     {/* Content Editor */}
-                    <div className="glass-panel p-8 rounded-3xl bg-white/50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700">
+                    <div className="glass-panel p-8 rounded-3xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
                         <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
                             <Settings size={20} className="text-indigo-500" />
                             Edit Label Content
                         </h3>
+
+                        {/* Canva & Upload Section */}
+                        <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 p-4 rounded-xl border border-purple-100 dark:border-purple-800/30 mb-6">
+                            <h4 className="flex items-center gap-2 font-bold text-sm text-purple-900 dark:text-purple-200 mb-3">
+                                <span className="text-lg">🎨</span> Design Your Own
+                            </h4>
+                            <div className="flex gap-3">
+                                <a
+                                    href="https://www.canva.com/create/labels/"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex-1 bg-[#7D2AE8] hover:bg-[#641bc2] text-white px-4 py-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm shadow-purple-200"
+                                >
+                                    Open Canva
+                                </a>
+                                <label className="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-slate-600 dark:text-slate-300 px-4 py-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-sm">
+                                    <span>Upload Design</span>
+                                    <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                                </label>
+                            </div>
+                            <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">
+                                Tip: Design your label in Canva (2" x 4" vertical), download as PNG/JPG, and upload here to print exactly as designed.
+                            </p>
+                        </div>
+
                         <div className="space-y-4">
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Item Name</label>

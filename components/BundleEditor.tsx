@@ -4,7 +4,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm, useFieldArray } from 'react-hook-form';
-import { Save, Plus, Trash, ArrowLeft, Package, Search, DollarSign, TrendingUp } from 'lucide-react';
+import { Save, Plus, Trash, ArrowLeft, Package, Search, DollarSign, TrendingUp, Sparkles, Image as ImageIcon, Loader2, Download, Copy } from 'lucide-react';
 import Link from 'next/link';
 
 interface BundleEditorProps {
@@ -18,6 +18,8 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
     const isNew = !initialData;
     const [searchTerm, setSearchTerm] = useState('');
     const [recipeCosts, setRecipeCosts] = useState<Record<string, number>>({});
+    const [catalogs, setCatalogs] = useState<any[]>([]);
+    const [isGeneratingImage, setIsGeneratingImage] = useState(false);
 
     const { register, control, handleSubmit, watch, setValue } = useForm({
         defaultValues: initialData ? {
@@ -25,8 +27,13 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
             sku: initialData.sku,
             description: initialData.description,
             serving_tier: initialData.serving_tier || 'family',
+            catalog_id: initialData.catalog_id || '',
+            image_url: initialData.image_url || '',
             price: initialData.price || '',
+            stock_on_hand: initialData.stock_on_hand || 0,
             is_active: initialData.is_active ?? true,
+            show_on_storefront: initialData.show_on_storefront ?? false,
+            order_cutoff_date: initialData.order_cutoff_date ? new Date(initialData.order_cutoff_date).toISOString().split('T')[0] : '',
             contents: initialData.contents.map((c: any) => ({
                 recipe_id: c.recipe_id,
                 name: c.recipe.name,
@@ -37,8 +44,13 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
             sku: '',
             description: '',
             serving_tier: 'family',
+            catalog_id: '',
+            image_url: '',
             price: '', // Default empty (will use calc if null)
+            stock_on_hand: 0,
             is_active: true,
+            show_on_storefront: false,
+            order_cutoff_date: '',
             contents: []
         }
     });
@@ -48,20 +60,22 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
         name: 'contents'
     });
 
-    // Fetch recipe costs on mount
+    // Fetch resources on mount
     useEffect(() => {
-        async function fetchCosts() {
+        async function fetchData() {
             try {
-                const res = await fetch('/api/recipes/costs');
-                if (res.ok) {
-                    const costs = await res.json();
-                    setRecipeCosts(costs);
-                }
+                // Costs
+                const costRes = await fetch('/api/recipes/costs');
+                if (costRes.ok) setRecipeCosts(await costRes.json());
+
+                // Catalogs
+                const catRes = await fetch('/api/catalogs');
+                if (catRes.ok) setCatalogs(await catRes.json());
             } catch (e) {
-                console.error('Failed to fetch recipe costs:', e);
+                console.error('Failed to fetch data:', e);
             }
         }
-        fetchCosts();
+        fetchData();
     }, []);
 
     const onSubmit = async (data: any) => {
@@ -89,10 +103,20 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
         }
     };
 
-    // Filter recipes for dropdown
-    const filteredRecipes = allRecipes
-        .filter(r => r.name.toLowerCase().includes(searchTerm.toLowerCase()))
-        .sort((a, b) => a.name.localeCompare(b.name));
+    // Filter recipes for dropdown with Deduping by Name
+    const filteredRecipes = useMemo(() => {
+        const lowerSearch = searchTerm.toLowerCase();
+        const seen = new Set();
+        return allRecipes
+            .filter(r => {
+                const name = r.name.toLowerCase();
+                if (!name.includes(lowerSearch)) return false;
+                if (seen.has(name)) return false;
+                seen.add(name);
+                return true;
+            })
+            .sort((a, b) => a.name.localeCompare(b.name));
+    }, [allRecipes, searchTerm]);
 
     const addRecipe = (recipeId: string, recipeName: string) => {
         append({ recipe_id: recipeId, name: recipeName, quantity: 1.0 });
@@ -123,36 +147,98 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
             }
         }
 
-        // Adjust cost for Serves 2
-        let adjustedCost = totalCost;
-        const tierLower = servingTier.toLowerCase();
-        if (tierLower.includes('couple') || tierLower.includes('serves 2') || tierLower === 'couple') {
-            adjustedCost = (totalCost / 5) * 2;
-        }
+        // Adjust cost logic removed: Trust the actual sum of ingredients/recipes.
+        const adjustedCost = totalCost;
 
         const profitMargin = sellingPrice - adjustedCost;
         const profitPercent = sellingPrice > 0 ? (profitMargin / sellingPrice) * 100 : 0;
+        const foodCostPercent = sellingPrice > 0 ? (adjustedCost / sellingPrice) * 100 : 0;
 
         return {
             totalCost,
             adjustedCost,
             sellingPrice,
             profitMargin,
-            profitPercent
+            profitPercent,
+            foodCostPercent
         };
     }, [watch('contents'), watch('serving_tier'), watch('price'), recipeCosts]);
+
+
+    const handleDuplicateAsServes2 = async () => {
+        if (!confirm("Create a 'Serves 2' version of this bundle?\n\nThis will:\n1. Clone this bundle\n2. Rename it to '(Serves 2)'\n3. Switch all recipes to their '(Serves 2)' versions (if found)\n4. Set tier to 'serves_2'")) return;
+
+        const current = watch();
+
+        // Map Contents
+        const newContents = current.contents.map((c: any) => {
+            const target = `${c.name} (Serves 2)`;
+            // Case-insensitive lookup
+            const match = allRecipes.find(r => r.name.toLowerCase() === target.toLowerCase());
+
+            if (match) {
+                return {
+                    recipe_id: match.id,
+                    quantity: c.quantity
+                };
+            }
+            return { recipe_id: c.recipe_id, quantity: c.quantity };
+        });
+
+        const payload = {
+            ...current,
+            name: `${current.name} (Serves 2)`,
+            sku: `${current.sku}-S2`,
+            serving_tier: 'serves_2',
+            contents: newContents,
+            price: Number(current.price) || null, // Keep price or clear? Keeping for reference.
+            is_active: true
+        };
+
+        try {
+            const res = await fetch('/api/bundles', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (res.ok) {
+                const json = await res.json();
+                alert("Bundle Cloned Successfully!");
+                router.push(`/bundles/${json.id}`);
+                router.refresh();
+            } else {
+                const err = await res.json();
+                alert(`Failed to clone: ${err.error}`);
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Error cloning bundle.");
+        }
+    };
 
     return (
         <div className="max-w-4xl mx-auto space-y-8">
             {/* Header */}
-            <div className="flex items-center gap-4">
-                <Link href="/bundles" className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-500 dark:text-slate-400 transition-colors">
-                    <ArrowLeft size={24} />
-                </Link>
-                <div>
-                    <h1 className="text-3xl font-bold text-slate-900 dark:text-white text-adaptive">{isNew ? 'New Bundle' : 'Edit Bundle'}</h1>
-                    <p className="text-slate-500 dark:text-slate-400 text-adaptive-subtle">Define the contents of your meal kit.</p>
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                    <Link href="/bundles" className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-500 dark:text-slate-400 transition-colors">
+                        <ArrowLeft size={24} />
+                    </Link>
+                    <div>
+                        <h1 className="text-3xl font-bold text-slate-900 dark:text-white text-adaptive">{isNew ? 'New Bundle' : 'Edit Bundle'}</h1>
+                        <p className="text-slate-500 dark:text-slate-400 text-adaptive-subtle">Define the contents of your meal kit.</p>
+                    </div>
                 </div>
+                {!isNew && (
+                    <button
+                        onClick={handleDuplicateAsServes2}
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg font-bold transition-colors border border-indigo-100 dark:border-indigo-800"
+                    >
+                        <Copy size={18} />
+                        Make Serves 2
+                    </button>
+                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -163,6 +249,107 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
                             <Package size={24} />
                         </div>
 
+                        {/* Image Generation */}
+                        <div>
+                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Bundle Image</label>
+                            <div className="relative group">
+                                {watch('image_url') ? (
+                                    <div className="relative w-full aspect-square rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 mb-2 group">
+                                        <img src={watch('image_url')} alt="Bundle" className="w-full h-full object-cover" />
+                                        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <a
+                                                href={watch('image_url')}
+                                                download={`bundle-${(watch('name') || 'image').replace(/\s+/g, '-').toLowerCase()}.png`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="p-1.5 bg-white text-slate-600 hover:text-indigo-600 rounded-full shadow-md transition-colors"
+                                                title="Download Image"
+                                            >
+                                                <Download size={16} />
+                                            </a>
+                                            <button
+                                                type="button"
+                                                onClick={() => setValue('image_url', '')}
+                                                className="p-1.5 bg-white text-rose-600 hover:text-rose-700 rounded-full shadow-md transition-colors"
+                                                title="Remove Image"
+                                            >
+                                                <Trash size={16} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="w-full aspect-video bg-slate-50 dark:bg-slate-900 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-lg flex flex-col items-center justify-center text-slate-400 mb-3 p-4">
+                                        <ImageIcon size={32} className="mb-2 opacity-50" />
+                                        <span className="text-xs">No image selected</span>
+                                    </div>
+                                )}
+
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="Image URL..."
+                                        {...register('image_url')}
+                                        className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                    <button
+                                        type="button"
+                                        disabled={isGeneratingImage}
+                                        onClick={async () => {
+                                            const name = watch('name');
+                                            const desc = watch('description');
+                                            const tier = watch('serving_tier');
+                                            if (!name) {
+                                                alert("Please enter a bundle name first.");
+                                                return;
+                                            }
+
+                                            // Check providers first
+                                            try {
+                                                const keysRes = await fetch('/api/integrations/keys');
+                                                const keys = await keysRes.json();
+                                                // Prefer OpenAI
+                                                let provider = keys.openai ? 'openai' : keys.gemini ? 'gemini' : null;
+
+                                                if (!provider) {
+                                                    alert("Please configure AI keys in Settings first.");
+                                                    return;
+                                                }
+
+                                                setIsGeneratingImage(true);
+                                                const prompt = `${name} meal kit, ${tier} size. ${desc}`;
+
+                                                const res = await fetch('/api/ai/generate-image', {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({
+                                                        prompt,
+                                                        provider,
+                                                        bundleName: name
+                                                    })
+                                                });
+
+                                                const data = await res.json();
+                                                if (res.ok && data.url) {
+                                                    setValue('image_url', data.url, { shouldDirty: true });
+                                                } else {
+                                                    alert("Generation failed: " + (data.error || 'Unknown error'));
+                                                }
+                                            } catch (e) {
+                                                console.error(e);
+                                                alert("Network error generating image.");
+                                            } finally {
+                                                setIsGeneratingImage(false);
+                                            }
+                                        }}
+                                        className="px-3 py-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 dark:text-indigo-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 whitespace-nowrap"
+                                    >
+                                        {isGeneratingImage ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                                        Generate AI
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
                         <div>
                             <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Bundle Name</label>
                             <input
@@ -170,6 +357,19 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
                                 className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white placeholder:text-slate-400"
                                 placeholder="e.g. Family Pizza Night"
                             />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Catalog (Season)</label>
+                            <select
+                                {...register('catalog_id')}
+                                className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 font-medium text-slate-900 dark:text-white"
+                            >
+                                <option value="">-- No Catalog --</option>
+                                {catalogs.map((c: any) => (
+                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                            </select>
                         </div>
 
                         <div>
@@ -403,15 +603,26 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
                             </div>
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Selling Price ($)</label>
-                            <input
-                                {...register('price')}
-                                type="number"
-                                step="0.01"
-                                className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-sm text-slate-900 dark:text-white placeholder:text-slate-400"
-                                placeholder="25.00"
-                            />
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Selling Price ($)</label>
+                                <input
+                                    {...register('price')}
+                                    type="number"
+                                    step="0.01"
+                                    className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-sm text-slate-900 dark:text-white placeholder:text-slate-400"
+                                    placeholder="25.00"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Stock Quantity</label>
+                                <input
+                                    {...register('stock_on_hand')}
+                                    type="number"
+                                    className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-sm text-slate-900 dark:text-white placeholder:text-slate-400"
+                                    placeholder="0"
+                                />
+                            </div>
                         </div>
 
                         <div>
@@ -423,19 +634,50 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
                             />
                         </div>
 
-                        <div className="flex items-center gap-3 bg-slate-50 dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
-                            <input
-                                {...register('is_active')}
-                                type="checkbox"
-                                id="is_active"
-                                className="w-5 h-5 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer accent-indigo-600"
-                            />
-                            <label htmlFor="is_active" className="text-sm font-bold text-slate-700 dark:text-slate-200 cursor-pointer select-none">
-                                Active Status
-                            </label>
-                            <span className="ml-auto text-xs text-slate-400 font-medium">
-                                {watch('is_active') ? 'Visible' : 'Hidden'}
-                            </span>
+                        <div className="space-y-4 bg-slate-50 dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
+                            <div className="flex items-center gap-3">
+                                <input
+                                    {...register('is_active')}
+                                    type="checkbox"
+                                    id="is_active"
+                                    className="w-5 h-5 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer accent-indigo-600"
+                                />
+                                <label htmlFor="is_active" className="text-sm font-bold text-slate-700 dark:text-slate-200 cursor-pointer select-none">
+                                    Active Status
+                                </label>
+                                <span className="ml-auto text-xs text-slate-400 font-medium">
+                                    {watch('is_active') ? 'Enabled/Unlocked' : 'Archived/Hidden'}
+                                </span>
+                            </div>
+
+                            <hr className="border-slate-200 dark:border-slate-800" />
+
+                            <div className="flex items-center gap-3">
+                                <input
+                                    {...register('show_on_storefront')}
+                                    type="checkbox"
+                                    id="show_on_storefront"
+                                    className="w-5 h-5 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer accent-indigo-600"
+                                />
+                                <label htmlFor="show_on_storefront" className="text-sm font-bold text-slate-700 dark:text-slate-200 cursor-pointer select-none">
+                                    Show on Customer Storefront
+                                </label>
+                                <span className="ml-auto text-xs text-slate-400 font-medium">
+                                    {watch('show_on_storefront') ? 'Visible to public' : 'Internal CRM only'}
+                                </span>
+                            </div>
+
+                            {watch('show_on_storefront') && (
+                                <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 animate-in fade-in slide-in-from-top-2">
+                                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Storefront Order Cutoff Date</label>
+                                    <input
+                                        {...register('order_cutoff_date')}
+                                        type="date"
+                                        className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 font-medium text-slate-900 dark:text-white"
+                                    />
+                                    <p className="text-xs text-slate-500 mt-1.5">If set, a global countdown banner will appear on the storefront driving urgency to order before midnight on this date.</p>
+                                </div>
+                            )}
                         </div>
 
                         <button
@@ -588,9 +830,21 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
                                             ${financials.profitMargin.toFixed(2)}
                                         </div>
                                     </div>
+                                    <div className="bg-white dark:bg-slate-800 p-3 rounded-lg ring-2 ring-indigo-500/10">
+                                        <div className="text-xs text-indigo-600 dark:text-indigo-400 uppercase font-black mb-1">Food Cost %</div>
+                                        <div className={`text-lg font-black ${financials.foodCostPercent > 49 ? 'text-rose-600' :
+                                            financials.foodCostPercent >= 35 ? 'text-orange-500' :
+                                                'text-emerald-600'
+                                            }`}>
+                                            {financials.foodCostPercent.toFixed(1)}%
+                                        </div>
+                                    </div>
                                     <div className="bg-white dark:bg-slate-800 p-3 rounded-lg">
                                         <div className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold mb-1">Profit %</div>
-                                        <div className={`text-lg font-bold ${financials.profitPercent >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                        <div className={`text-lg font-black ${financials.profitPercent > 49 ? 'text-emerald-600' :
+                                            financials.profitPercent >= 35 ? 'text-orange-500' :
+                                                'text-rose-600'
+                                            }`}>
                                             {financials.profitPercent.toFixed(1)}%
                                         </div>
                                     </div>

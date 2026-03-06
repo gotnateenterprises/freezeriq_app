@@ -11,6 +11,12 @@ export interface PrintJob {
     allergens?: string;
     notes?: string;
     isFinalLabel?: boolean;
+    // Tenant Branding
+    businessName?: string;
+    logoUrl?: string;
+    primaryColor?: string;
+    secondaryColor?: string;
+    accentColor?: string;
 }
 
 export interface LabelPrinter {
@@ -53,7 +59,7 @@ class DateCodeGeniePrinter implements LabelPrinter {
                 },
                 // Metadata for tracking
                 metadata: {
-                    source: "FreezerIQ",
+                    source: "FreezerIQ™",
                     timestamp: new Date().toISOString()
                 }
             };

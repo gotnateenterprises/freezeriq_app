@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/db';
 
 // GET /api/delivery/labels/[id]
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
         const { id } = await params;
         const template = await prisma.labelTemplate.findUnique({
             where: { id }
@@ -13,6 +15,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
         if (!template) {
             return NextResponse.json({ error: 'Template not found' }, { status: 404 });
+        }
+
+        if (template.business_id !== session.user.businessId) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
         }
 
         return NextResponse.json(template);
@@ -24,7 +30,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 // PUT /api/delivery/labels/[id]
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
         const { id } = await params;
+
+        // Ownership Check
+        const existing = await prisma.labelTemplate.findUnique({ where: { id } });
+        if (!existing) return NextResponse.json({ error: "Not Found" }, { status: 404 });
+        if (existing.business_id !== session.user.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+
         const body = await req.json();
         const { name, elements, width, height, isDefault } = body;
 
@@ -48,7 +64,17 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 // DELETE /api/delivery/labels/[id]
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
         const { id } = await params;
+
+        // Ownership Check
+        const existing = await prisma.labelTemplate.findUnique({ where: { id } });
+        if (!existing) return NextResponse.json({ error: "Not Found" }, { status: 404 });
+        if (existing.business_id !== session.user.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+
         await prisma.labelTemplate.delete({
             where: { id }
         });
