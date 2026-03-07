@@ -1,0 +1,21 @@
+{
+    "name": "Freezer Chef VIP",
+    "short_name": "Freezer Chef",
+    "icons": [
+        {
+            "src": "/icons/icon-192x192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "/icons/icon-512x512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ],
+    "theme_color": "#1e293b",
+    "background_color": "#f8fafc",
+    "display": "standalone",
+    "orientation": "portrait-primary",
+    "start_url": "/shop/my-freezer-chef"
+}
