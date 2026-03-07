@@ -480,7 +480,7 @@ function CustomerImportTrigger() {
 
 export default function SettingsPage() {
     const { data: session } = useSession();
-    const [integrationStatus, setIntegrationStatus] = useState({ square: false, qbo: false, meta: false, instagram: false });
+    const [integrationStatus, setIntegrationStatus] = useState({ square: false, qbo: false, meta: false, instagram: false, stripe: false });
     const [isBackingUp, setIsBackingUp] = useState(false);
     const [backupStatus, setBackupStatus] = useState<{ success: boolean; message: string } | null>(null);
     const [isConfirmingClear, setIsConfirmingClear] = useState(false);
@@ -494,7 +494,7 @@ export default function SettingsPage() {
             .catch(console.error);
     }, []);
 
-    const disconnectIntegration = async (provider: 'square' | 'qbo' | 'meta' | 'instagram') => {
+    const disconnectIntegration = async (provider: 'square' | 'qbo' | 'meta' | 'instagram' | 'stripe') => {
         if (!confirm(`Are you sure you want to delete the ${provider} connection?`)) return;
         try {
             const res = await fetch('/api/integrations/disconnect', {
@@ -607,6 +607,13 @@ export default function SettingsPage() {
                                 isConnected={integrationStatus.qbo}
                                 connectUrl="/api/auth/qbo"
                                 onDisconnect={() => disconnectIntegration('qbo')}
+                            />
+                            <IntegrationItem
+                                name="Stripe Payments"
+                                logo="ST"
+                                isConnected={integrationStatus.stripe}
+                                connectUrl="/api/auth/stripe"
+                                onDisconnect={() => disconnectIntegration('stripe')}
                             />
                         </div>
                     </div>

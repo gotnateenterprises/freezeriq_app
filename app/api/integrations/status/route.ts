@@ -19,7 +19,8 @@ export async function GET() {
             square: integrations.some(i => i.provider === 'square'),
             qbo: integrations.some(i => i.provider === 'qbo'),
             meta: integrations.some(i => i.provider === 'meta'),
-            instagram: integrations.some(i => i.provider === 'instagram')
+            instagram: integrations.some(i => i.provider === 'instagram'),
+            stripe: integrations.some(i => i.provider === 'stripe')
         };
 
         return NextResponse.json(status);
