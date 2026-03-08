@@ -270,7 +270,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
     }
 
     return (
-        <div className="relative min-h-screen bg-brand-cream dark:bg-slate-950 pb-32 noise-grain overflow-x-hidden">
+        <div className="relative min-h-screen bg-brand-cream dark:bg-slate-950 pb-32 noise-grain w-full max-w-[100vw] overflow-x-clip overflow-x-hidden">
             {/* Global Background Blobs for Glass Look - Warm Feminine Energy */}
             <div className="fixed inset-0 pointer-events-none z-0">
                 <div className="absolute top-[5%] -right-[5%] w-[60%] h-[60%] bg-brand-rose/10 rounded-full blur-[160px] animate-pulse" />
@@ -422,7 +422,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                         {/* Right Column: Stationary Purchase Box */}
                         <div className="lg:w-[400px]" id="purchase-section">
                             {featuredBundle ? (
-                                <div className="space-y-8 w-full max-w-[100vw] overflow-x-hidden md:max-w-none">
+                                <div className="space-y-8 w-full max-w-full overflow-x-hidden md:max-w-none">
                                     <div className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest text-center shadow-lg mx-auto">
                                         Subscribe & Save
                                     </div>
