@@ -62,12 +62,8 @@ export default function StorefrontFooter({ businessName, slug, primaryColor, foo
                     </div>
                 </div>
 
-                <div className="border-t border-slate-100 dark:border-slate-900 pt-12 flex flex-col md:flex-row justify-between items-center gap-8">
+                <div className="border-t border-slate-100 dark:border-slate-900 pt-12 flex flex-col md:flex-row items-center justify-center text-center gap-8">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">&copy; {currentYear} {businessName}. Handcrafted with care.</p>
-
-                    <div className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em] flex items-center gap-2">
-                        Powered by <span className="text-slate-400 opacity-50">FreezerIQ</span>
-                    </div>
                 </div>
             </div>
         </footer>

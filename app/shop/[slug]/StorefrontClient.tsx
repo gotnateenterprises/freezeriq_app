@@ -433,20 +433,6 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                                         primaryColor={branding.primary_color}
                                     />
 
-                                    {/* Host Fundraiser CTA */}
-                                    <div className="mt-8 p-8 lg:p-10 bg-linear-to-br from-pink-500 to-rose-500 rounded-[2.5rem] text-white space-y-6 shadow-2xl shadow-pink-500/20 w-full overflow-hidden">
-                                        <h4 className="text-xl font-black leading-tight">Raise Funds With Us</h4>
-                                        <p className="text-pink-100 text-sm font-medium leading-relaxed">
-                                            Partner with us to raise money for your organization with delicious freezer meals.
-                                        </p>
-                                        <Link
-                                            href={`/shop/${slug}/raise-funds`}
-                                            className="inline-flex items-center gap-2 bg-white text-pink-600 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-transform hover:scale-105"
-                                        >
-                                            Start Fundraising
-                                            <ArrowRight size={14} className="shrink-0" strokeWidth={3} />
-                                        </Link>
-                                    </div>
                                 </div>
                             ) : (
                                 <div className="p-8 bg-slate-50 dark:bg-slate-900 rounded-[2.5rem] text-center border border-slate-100 dark:border-slate-800">
@@ -541,12 +527,32 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                                 </div>
                             )}
                         </div>
+
+                        {/* Host Fundraiser CTA Moved Here! */}
+                        <div className="p-8 lg:p-12 bg-linear-to-br from-pink-500 to-rose-500 rounded-[3.5rem] text-white space-y-6 shadow-2xl shadow-pink-500/20 w-full overflow-hidden relative group">
+                            <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-10 rounded-full blur-3xl z-0 group-hover:scale-110 transition-transform duration-700" />
+                            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8">
+                                <div className="space-y-4 max-w-xl">
+                                    <h4 className="text-3xl md:text-4xl font-black leading-tight">Raise Funds With Us</h4>
+                                    <p className="text-pink-50 text-lg font-medium leading-relaxed">
+                                        Partner with us to raise money for your organization with delicious freezer meals.
+                                    </p>
+                                </div>
+                                <Link
+                                    href={`/shop/${slug}/raise-funds`}
+                                    className="shrink-0 inline-flex items-center justify-center gap-2 bg-white text-pink-600 px-8 py-4 rounded-full font-black text-sm uppercase tracking-widest transition-transform hover:scale-105 shadow-xl"
+                                >
+                                    Start Fundraising
+                                    <ArrowRight size={16} className="shrink-0" strokeWidth={3} />
+                                </Link>
+                            </div>
+                        </div>
                     </section>
                 </div>
 
                 {/* Footer */}
                 <StorefrontFooter
-                    businessName={branding.business_name}
+                    businessName={(branding.business_name && branding.business_name !== 'FreezerIQ' && branding.business_name !== 'Freezer IQ') ? branding.business_name : 'Freezer Chef'}
                     slug={business.slug}
                     primaryColor={branding.primary_color}
                     footerText={storefrontConfig?.footer_text}
