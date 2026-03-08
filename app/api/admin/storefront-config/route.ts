@@ -19,8 +19,8 @@ export async function GET(request: Request) {
         // Fetch business slug for preview links
         const business = await prisma.business.findUnique({
             where: { id: user.business.id },
-            select: { slug: true }
-        });
+            select: { slug: true, custom_domain: true } as any
+        }) as any;
 
         const storefrontConfigs: any[] = await prisma.$queryRaw`
             SELECT hero_headline, hero_subheadline, hero_image_url, our_story_headline, our_story_content,
@@ -36,7 +36,8 @@ export async function GET(request: Request) {
 
         return NextResponse.json({
             ...config,
-            business_slug: business?.slug
+            business_slug: business?.slug,
+            custom_domain: business?.custom_domain
         });
     } catch (error) {
         console.error("Error fetching storefront config:", error);
@@ -78,6 +79,21 @@ export async function POST(request: Request) {
         });
 
         if (!user?.business) return new NextResponse('Business not found', { status: 404 });
+
+        if (body.custom_domain !== undefined) {
+            const cleanDomain = body.custom_domain ? body.custom_domain.replace(/^https?:\/\//i, '').replace(/^www\./i, '').trim().toLowerCase() : null;
+            try {
+                await prisma.business.update({
+                    where: { id: user.business.id },
+                    data: { custom_domain: cleanDomain } as any
+                });
+            } catch (domainError: any) {
+                if (domainError.code === 'P2002') {
+                    return NextResponse.json({ error: "Domain already in use by another business." }, { status: 400 });
+                }
+                console.error("Domain update failed", domainError);
+            }
+        }
 
         const upsertQuery = `
             INSERT INTO storefront_configs (

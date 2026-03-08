@@ -117,6 +117,33 @@ export default function StorefrontSettings() {
                 </div>
             </div>
 
+            {/* Domain Mapping Section */}
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <div className="w-1.5 h-6 bg-blue-500 rounded-full" />
+                    Custom Domain
+                </h3>
+                <div className="grid gap-4">
+                    <div>
+                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">
+                            Domain Name <span className="text-xs font-normal text-slate-400 ml-2">(e.g., www.mybakery.com)</span>
+                        </label>
+                        <div className="flex gap-2 relative">
+                            <input
+                                type="text"
+                                value={(config as any).custom_domain || ''}
+                                onChange={e => setConfig({ ...config, custom_domain: e.target.value } as any)}
+                                placeholder="www.yourdomain.com"
+                                className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-sm"
+                            />
+                        </div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                            Enter the fully qualified domain name you wish to map. Make sure to point your domain's CNAME or A Record to our servers first!
+                        </p>
+                    </div>
+                </div>
+            </div>
+
             {/* Hero Section */}
             <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
