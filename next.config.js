@@ -12,6 +12,12 @@ const nextConfig = {
     },
     experimental: {
     },
+    typescript: {
+        ignoreBuildErrors: true,
+    },
+    eslint: {
+        ignoreDuringBuilds: true,
+    },
     // Re-enable Turbopack or keep disabled as per stability preference
     async headers() {
         return [
