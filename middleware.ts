@@ -38,8 +38,18 @@ export default auth((req) => {
         return NextResponse.next();
     }
 
+    // Prevent trailing slash redirects from exposing the internal domain folder structure
+    if (url.pathname !== '/' && url.pathname.endsWith('/')) {
+        const cleanPath = url.pathname.slice(0, -1);
+        return NextResponse.redirect(new URL(`${cleanPath}${searchParams.length > 0 ? `?${searchParams}` : ''}`, req.url), 308);
+    }
+
+    // Determine the precise rewrite target without a trailing slash (unless the hostname itself trails, which is stripped)
+    const finalPath = url.pathname === '/' ? '' : url.pathname;
+    const finalSearch = searchParams.length > 0 ? `?${searchParams}` : '';
+
     // rewrite everything else to `/[domain]/[slug] dynamic route
-    return NextResponse.rewrite(new URL(`/${hostname}${path}`, req.url));
+    return NextResponse.rewrite(new URL(`/${hostname}${finalPath}${finalSearch}`, req.url));
 });
 
 export const config = {
