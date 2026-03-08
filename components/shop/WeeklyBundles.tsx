@@ -41,7 +41,7 @@ export default function WeeklyBundles({ bundles, primaryColor, onSelect, activeB
                 </div>
             </div>
 
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-4 w-full md:max-w-none">
                 {bundles.map((bundle, idx) => {
                     const isActive = bundle.id === activeBundleId;
                     return (

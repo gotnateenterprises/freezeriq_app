@@ -55,17 +55,17 @@ export default function SurplusWaitlist({ businessName, primaryColor, slug, busi
     }
 
     return (
-        <div className="bg-white dark:bg-slate-800 rounded-3xl overflow-hidden shadow-lg border border-slate-100 dark:border-slate-700">
-            <div className="p-8 md:p-12 grid md:grid-cols-2 gap-12 items-center">
+        <div className="bg-white dark:bg-slate-800 rounded-3xl overflow-hidden shadow-lg border border-slate-100 dark:border-slate-700 max-w-4xl mx-auto w-full">
+            <div className="p-6 sm:p-8 md:p-12 grid md:grid-cols-2 gap-8 md:gap-12 items-center">
                 <div>
                     <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold uppercase tracking-widest mb-6">
                         <span className="w-2 h-2 rounded-full bg-slate-400"></span>
                         Currently Sold Out
                     </div>
-                    <h2 className="text-3xl md:text-4xl font-black text-slate-900 dark:text-white mb-4">
+                    <h2 className="text-2xl md:text-3xl lg:text-4xl font-black text-slate-900 dark:text-white mb-3">
                         Don't Miss the Next Drop
                     </h2>
-                    <p className="text-lg text-slate-600 dark:text-slate-400 mb-8 leading-relaxed">
+                    <p className="text-base text-slate-600 dark:text-slate-400 mb-6 leading-relaxed">
                         Our extra meals sell out fast! Join the waitlist to get an instant email notification when we restock the freezer.
                     </p>
 
@@ -79,7 +79,7 @@ export default function SurplusWaitlist({ businessName, primaryColor, slug, busi
                     </div>
                 </div>
 
-                <div className="bg-slate-50 dark:bg-slate-900 p-8 rounded-2xl">
+                <div className="bg-slate-50 dark:bg-slate-900 p-6 md:p-8 rounded-2xl w-full">
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
                             <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">

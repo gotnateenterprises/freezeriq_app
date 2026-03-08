@@ -270,9 +270,9 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
     }
 
     return (
-        <div className="relative min-h-screen bg-brand-cream dark:bg-slate-950 pb-32 noise-grain">
+        <div className="relative min-h-screen bg-brand-cream dark:bg-slate-950 pb-32 noise-grain overflow-x-hidden">
             {/* Global Background Blobs for Glass Look - Warm Feminine Energy */}
-            <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+            <div className="fixed inset-0 pointer-events-none z-0">
                 <div className="absolute top-[5%] -right-[5%] w-[60%] h-[60%] bg-brand-rose/10 rounded-full blur-[160px] animate-pulse" />
                 <div className="absolute bottom-[5%] -left-[5%] w-[60%] h-[60%] bg-amber-100/20 rounded-full blur-[160px] animate-pulse" style={{ animationDelay: '2s' }} />
             </div>
@@ -422,8 +422,8 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                         {/* Right Column: Stationary Purchase Box */}
                         <div className="lg:w-[400px]" id="purchase-section">
                             {featuredBundle ? (
-                                <div className="space-y-8">
-                                    <div className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest text-center shadow-lg">
+                                <div className="space-y-8 w-full max-w-[100vw] overflow-x-hidden md:max-w-none">
+                                    <div className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest text-center shadow-lg mx-auto">
                                         Subscribe & Save
                                     </div>
                                     <PurchaseSidebar
@@ -434,7 +434,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                                     />
 
                                     {/* Host Fundraiser CTA */}
-                                    <div className="mt-8 p-10 bg-linear-to-br from-pink-500 to-rose-500 rounded-[2.5rem] text-white space-y-6 shadow-2xl shadow-pink-500/20">
+                                    <div className="mt-8 p-8 lg:p-10 bg-linear-to-br from-pink-500 to-rose-500 rounded-[2.5rem] text-white space-y-6 shadow-2xl shadow-pink-500/20 w-full overflow-hidden">
                                         <h4 className="text-xl font-black leading-tight">Raise Funds With Us</h4>
                                         <p className="text-pink-100 text-sm font-medium leading-relaxed">
                                             Partner with us to raise money for your organization with delicious freezer meals.
@@ -444,7 +444,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                                             className="inline-flex items-center gap-2 bg-white text-pink-600 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-transform hover:scale-105"
                                         >
                                             Start Fundraising
-                                            <ArrowRight size={14} strokeWidth={3} />
+                                            <ArrowRight size={14} className="shrink-0" strokeWidth={3} />
                                         </Link>
                                     </div>
                                 </div>
