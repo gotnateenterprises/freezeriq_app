@@ -53,9 +53,25 @@ export default async function CustomDomainPage({ params }: { params: Promise<{ d
     const { domain } = await params;
     const decodedDomain = decodeURIComponent(domain);
 
-    const business = await prisma.business.findFirst({
-        where: { slug: decodedDomain }
+    const isWww = decodedDomain.startsWith('www.');
+    const rootDomainString = isWww ? decodedDomain.replace('www.', '') : decodedDomain;
+    const wwwDomainString = isWww ? decodedDomain : `www.${decodedDomain}`;
+
+    let business = await prisma.business.findFirst({
+        where: {
+            OR: [
+                { custom_domain: decodedDomain },
+                { custom_domain: rootDomainString },
+                { custom_domain: wwwDomainString }
+            ]
+        }
     });
+
+    if (!business && (decodedDomain.includes('myfreezerchef.com'))) {
+        business = await prisma.business.findFirst({
+            where: { slug: 'my-freezer-chef' }
+        });
+    }
 
     if (!business) {
         // We'll redirect to the main login or dashboard instead of 404ing the whole app
