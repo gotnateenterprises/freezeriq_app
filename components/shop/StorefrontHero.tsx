@@ -36,7 +36,7 @@ export default function StorefrontHero({
     return (
         <div className="relative w-full min-h-[90vh] md:min-h-screen flex flex-col">
             {/* Premium Top Navigation Bar */}
-            <nav className="absolute top-0 left-0 right-0 z-50 px-6 py-6 md:py-8 flex justify-between items-center bg-linear-to-b from-black/20 to-transparent pointer-events-none">
+            <nav className="absolute top-0 left-0 right-0 z-50 px-6 py-6 md:py-8 flex justify-between items-center bg-gradient-to-b from-black/40 to-transparent pointer-events-none">
                 <div className="flex items-center gap-4 pointer-events-auto group cursor-pointer" onClick={() => window.location.href = '/'}>
                     {logoUrl ? (
                         <div className="w-12 h-12 md:w-16 md:h-16 rounded-2xl overflow-hidden shadow-2xl bg-white/10 backdrop-blur-md p-1.5 transition-transform group-hover:scale-105 border border-white/20">
@@ -54,9 +54,9 @@ export default function StorefrontHero({
             </nav>
 
             {/* Immersive Background Layer */}
-            <div className="absolute inset-0 z-0 overflow-hidden bg-white">
+            <div className="absolute inset-0 z-[1] overflow-hidden bg-slate-900 pointer-events-none">
                 {/* Visual Treatment Overlays - NOSTALGIC BRIGHT COUNTRY */}
-                <div className="absolute inset-0 bg-white/5 z-10" /> {/* Minimal shade */}
+                <div className="absolute inset-0 bg-black/10 z-10" /> {/* Minimal shade */}
                 <div className="absolute inset-0 bg-amber-900/15 z-15 mix-blend-overlay" /> {/* Warmer nostalgic warmth */}
                 <div className="absolute inset-0 z-20 pointer-events-none opacity-25 mix-blend-soft-light grayscale contrast-125" style={{ backgroundImage: 'url("https://www.transparenttextures.com/patterns/p6.png")' }} /> {/* Nostalgic Grain */}
                 <div className="absolute inset-0 z-25 pointer-events-none shadow-[inset_0_0_150px_rgba(255,255,255,0.3)]" /> {/* Soft light vignette */}
@@ -89,7 +89,7 @@ export default function StorefrontHero({
             </div>
 
             {/* Content Card - Centered Frosted Glass */}
-            <div className="relative z-30 flex-1 flex items-center justify-center px-6 pt-20">
+            <div className="relative z-10 flex-1 flex items-center justify-center px-6 pt-20">
                 <motion.div
                     initial={{ opacity: 0, y: 30 }}
                     animate={{ opacity: 1, y: 0 }}
