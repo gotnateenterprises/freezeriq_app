@@ -12,6 +12,12 @@ export default async function middleware(req: any) {
         return NextResponse.next();
     }
 
+    // Bypass middleware for direct static asset requests like /images/ or /favicon.ico 
+    // that might bypass the next.config matcher on the edge.
+    if (url.pathname.startsWith('/images') || url.pathname.includes('.')) {
+        return NextResponse.next();
+    }
+
     hostname = hostname.replace('.localhost:3000', `.${process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost:3000'}`);
 
     if (
