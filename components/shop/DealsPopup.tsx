@@ -8,9 +8,10 @@ interface DealsPopupProps {
     businessName: string;
     primaryColor: string;
     onCapture: (email: string, name: string) => void;
+    isAuthenticated?: boolean;
 }
 
-export default function DealsPopup({ businessName, primaryColor, onCapture }: DealsPopupProps) {
+export default function DealsPopup({ businessName, primaryColor, onCapture, isAuthenticated = false }: DealsPopupProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [email, setEmail] = useState('');
     const [name, setName] = useState('');
@@ -18,13 +19,16 @@ export default function DealsPopup({ businessName, primaryColor, onCapture }: De
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
-        // Show after 3 seconds
+        // Suppress popup if user is actively logged in via NextAuth
+        if (isAuthenticated) return;
+
+        // Show after 15 seconds
         const timer = setTimeout(() => {
             const hasSignedUp = localStorage.getItem(`signed_up_${businessName}`);
             if (!hasSignedUp) setIsOpen(true);
-        }, 7000);
+        }, 15000);
         return () => clearTimeout(timer);
-    }, [businessName]);
+    }, [businessName, isAuthenticated]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();

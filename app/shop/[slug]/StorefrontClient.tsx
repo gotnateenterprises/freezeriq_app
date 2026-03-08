@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { ShoppingBag, Users, ArrowRight, ArrowLeft, MessageSquare, Tag } from 'lucide-react';
 import Link from 'next/link';
 import JsonLd from '@/components/JsonLd';
-
+import { useSession } from 'next-auth/react';
 import DealsPopup from '@/components/shop/DealsPopup';
 import { useCart } from '@/context/CartContext';
 import CartDrawer from '@/components/shop/CartDrawer';
@@ -100,6 +100,7 @@ interface StorefrontClientProps {
 
 export default function StorefrontClient({ overrideSlug }: StorefrontClientProps = {}) {
     const params = useParams();
+    const { status } = useSession();
     const slug = overrideSlug || params?.slug;
     const { addToCart } = useCart();
     const [data, setData] = useState<TenantData | null>(null);
@@ -285,6 +286,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                 <DealsPopup
                     businessName={(business.branding.business_name && business.branding.business_name !== 'FreezerIQ') ? business.branding.business_name : 'Freezer Chef'}
                     primaryColor={branding.primary_color}
+                    isAuthenticated={status === 'authenticated'}
                     onCapture={(email, name) => console.log('Lead captured:', { email, name })}
                 />
                 {/* ... (CartDrawer, PublicRecipeDetail, JsonLd remain same) */}
