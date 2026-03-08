@@ -94,8 +94,13 @@ interface TenantData {
     fundraisers: Fundraiser[];
 }
 
-export default function StorefrontClient() {
-    const { slug } = useParams();
+interface StorefrontClientProps {
+    overrideSlug?: string;
+}
+
+export default function StorefrontClient({ overrideSlug }: StorefrontClientProps = {}) {
+    const params = useParams();
+    const slug = overrideSlug || params?.slug;
     const { addToCart } = useCart();
     const [data, setData] = useState<TenantData | null>(null);
     const [loading, setLoading] = useState(true);

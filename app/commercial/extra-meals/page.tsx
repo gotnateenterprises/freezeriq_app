@@ -22,7 +22,7 @@ export default async function ExtraMealsPage() {
         orderBy: { name: 'asc' }
     });
 
-    const activeCount = recipes.filter(r => r.is_published).length;
+    const activeCount = recipes.filter(r => (r as any).is_published).length;
     // We don't have inventory_count on recipes yet, use a placeholder 0 for now
     const itemsWithStockCount = recipes.filter(r => false).length;
 

@@ -48,10 +48,10 @@ export default async function CustomerDashboardPage({ params }: { params: Promis
                         </div>
                         <div>
                             <p className="text-sm font-bold text-slate-500">Meal Credits</p>
-                            <h3 className="text-2xl font-black text-slate-900 dark:text-white">{customer.meal_credits} Available</h3>
+                            <h3 className="text-2xl font-black text-slate-900 dark:text-white">{(customer as any).meal_credits || 0} Available</h3>
                         </div>
                     </div>
-                    {customer.meal_credits > 0 ? (
+                    {((customer as any).meal_credits || 0) > 0 ? (
                         <Link
                             href={`/shop/${slug}/account/box`}
                             className="block w-full text-center py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-colors"
@@ -68,9 +68,9 @@ export default async function CustomerDashboardPage({ params }: { params: Promis
                 {/* Subscription Status Card */}
                 <SubscriptionManagerCard
                     customerId={customer.id}
-                    subscriptionStatus={customer.subscription_status}
-                    subscriptionPlanId={customer.subscription_plan_id}
-                    stripeSubscriptionId={customer.stripe_subscription_id}
+                    subscriptionStatus={(customer as any).subscription_status}
+                    subscriptionPlanId={(customer as any).subscription_plan_id}
+                    stripeSubscriptionId={(customer as any).stripe_subscription_id}
                 />
 
                 {/* Loyalty Balance Card */}

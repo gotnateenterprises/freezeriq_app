@@ -28,13 +28,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 export default async function SubscribePage({ params }: { params: Promise<{ slug: string }> }) {
     const { slug } = await params;
     const business = await prisma.business.findUnique({
-        where: { slug },
-        include: {
-            subscription_tiers: {
-                where: { is_active: true },
-                orderBy: { price: 'asc' }
-            }
-        }
+        where: { slug }
     });
 
     if (!business) {
@@ -125,10 +119,7 @@ export default async function SubscribePage({ params }: { params: Promise<{ slug
                     businessId={business.id}
                     slug={slug}
                     primaryColor={primaryColor}
-                    tiers={business.subscription_tiers.map(t => ({
-                        ...t,
-                        price: Number(t.price)
-                    })) as any}
+                    tiers={[]}
                 />
 
             </main>

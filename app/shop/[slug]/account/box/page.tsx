@@ -63,7 +63,7 @@ export default async function BuildABoxPage({ params }: { params: Promise<{ slug
                 <p className="text-slate-500 font-medium">Select your meals for the upcoming delivery.</p>
             </header>
 
-            {customer.meal_credits <= 0 ? (
+            {((customer as any).meal_credits || 0) <= 0 ? (
                 <div className="bg-white dark:bg-slate-800 rounded-3xl p-12 text-center border border-slate-200 dark:border-slate-700">
                     <Store size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-4" />
                     <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-2">No Meal Credits Available</h2>
@@ -81,7 +81,7 @@ export default async function BuildABoxPage({ params }: { params: Promise<{ slug
                 </div>
             ) : (
                 <BoxBuilder
-                    credits={customer.meal_credits}
+                    credits={(customer as any).meal_credits || 0}
                     menuItems={menuItems}
                     slug={slug}
                     businessId={session.businessId}

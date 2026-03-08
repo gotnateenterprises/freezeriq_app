@@ -11,11 +11,11 @@ interface RecipeWithInventory {
     inventory_count: number | null;
     base_yield_unit: string | null;
     container_type: string | null;
-    is_published: boolean;
+    is_published?: boolean;
 }
 
 export default function ExtraMealToggleRow({ recipe }: { recipe: RecipeWithInventory }) {
-    const [isPublished, setIsPublished] = useState(recipe.is_published);
+    const [isPublished, setIsPublished] = useState(!!recipe.is_published);
     const [isLoading, setIsLoading] = useState(false);
 
     const togglePublish = async () => {
@@ -90,8 +90,8 @@ export default function ExtraMealToggleRow({ recipe }: { recipe: RecipeWithInven
                         onClick={togglePublish}
                         disabled={isLoading}
                         className={`relative flex items-center justify-between w-32 p-1.5 rounded-full border shadow-inner transition-all duration-300 disabled:opacity-50 ${isPublished
-                                ? 'bg-emerald-500 border-emerald-600'
-                                : 'bg-slate-200 border-slate-300'
+                            ? 'bg-emerald-500 border-emerald-600'
+                            : 'bg-slate-200 border-slate-300'
                             }`}
                         title={isPublished ? "Hide from Storefront" : "Publish to Storefront"}
                     >
