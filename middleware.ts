@@ -4,12 +4,9 @@ import { NextResponse } from 'next/server';
 
 const { auth } = NextAuth(authConfig);
 
-export default auth((req) => {
+export default async function middleware(req: any) {
     const url = req.nextUrl;
-
-    // Get hostname of request (e.g. demo.vercel.pub, demo.localhost:3000)
-    let hostname = req.headers
-        .get('host')
+    let hostname = req.headers.get('host');
 
     if (!hostname) {
         return NextResponse.next();
@@ -17,7 +14,6 @@ export default auth((req) => {
 
     hostname = hostname.replace('.localhost:3000', `.${process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost:3000'}`);
 
-    // special case for Vercel preview deployment URLs
     if (
         hostname.includes('---') &&
         hostname.endsWith(`.${process.env.NEXT_PUBLIC_VERCEL_DEPLOYMENT_SUFFIX}`)
@@ -26,16 +22,14 @@ export default auth((req) => {
     }
 
     const searchParams = req.nextUrl.searchParams.toString();
-    const path = `${url.pathname}${searchParams.length > 0 ? `?${searchParams}` : ''}`;
-
-    // Standardize localhost for testing and handle `www.` stripping for production
     const isLocalhost = hostname === 'localhost:3000';
     const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'freezeriq.com';
     const isRootDomain = hostname === rootDomain || hostname === `www.${rootDomain}`;
 
-    // rewrites for app pages
     if (isLocalhost || isRootDomain || hostname.includes('freezeriq.com') || hostname.includes('vercel.app')) {
-        return NextResponse.next();
+        // Run auth middleware manually since we need it for platform pages
+        const authResult = await auth(req as any);
+        return authResult || NextResponse.next();
     }
 
     // Prevent trailing slash redirects from exposing the internal domain folder structure
@@ -44,13 +38,12 @@ export default auth((req) => {
         return NextResponse.redirect(new URL(`${cleanPath}${searchParams.length > 0 ? `?${searchParams}` : ''}`, req.url), 308);
     }
 
-    // Determine the precise rewrite target without a trailing slash (unless the hostname itself trails, which is stripped)
+    // Rewrite custom domain requests directly without NextAuth interference
     const finalPath = url.pathname === '/' ? '' : url.pathname;
     const finalSearch = searchParams.length > 0 ? `?${searchParams}` : '';
 
-    // rewrite everything else to `/[domain]/[slug] dynamic route
     return NextResponse.rewrite(new URL(`/${hostname}${finalPath}${finalSearch}`, req.url));
-});
+}
 
 export const config = {
     matcher: ['/((?!api/|_next/|_static/|_vercel|[\\w-]+\\.\\w+).*)'],
