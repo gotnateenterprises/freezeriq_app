@@ -28,8 +28,13 @@ export default auth((req) => {
     const searchParams = req.nextUrl.searchParams.toString();
     const path = `${url.pathname}${searchParams.length > 0 ? `?${searchParams}` : ''}`;
 
+    // Standardize localhost for testing and handle `www.` stripping for production
+    const isLocalhost = hostname === 'localhost:3000';
+    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'freezeriq.com';
+    const isRootDomain = hostname === rootDomain || hostname === `www.${rootDomain}`;
+
     // rewrites for app pages
-    if (hostname === 'localhost:3000' || hostname === process.env.NEXT_PUBLIC_ROOT_DOMAIN || hostname.includes('freezeriq.com') || hostname.includes('vercel.app')) {
+    if (isLocalhost || isRootDomain || hostname.includes('freezeriq.com') || hostname.includes('vercel.app')) {
         return NextResponse.next();
     }
 
