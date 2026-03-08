@@ -94,9 +94,9 @@ export default function StorefrontHero({
                     initial={{ opacity: 0, y: 30 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
-                    className="w-full max-w-[90vw] md:max-w-4xl mx-auto"
+                    className="w-full max-w-[92vw] sm:max-w-[90vw] md:max-w-4xl mx-auto"
                 >
-                    <div className="bg-white/10 dark:bg-slate-900/20 backdrop-blur-md rounded-[3rem] p-8 md:p-24 text-center shadow-[0_32px_64px_-16px_rgba(0,0,0,0.2)] border border-white/20 dark:border-white/5 relative overflow-hidden">
+                    <div className="bg-white/10 dark:bg-slate-900/20 backdrop-blur-md rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-8 md:p-16 lg:p-24 text-center shadow-[0_32px_64px_-16px_rgba(0,0,0,0.2)] border border-white/20 dark:border-white/5 relative overflow-hidden">
                         {/* Status Label */}
                         <motion.div
                             initial={{ opacity: 0, scale: 0.9 }}
@@ -110,7 +110,7 @@ export default function StorefrontHero({
                             </span>
                         </motion.div>
 
-                        <h1 className="text-4xl md:text-7xl font-black text-slate-900 dark:text-white mb-6 md:mb-10 leading-[1.1] tracking-tight">
+                        <h1 className="text-2xl sm:text-4xl md:text-7xl font-black text-slate-900 dark:text-white mb-6 md:mb-10 leading-[1.1] tracking-tight">
                             {headline || (
                                 <>Delicious Freezer Meals<br />Made for Your Busy Life</>
                             )}
