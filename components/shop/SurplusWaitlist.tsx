@@ -56,13 +56,13 @@ export default function SurplusWaitlist({ businessName, primaryColor, slug, busi
 
     return (
         <div className="bg-white dark:bg-slate-800 rounded-3xl overflow-hidden shadow-lg border border-slate-100 dark:border-slate-700 max-w-4xl mx-auto w-full">
-            <div className="p-6 sm:p-8 md:p-12 grid md:grid-cols-2 gap-8 md:gap-12 items-center">
+            <div className="p-4 sm:p-6 md:p-10 grid md:grid-cols-2 gap-6 md:gap-10 items-center">
                 <div>
                     <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold uppercase tracking-widest mb-6">
                         <span className="w-2 h-2 rounded-full bg-slate-400"></span>
                         Currently Sold Out
                     </div>
-                    <h2 className="text-2xl md:text-3xl lg:text-4xl font-black text-slate-900 dark:text-white mb-3">
+                    <h2 className="text-xl md:text-3xl lg:text-4xl font-black text-slate-900 dark:text-white mb-3">
                         Don't Miss the Next Drop
                     </h2>
                     <p className="text-base text-slate-600 dark:text-slate-400 mb-6 leading-relaxed">

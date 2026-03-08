@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ShoppingBag, Users, ArrowRight, ArrowLeft, MessageSquare, Tag } from 'lucide-react';
 import Link from 'next/link';
+import { motion, AnimatePresence } from 'framer-motion';
 import JsonLd from '@/components/JsonLd';
 import { useSession } from 'next-auth/react';
 import DealsPopup from '@/components/shop/DealsPopup';
@@ -108,6 +109,8 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
     const [error, setError] = useState<{ message: string, slugs?: { name: string, slug: string }[] } | null>(null);
     const [activeBundleId, setActiveBundleId] = useState<string | null>(null);
     const [selectedPublicRecipe, setSelectedPublicRecipe] = useState<any | null>(null);
+    const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+    const [purchaseModalBundle, setPurchaseModalBundle] = useState<any>(null);
 
     useEffect(() => {
         async function fetchStorefront() {
@@ -161,7 +164,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
             {/* Skeleton Hero */}
             <div className="h-[500px] w-full bg-slate-200/50 dark:bg-slate-800/50 animate-pulse" />
 
-            <div className="max-w-7xl mx-auto px-6 -mt-24 relative z-20 space-y-24">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 -mt-24 relative z-20 space-y-24">
                 {/* Skeleton Story Block */}
                 <div className="bg-white/40 dark:bg-slate-900/60 rounded-[4rem] p-12 h-64 border border-white dark:border-slate-800 animate-pulse" />
 
@@ -193,8 +196,8 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
 
     if (error || !data) {
         return (
-            <div className="min-h-screen bg-brand-cream/50 flex items-center justify-center p-6">
-                <div className="max-w-xl w-full p-12 bg-white/80 backdrop-blur-3xl dark:bg-slate-800/80 rounded-[3.5rem] shadow-2xl border border-white shadow-brand-rose/5 text-center">
+            <div className="min-h-screen bg-brand-cream/50 flex items-center justify-center p-4">
+                <div className="max-w-xl w-full p-8 md:p-12 bg-white/80 backdrop-blur-3xl dark:bg-slate-800/80 rounded-[3.5rem] shadow-2xl border border-white shadow-brand-rose/5 text-center">
                     <h1 className="text-4xl font-serif text-slate-900 dark:text-white mb-6">Shop Not Found</h1>
                     <p className="text-slate-500 dark:text-slate-400 mb-10 font-medium">
                         We couldn't find a storefront at <strong>/shop/{slug}</strong>.
@@ -277,7 +280,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                 <div className="absolute bottom-[5%] -left-[5%] w-[60%] h-[60%] bg-amber-100/20 rounded-full blur-[160px] animate-pulse" style={{ animationDelay: '2s' }} />
             </div>
 
-            <div className="relative z-10 font-sans flex flex-col min-h-screen">
+            <div className="relative z-10 font-sans flex flex-col min-h-screen max-w-full">
                 <CountdownBanner
                     targetDate={globalCutoffDate}
                     primaryColor={branding.primary_color}
@@ -289,7 +292,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                     isAuthenticated={status === 'authenticated'}
                     onCapture={(email, name) => console.log('Lead captured:', { email, name })}
                 />
-                {/* ... (CartDrawer, PublicRecipeDetail, JsonLd remain same) */}
+
                 <CartDrawer
                     primaryColor={branding.primary_color}
                     businessId={business.id}
@@ -307,6 +310,42 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                     recipe={selectedPublicRecipe}
                     primaryColor={branding.primary_color}
                 />
+
+                {/* Purchase Modal */}
+                <AnimatePresence>
+                    {showPurchaseModal && purchaseModalBundle && (
+                        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+                            <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                onClick={() => setShowPurchaseModal(false)}
+                                className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+                            />
+                            <motion.div
+                                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                                className="relative w-full max-w-md z-10"
+                            >
+                                <button
+                                    onClick={() => setShowPurchaseModal(false)}
+                                    className="absolute -top-12 right-0 w-10 h-10 bg-white/20 hover:bg-white/40 rounded-full flex items-center justify-center text-white backdrop-blur-md transition-colors"
+                                >
+                                    <span className="sr-only">Close</span>
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                                </button>
+                                <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl rounded-[2.5rem] shadow-2xl relative overflow-hidden">
+                                    <div className="absolute top-0 left-0 w-full h-2 z-10" style={{ backgroundColor: branding.primary_color || '#4f46e5' }} />
+                                    <PurchaseSidebar
+                                        bundle={purchaseModalBundle}
+                                        primaryColor={branding.primary_color}
+                                    />
+                                </div>
+                            </motion.div>
+                        </div>
+                    )}
+                </AnimatePresence>
 
                 <JsonLd data={{
                     "@context": "https://schema.org",
@@ -336,10 +375,10 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                 />
 
                 {/* Main Content Flow */}
-                <div className="max-w-7xl mx-auto px-6 -mt-24 relative z-20 space-y-24">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 -mt-24 relative z-20 space-y-16 sm:space-y-24 mb-16">
 
                     {/* Our Story / Mission */}
-                    <section className="bg-white/40 dark:bg-slate-900/60 backdrop-blur-3xl p-12 md:p-20 rounded-[4rem] border border-white dark:border-white/5 shadow-[0_48px_96px_-24px_rgba(244,114,182,0.1)] relative overflow-hidden">
+                    <section className="bg-white/40 dark:bg-slate-900/60 backdrop-blur-3xl p-6 sm:p-12 md:p-20 rounded-[2rem] sm:rounded-[4rem] border border-white dark:border-white/5 shadow-[0_48px_96px_-24px_rgba(244,114,182,0.1)] relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-64 h-64 bg-amber-50 rounded-full blur-3xl opacity-50 -z-10" />
 
                         <div className="flex items-center gap-3 mb-8 font-black uppercase tracking-[0.25em] text-[10px] text-brand-teal">
@@ -347,17 +386,17 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                             Our Heritage
                         </div>
 
-                        <h2 className="font-serif text-4xl md:text-5xl text-slate-900 dark:text-white mb-10 leading-tight">
+                        <h2 className="font-serif text-3xl sm:text-4xl md:text-5xl text-slate-900 dark:text-white mb-8 sm:mb-10 leading-tight">
                             {storefrontConfig?.our_story_headline || (
                                 <>The Heart of <span className="text-brand-teal">{business.branding.business_name}</span></>
                             )}
                         </h2>
 
-                        <div className="prose prose-xl dark:prose-invert max-w-none text-slate-600 dark:text-slate-300 font-medium leading-[1.8] opacity-90">
+                        <div className="prose prose-lg sm:prose-xl dark:prose-invert max-w-none text-slate-600 dark:text-slate-300 font-medium leading-[1.8] opacity-90">
                             {storefrontConfig?.our_story_content ? (
                                 <p className="whitespace-pre-wrap">{storefrontConfig.our_story_content}</p>
                             ) : (
-                                <div className="space-y-8">
+                                <div className="space-y-6 sm:space-y-8">
                                     <p>At <strong>{(!business.branding.business_name || business.branding.business_name === 'FreezerIQ') ? 'Freezer Chef' : business.branding.business_name}</strong>, we bring over 10 years of experience in freezer meal preparation to your table—taking the stress out of dinnertime and replacing it with comforting, crave-worthy flavors your whole family will love.</p>
                                     <p>Our freezer-ready meals are handcrafted with care and packed with nostalgia—from hearty casseroles and slow-simmered soups to warm, oven-baked favorites and cozy crockpot classics that taste just like Grandma used to make.</p>
                                 </div>
@@ -386,24 +425,27 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                         </section>
                     )}
 
-                    {/* Lower Section: Bundles & Stationary Purchase Box */}
-                    <div className="flex flex-col lg:flex-row gap-16 pb-20">
-                        {/* Left Column: Monthly Bundles */}
-                        <div className="flex-1 space-y-16">
+                    {/* Lower Section: Bundles */}
+                    <div className="pb-20 w-full overflow-hidden">
+                        <div className="space-y-16 w-full max-w-full">
 
                             {/* Monthly Bundles Container */}
-                            <div id="shop-bundles" className="scroll-mt-32">
+                            <div id="shop-bundles" className="scroll-mt-32 w-full max-w-full">
                                 <WeeklyBundles
                                     bundles={monthlyBundles}
                                     primaryColor={branding.primary_color}
-                                    onAddToCart={addToCart}
+                                    onAddToCart={(params) => {
+                                        const bundle = monthlyBundles.find(b => b.id === params.bundleId);
+                                        setPurchaseModalBundle(bundle);
+                                        setShowPurchaseModal(true);
+                                    }}
                                     onSelect={handleSelectBundle}
                                     activeBundleId={activeBundleId || ''}
                                 />
                             </div>
 
                             {/* Featured Recipes Grid (Reflects active bundle) */}
-                            <div className="space-y-6 scroll-mt-24" id="meals-grid">
+                            <div className="space-y-6 scroll-mt-24 w-full" id="meals-grid">
                                 <div className="flex items-center gap-2 mb-4">
                                     <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600">
                                         <ShoppingBag size={20} />
@@ -417,28 +459,6 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                                     onItemClick={(recipe) => setSelectedPublicRecipe(recipe)}
                                 />
                             </div>
-                        </div>
-
-                        {/* Right Column: Stationary Purchase Box */}
-                        <div className="lg:w-[400px]" id="purchase-section">
-                            {featuredBundle ? (
-                                <div className="space-y-8 w-full max-w-full overflow-x-hidden md:max-w-none">
-                                    <div className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest text-center shadow-lg mx-auto">
-                                        Subscribe & Save
-                                    </div>
-                                    <PurchaseSidebar
-                                        key={featuredBundle.id} // Force re-render on selection change
-                                        // @ts-ignore
-                                        bundle={featuredBundle}
-                                        primaryColor={branding.primary_color}
-                                    />
-
-                                </div>
-                            ) : (
-                                <div className="p-8 bg-slate-50 dark:bg-slate-900 rounded-[2.5rem] text-center border border-slate-100 dark:border-slate-800">
-                                    <p className="text-slate-500 font-medium">No bundles available right now.</p>
-                                </div>
-                            )}
                         </div>
                     </div>
                 </div>

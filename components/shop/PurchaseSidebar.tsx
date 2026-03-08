@@ -63,7 +63,7 @@ export default function PurchaseSidebar({ bundle, primaryColor }: PurchaseSideba
     };
 
     return (
-        <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl rounded-[2.5rem] p-8 shadow-[0_24px_48px_-12px_rgba(79,70,229,0.12)] border border-indigo-50/50 dark:border-slate-700">
+        <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl rounded-[2.5rem] p-6 sm:p-8 shadow-[0_24px_48px_-12px_rgba(79,70,229,0.12)] border border-indigo-50/50 dark:border-slate-700 w-full max-w-full">
             <div className="mb-6">
                 <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-2 tracking-tight">{bundle.name}</h3>
                 <p className="text-sm text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
@@ -121,26 +121,26 @@ export default function PurchaseSidebar({ bundle, primaryColor }: PurchaseSideba
             </div>
 
             {/* Serving Size Toggle */}
-            <div className="space-y-3 mb-8">
+            <div className="space-y-3 mb-8 w-full">
                 <label className="text-[10px] font-black uppercase text-indigo-400 tracking-[0.2em] ml-1">Select Size</label>
-                <div className="bg-slate-50 dark:bg-slate-950 p-1.5 rounded-2xl flex border border-indigo-50/50 dark:border-slate-800">
+                <div className="bg-slate-50 dark:bg-slate-950 p-1.5 rounded-2xl flex flex-col min-[400px]:flex-row border border-indigo-50/50 dark:border-slate-800 w-full max-w-full">
                     <button
                         onClick={() => setServingSize('large')}
-                        className={`flex-1 py-3.5 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all ${servingSize === 'large'
+                        className={`flex-1 py-3 px-2 rounded-xl font-black text-[9px] sm:text-[10px] uppercase tracking-wider transition-all min-w-0 ${servingSize === 'large'
                             ? "bg-white dark:bg-slate-800 text-indigo-600 shadow-xl"
                             : "text-slate-400 hover:text-slate-600"
                             }`}
                     >
-                        Large Family (5-6)
+                        Large <span className="hidden sm:inline">(5-6)</span>
                     </button>
                     <button
                         onClick={() => setServingSize('medium')}
-                        className={`flex-1 py-3.5 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all ${servingSize === 'medium'
+                        className={`flex-1 py-3 px-2 rounded-xl font-black text-[9px] sm:text-[10px] uppercase tracking-wider transition-all min-w-0 ${servingSize === 'medium'
                             ? "bg-white dark:bg-slate-800 text-indigo-600 shadow-xl"
                             : "text-slate-400 hover:text-slate-600"
                             }`}
                     >
-                        Half Family (2-3)
+                        Small <span className="hidden sm:inline">(2-3)</span>
                     </button>
                 </div>
             </div>

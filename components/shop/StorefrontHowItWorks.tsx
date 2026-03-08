@@ -77,9 +77,9 @@ export default function StorefrontHowItWorks({ content }: StorefrontHowItWorksPr
     ];
 
     return (
-        <section className="py-24 border-b border-indigo-50/50 dark:border-slate-800/50 relative z-10">
-            <div className="max-w-7xl mx-auto px-6">
-                <div className="text-center mb-20">
+        <section className="py-16 md:py-24 border-b border-indigo-50/50 dark:border-slate-800/50 relative z-10 overflow-hidden w-full">
+            <div className="max-w-7xl mx-auto w-full">
+                <div className="text-center mb-12 md:mb-20 px-6">
                     <motion.span
                         initial={{ opacity: 0, y: 10 }}
                         whileInView={{ opacity: 1, y: 0 }}
@@ -93,7 +93,7 @@ export default function StorefrontHowItWorks({ content }: StorefrontHowItWorksPr
                         whileInView={{ opacity: 1, y: 0 }}
                         viewport={{ once: true }}
                         transition={{ delay: 0.1 }}
-                        className="text-4xl md:text-5xl font-black text-slate-900 dark:text-white tracking-tight"
+                        className="text-3xl md:text-5xl font-black text-slate-900 dark:text-white tracking-tight"
                     >
                         The Process
                     </motion.h2>
@@ -104,16 +104,16 @@ export default function StorefrontHowItWorks({ content }: StorefrontHowItWorksPr
                         initial={{ opacity: 0, y: 20 }}
                         whileInView={{ opacity: 1, y: 0 }}
                         viewport={{ once: true }}
-                        className="max-w-3xl mx-auto"
+                        className="max-w-3xl mx-auto px-6"
                     >
-                        <div className="bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl p-10 md:p-16 rounded-[3rem] border border-white dark:border-white/5 shadow-xl shadow-teal-500/5 text-center">
-                            <p className="text-lg md:text-xl text-slate-600 dark:text-slate-300 font-medium leading-relaxed whitespace-pre-wrap">
+                        <div className="bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl p-8 md:p-16 rounded-[2rem] border border-white dark:border-white/5 shadow-xl shadow-teal-500/5 text-center">
+                            <p className="text-base md:text-xl text-slate-600 dark:text-slate-300 font-medium leading-relaxed whitespace-pre-wrap">
                                 {content}
                             </p>
                         </div>
                     </motion.div>
                 ) : (
-                    <div className="flex overflow-x-auto snap-x snap-mandatory gap-6 md:gap-16 pb-8 md:grid md:grid-cols-3 relative hide-scrollbar px-2" style={{ msOverflowStyle: 'none', scrollbarWidth: 'none' }}>
+                    <div className="flex overflow-x-auto snap-x snap-mandatory gap-6 md:gap-16 pb-8 px-6 md:grid md:grid-cols-3 relative hide-scrollbar w-full" style={{ msOverflowStyle: 'none', scrollbarWidth: 'none' }}>
                         <style jsx>{`
                             div::-webkit-scrollbar {
                                 display: none;
@@ -129,15 +129,15 @@ export default function StorefrontHowItWorks({ content }: StorefrontHowItWorksPr
                                 whileInView={{ opacity: 1, y: 0 }}
                                 viewport={{ once: true }}
                                 transition={{ delay: idx * 0.1 }}
-                                className="relative z-10 flex flex-col items-center text-center group min-w-[85vw] md:min-w-0 snap-center"
+                                className="relative z-10 flex flex-col items-center text-center group w-[80vw] max-w-[300px] shrink-0 md:w-auto snap-center"
                             >
-                                <div className={`relative w-32 h-32 rounded-[3.5rem] ${step.bg} flex items-center justify-center mb-8 transition-all duration-500 group-hover:rounded-[2.5rem] group-hover:scale-110 group-hover:shadow-[0_24px_48px_-12px_rgba(79,70,229,0.1)] border border-white dark:border-white/5`}>
+                                <div className={`relative w-32 h-32 rounded-[3.5rem] ${step.bg} flex items-center justify-center mb-6 transition-all duration-500 group-hover:rounded-[2.5rem] group-hover:scale-110 group-hover:shadow-[0_24px_48px_-12px_rgba(79,70,229,0.1)] border border-white dark:border-white/5`}>
                                     <div className="absolute top-0 right-0 -translate-y-1/4 translate-x-1/4 bg-white dark:bg-slate-800 px-3 py-1 rounded-full shadow-sm border border-teal-50 dark:border-slate-700">
                                         <span className="text-[10px] font-black text-brand-teal uppercase tracking-wider">{step.badge}</span>
                                     </div>
                                     <step.icon size={48} className={step.color} strokeWidth={1.5} />
                                 </div>
-                                <h3 className="text-2xl font-black mb-3 text-slate-900 dark:text-white tracking-tight">{step.title}</h3>
+                                <h3 className="text-xl md:text-2xl font-black mb-3 text-slate-900 dark:text-white tracking-tight">{step.title}</h3>
                                 <p className="text-slate-500 dark:text-slate-400 font-medium leading-relaxed max-w-[280px]">
                                     {step.desc}
                                 </p>
