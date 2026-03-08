@@ -324,16 +324,16 @@ model Order {
 }
 
 model OrderItem {
-  id           String      @id @default(uuid())
-  order_id     String?
-  bundle_id    String?
-  quantity     Int
-  variant_size VariantSize @default(serves_5)
-  item_name    String?
-  unit_price   Decimal?    @db.Decimal(10, 2)
+  id              String      @id @default(uuid())
+  order_id        String?
+  bundle_id       String?
+  quantity        Int
+  variant_size    VariantSize @default(serves_5)
+  item_name       String?
+  unit_price      Decimal?    @db.Decimal(10, 2)
   is_subscription Boolean     @default(false)
-  bundle       Bundle?     @relation(fields: [bundle_id], references: [id])
-  order        Order?      @relation(fields: [order_id], references: [id])
+  bundle          Bundle?     @relation(fields: [bundle_id], references: [id])
+  order           Order?      @relation(fields: [order_id], references: [id])
 
   @@map("order_items")
 }
@@ -550,22 +550,22 @@ model StorefrontConfig {
 }
 
 model Invoice {
-  id             String        @id @default(uuid())
-  business_id    String
-  customer_id    String
-  status         InvoiceStatus @default(PENDING)
-  payment_method String?       @default("check")
-  total_amount   Decimal       @db.Decimal(10, 2)
-  tax_amount     Decimal?      @default(0) @db.Decimal(10, 2)
-  created_at     DateTime      @default(now())
-  updated_at     DateTime      @updatedAt
-  due_date                 DateTime?
+  id                        String        @id @default(uuid())
+  business_id               String
+  customer_id               String
+  status                    InvoiceStatus @default(PENDING)
+  payment_method            String?       @default("check")
+  total_amount              Decimal       @db.Decimal(10, 2)
+  tax_amount                Decimal?      @default(0) @db.Decimal(10, 2)
+  created_at                DateTime      @default(now())
+  updated_at                DateTime      @updatedAt
+  due_date                  DateTime?
   fundraiser_profit_percent Decimal?      @default(0) @db.Decimal(5, 2)
   fundraiser_profit_amount  Decimal?      @default(0) @db.Decimal(10, 2)
-  items                    InvoiceItem[]
-  order                    Order?
-  business       Business      @relation(fields: [business_id], references: [id], onDelete: Cascade)
-  customer       Customer      @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  items                     InvoiceItem[]
+  order                     Order?
+  business                  Business      @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  customer                  Customer      @relation(fields: [customer_id], references: [id], onDelete: Cascade)
 
   @@map("invoices")
 }

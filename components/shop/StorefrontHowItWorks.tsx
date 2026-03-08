@@ -27,7 +27,7 @@ export default function StorefrontHowItWorks({ content }: StorefrontHowItWorksPr
         },
         {
             icon: UtensilsCrossed,
-            title: "Pour & Enjoy",
+            title: "Cook & Enjoy",
             desc: "No prep needed. Just put in your crockpot, Insta-pot or oven, and dinner is served!",
             color: "text-brand-teal",
             bg: "bg-teal-50/50 dark:bg-teal-900/10",
@@ -72,7 +72,7 @@ export default function StorefrontHowItWorks({ content }: StorefrontHowItWorksPr
                         </div>
                     </motion.div>
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-16 relative">
+                    <div className="flex overflow-x-auto snap-x snap-mandatory md:grid md:grid-cols-3 gap-8 md:gap-16 pb-8 px-4 -mx-4 md:px-0 md:mx-0 relative hide-scrollbar">
                         {/* Connecting Line (Desktop Only) - Feminized */}
                         <div className="hidden md:block absolute top-16 left-[10%] right-[10%] h-px bg-linear-to-r from-transparent via-teal-100 dark:via-teal-900/30 to-transparent z-0" />
 
@@ -83,7 +83,7 @@ export default function StorefrontHowItWorks({ content }: StorefrontHowItWorksPr
                                 whileInView={{ opacity: 1, y: 0 }}
                                 viewport={{ once: true }}
                                 transition={{ delay: idx * 0.1 }}
-                                className="relative z-10 flex flex-col items-center text-center group"
+                                className="relative z-10 flex flex-col items-center text-center group min-w-[85vw] md:min-w-0 snap-center"
                             >
                                 <div className={`relative w-32 h-32 rounded-[3.5rem] ${step.bg} flex items-center justify-center mb-8 transition-all duration-500 group-hover:rounded-[2.5rem] group-hover:scale-110 group-hover:shadow-[0_24px_48px_-12px_rgba(79,70,229,0.1)] border border-white dark:border-white/5`}>
                                     <div className="absolute top-0 right-0 -translate-y-1/4 translate-x-1/4 bg-white dark:bg-slate-800 px-3 py-1 rounded-full shadow-sm border border-teal-50 dark:border-slate-700">

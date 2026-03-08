@@ -91,6 +91,12 @@ export default function WeeklyBundles({ bundles, primaryColor, onSelect, activeB
                                     )}
                                 </div>
                             </div>
+
+                            <div className="mt-4 px-2">
+                                <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors flex items-center gap-2">
+                                    Click to view meals <ChevronRight size={12} />
+                                </div>
+                            </div>
                         </motion.button>
                     )
                 })}

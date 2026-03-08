@@ -37,7 +37,7 @@ export default function DeliciousGrid({ images = [], recipes = [], onItemClick }
     ];
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4">
+        <div className="flex overflow-x-auto gap-6 p-4 pb-8 snap-x snap-mandatory hide-scrollbar -mx-6 px-6 md:mx-0 md:px-4">
             {items.map((item, idx) => (
                 <motion.div
                     key={idx}
@@ -46,10 +46,7 @@ export default function DeliciousGrid({ images = [], recipes = [], onItemClick }
                     viewport={{ once: true }}
                     transition={{ delay: idx * 0.1, duration: 0.6, ease: "easeOut" }}
                     onClick={() => onItemClick?.(item)}
-                    className={`relative group/grid overflow-hidden rounded-[3rem] shadow-lg hover:shadow-2xl transition-all duration-500 border border-slate-100 dark:border-slate-800 cursor-pointer ${
-                        // Consistent grid pattern
-                        idx === 0 ? "aspect-square md:aspect-[4/3] md:col-span-2" : "aspect-square"
-                        }`}
+                    className={`relative group/grid overflow-hidden rounded-[3rem] shadow-lg hover:shadow-2xl transition-all duration-500 border border-slate-100 dark:border-slate-800 cursor-pointer snap-center shrink-0 w-[85vw] sm:w-[60vw] md:w-[45vw] lg:w-[35vw] aspect-square`}
                 >
                     {/* Background Ethereal Fill (Prevents Pixelation for small vertical/horizontal files) */}
                     <div className="absolute inset-0 z-0 select-none pointer-events-none overflow-hidden origin-center scale-110">

@@ -22,7 +22,7 @@ export default function DealsPopup({ businessName, primaryColor, onCapture }: De
         const timer = setTimeout(() => {
             const hasSignedUp = localStorage.getItem(`signed_up_${businessName}`);
             if (!hasSignedUp) setIsOpen(true);
-        }, 3000);
+        }, 7000);
         return () => clearTimeout(timer);
     }, [businessName]);
 

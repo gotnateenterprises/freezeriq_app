@@ -257,12 +257,10 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
 
     const handleSelectBundle = (bundleId: string) => {
         setActiveBundleId(bundleId);
-        // Smooth scroll back up to the purchase box if it's far down
-        const purchaseBox = document.getElementById('purchase-section');
-        if (purchaseBox) {
-            purchaseBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } else {
-            window.scrollTo({ top: 400, behavior: 'smooth' });
+        // Smooth scroll to the meals grid
+        const mealsGrid = document.getElementById('meals-grid');
+        if (mealsGrid) {
+            mealsGrid.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
     };
 
@@ -403,7 +401,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                             </div>
 
                             {/* Featured Recipes Grid (Reflects active bundle) */}
-                            <div className="space-y-6">
+                            <div className="space-y-6 scroll-mt-24" id="meals-grid">
                                 <div className="flex items-center gap-2 mb-4">
                                     <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600">
                                         <ShoppingBag size={20} />
