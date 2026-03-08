@@ -11,42 +11,6 @@ interface DeliciousGridProps {
 
 export default function DeliciousGrid({ images = [], recipes = [], onItemClick }: DeliciousGridProps) {
     const [loadedIndices, setLoadedIndices] = React.useState<Set<number>>(new Set());
-    const scrollContainerRef = React.useRef<HTMLDivElement>(null);
-
-    React.useEffect(() => {
-        const container = scrollContainerRef.current;
-        if (!container) return;
-
-        let animationFrameId: number;
-        let isInteracting = false;
-
-        const stopScroll = () => { isInteracting = true; };
-        const startScroll = () => { isInteracting = false; };
-
-        container.addEventListener('mouseenter', stopScroll);
-        container.addEventListener('mouseleave', startScroll);
-        container.addEventListener('touchstart', stopScroll, { passive: true });
-        container.addEventListener('touchend', startScroll);
-
-        const scroll = () => {
-            if (!isInteracting && container) {
-                container.scrollLeft += 0.5;
-                if (container.scrollLeft >= container.scrollWidth - container.clientWidth - 1) {
-                    container.scrollLeft = 0;
-                }
-            }
-            animationFrameId = requestAnimationFrame(scroll);
-        };
-        animationFrameId = requestAnimationFrame(scroll);
-
-        return () => {
-            cancelAnimationFrame(animationFrameId);
-            container.removeEventListener('mouseenter', stopScroll);
-            container.removeEventListener('mouseleave', startScroll);
-            container.removeEventListener('touchstart', stopScroll);
-            container.removeEventListener('touchend', startScroll);
-        };
-    }, []);
 
     const handleImageLoad = (index: number) => {
         setLoadedIndices(prev => {
@@ -73,7 +37,12 @@ export default function DeliciousGrid({ images = [], recipes = [], onItemClick }
     ];
 
     return (
-        <div ref={scrollContainerRef} className="flex overflow-x-auto gap-6 p-4 pt-1 pb-8 snap-x hide-scrollbar -mx-6 px-6 md:mx-0 md:px-4" style={{ WebkitOverflowScrolling: 'touch' }}>
+        <div className="flex overflow-x-auto gap-4 p-4 pb-8 snap-x snap-mandatory relative z-10 w-full" style={{ msOverflowStyle: 'none', scrollbarWidth: 'none' }}>
+            <style jsx>{`
+                div::-webkit-scrollbar {
+                    display: none;
+                }
+            `}</style>
             {items.map((item, idx) => (
                 <motion.div
                     key={idx}

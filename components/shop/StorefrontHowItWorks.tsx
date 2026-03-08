@@ -113,7 +113,12 @@ export default function StorefrontHowItWorks({ content }: StorefrontHowItWorksPr
                         </div>
                     </motion.div>
                 ) : (
-                    <div ref={scrollContainerRef} className="flex overflow-x-auto snap-x md:grid md:grid-cols-3 gap-8 md:gap-16 pb-8 px-4 -mx-4 md:px-0 md:mx-0 relative hide-scrollbar" style={{ WebkitOverflowScrolling: 'touch' }}>
+                    <div className="flex overflow-x-auto snap-x snap-mandatory gap-6 md:gap-16 pb-8 md:grid md:grid-cols-3 relative hide-scrollbar px-2" style={{ msOverflowStyle: 'none', scrollbarWidth: 'none' }}>
+                        <style jsx>{`
+                            div::-webkit-scrollbar {
+                                display: none;
+                            }
+                        `}</style>
                         {/* Connecting Line (Desktop Only) - Feminized */}
                         <div className="hidden md:block absolute top-16 left-[10%] right-[10%] h-px bg-linear-to-r from-transparent via-teal-100 dark:via-teal-900/30 to-transparent z-0" />
 
