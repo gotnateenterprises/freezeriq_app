@@ -19,6 +19,12 @@ export const metadata = {
     description: 'Intelligence for your Kitchen.',
 };
 
+export const viewport = {
+    width: 'device-width',
+    initialScale: 1,
+    maximumScale: 1,
+};
+
 export default async function RootLayout({
     children,
 }: {
@@ -29,7 +35,7 @@ export default async function RootLayout({
 
     return (
         <html lang="en">
-            <body className={`${jakarta.variable} ${dmSerif.variable} ${outfit.variable} antialiased bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 h-screen overflow-hidden transition-colors duration-300`}>
+            <body className={`${jakarta.variable} ${dmSerif.variable} ${outfit.variable} antialiased bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 min-h-screen transition-colors duration-300`}>
                 <ThemeProvider>
                     <TenantThemeProvider />
                     <AuthProvider session={session}>

@@ -11,43 +11,8 @@ interface StorefrontHowItWorksProps {
 export default function StorefrontHowItWorks({ content }: StorefrontHowItWorksProps) {
     const scrollContainerRef = React.useRef<HTMLDivElement>(null);
 
-    React.useEffect(() => {
-        const container = scrollContainerRef.current;
-        if (!container) return;
-
-        // Auto-scroll logic only intended for smaller screens where it's single line
-        if (window.innerWidth > 768) return;
-
-        let animationFrameId: number;
-        let isInteracting = false;
-
-        const stopScroll = () => { isInteracting = true; };
-        const startScroll = () => { isInteracting = false; };
-
-        container.addEventListener('mouseenter', stopScroll);
-        container.addEventListener('mouseleave', startScroll);
-        container.addEventListener('touchstart', stopScroll, { passive: true });
-        container.addEventListener('touchend', startScroll);
-
-        const scroll = () => {
-            if (!isInteracting && container) {
-                container.scrollLeft += 0.5;
-                if (container.scrollLeft >= container.scrollWidth - container.clientWidth - 1) {
-                    container.scrollLeft = 0;
-                }
-            }
-            animationFrameId = requestAnimationFrame(scroll);
-        };
-        animationFrameId = requestAnimationFrame(scroll);
-
-        return () => {
-            cancelAnimationFrame(animationFrameId);
-            container.removeEventListener('mouseenter', stopScroll);
-            container.removeEventListener('mouseleave', startScroll);
-            container.removeEventListener('touchstart', stopScroll);
-            container.removeEventListener('touchend', startScroll);
-        };
-    }, []);
+    // Auto-scroll removed to fix mobile jitter.
+    // Native CSS snapping and touch-momentum are used instead.
 
     const steps = [
         {

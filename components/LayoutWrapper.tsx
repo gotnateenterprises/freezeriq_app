@@ -22,7 +22,7 @@ export default function LayoutWrapper({ children, hasSession }: LayoutWrapperPro
                     <Sidebar />
                 </div>
             )}
-            <main className={`flex-1 p-8 h-full overflow-y-auto overflow-x-hidden ${showSidebar ? 'ml-[280px]' : 'ml-0'} print:ml-0 print:p-0 print:h-auto print:overflow-visible transition-all duration-300`}>
+            <main className={`flex-1 ${!isShopPage ? 'h-full overflow-y-auto p-8' : 'min-h-screen p-4 sm:p-8'} overflow-x-hidden ${showSidebar ? 'ml-[280px]' : 'ml-0'} print:ml-0 print:p-0 print:h-auto print:overflow-visible transition-all duration-300`}>
                 {children}
             </main>
         </div>
