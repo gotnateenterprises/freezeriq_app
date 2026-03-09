@@ -48,7 +48,7 @@ export default function StorefrontHero({
                         </div>
                     )}
                     <h2 className="text-xl md:text-2xl font-serif text-white drop-shadow-md">
-                        {(!businessName || businessName === 'FreezerIQ') ? 'Freezer Chef' : businessName}
+                        {(!businessName || businessName === 'FreezerIQ' || businessName === 'Freezer IQ') ? 'Freezer Chef' : businessName}
                     </h2>
                 </div>
             </nav>

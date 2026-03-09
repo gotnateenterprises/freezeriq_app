@@ -287,7 +287,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                 />
 
                 <DealsPopup
-                    businessName={(business.branding.business_name && business.branding.business_name !== 'FreezerIQ') ? business.branding.business_name : 'Freezer Chef'}
+                    businessName={(business.branding.business_name && business.branding.business_name !== 'FreezerIQ' && business.branding.business_name !== 'Freezer IQ') ? business.branding.business_name : 'Freezer Chef'}
                     primaryColor={branding.primary_color}
                     isAuthenticated={status === 'authenticated'}
                     onCapture={(email, name) => console.log('Lead captured:', { email, name })}
@@ -397,7 +397,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                                 <p className="whitespace-pre-wrap">{storefrontConfig.our_story_content}</p>
                             ) : (
                                 <div className="space-y-6 sm:space-y-8">
-                                    <p>At <strong>{(!business.branding.business_name || business.branding.business_name === 'FreezerIQ') ? 'Freezer Chef' : business.branding.business_name}</strong>, we bring over 10 years of experience in freezer meal preparation to your table—taking the stress out of dinnertime and replacing it with comforting, crave-worthy flavors your whole family will love.</p>
+                                    <p>At <strong>{(!business.branding.business_name || business.branding.business_name === 'FreezerIQ' || business.branding.business_name === 'Freezer IQ') ? 'Freezer Chef' : business.branding.business_name}</strong>, we bring over 10 years of experience in freezer meal preparation to your table—taking the stress out of dinnertime and replacing it with comforting, crave-worthy flavors your whole family will love.</p>
                                     <p>Our freezer-ready meals are handcrafted with care and packed with nostalgia—from hearty casseroles and slow-simmered soups to warm, oven-baked favorites and cozy crockpot classics that taste just like Grandma used to make.</p>
                                 </div>
                             )}

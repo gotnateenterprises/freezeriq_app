@@ -17,8 +17,11 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
         }
 
         const { business } = data;
-        const title = `${business.branding.business_name} | Powered by FreezerIQ`;
-        const description = business.branding.tagline || `Order delicious, home-cooked freezer meals from ${business.branding.business_name}.`;
+        const bName = business.branding?.business_name;
+        const finalName = (bName && bName !== 'FreezerIQ' && bName !== 'Freezer IQ') ? bName : 'Freezer Chef';
+
+        const title = `${finalName} | Fresh Meals Delivered`;
+        const description = business.branding?.tagline || `Order delicious, home-cooked freezer meals from ${finalName}.`;
 
         return {
             title,
