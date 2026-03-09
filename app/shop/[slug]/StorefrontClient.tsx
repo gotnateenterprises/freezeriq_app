@@ -280,7 +280,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                 <div className="absolute bottom-[5%] -left-[5%] w-[60%] h-[60%] bg-amber-100/20 rounded-full blur-[160px] animate-pulse" style={{ animationDelay: '2s' }} />
             </div>
 
-            <div className="relative z-10 font-sans flex flex-col min-h-screen max-w-full">
+            <div className="relative z-10 font-sans flex flex-col min-h-screen w-full max-w-[100vw] overflow-x-hidden">
                 <CountdownBanner
                     targetDate={globalCutoffDate}
                     primaryColor={branding.primary_color}
@@ -388,7 +388,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
 
                         <h2 className="font-serif text-3xl sm:text-4xl md:text-5xl text-slate-900 dark:text-white mb-8 sm:mb-10 leading-tight">
                             {storefrontConfig?.our_story_headline || (
-                                <>The Heart of <span className="text-brand-teal">{business.branding.business_name}</span></>
+                                <>The Heart of <span className="text-brand-teal">{(!business.branding.business_name || business.branding.business_name === 'FreezerIQ' || business.branding.business_name === 'Freezer IQ') ? 'Freezer Chef' : business.branding.business_name}</span></>
                             )}
                         </h2>
 
@@ -517,9 +517,9 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                             <p className="text-slate-500 dark:text-slate-400 font-medium max-w-xl">Limited surplus inventory available for immediate pickup or delivery.</p>
                         </div>
 
-                        <div className="bg-emerald-50/20 dark:bg-slate-900/30 p-4 rounded-[4rem] border border-emerald-50/50 dark:border-slate-800">
+                        <div className="bg-emerald-50/20 dark:bg-slate-900/30 p-2 sm:p-4 rounded-[2rem] sm:rounded-[4rem] border border-emerald-50/50 dark:border-slate-800 w-full overflow-hidden">
                             {surplusBundles.length > 0 ? (
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-4 sm:p-6">
                                     {surplusBundles.map(bundle => (
                                         <StorefrontProductCard
                                             key={bundle.id}
@@ -537,7 +537,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                                     ))}
                                 </div>
                             ) : (
-                                <div className="p-8">
+                                <div className="p-2 sm:p-8 w-full overflow-hidden">
                                     <SurplusWaitlist
                                         businessName={branding.business_name}
                                         primaryColor={branding.primary_color}

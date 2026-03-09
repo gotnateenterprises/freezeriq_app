@@ -44,6 +44,12 @@ export default async function middleware(req: any) {
         return NextResponse.redirect(new URL(`${cleanPath}${searchParams.length > 0 ? `?${searchParams}` : ''}`, req.url), 308);
     }
 
+    // Bypass rewrite for known root paths so they resolve to standard NextJS app/ folders
+    if (url.pathname.startsWith('/shop/') || url.pathname.startsWith('/api/') || url.pathname.startsWith('/fundraiser/') || url.pathname.startsWith('/login') || url.pathname.startsWith('/dashboard')) {
+        const authResult = await auth(req as any);
+        return authResult || NextResponse.next();
+    }
+
     // Rewrite custom domain requests directly without NextAuth interference
     const finalPath = url.pathname === '/' ? '' : url.pathname;
     const finalSearch = searchParams.length > 0 ? `?${searchParams}` : '';
