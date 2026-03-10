@@ -11,10 +11,8 @@ interface Order {
     customer: {
         name: string;
         type: string;
-        address?: string;
-        city?: string;
-        match_zip?: string;
-    };
+        delivery_address?: string;
+    } | null;
     created_at: string;
     items: {
         quantity: number;
@@ -78,8 +76,8 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
             bundleHint: item.bundle.name,
             printQty: item.quantity.toString(),
             sku: item.bundle.sku,
-            customer: order.customer.name,
-            address: order.customer.address || '',
+            customer: order.customer?.name || 'Unknown',
+            address: order.customer?.delivery_address || '',
             orderId: order.id.slice(0, 8)
         });
 
@@ -135,12 +133,12 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                                 />
                             </div>
                             <div>
-                                <h4 className="font-black text-slate-900 dark:text-white text-lg">{order.customer.name}</h4>
+                                <h4 className="font-black text-slate-900 dark:text-white text-lg">{order.customer?.name || 'Unknown Customer'}</h4>
                                 <div className="text-sm text-slate-500 flex flex-col">
                                     <span>#{order.id.slice(0, 8)} • {format(new Date(order.created_at), 'MMM d')}</span>
-                                    {order.customer.address && (
+                                    {order.customer?.delivery_address && (
                                         <span className="font-medium text-slate-600 dark:text-slate-400 mt-1">
-                                            {order.customer.address}, {order.customer.city} {order.customer.match_zip}
+                                            {order.customer.delivery_address}
                                         </span>
                                     )}
                                 </div>

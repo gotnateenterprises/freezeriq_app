@@ -59,10 +59,11 @@ export async function GET() {
         });
 
         // 3. Fetch COMPLETED orders (Delivery Queue)
+        // Include both enum variants to catch all completed orders
         const completedOrders = await prisma.order.findMany({
             where: {
                 business_id: businessId,
-                status: OrderStatus.completed
+                status: { in: [OrderStatus.completed, OrderStatus.COMPLETED] }
             },
             include: {
                 customer: {

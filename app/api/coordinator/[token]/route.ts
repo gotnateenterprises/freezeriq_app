@@ -1,3 +1,22 @@
+/**
+ * Coordinator Portal API
+ *
+ * ACCESS MODEL: Token-based (no auth session required)
+ * - GET/POST/PUT gated by `portal_token` on FundraiserCampaign
+ * - Token holder has coordinator-level access:
+ *   GET  → view campaign details, privacy-filtered orders, available bundles
+ *   POST → submit compiled fundraiser order on behalf of supporters
+ *   PUT  → update coordinator payment settings (Venmo link, instructions)
+ * - No PII exposure: delivery addresses, emails, phones filtered from GET responses
+ * - Plan gating checked per-request against business subscription
+ *
+ * ACTOR: Fundraiser Coordinator
+ * SCOPE: Single campaign (resolved from portal_token)
+ *
+ * NOTE: Supporters do NOT place orders through FreezerIQ. The coordinator
+ * collects supporter orders/payments externally, then submits the compiled
+ * bulk order here for tenant fulfillment.
+ */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 
@@ -115,8 +134,8 @@ export async function POST(
         // 2. Create Order
         const order = await prisma.order.create({
             data: {
-                external_id: `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                source: 'manual',
+                external_id: `fundraiser-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                source: 'fundraiser',
                 customer_name: customerName,
                 participant_name: participantName,
                 status: 'pending',

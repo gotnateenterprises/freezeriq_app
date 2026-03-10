@@ -670,6 +670,7 @@ enum OrderSource {
   manual
   meta
   storefront
+  fundraiser
 }
 
 enum OrderStatus {
