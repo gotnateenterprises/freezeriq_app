@@ -91,7 +91,7 @@ export default function PrintPackingSlipsPage() {
 
                     <div className="flex items-center gap-4">
                         <div className="text-sm text-slate-500 font-medium">
-                            {orders.length} Orders • {orders.reduce((acc, o) => acc + o.items.length, 0)} Items
+                            {orders.length} Orders • {orders.reduce((acc, o) => acc + o.items.reduce((sum: number, item: any) => sum + (item.quantity || 1), 0), 0)} Boxes
                         </div>
                         <button
                             onClick={() => window.print()}

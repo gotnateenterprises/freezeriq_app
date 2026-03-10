@@ -177,7 +177,7 @@ function InvoicesContent() {
             doc.setTextColor(50, 50, 50);
             doc.setFontSize(24);
             doc.setFont('helvetica', 'bold');
-            doc.text(branding?.business_name || 'FreezerIQ', 40, 60);
+            doc.text(branding?.business_name || 'My Business', 40, 60);
         }
 
         doc.setTextColor(50, 50, 50);
@@ -385,13 +385,13 @@ function InvoicesContent() {
             const pdfDataUri = doc.output('datauristring');
             const base64Content = pdfDataUri.split(',')[1];
 
-            const subject = `Invoice from ${branding?.business_name || 'FreezerIQ'} (#${invoice.id.slice(0, 8).toUpperCase()})`;
+            const subject = `Invoice from ${branding?.business_name || 'Your Meal Prep Business'} (#${invoice.id.slice(0, 8).toUpperCase()})`;
             const html = `
                 <p>Hi ${invoice.customer.name},</p>
                 <p>Please find your invoice attached for your recent order.</p>
                 <p>Total Amount: <strong>$${Number(invoice.total_amount).toFixed(2)}</strong></p>
                 <p>Thank you for your support!</p>
-                <p>Warmly,<br>${branding?.business_name || 'The FreezerIQ Team'}</p>
+                <p>Warmly,<br>${branding?.business_name || 'Your Meal Prep Team'}</p>
             `;
 
             setPreviewContent({

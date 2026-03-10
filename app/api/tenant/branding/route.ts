@@ -5,6 +5,9 @@ import { uploadToS3 } from '@/lib/s3';
 
 export const dynamic = 'force-dynamic';
 
+// Allow larger uploads for logo/QR images (up to 10MB)
+export const maxDuration = 30;
+
 export async function GET(req: NextRequest) {
     try {
         const session = await auth();
@@ -49,9 +52,9 @@ export async function GET(req: NextRequest) {
 
         if (!branding) {
             return NextResponse.json({
-                business_name: business?.name || 'FreezerIQ',
+                business_name: business?.name || 'My Business',
                 business_slug: business?.slug,
-                tagline: 'Intelligence for your Kitchen.',
+                tagline: '',
                 logo_url: null,
                 primary_color: '#10b981',
                 secondary_color: '#6366f1',
@@ -99,6 +102,7 @@ export async function POST(req: NextRequest) {
         });
 
         const formData = await req.formData();
+        console.log('[BrandingAPI] FormData keys:', [...formData.keys()]);
         const businessName = formData.get('business_name') as string;
         const tagline = formData.get('tagline') as string;
         const primaryColor = formData.get('primary_color') as string;
@@ -116,18 +120,31 @@ export async function POST(req: NextRequest) {
 
         // Upload Logo
         if (logoFile && logoFile.size > 0) {
-            const buffer = Buffer.from(await logoFile.arrayBuffer());
-            const ext = logoFile.name.split('.').pop() || 'png';
-            const safeName = `logo_${user.business_id}_${Date.now()}.${ext}`;
-            logoUrl = await uploadToS3(buffer, safeName, logoFile.type || 'image/png');
+            console.log(`[BrandingAPI] Uploading logo: ${logoFile.name} (${logoFile.size} bytes, type: ${logoFile.type})`);
+            try {
+                const buffer = Buffer.from(await logoFile.arrayBuffer());
+                const ext = logoFile.name.split('.').pop() || 'png';
+                const safeName = `logo_${user.business_id}_${Date.now()}.${ext}`;
+                logoUrl = await uploadToS3(buffer, safeName, logoFile.type || 'image/png');
+                console.log(`[BrandingAPI] Logo uploaded: ${logoUrl}`);
+            } catch (uploadErr: any) {
+                console.error('[BrandingAPI] Logo upload failed:', uploadErr.message);
+                // Continue saving other fields even if upload fails
+            }
         }
 
         // Upload QR
         if (reviewQrFile && reviewQrFile.size > 0) {
-            const buffer = Buffer.from(await reviewQrFile.arrayBuffer());
-            const ext = reviewQrFile.name.split('.').pop() || 'png';
-            const safeName = `qr_${user.business_id}_${Date.now()}.${ext}`;
-            reviewQrUrl = await uploadToS3(buffer, safeName, reviewQrFile.type || 'image/png');
+            console.log(`[BrandingAPI] Uploading QR: ${reviewQrFile.name} (${reviewQrFile.size} bytes)`);
+            try {
+                const buffer = Buffer.from(await reviewQrFile.arrayBuffer());
+                const ext = reviewQrFile.name.split('.').pop() || 'png';
+                const safeName = `qr_${user.business_id}_${Date.now()}.${ext}`;
+                reviewQrUrl = await uploadToS3(buffer, safeName, reviewQrFile.type || 'image/png');
+                console.log(`[BrandingAPI] QR uploaded: ${reviewQrUrl}`);
+            } catch (uploadErr: any) {
+                console.error('[BrandingAPI] QR upload failed:', uploadErr.message);
+            }
         }
 
         // 3. Upsert Branding using business context

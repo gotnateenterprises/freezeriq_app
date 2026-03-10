@@ -13,7 +13,7 @@ export async function GET() {
         // (Status: pending, production_ready)
         const activeOrders = await prisma.order.findMany({
             where: {
-                status: { in: ['pending', 'production_ready'] },
+                status: { in: ['pending', 'production_ready', 'completed', 'COMPLETED', 'APPROVED', 'IN_PRODUCTION'] },
                 business_id: session.user.businessId
             },
             include: {

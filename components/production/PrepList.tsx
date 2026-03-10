@@ -160,7 +160,7 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
                                         <span className="text-lg font-bold text-slate-400 mb-1">units</span>
                                     </div>
                                     <button
-                                        onClick={() => handleUpdateStatus(item.bundle_id, 'APPROVED', 'IN_PRODUCTION')}
+                                        onClick={() => handleUpdateStatus(item.bundle_id, 'APPROVED' as any, 'IN_PRODUCTION' as any)}
                                         className="w-full flex items-center justify-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-emerald-500 hover:text-white dark:hover:bg-emerald-600 text-slate-600 dark:text-slate-300 py-3 rounded-xl font-bold transition-all print:hidden group-hover:bg-emerald-50 dark:group-hover:bg-emerald-900/20 group-hover:text-emerald-600 dark:group-hover:text-emerald-400"
                                     >
                                         <ArrowRight size={18} />
@@ -211,7 +211,7 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
                                         </button>
                                     </div>
                                     <button
-                                        onClick={() => handleUpdateStatus(item.bundle_id, 'IN_PRODUCTION', 'COMPLETED')}
+                                        onClick={() => handleUpdateStatus(item.bundle_id, 'IN_PRODUCTION' as any, 'completed')}
                                         className="w-full flex items-center justify-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700 py-3 rounded-xl font-bold transition-all shadow-lg shadow-emerald-200 dark:shadow-none"
                                     >
                                         <CheckCircle2 size={18} />

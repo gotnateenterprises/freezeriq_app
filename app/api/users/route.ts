@@ -3,17 +3,22 @@ import { prisma } from '@/lib/db';
 import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { sendInviteEmail } from '@/lib/email';
+import { withErrorHandler } from '@/lib/api-middleware';
+import { ValidationError, UnauthorizedError, NotFoundError } from '@/lib/errors';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('UsersRoute');
 
 // GET: List all users (Admin only)
-export async function GET() {
+export const GET = withErrorHandler(async () => {
     const session = await auth();
     if (session?.user?.role !== 'ADMIN') {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        throw new UnauthorizedError('Unauthorized');
     }
 
     const businessId = session.user.businessId;
     if (!businessId) {
-        return NextResponse.json({ error: 'Business ID missing from session' }, { status: 400 });
+        throw new ValidationError('Business ID missing from session');
     }
 
     const users = await prisma.user.findMany({
@@ -36,110 +41,105 @@ export async function GET() {
     });
 
     return NextResponse.json(users);
-}
+});
 
 // POST: Invite a new user
-export async function POST(req: Request) {
+export const POST = withErrorHandler(async (req: Request) => {
     const session = await auth();
     if (session?.user?.role !== 'ADMIN') {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        throw new UnauthorizedError('Unauthorized');
     }
 
     const businessId = session.user.businessId;
     if (!businessId) {
-        return NextResponse.json({ error: 'Business ID missing from session' }, { status: 400 });
+        throw new ValidationError('Business ID missing from session');
     }
 
-    try {
-        const { email, role, firstName, lastName, phone, address } = await req.json();
+    const { email, role, firstName, lastName, phone, address } = await req.json();
 
-        // Check if exists
-        const existing = await prisma.user.findUnique({ where: { email } });
-        if (existing) {
-            return NextResponse.json({ error: 'User already exists' }, { status: 400 });
+    // Check if exists
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+        throw new ValidationError('User already exists');
+    }
+
+    // Create with temp password
+    const tempPassword = Math.random().toString(36).slice(-8);
+    const hashedPassword = await bcrypt.hash(tempPassword, 10);
+
+    // Construct display name
+    const displayName = (firstName && lastName) ? `${firstName} ${lastName}` : email.split('@')[0];
+
+    const newUser = await prisma.user.create({
+        data: {
+            email,
+            role: role || 'CHEF',
+            password: hashedPassword,
+            name: displayName,
+            firstName,
+            lastName,
+            phone,
+            address,
+            permissions: [],
+            business_id: businessId
         }
+    });
 
-        // Create with temp password
-        const tempPassword = Math.random().toString(36).slice(-8);
-        const hashedPassword = await bcrypt.hash(tempPassword, 10);
+    // Send Email
+    await sendInviteEmail(email, tempPassword);
 
-        // Construct display name
-        const displayName = (firstName && lastName) ? `${firstName} ${lastName}` : email.split('@')[0];
+    logger.info(`User ${email} created with temporary password`);
 
-        const newUser = await prisma.user.create({
-            data: {
-                email,
-                role: role || 'CHEF',
-                password: hashedPassword,
-                name: displayName,
-                firstName,
-                lastName,
-                phone,
-                address,
-                permissions: [],
-                business_id: businessId
-            }
-        });
-
-        // Send Email
-        await sendInviteEmail(email, tempPassword);
-
-        console.log(`[INVITE] User ${email} created with password: ${tempPassword}`);
-
-        return NextResponse.json(newUser);
-    } catch (e) {
-        console.error(e);
-        return NextResponse.json({ error: 'Failed to create user' }, { status: 500 });
-    }
-}
+    return NextResponse.json(newUser);
+});
 
 // DELETE: Remove a user
-export async function DELETE(req: Request) {
+export const DELETE = withErrorHandler(async (req: Request) => {
     const session = await auth();
     if (session?.user?.role !== 'ADMIN') {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        throw new UnauthorizedError('Unauthorized');
     }
 
     const businessId = session.user.businessId;
     if (!businessId) {
-        return NextResponse.json({ error: 'Business ID missing from session' }, { status: 400 });
+        throw new ValidationError('Business ID missing from session');
     }
 
     const url = new URL(req.url);
     const id = url.searchParams.get('id');
 
-    if (!id) return NextResponse.json({ error: 'Missing ID' }, { status: 400 });
+    if (!id) throw new ValidationError('Missing ID');
 
     if (id === session.user.id) {
-        return NextResponse.json({ error: 'Cannot delete yourself' }, { status: 400 });
+        throw new ValidationError('Cannot delete yourself');
     }
 
     const targetUser = await prisma.user.findUnique({ where: { id } });
     if (!targetUser || targetUser.business_id !== businessId) {
-        return NextResponse.json({ error: 'User not found or unauthorized' }, { status: 404 });
+        throw new NotFoundError('User not found or unauthorized');
     }
 
     await prisma.user.delete({ where: { id } });
     return NextResponse.json({ success: true });
-}
+});
 
 // PATCH: Update permissions or details
-export async function PATCH(req: Request) {
+export const PATCH = withErrorHandler(async (req: Request) => {
     const session = await auth();
     if (session?.user?.role !== 'ADMIN') {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        throw new UnauthorizedError('Unauthorized');
     }
 
     const businessId = session.user.businessId;
     if (!businessId) {
-        return NextResponse.json({ error: 'Business ID missing from session' }, { status: 400 });
+        throw new ValidationError('Business ID missing from session');
     }
 
     const { id, permissions, firstName, lastName, phone, address, role } = await req.json();
 
     const targetUser = await prisma.user.findUnique({ where: { id } });
     if (!targetUser || targetUser.business_id !== businessId) {
-        return NextResponse.json({ error: 'User not found or unauthorized' }, { status: 404 });
+        throw new NotFoundError('User not found or unauthorized');
     }
 
     const updateData: any = {};
@@ -161,4 +161,4 @@ export async function PATCH(req: Request) {
     });
 
     return NextResponse.json(updated);
-}
+});

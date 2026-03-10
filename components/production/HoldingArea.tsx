@@ -170,7 +170,6 @@ export default function HoldingArea({ orders, onRefresh }: HoldingAreaProps) {
                                             >
                                                 {isDeleting === order.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
                                             </button>
-                                            <p className="font-black text-indigo-600">${Number(order.total_amount).toFixed(2)}</p>
                                         </div>
                                         {order.delivery_date && (
                                             <div className="flex items-center gap-1 text-xs text-amber-600 font-bold justify-end">

@@ -311,7 +311,7 @@ export default function DeliveryDashboard() {
             const [itemsRes, statsRes, routesRes, labelsRes] = await Promise.all([
                 fetch('/api/delivery/inventory'),
                 fetch('/api/delivery/stats'),
-                fetch('/api/orders?status=pending,production_ready'),
+                fetch('/api/orders?status=pending,production_ready,completed,COMPLETED,APPROVED,IN_PRODUCTION'),
                 fetch('/api/delivery/labels')
             ]);
 

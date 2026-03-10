@@ -955,6 +955,133 @@ export function ProductionCalculator() {
                                     <Printer size={16} />
                                     Print Recipes
                                 </button>
+                                <button
+                                    onClick={async () => {
+                                        if (!result || !result.prepTasks || Object.keys(result.prepTasks).length === 0) {
+                                            alert('No recipes to print labels for. Please calculate a production plan first.');
+                                            return;
+                                        }
+
+                                        const btn = document.activeElement as HTMLButtonElement;
+                                        const totalRecipes = Object.keys(result.prepTasks).length;
+                                        if (btn) {
+                                            btn.disabled = true;
+                                            btn.textContent = `Fetching ${totalRecipes} recipes...`;
+                                        }
+
+                                        try {
+                                            // Fetch branding
+                                            let branding: any = null;
+                                            try {
+                                                const brandRes = await fetch('/api/tenant/branding');
+                                                if (brandRes.ok) branding = await brandRes.json();
+                                            } catch (e) {
+                                                console.error('Failed to fetch branding', e);
+                                            }
+
+                                            // Fetch all recipe details
+                                            const entries = Object.entries(result.prepTasks);
+                                            let successCount = 0;
+                                            let failCount = 0;
+
+                                            for (let i = 0; i < entries.length; i++) {
+                                                const [fullName, task] = entries[i];
+                                                if (btn) btn.textContent = `Printing ${i + 1}/${totalRecipes}...`;
+
+                                                try {
+                                                    // Fetch recipe data
+                                                    const recipeRes = await fetch(`/api/recipes/${task.id}`);
+                                                    if (!recipeRes.ok) { failCount++; continue; }
+                                                    const recipe = await recipeRes.json();
+                                                    if (recipe.error) { failCount++; continue; }
+
+                                                    // Build ingredients string
+                                                    const ingredients = (recipe.child_items || [])
+                                                        .map((item: any) => item.child_ingredient?.name || item.child_recipe?.name)
+                                                        .filter(Boolean)
+                                                        .join(', ');
+
+                                                    // Auto-detect allergens
+                                                    const allergenMap: Record<string, string> = {
+                                                        "peanut": "Peanut", "soy": "Soy", "wheat": "Gluten", "gluten": "Gluten",
+                                                        "egg": "Egg", "fish": "Fish", "shellfish": "Shellfish", "milk": "Dairy",
+                                                        "dairy": "Dairy", "butter": "Dairy", "cheese": "Dairy", "cream": "Dairy",
+                                                        "tree nut": "Tree Nut", "almond": "Tree Nut", "walnut": "Tree Nut",
+                                                        "sesame": "Sesame"
+                                                    };
+                                                    const ingredsLower = ingredients.toLowerCase();
+                                                    const detectedAllergens = new Set<string>();
+                                                    Object.keys(allergenMap).forEach(k => {
+                                                        if (ingredsLower.includes(k)) detectedAllergens.add(allergenMap[k]);
+                                                    });
+
+                                                    // Detect meal size from name
+                                                    let mealSize = recipe.base_yield_unit || 'batch';
+                                                    if (fullName.includes('Serves 2')) mealSize = 'Serves 2';
+                                                    else if (fullName.includes('Family')) mealSize = 'Family Size';
+                                                    else if (fullName.includes('Single')) mealSize = 'Single Serving';
+
+                                                    // Best-by date (6 months out)
+                                                    const expiry = new Date();
+                                                    expiry.setMonth(expiry.getMonth() + 6);
+
+                                                    // Send print job
+                                                    const printRes = await fetch('/api/production/print-label', {
+                                                        method: 'POST',
+                                                        headers: { 'Content-Type': 'application/json' },
+                                                        body: JSON.stringify({
+                                                            job: {
+                                                                recipeName: recipe.name,
+                                                                ingredients,
+                                                                expiryDate: expiry.toLocaleDateString(),
+                                                                quantity: Math.round(task.qty),
+                                                                unit: mealSize,
+                                                                user: 'Batch Print',
+                                                                allergens: recipe.allergens || Array.from(detectedAllergens).sort().join(', '),
+                                                                notes: '',
+                                                                isFinalLabel: true,
+                                                                businessName: branding?.business_name,
+                                                                logoUrl: branding?.logo_url,
+                                                                primaryColor: branding?.primary_color,
+                                                                secondaryColor: branding?.secondary_color,
+                                                                accentColor: branding?.accent_color,
+                                                                metadata: {
+                                                                    mealSize,
+                                                                    instructions: recipe.label_text || task.label_text || ''
+                                                                }
+                                                            }
+                                                        })
+                                                    });
+                                                    const printData = await printRes.json();
+                                                    if (printRes.ok && printData.success) successCount++;
+                                                    else failCount++;
+                                                } catch (e) {
+                                                    console.error(`Failed to print label for ${fullName}`, e);
+                                                    failCount++;
+                                                }
+                                            }
+
+                                            // Summary
+                                            if (failCount === 0) {
+                                                alert(`✅ All ${successCount} label print jobs sent successfully!`);
+                                            } else {
+                                                alert(`Label printing complete:\n✅ ${successCount} succeeded\n❌ ${failCount} failed\n\nCheck your printer connection for failed jobs.`);
+                                            }
+                                        } catch (e) {
+                                            console.error('Batch label print error:', e);
+                                            alert('An error occurred during batch label printing.');
+                                        } finally {
+                                            if (btn) {
+                                                btn.disabled = false;
+                                                btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6"/><rect x="6" y="14" width="12" height="8" rx="1"/></svg> Batch Print All Labels';
+                                            }
+                                        }
+                                    }}
+                                    className="flex items-center gap-2 text-sm font-bold text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 px-3 py-2 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors print:hidden disabled:opacity-50 border border-indigo-200 dark:border-indigo-800"
+                                >
+                                    <Printer size={16} />
+                                    Batch Print All Labels
+                                </button>
                             </div>
                         </div>
                         <div className="space-y-4">
@@ -975,9 +1102,22 @@ export function ProductionCalculator() {
                                             </div>
                                             <span className="font-bold text-slate-700 dark:text-slate-300">{name}</span>
                                         </div>
-                                        <span className="font-mono font-bold text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded text-sm">
-                                            {Math.round(data.qty)} {data.unit}
-                                        </span>
+                                        <div className="flex items-center gap-3">
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    router.push(`/labels?recipeId=${data.id}&printQty=${Math.round(data.qty)}&from=production`);
+                                                }}
+                                                className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 px-2.5 py-1.5 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+                                                title={`Print ${Math.round(data.qty)} labels for ${name}`}
+                                            >
+                                                <Printer size={14} />
+                                                Print Labels ({Math.round(data.qty)})
+                                            </button>
+                                            <span className="font-mono font-bold text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded text-sm">
+                                                {Math.round(data.qty)} {data.unit}
+                                            </span>
+                                        </div>
                                     </div>
                                 ))}
                         </div>

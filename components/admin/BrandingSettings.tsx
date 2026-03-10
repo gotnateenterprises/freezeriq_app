@@ -18,7 +18,7 @@ interface BrandingSettingsProps {
 export default function BrandingSettings({ isSuperAdmin }: BrandingSettingsProps) {
     const [logo, setLogo] = useState<string | null>(null);
     const [logoFile, setLogoFile] = useState<File | null>(null);
-    const [appName, setAppName] = useState("FreezerIQ");
+    const [appName, setAppName] = useState("");
     const [tagline, setTagline] = useState('Deliciously Easy, home-cooked meals prepared fresh and frozen for your convenience.');
     const [thankYouNote, setThankYouNote] = useState('');
     const [reviewPrompt, setReviewPrompt] = useState('');
@@ -199,7 +199,7 @@ export default function BrandingSettings({ isSuperAdmin }: BrandingSettingsProps
                         <div className="flex justify-between items-end mb-2">
                             <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">Application Name</label>
                             <button
-                                onClick={() => setAppName("FreezerIQ")}
+                                onClick={() => setAppName("")}
                                 className="text-[10px] font-black uppercase text-indigo-600 hover:underline"
                             >
                                 Reset
@@ -210,7 +210,7 @@ export default function BrandingSettings({ isSuperAdmin }: BrandingSettingsProps
                             value={appName}
                             onChange={(e) => setAppName(e.target.value)}
                             className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500"
-                            placeholder="e.g. FreezerIQ"
+                            placeholder="e.g. My Meal Prep Business"
                         />
                     </div>
 

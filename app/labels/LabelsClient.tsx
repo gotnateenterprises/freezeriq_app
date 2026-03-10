@@ -262,7 +262,7 @@ export default function LabelsPage() {
                             ...prev,
                             name: data.name,
                             ingredients: ingredsString,
-                            allergens: data.allergens || detectedAllergens,
+                            allergens: detectedAllergens || data.allergens || '',
                             mealSize: detectedSize,
                             macros: data.macros || '',
                             instructions
