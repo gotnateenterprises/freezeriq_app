@@ -187,9 +187,9 @@ export default function PrintPackingSlipsPage() {
                             {/* Contents List */}
                             <div className="flex-1 min-h-0 overflow-visible">
                                 <h3 className="text-sm font-bold text-slate-900 mb-2 flex flex-col gap-1 uppercase tracking-wider border-b border-slate-100 pb-1">
-                                    {order.bundle?.name && (
+                                    {bundle?.name && (
                                         <div className="text-xs text-indigo-600 font-black mb-1">
-                                            Bundle: {order.bundle.name}
+                                            Bundle: {bundle.name}
                                         </div>
                                     )}
                                     <div className="flex items-center gap-2">
