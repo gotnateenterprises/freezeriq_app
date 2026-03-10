@@ -186,9 +186,16 @@ export default function PrintPackingSlipsPage() {
 
                             {/* Contents List */}
                             <div className="flex-1 min-h-0 overflow-visible">
-                                <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2 uppercase tracking-wider border-b border-slate-100 pb-1">
-                                    <Box size={14} className="text-indigo-500" />
-                                    Box Contents
+                                <h3 className="text-sm font-bold text-slate-900 mb-2 flex flex-col gap-1 uppercase tracking-wider border-b border-slate-100 pb-1">
+                                    {order.bundle?.name && (
+                                        <div className="text-xs text-indigo-600 font-black mb-1">
+                                            Bundle: {order.bundle.name}
+                                        </div>
+                                    )}
+                                    <div className="flex items-center gap-2">
+                                        <Box size={14} className="text-indigo-500" />
+                                        Box Contents
+                                    </div>
                                 </h3>
 
                                 {contents.length > 0 ? (

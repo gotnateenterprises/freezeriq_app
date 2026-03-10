@@ -66,8 +66,14 @@ const navItems = [
 
 export default function Sidebar() {
     const pathname = usePathname();
-    const [logo, setLogo] = useState<string | null>(null);
-    const [appName, setAppName] = useState("FreezerIQ");
+    const [logo, setLogo] = useState<string | null>(() => {
+        if (typeof window !== 'undefined') return localStorage.getItem('kitchenLogo');
+        return null;
+    });
+    const [appName, setAppName] = useState(() => {
+        if (typeof window !== 'undefined') return localStorage.getItem('appName') || 'FreezerIQ';
+        return 'FreezerIQ';
+    });
     const [businessSlug, setBusinessSlug] = useState<string | null>(null);
     const [showLogoInHeader, setShowLogoInHeader] = useState(false);
 
@@ -138,7 +144,8 @@ export default function Sidebar() {
     }
 
     // Prefer session data for branding, UNLESS local appName has been updated by Tenant Branding
-    const displayLogo = (session?.user as any)?.businessLogo || logo || '/images/placeholder-logo.png';
+    // businessLogo was removed from session token (too large for cookie), so rely on API state
+    const displayLogo = logo || '/images/placeholder-logo.png';
     // Fix: Strictly use local state `appName` which is managed by the effect.
     // Initial state is "FreezerIQ", but effect will update it from localStorage/API immediately.
     // If session has a business name, we could use it as initial state, but `useEffect` is safer source of truth.

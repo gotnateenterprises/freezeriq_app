@@ -140,6 +140,15 @@ export default function StorefrontSettings() {
                         <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
                             Enter the fully qualified domain name you wish to map. Make sure to point your domain's CNAME or A Record to our servers first!
                         </p>
+                        <a
+                            href="/training?topic=custom-domain-setup"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 mt-1.5 transition-colors"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                            View DNS Setup Instructions (CNAME & A Record Guide)
+                        </a>
                     </div>
                 </div>
             </div>
