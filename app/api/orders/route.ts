@@ -51,6 +51,7 @@ export async function GET(req: NextRequest) {
                                 name: true,
                                 sku: true,
                                 price: true,
+                                serving_tier: true,
                                 contents: {
                                     select: {
                                         quantity: true,
@@ -69,7 +70,8 @@ export async function GET(req: NextRequest) {
                                 id: true,
                                 name: true,
                                 sku: true,
-                                price: true
+                                price: true,
+                                serving_tier: true
                             }
                         }
                     }
