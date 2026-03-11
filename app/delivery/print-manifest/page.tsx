@@ -8,9 +8,10 @@ import Link from 'next/link';
 interface OrderItem {
     bundle: {
         name: string;
-        serving_tier: string;
+        serving_tier?: string;
     };
     quantity: number;
+    variant_size?: string;
 }
 
 interface Order {
@@ -19,11 +20,16 @@ interface Order {
     organization?: { name: string };
     delivery_sequence: number;
     items: OrderItem[];
-    // ... other fields
+}
+
+interface Stats {
+    largeBoxesNeeded: number;
+    smallBoxesNeeded: number;
 }
 
 export default function PrintManifestPage() {
     const [orders, setOrders] = useState<Order[]>([]);
+    const [stats, setStats] = useState<Stats | null>(null);
     const [loading, setLoading] = useState(true);
     const [logo, setLogo] = useState<string | null>(null);
     const date = new Date().toLocaleDateString();
@@ -31,16 +37,26 @@ export default function PrintManifestPage() {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                // Fetch Orders
-                const ordersRes = await fetch('/api/orders?status=pending,production_ready');
+                // Fetch Orders AND Stats in parallel
+                const [ordersRes, statsRes, bizRes] = await Promise.all([
+                    fetch('/api/orders?status=pending,production_ready,completed,COMPLETED,APPROVED,IN_PRODUCTION'),
+                    fetch('/api/delivery/stats'),
+                    fetch('/api/business')
+                ]);
+
                 const ordersData = await ordersRes.json();
                 const sorted = ordersData.sort((a: any, b: any) =>
                     (a.delivery_sequence || 999) - (b.delivery_sequence || 999)
                 );
                 setOrders(sorted);
 
-                // Fetch Logo
-                const bizRes = await fetch('/api/business');
+                // Stats (server-side calculated, authoritative for totals)
+                if (statsRes.ok) {
+                    const statsData = await statsRes.json();
+                    setStats(statsData);
+                }
+
+                // Logo
                 if (bizRes.ok) {
                     const bizData = await bizRes.json();
                     if (bizData.logo_url) setLogo(bizData.logo_url);
@@ -56,23 +72,28 @@ export default function PrintManifestPage() {
 
     if (loading) return <div className="p-12 text-center">Loading manifest...</div>;
 
-    // Calculate Totals
-    let totalLarge = 0;
-    let totalSmall = 0;
+    // Helper: determine if an item is a large (family) box
+    const isLargeBox = (item: OrderItem): boolean => {
+        // Check variant_size first (most reliable from order items)
+        const vs = (item.variant_size || '').toLowerCase();
+        if (vs.includes('family') || vs === 'serves_5' || vs === 'serves_10') return true;
 
+        // Then check bundle serving_tier
+        const tier = (item.bundle?.serving_tier || '').toLowerCase();
+        if (tier === 'family') return true;
+
+        // Finally check bundle name
+        const name = (item.bundle?.name || '').toLowerCase();
+        if (name.includes('family')) return true;
+
+        return false;
+    };
+
+    // Per-row breakdown
     const manifestRows = orders.map((order, index) => {
         const customerName = order.customer_name || order.organization?.name || 'Unknown';
-        const largeCount = order.items.reduce((acc, item) => {
-            const isLarge = item.bundle?.name.toLowerCase().includes('family') || item.bundle?.serving_tier?.toLowerCase() === 'family';
-            return acc + (isLarge ? item.quantity : 0);
-        }, 0);
-        const smallCount = order.items.reduce((acc, item) => {
-            const isLarge = item.bundle?.name.toLowerCase().includes('family') || item.bundle?.serving_tier?.toLowerCase() === 'family';
-            return acc + (isLarge ? 0 : item.quantity);
-        }, 0);
-
-        totalLarge += largeCount;
-        totalSmall += smallCount;
+        const largeCount = order.items.reduce((acc, item) => acc + (isLargeBox(item) ? item.quantity : 0), 0);
+        const smallCount = order.items.reduce((acc, item) => acc + (isLargeBox(item) ? 0 : item.quantity), 0);
 
         const bundlesText = order.items.map(i => `${i.quantity}x ${i.bundle?.name}`).join(', ');
 
@@ -84,6 +105,10 @@ export default function PrintManifestPage() {
             small: smallCount
         };
     });
+
+    // Use server-side stats for authoritative totals (matches delivery tab)
+    const totalLarge = stats?.largeBoxesNeeded ?? manifestRows.reduce((sum, r) => sum + r.large, 0);
+    const totalSmall = stats?.smallBoxesNeeded ?? manifestRows.reduce((sum, r) => sum + r.small, 0);
 
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-900 print:bg-white p-8">
