@@ -73,16 +73,14 @@ export default function PrintManifestPage() {
     if (loading) return <div className="p-12 text-center">Loading manifest...</div>;
 
     // Helper: determine if an item is a large (family) box
+    // serving_tier on the BUNDLE is the source of truth (matches stats API logic)
     const isLargeBox = (item: OrderItem): boolean => {
-        // Check variant_size first (most reliable from order items)
-        const vs = (item.variant_size || '').toLowerCase();
-        if (vs.includes('family') || vs === 'serves_5' || vs === 'serves_10') return true;
-
-        // Then check bundle serving_tier
+        // Primary: bundle serving_tier (most reliable)
         const tier = (item.bundle?.serving_tier || '').toLowerCase();
         if (tier === 'family') return true;
+        if (tier && tier !== 'family') return false; // explicit non-family tier
 
-        // Finally check bundle name
+        // Fallback: bundle name contains "family"
         const name = (item.bundle?.name || '').toLowerCase();
         if (name.includes('family')) return true;
 
