@@ -129,7 +129,6 @@ export default function PrintManifestPage() {
                             <th className="py-2">Bundles (Contents)</th>
                             <th className="py-2 w-20 text-center">Lg Box</th>
                             <th className="py-2 w-20 text-center">Sm Box</th>
-                            <th className="py-2 w-32 text-right">Signature</th>
                         </tr>
                     </thead>
                     <tbody className="text-sm">
@@ -140,15 +139,19 @@ export default function PrintManifestPage() {
                                 <td className="py-3 text-slate-600">{row.details}</td>
                                 <td className="py-3 text-center font-mono font-bold text-lg">{row.large || '-'}</td>
                                 <td className="py-3 text-center font-mono font-bold text-lg">{row.small || '-'}</td>
-                                <td className="py-3">
-                                    <div className="border-b border-slate-300 h-6 w-full"></div>
-                                </td>
                             </tr>
                         ))}
                     </tbody>
+                    <tfoot>
+                        <tr className="border-t-2 border-black">
+                            <td colSpan={3} className="py-3 text-right font-black uppercase text-sm">Totals:</td>
+                            <td className="py-3 text-center font-mono font-black text-xl">{totalLarge}</td>
+                            <td className="py-3 text-center font-mono font-black text-xl">{totalSmall}</td>
+                        </tr>
+                    </tfoot>
                 </table>
 
-                <div className="mt-12 pt-8 border-t-2 border-black flex justify-between items-end">
+                <div className="absolute bottom-8 left-8 right-8 pt-8 border-t-2 border-black flex justify-between items-end">
                     <div className="flex gap-16">
                         <div>
                             <p className="font-bold">Driver Signature:</p>
