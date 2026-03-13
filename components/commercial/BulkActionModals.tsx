@@ -191,8 +191,8 @@ export function MergeModal({
                         </select>
                     </div>
                     <div className="bg-amber-50 dark:bg-amber-900/20 p-4 rounded-xl text-xs text-amber-800 dark:text-amber-200 font-medium leading-relaxed">
-                        <strong className="block mb-1 text-amber-900 dark:text-amber-100 uppercase">Warning</strong>
-                        The selected duplicate will be <strong>permanently deleted</strong>, and any recipes using it will be updated to use <strong className="text-emerald-700 dark:text-emerald-400">"{mergeSource.name}"</strong> instead.
+                        <strong className="block mb-1 text-amber-900 dark:text-amber-100 uppercase">How it works</strong>
+                        All recipes currently using the duplicate will be <strong>automatically updated</strong> to use <strong className="text-emerald-700 dark:text-emerald-400">"{mergeSource.name}"</strong> instead — no recipe changes needed. The duplicate entry will then be removed from your ingredient list.
                     </div>
                 </div>
                 <div className="p-6 bg-slate-50 dark:bg-slate-800/50 flex gap-3 justify-end">

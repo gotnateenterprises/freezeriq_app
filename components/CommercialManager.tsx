@@ -531,7 +531,7 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
 
         const duplicateName = ingredients.find(i => i.id === mergeTargetId)?.name;
 
-        if (!confirm(`MERGE WARNING:\n\nYou are KEEPING "${mergeSource.name}" and DELETING "${duplicateName}".\n\nAll recipes using "${duplicateName}" will be updated to use "${mergeSource.name}" instead.\n\nThis cannot be undone.`)) {
+        if (!confirm(`MERGE CONFIRMATION:\n\nKEEPING: "${mergeSource.name}"\nREMOVING: "${duplicateName}"\n\nAll recipes using "${duplicateName}" will be safely merged to use "${mergeSource.name}" instead. Your recipes will not be affected.\n\nContinue?`)) {
             return;
         }
 
