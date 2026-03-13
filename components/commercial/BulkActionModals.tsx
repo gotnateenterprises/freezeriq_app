@@ -170,18 +170,18 @@ export function MergeModal({
                         Merge Ingredient
                     </h3>
                     <p className="text-slate-500 mt-2">
-                        Merging <strong>{mergeSource.name}</strong>...
+                        Keeping <strong className="text-emerald-600">{mergeSource.name}</strong>
                     </p>
                 </div>
                 <div className="p-6 space-y-4">
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Select Target Ingredient</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Select the DUPLICATE to Delete</label>
                         <select
                             className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-medium"
                             value={mergeTargetId}
                             onChange={(e) => setMergeTargetId(e.target.value)}
                         >
-                            <option value="">-- Choose Ingredient to Keep --</option>
+                            <option value="">-- Choose Duplicate to Remove --</option>
                             {[...ingredients]
                                 .filter(i => i.id !== mergeSource.id) // Exclude self
                                 .sort((a, b) => a.name.localeCompare(b.name))
@@ -192,7 +192,7 @@ export function MergeModal({
                     </div>
                     <div className="bg-amber-50 dark:bg-amber-900/20 p-4 rounded-xl text-xs text-amber-800 dark:text-amber-200 font-medium leading-relaxed">
                         <strong className="block mb-1 text-amber-900 dark:text-amber-100 uppercase">Warning</strong>
-                        You are about to merge "{mergeSource.name}" into the selected ingredient. "{mergeSource.name}" will be <strong>permanently deleted</strong>, and any recipes using it will be updated to use the selected ingredient instead.
+                        The selected duplicate will be <strong>permanently deleted</strong>, and any recipes using it will be updated to use <strong className="text-emerald-700 dark:text-emerald-400">"{mergeSource.name}"</strong> instead.
                     </div>
                 </div>
                 <div className="p-6 bg-slate-50 dark:bg-slate-800/50 flex gap-3 justify-end">

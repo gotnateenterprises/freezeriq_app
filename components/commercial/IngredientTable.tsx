@@ -412,7 +412,7 @@ export default function IngredientTable({
                                             <button
                                                 onClick={() => setMergeSource(ing)}
                                                 className="p-2 text-indigo-300 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all"
-                                                title="Merge into another ingredient"
+                                                title="Keep this — merge a duplicate into it"
                                             >
                                                 <Merge size={18} />
                                             </button>

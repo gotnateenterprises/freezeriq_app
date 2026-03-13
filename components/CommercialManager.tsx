@@ -529,9 +529,9 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
     const handleMerge = async () => {
         if (!mergeSource || !mergeTargetId) return;
 
-        const targetName = ingredients.find(i => i.id === mergeTargetId)?.name;
+        const duplicateName = ingredients.find(i => i.id === mergeTargetId)?.name;
 
-        if (!confirm(`MERGE WARNING:\n\nAre you sure you want to merge "${mergeSource.name}" INTO "${targetName}"?\n\n"${mergeSource.name}" will be DELETED and all recipes using it will now use "${targetName}".\n\nThis cannot be undone.`)) {
+        if (!confirm(`MERGE WARNING:\n\nYou are KEEPING "${mergeSource.name}" and DELETING "${duplicateName}".\n\nAll recipes using "${duplicateName}" will be updated to use "${mergeSource.name}" instead.\n\nThis cannot be undone.`)) {
             return;
         }
 
@@ -540,14 +540,14 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
             const res = await fetch('/api/commercial/ingredients/merge', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sourceId: mergeSource.id, targetId: mergeTargetId })
+                body: JSON.stringify({ sourceId: mergeTargetId, targetId: mergeSource.id })
             });
 
             const data = await res.json();
             if (data.error) throw new Error(data.error);
 
-            // Update Local State
-            setIngredients(prev => prev.filter(i => i.id !== mergeSource.id));
+            // Update Local State - remove the duplicate (mergeTargetId)
+            setIngredients(prev => prev.filter(i => i.id !== mergeTargetId));
             setMergeSource(null);
             setMergeTargetId('');
             alert("Merged successfully!");
