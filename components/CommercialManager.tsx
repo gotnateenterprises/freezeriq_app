@@ -114,6 +114,16 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
         }));
     };
 
+    const handleAddCases = (id: string, caseCount: number) => {
+        setIngredients(prev => prev.map(ing => {
+            if (ing.id !== id) return ing;
+            const pQty = ing.purchase_quantity || 0;
+            if (pQty <= 0) return ing;
+            const addedStock = caseCount * pQty;
+            return { ...ing, stock_quantity: (ing.stock_quantity || 0) + addedStock };
+        }));
+    };
+
     // Helper for Deep Linking
     const getSupplierSearchUrl = (baseUrl: string, query: string) => {
         if (!baseUrl) return null;
@@ -698,6 +708,7 @@ export default function CommercialManager({ initialSuppliers, initialIngredients
                     confirmDelete={confirmDelete}
                     setMergeSource={setMergeSource}
                     UNIT_OPTIONS={UNIT_OPTIONS}
+                    handleAddCases={handleAddCases}
                 />
             )}
 

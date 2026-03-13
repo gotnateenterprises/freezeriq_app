@@ -1,4 +1,5 @@
-import { Plus, Minus, Search, Save, Copy, Merge, Trash2, ExternalLink, Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { Plus, Minus, Search, Save, Copy, Merge, Trash2, ExternalLink, Loader2, PackagePlus } from 'lucide-react';
 
 interface Supplier {
     id: string;
@@ -42,6 +43,7 @@ interface IngredientTableProps {
     confirmDelete: (id: string, name: string) => void;
     setMergeSource: (ing: Ingredient) => void;
     UNIT_OPTIONS: string[];
+    handleAddCases: (id: string, caseCount: number) => void;
 }
 
 export default function IngredientTable({
@@ -65,8 +67,11 @@ export default function IngredientTable({
     handleSaveSingle,
     confirmDelete,
     setMergeSource,
-    UNIT_OPTIONS
+    UNIT_OPTIONS,
+    handleAddCases
 }: IngredientTableProps) {
+    const [addCasesId, setAddCasesId] = useState<string | null>(null);
+    const [caseCount, setCaseCount] = useState('1');
     return (
         <>
             <div className="glass-panel rounded-3xl p-6 mb-6 bg-white/50 dark:bg-slate-800/40 border border-white/40 dark:border-slate-700/50">
@@ -278,7 +283,69 @@ export default function IngredientTable({
                                             >
                                                 <Plus size={16} />
                                             </button>
+                                            <button
+                                                onClick={() => {
+                                                    setAddCasesId(addCasesId === ing.id ? null : ing.id);
+                                                    setCaseCount('1');
+                                                }}
+                                                className={`p-1.5 rounded-lg transition-all ${
+                                                    addCasesId === ing.id
+                                                        ? 'text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 dark:text-indigo-400'
+                                                        : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                                                }`}
+                                                title="Add Cases to Stock"
+                                            >
+                                                <PackagePlus size={16} />
+                                            </button>
                                         </div>
+                                        {addCasesId === ing.id && (
+                                            <div className="mt-2 p-3 bg-indigo-50/80 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/50 rounded-xl space-y-2 animate-in fade-in slide-in-from-top-1">
+                                                {(ing.purchase_quantity && ing.purchase_quantity > 0) ? (
+                                                    <>
+                                                        <div className="flex items-center gap-2">
+                                                            <input
+                                                                type="number"
+                                                                min="1"
+                                                                value={caseCount}
+                                                                onChange={(e) => setCaseCount(e.target.value)}
+                                                                className="w-16 px-2 py-1.5 border border-indigo-300 dark:border-indigo-700 rounded-lg text-center font-bold text-indigo-700 dark:text-indigo-300 bg-white dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                                                                autoFocus
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') {
+                                                                        const count = parseInt(caseCount) || 0;
+                                                                        if (count > 0) {
+                                                                            handleAddCases(ing.id, count);
+                                                                            setAddCasesId(null);
+                                                                        }
+                                                                    } else if (e.key === 'Escape') {
+                                                                        setAddCasesId(null);
+                                                                    }
+                                                                }}
+                                                            />
+                                                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                                                                × {ing.purchase_quantity} = <strong className="text-emerald-600 dark:text-emerald-400">+{(parseInt(caseCount) || 0) * ing.purchase_quantity} {ing.unit}</strong>
+                                                            </span>
+                                                        </div>
+                                                        <button
+                                                            onClick={() => {
+                                                                const count = parseInt(caseCount) || 0;
+                                                                if (count > 0) {
+                                                                    handleAddCases(ing.id, count);
+                                                                    setAddCasesId(null);
+                                                                }
+                                                            }}
+                                                            className="w-full px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg shadow-sm transition-all active:scale-95"
+                                                        >
+                                                            Add to Stock
+                                                        </button>
+                                                    </>
+                                                ) : (
+                                                    <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                                                        ⚠️ Set Pack Size first (in the Pack Size column)
+                                                    </p>
+                                                )}
+                                            </div>
+                                        )}
                                     </td>
                                     <td className="px-6 py-4 pl-8">
                                         <select
