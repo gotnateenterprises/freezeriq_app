@@ -109,9 +109,12 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
     const handleSyncIngredient = (index: number, name: string) => {
         const match = allIngredients.find(ing => ing.name.toLowerCase() === name.toLowerCase());
         if (match) {
-            setValue(`items.${index}.unit`, match.unit);
-            // If the schema/form needs more fields like cost/sku in the future, add them here
-            // For now, these are the core ones needed for calculation
+            // Only auto-fill unit when the field is empty (new row).
+            // Never overwrite a unit the user already chose.
+            const currentUnit = watch(`items.${index}.unit`);
+            if (!currentUnit) {
+                setValue(`items.${index}.unit`, match.unit);
+            }
         }
     };
 
