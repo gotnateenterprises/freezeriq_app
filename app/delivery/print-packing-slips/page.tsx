@@ -38,7 +38,7 @@ export default function PrintPackingSlipsPage() {
         const fetchData = async () => {
             try {
                 // Fetch Orders
-                const ordersRes = await fetch('/api/orders?status=pending,production_ready&include_details=true');
+                const ordersRes = await fetch('/api/orders?status=pending,production_ready,APPROVED,IN_PRODUCTION,COMPLETED&include_details=true');
                 const ordersData = await ordersRes.json();
                 const sorted = ordersData.sort((a: any, b: any) =>
                     (a.delivery_sequence || 999) - (b.delivery_sequence || 999)

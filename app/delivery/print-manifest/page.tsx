@@ -44,6 +44,8 @@ export default function PrintManifestPage() {
                     fetch('/api/business')
                 ]);
 
+
+
                 const ordersData = await ordersRes.json();
                 const sorted = ordersData.sort((a: any, b: any) =>
                     (a.delivery_sequence || 999) - (b.delivery_sequence || 999)
@@ -194,6 +196,121 @@ export default function PrintManifestPage() {
                     </div>
                 </div>
             </div>
+
+            {/* Per-Customer Receipt Pages */}
+            {orders.map((order, idx) => {
+                const customerName = order.customer_name || 'Unknown';
+                const orgName = order.organization?.name || '';
+
+                const largeCount = order.items.reduce((acc, item) => {
+                    const isSmall = item.variant_size?.toLowerCase() === 'serves_2' ||
+                        item.bundle?.name?.toLowerCase().includes('serves 2');
+                    const isLarge = !isSmall && (
+                        item.variant_size?.toLowerCase() === 'serves_5' ||
+                        item.bundle?.name?.toLowerCase().includes('family') ||
+                        item.bundle?.serving_tier?.toLowerCase() === 'family' ||
+                        !item.variant_size
+                    );
+                    return acc + (isLarge ? item.quantity : 0);
+                }, 0);
+
+                const smallCount = order.items.reduce((acc, item) => {
+                    const isSmall = item.variant_size?.toLowerCase() === 'serves_2' ||
+                        item.bundle?.name?.toLowerCase().includes('serves 2');
+                    return acc + (isSmall ? item.quantity : 0);
+                }, 0);
+
+                return (
+                    <div
+                        key={order.id}
+                        className="bg-white shadow-xl print:shadow-none max-w-5xl mx-auto p-8 min-h-[11in] flex flex-col relative mt-8"
+                        style={{ pageBreakBefore: 'always' }}
+                    >
+                        {/* Receipt Header */}
+                        <div className="flex justify-between items-end border-b-4 border-black pb-4 mb-6">
+                            <div className="flex flex-col gap-4">
+                                {logo && (
+                                    <div className="h-16 relative w-48">
+                                        <img src={logo} alt="Logo" className="h-full w-full object-contain object-left" />
+                                    </div>
+                                )}
+                                <div>
+                                    <h1 className="text-3xl font-black uppercase tracking-tighter">Delivery Receipt</h1>
+                                    <p className="text-lg font-bold text-slate-500 mt-1">{date}</p>
+                                </div>
+                            </div>
+                            <div className="text-right text-sm text-slate-500">
+                                Order {idx + 1} of {orders.length}
+                            </div>
+                        </div>
+
+                        {/* Customer Info */}
+                        <div className="border-l-4 border-indigo-600 pl-4 py-2 mb-6">
+                            <p className="font-black text-slate-800 text-xl uppercase">{customerName}</p>
+                            {orgName && (
+                                <p className="text-slate-600 font-medium text-sm mt-1">{orgName}</p>
+                            )}
+                        </div>
+
+                        {/* Items Table */}
+                        <div className="flex-grow">
+                            <table className="w-full text-left border-collapse">
+                                <thead>
+                                    <tr className="border-b-2 border-black text-sm uppercase">
+                                        <th className="py-2 w-12 text-center">#</th>
+                                        <th className="py-2">Bundle</th>
+                                        <th className="py-2 w-28 text-center">Size</th>
+                                        <th className="py-2 w-20 text-center">Qty</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="text-sm">
+                                    {order.items.map((item, itemIdx) => (
+                                        <tr key={itemIdx} className="border-b border-slate-300">
+                                            <td className="py-3 text-center font-bold text-slate-500">{itemIdx + 1}</td>
+                                            <td className="py-3 font-bold">{item.bundle?.name || 'Item'}</td>
+                                            <td className="py-3 text-center text-slate-600">
+                                                {item.variant_size === 'serves_2' ? 'Small (Serves 2)' : 'Family (Serves 5)'}
+                                            </td>
+                                            <td className="py-3 text-center font-mono font-bold text-lg">{item.quantity}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+
+                            {/* Box Summary */}
+                            <div className="mt-4 flex gap-8 text-sm font-bold border-t-2 border-black pt-3">
+                                <span>Large Boxes: <span className="text-lg font-mono">{largeCount}</span></span>
+                                <span>Small Boxes: <span className="text-lg font-mono">{smallCount}</span></span>
+                                <span>Total Boxes: <span className="text-lg font-mono">{largeCount + smallCount}</span></span>
+                            </div>
+                        </div>
+
+                        {/* Signature Block */}
+                        <div className="mt-auto pt-8 border-t-2 border-black">
+                            <p className="text-sm text-slate-600 mb-4">
+                                By signing below, I confirm that I have received all items listed above in good condition.
+                            </p>
+                            <div className="flex gap-16">
+                                <div>
+                                    <p className="font-bold">Customer Signature:</p>
+                                    <div className="border-b border-black w-64 h-8 mt-2"></div>
+                                </div>
+                                <div>
+                                    <p className="font-bold">Print Name:</p>
+                                    <div className="border-b border-black w-48 h-8 mt-2"></div>
+                                </div>
+                                <div>
+                                    <p className="font-bold">Date:</p>
+                                    <div className="border-b border-black w-32 h-8 mt-2"></div>
+                                </div>
+                            </div>
+                            <div className="text-right text-xs text-slate-400 mt-4">
+                                Generated by FreezerIQ
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
         </div>
     );
 }
