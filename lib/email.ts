@@ -2,9 +2,36 @@ import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Helper to determine the "From" address
-// In development/testing without a verified domain, Resend requires 'onboarding@resend.dev'
+// Platform-level sender (invites, password resets, etc.)
 const FROM_EMAIL = process.env.EMAIL_FROM || 'onboarding@resend.dev';
+
+/**
+ * Build tenant-branded sender info for emails sent on behalf of a tenant business.
+ * Returns { from, replyTo } where:
+ *   from = "Freezer Chef via FreezerIQ <notifications@freezeriq.com>"
+ *   replyTo = tenant's contact_email (if set)
+ */
+export async function getTenantSender(businessId: string): Promise<{ from: string; replyTo?: string }> {
+    const { prisma } = await import('@/lib/db');
+
+    const business = await prisma.business.findUnique({
+        where: { id: businessId },
+        select: { name: true, contact_email: true }
+    });
+
+    if (!business) {
+        return { from: FROM_EMAIL };
+    }
+
+    // Use platform domain as the actual sender, but display tenant name
+    const platformDomain = FROM_EMAIL.match(/<(.+)>/)?.[1] || FROM_EMAIL;
+    const from = `${business.name} via FreezerIQ <${platformDomain}>`;
+    const replyTo = business.contact_email || undefined;
+
+    return { from, replyTo };
+}
+
+// --- Platform-level emails (no tenant branding) ---
 
 export async function sendInviteEmail(email: string, tempPassword: string) {
     if (!process.env.RESEND_API_KEY) {
@@ -80,15 +107,23 @@ export async function sendPasswordResetEmail(email: string, tempPassword: string
     }
 }
 
+// --- Tenant-branded emails ---
+
 export async function sendOrderConfirmationEmail(
     toEmail: string,
     order: any,
     items: any[],
     orgContactEmail?: string | null,
     paymentInstructions?: string | null,
-    externalPaymentLink?: string | null
+    externalPaymentLink?: string | null,
+    businessId?: string
 ) {
     if (!process.env.RESEND_API_KEY) return;
+
+    // Resolve tenant sender if businessId provided
+    const sender = businessId
+        ? await getTenantSender(businessId)
+        : { from: FROM_EMAIL };
 
     const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
     const total = currency.format(Number(order.total_amount));
@@ -151,8 +186,9 @@ export async function sendOrderConfirmationEmail(
         if (orgContactEmail) recipients.push(orgContactEmail);
 
         const { data, error } = await resend.emails.send({
-            from: FROM_EMAIL,
-            to: recipients, // Send to both customer and org
+            from: sender.from,
+            to: recipients,
+            replyTo: sender.replyTo,
             subject: `Order Confirmation: ${order.customer_name}`,
             html: htmlContent
         });
@@ -172,14 +208,20 @@ export async function sendOrderConfirmationEmail(
 
 export async function sendLeadNotificationEmail(
     toBusinessEmail: string,
-    lead: { name: string, email: string, phone?: string, source: string, notes?: string }
+    lead: { name: string, email: string, phone?: string, source: string, notes?: string },
+    businessId?: string
 ) {
     if (!process.env.RESEND_API_KEY) return;
 
+    const sender = businessId
+        ? await getTenantSender(businessId)
+        : { from: FROM_EMAIL };
+
     try {
         const { data, error } = await resend.emails.send({
-            from: FROM_EMAIL,
+            from: sender.from,
             to: toBusinessEmail,
+            replyTo: sender.replyTo,
             subject: `New Lead Captured: ${lead.name}`,
             html: `
                 <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
@@ -209,16 +251,31 @@ export async function sendLeadNotificationEmail(
     }
 }
 
-export async function sendEmail({ to, subject, html }: { to: string | string[], subject: string, html: string }) {
+export async function sendEmail({
+    to,
+    subject,
+    html,
+    businessId
+}: {
+    to: string | string[],
+    subject: string,
+    html: string,
+    businessId?: string
+}) {
     if (!process.env.RESEND_API_KEY) {
         console.warn('RESEND_API_KEY is missing. Skipping email.');
         return false;
     }
 
+    const sender = businessId
+        ? await getTenantSender(businessId)
+        : { from: FROM_EMAIL };
+
     try {
         const { data, error } = await resend.emails.send({
-            from: FROM_EMAIL,
+            from: sender.from,
             to: Array.isArray(to) ? to : [to],
+            replyTo: sender.replyTo,
             subject,
             html
         });
@@ -235,3 +292,4 @@ export async function sendEmail({ to, subject, html }: { to: string | string[], 
         return false;
     }
 }
+

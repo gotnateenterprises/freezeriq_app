@@ -42,9 +42,14 @@ export async function POST(req: Request) {
             };
         }) || [];
 
+        // Resolve tenant-branded sender
+        const { getTenantSender } = await import('@/lib/email');
+        const sender = await getTenantSender(session.user.businessId);
+
         const data = await resend.emails.send({
-            from: 'Freezer Chef <docs@freezeriq.com>', // Update this to your verified domain!
+            from: sender.from,
             to: [recipient],
+            replyTo: sender.replyTo,
             subject: subject || 'New Document',
             react: DocumentEmail({
                 subject: subject || 'New Document',
@@ -52,8 +57,6 @@ export async function POST(req: Request) {
                 documentName: documentName || 'Document'
             }),
             attachments: formattedAttachments,
-            // If we want to send HTML directly instead of React template:
-            // html: htmlContent
         });
 
         if (data.error) {

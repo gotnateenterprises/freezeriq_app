@@ -8,6 +8,11 @@ const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder');
 
 export async function POST(req: Request) {
     try {
+        // Resolve session for tenant sender
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        const businessId = session?.user?.businessId;
+
         const body = await req.json();
         const { supplier, email, items } = body;
 
@@ -39,9 +44,16 @@ export async function POST(req: Request) {
             return NextResponse.json({ success: true, simulated: true });
         }
 
+        // Resolve tenant-branded sender
+        const { getTenantSender } = await import('@/lib/email');
+        const sender = businessId
+            ? await getTenantSender(businessId)
+            : { from: 'FreezerIQ Orders <orders@freezeriq.com>' };
+
         const data = await resend.emails.send({
-            from: 'FreezerIQ Orders <orders@freezeriq.com>', // Note: This needs a verified domain on Resend in production
+            from: sender.from,
             to: [email],
+            replyTo: sender.replyTo,
             subject: `New Purchase Order: ${supplier}`,
             text: `Please find the attached Purchase Order for ${supplier}.\n\nThank you,\nFreezerIQ`,
             attachments: [

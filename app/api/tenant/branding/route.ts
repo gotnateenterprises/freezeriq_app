@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
         // We find the branding record linked to the business admin or any user in this business
         const business = await prisma.business.findUnique({
             where: { id: user.business_id },
-            select: { slug: true, name: true }
+            select: { slug: true, name: true, contact_email: true }
         });
 
         const branding = await prisma.tenantBranding.findFirst({
@@ -54,6 +54,7 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({
                 business_name: business?.name || 'My Business',
                 business_slug: business?.slug,
+                contact_email: business?.contact_email || '',
                 tagline: '',
                 logo_url: null,
                 primary_color: '#10b981',
@@ -64,7 +65,8 @@ export async function GET(req: NextRequest) {
 
         return NextResponse.json({
             ...branding,
-            business_slug: business?.slug
+            business_slug: business?.slug,
+            contact_email: business?.contact_email || ''
         });
     } catch (error) {
         console.error('Error fetching branding:', error);
@@ -104,6 +106,7 @@ export async function POST(req: NextRequest) {
         const formData = await req.formData();
         console.log('[BrandingAPI] FormData keys:', [...formData.keys()]);
         const businessName = formData.get('business_name') as string;
+        const contactEmail = formData.get('contact_email') as string;
         const tagline = formData.get('tagline') as string;
         const primaryColor = formData.get('primary_color') as string;
         const secondaryColor = formData.get('secondary_color') as string;
@@ -178,6 +181,14 @@ export async function POST(req: NextRequest) {
                 ...(reviewQrUrl && { review_qr_url: reviewQrUrl }),
             }
         });
+
+        // Persist contact_email on the Business model (business-level setting)
+        if (contactEmail !== undefined) {
+            await prisma.business.update({
+                where: { id: user.business_id },
+                data: { contact_email: contactEmail || null }
+            });
+        }
 
         return NextResponse.json(branding);
 

@@ -127,10 +127,15 @@ export async function POST(req: Request) {
             return NextResponse.json({ success: true, mocked: true });
         }
 
+        // Resolve tenant-branded sender
+        const { getTenantSender } = await import('@/lib/email');
+        const sender = await getTenantSender(session.user.businessId);
+
         const data = await resend.emails.send({
-            from: 'Freezer Chef <onboarding@resend.dev>',
+            from: sender.from,
             to: Array.isArray(to) ? to : [to],
             bcc: bcc ? (Array.isArray(bcc) ? bcc : [bcc]) : undefined,
+            replyTo: sender.replyTo,
             subject: finalSubject,
             html: finalHtml,
             attachments: processedAttachments

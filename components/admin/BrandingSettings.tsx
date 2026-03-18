@@ -19,6 +19,7 @@ export default function BrandingSettings({ isSuperAdmin }: BrandingSettingsProps
     const [logo, setLogo] = useState<string | null>(null);
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [appName, setAppName] = useState("");
+    const [contactEmail, setContactEmail] = useState("");
     const [tagline, setTagline] = useState('Deliciously Easy, home-cooked meals prepared fresh and frozen for your convenience.');
     const [thankYouNote, setThankYouNote] = useState('');
     const [reviewPrompt, setReviewPrompt] = useState('');
@@ -43,6 +44,7 @@ export default function BrandingSettings({ isSuperAdmin }: BrandingSettingsProps
                 if (res.ok) {
                     const data = await res.json();
                     if (data.business_name) setAppName(data.business_name);
+                    if (data.contact_email) setContactEmail(data.contact_email);
                     if (data.tagline) setTagline(data.tagline);
                     if (data.thank_you_note) setThankYouNote(data.thank_you_note);
                     if (data.review_prompt) setReviewPrompt(data.review_prompt);
@@ -96,6 +98,7 @@ export default function BrandingSettings({ isSuperAdmin }: BrandingSettingsProps
         try {
             const formData = new FormData();
             formData.append('business_name', appName);
+            formData.append('contact_email', contactEmail);
             formData.append('tagline', tagline);
             formData.append('thank_you_note', thankYouNote);
             formData.append('review_prompt', reviewPrompt);
@@ -212,6 +215,20 @@ export default function BrandingSettings({ isSuperAdmin }: BrandingSettingsProps
                             className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500"
                             placeholder="e.g. My Meal Prep Business"
                         />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Contact Email</label>
+                        <input
+                            type="email"
+                            value={contactEmail}
+                            onChange={(e) => setContactEmail(e.target.value)}
+                            className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500"
+                            placeholder="e.g. hello@mybusiness.com"
+                        />
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">
+                            Used as reply-to on emails sent to your customers
+                        </p>
                     </div>
 
                     <div className="flex gap-8">
