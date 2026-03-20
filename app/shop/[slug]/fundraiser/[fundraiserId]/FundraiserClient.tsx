@@ -25,11 +25,22 @@ export default function FundraiserClient({
     const primaryColor = business.branding?.primary_color || '#4f46e5';
     const coordinatorEmail = campaign.coordinator_email || '';
 
-    const buildMailtoUrl = (bundleName?: string) => {
+    const buildMailtoUrl = (bundleName?: string, bundlePrice?: number) => {
         if (!coordinatorEmail) return '';
-        const subject = encodeURIComponent('Freezer Meal Fundraiser Order');
+        const subject = encodeURIComponent(
+            bundleName
+                ? `Fundraiser Bundle Order - ${bundleName}`
+                : 'Freezer Meal Fundraiser Order'
+        );
+        const priceStr = bundlePrice && bundlePrice > 0 ? `$${bundlePrice.toFixed(2)}` : 'See coordinator';
         const body = encodeURIComponent(
-            `Hi! I'd like to place an order for the fundraiser.\n\nBundle: ${bundleName || ''}\nQuantity:\nName:\nPhone:`
+            `Hi!\n\nI'd like to place an order for the fundraiser.\n\n` +
+            `Bundle: ${bundleName || ''}\n` +
+            `Price: ${priceStr}\n\n` +
+            `Quantity: \n` +
+            `Name: \n` +
+            `Phone: \n\n` +
+            `Please let me know the next steps for payment and pickup.\n\nThanks!`
         );
         return `mailto:${coordinatorEmail}?subject=${subject}&body=${body}`;
     };
@@ -212,8 +223,11 @@ export default function FundraiserClient({
                                     <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600">
                                         <ShoppingBag size={18} />
                                     </div>
-                                    <h2 className="text-lg sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight uppercase">Available Bundles</h2>
+                                    <h2 className="text-lg sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight uppercase">Order a Bundle to Support Us</h2>
                                 </div>
+                                <p className="text-sm sm:text-base text-slate-500 dark:text-slate-400 font-medium -mt-1">
+                                    Tap a bundle below to start your order by email.
+                                </p>
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                                     {bundles.map((bundle: any) => (
@@ -222,7 +236,7 @@ export default function FundraiserClient({
                                             bundle={bundle}
                                             primaryColor={primaryColor}
                                             onViewDetails={() => handleOpenBundleModal(bundle)}
-                                            mailtoUrl={coordinatorEmail ? buildMailtoUrl(bundle.name) : undefined}
+                                            mailtoUrl={coordinatorEmail ? buildMailtoUrl(bundle.name, Number(bundle.price || 0)) : undefined}
                                         />
                                     ))}
                                 </div>
@@ -358,7 +372,7 @@ function BundleCard({ bundle, primaryColor, onViewDetails, mailtoUrl }: {
 
                 <div className="flex items-center justify-between mb-4">
                     <span className="text-xl sm:text-2xl font-black" style={{ color: primaryColor }}>
-                        ${Number(bundle.price || 0).toFixed(2)}
+                        {Number(bundle.price || 0) > 0 ? `$${Number(bundle.price).toFixed(2)}` : 'Contact for Price'}
                     </span>
                     {bundle.serving_tier && (
                         <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-50 dark:bg-slate-800 px-3 py-1 rounded-full">
@@ -398,23 +412,27 @@ function BundleCard({ bundle, primaryColor, onViewDetails, mailtoUrl }: {
                     </div>
                 )}
 
-                <button
-                    onClick={onViewDetails}
-                    className="w-full mt-4 py-3 rounded-xl sm:rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all border-2 hover:shadow-md"
-                    style={{ borderColor: primaryColor, color: primaryColor }}
-                >
-                    View Details &amp; Order
-                </button>
-
-                {mailtoUrl && (
+                {mailtoUrl ? (
                     <a
                         href={mailtoUrl}
-                        className="w-full mt-2 py-2.5 rounded-xl sm:rounded-2xl font-bold text-[10px] sm:text-xs flex items-center justify-center gap-2 transition-all text-slate-500 hover:text-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
+                        className="w-full mt-4 py-3.5 rounded-xl sm:rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 text-white hover:shadow-lg hover:scale-[1.02] active:scale-95"
+                        style={{ backgroundColor: primaryColor }}
                     >
-                        <Mail size={13} />
-                        Order by Email
+                        <Mail size={14} strokeWidth={3} />
+                        Order This Bundle
                     </a>
+                ) : (
+                    <div className="w-full mt-4 py-3 rounded-xl sm:rounded-2xl font-bold text-[10px] sm:text-xs text-center text-slate-400 bg-slate-50 dark:bg-slate-800">
+                        Coordinator contact coming soon
+                    </div>
                 )}
+
+                <button
+                    onClick={onViewDetails}
+                    className="w-full mt-2 py-2.5 rounded-xl sm:rounded-2xl font-bold text-[10px] sm:text-xs transition-all border hover:shadow-sm flex items-center justify-center gap-1.5 text-slate-500 hover:text-slate-700 border-slate-200 dark:border-slate-700 dark:hover:bg-slate-800"
+                >
+                    View Details
+                </button>
             </div>
         </div>
     );
