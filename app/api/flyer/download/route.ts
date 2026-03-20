@@ -62,7 +62,7 @@ export async function GET(req: Request) {
         let bundles: any[];
         if (assignedBundleIds.length > 0) {
             bundles = await prisma.$queryRaw`
-                SELECT id, name, price, serving_tier FROM bundles
+                SELECT id, name, COALESCE(price, 0) as price, serving_tier FROM bundles
                 WHERE id IN(${Prisma.join(assignedBundleIds)})
                 AND business_id = ${businessId}
                 AND is_active = true
@@ -70,11 +70,11 @@ export async function GET(req: Request) {
             `;
         } else {
             bundles = await prisma.$queryRaw`
-                SELECT id, name, price, serving_tier FROM bundles
+                SELECT id, name, COALESCE(price, 0) as price, serving_tier FROM bundles
                 WHERE business_id = ${businessId}
                 AND is_active = true
                 ORDER BY name ASC
-                LIMIT 2
+                LIMIT 10
             `;
         }
 

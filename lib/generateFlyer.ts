@@ -130,8 +130,8 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     const menus = Array.from(menuMap.values()).slice(0, 2);
 
     // Global pricing — pick from first menu that has each tier
-    const globalFamilyPrice = menus.find(m => m.familyPrice !== null)?.familyPrice;
-    const globalCouplePrice = menus.find(m => m.couplePrice !== null)?.couplePrice;
+    const globalFamilyPrice = menus.find(m => m.familyPrice !== null)?.familyPrice ?? 0;
+    const globalCouplePrice = menus.find(m => m.couplePrice !== null)?.couplePrice ?? 0;
 
     // ═══════════════════════════════════════════════════════════════
     // PAGE 1: Fundraiser Details + Bundle Meals
@@ -149,7 +149,7 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     doc.setFontSize(12);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...textLight);
-    doc.text('Stock your freezer with ready-to-cook meals!', PAGE_W / 2, y + 3, { align: 'center' });
+    doc.text(`Stock your freezer with ready-to-cook meals from ${input.businessName}!`, PAGE_W / 2, y + 3, { align: 'center' });
     y += 10;
 
     // ── Primary color bar ──
@@ -198,7 +198,7 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     doc.text('PRICING (per bundle)', rightCol, detailsY);
 
     let priceY = detailsY + 9;
-    if (globalFamilyPrice !== null && globalFamilyPrice !== undefined) {
+    if (globalFamilyPrice > 0) {
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...textDark);
@@ -207,7 +207,7 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
         doc.text(`$${globalFamilyPrice.toFixed(2)}`, rightCol + 28, priceY);
         priceY += 9;
     }
-    if (globalCouplePrice !== null && globalCouplePrice !== undefined) {
+    if (globalCouplePrice > 0) {
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...textDark);
