@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 
 import EmailComposeModal from './EmailComposeModal';
 import FundraiserSetup from './FundraiserSetup';
-import MarketingFlyer from './MarketingFlyer';
+
 import { ShoppingBag, DollarSign, Mail, Phone, MapPin, User, StickyNote, Plus, Calendar, Eye, Loader2, Archive, RotateCcw, Sparkles, Tag, UtensilsCrossed, Clock } from 'lucide-react';
 import StatusPipeline from './StatusPipeline';
 import { STATUS_LABELS, STATUS_COLORS, type CustomerStatus } from '@/lib/statusConstants';
@@ -185,8 +185,6 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
     const [typingTimeout, setTypingTimeout] = useState<NodeJS.Timeout | null>(null);
 
     // Flyer Generation
-    const flyerRef = useRef<HTMLDivElement>(null);
-    const [flyerData, setFlyerData] = useState<any>(null);
     const [isGeneratingFlyer, setIsGeneratingFlyer] = useState(false);
     const [branding, setBranding] = useState<any>(null);
     // Normalize API status (Title Case) to Enum (UPPER_CASE)
@@ -235,84 +233,23 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
         setIsArchived(customer.archived || false);
     }, [customer.status, customer.archived]);
 
-    const generateFlyerPDF = async (data: any) => {
+    const generateFlyerPDF = async (_data?: any) => {
         setIsGeneratingFlyer(true);
-        setFlyerData(data);
-
-        // Wait for render
-        await new Promise(resolve => setTimeout(resolve, 300));
-
-        if (!flyerRef.current) {
-            console.error("Flyer ref not found");
-            setIsGeneratingFlyer(false);
-            return null;
-        }
-
         try {
-            const html2canvas = (await import('html2canvas')).default;
-            const jsPDF = (await import('jspdf')).default;
-
-            const page1El = flyerRef.current.querySelector('#flyer-page-1') as HTMLElement;
-            const page2El = flyerRef.current.querySelector('#flyer-page-2') as HTMLElement;
-
-            if (!page1El || !page2El) {
-                console.error("Flyer pages not found");
+            const res = await fetch('/api/flyer/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ customerId: customer.id }),
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                alert(err.error || 'Failed to generate flyer PDF');
                 return null;
             }
-
-            // Capture Page 1
-            const canvas1 = await html2canvas(page1El, {
-                // @ts-ignore
-                scale: 2,
-                useCORS: true,
-                logging: false,
-                onclone: (doc: Document) => {
-                    // Remove all external stylesheets and script injected styles to prevent Tailwind oklch parsing crashes.
-                    // The flyer relies entirely on inline styles.
-                    const styles = doc.querySelectorAll('style, link[rel="stylesheet"]');
-                    styles.forEach(s => {
-                        // Preserve Google Fonts used by the flyer
-                        if (s.innerHTML && s.innerHTML.includes('fonts.googleapis.com')) return;
-                        s.remove();
-                    });
-                }
-            });
-
-            // Capture Page 2
-            const canvas2 = await html2canvas(page2El, {
-                // @ts-ignore
-                scale: 2,
-                useCORS: true,
-                logging: false,
-                onclone: (doc: Document) => {
-                    const styles = doc.querySelectorAll('style, link[rel="stylesheet"]');
-                    styles.forEach(s => {
-                        if (s.innerHTML && s.innerHTML.includes('fonts.googleapis.com')) return;
-                        s.remove();
-                    });
-                }
-            });
-
-            const doc = new jsPDF('p', 'pt', 'letter');
-            const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
-
-            // Add Page 1
-            doc.addImage(canvas1.toDataURL('image/png'), 'PNG', 0, 0, pageWidth, pageHeight);
-
-            // Add Page 2
-            doc.addPage();
-            doc.addImage(canvas2.toDataURL('image/png'), 'PNG', 0, 0, pageWidth, pageHeight);
-
-            const pdfBase64 = doc.output('datauristring').split(',')[1];
-            return {
-                filename: `Marketing Packet - ${customer.name}.pdf`,
-                content: pdfBase64,
-                contentType: 'application/pdf'
-            };
+            return await res.json(); // { filename, content, contentType }
         } catch (e) {
-            console.error("Flyer generation failed", e);
-            alert("Failed to generate flyer PDF");
+            console.error('Flyer generation failed', e);
+            alert('Failed to generate flyer PDF');
             return null;
         } finally {
             setIsGeneratingFlyer(false);
@@ -650,14 +587,6 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
                 initialHtml={emailDraft.html}
                 recipientEmail={customer.email}
                 initialAttachments={emailAttachments}
-            />
-
-            {/* Hidden Flyer for Generation */}
-            <MarketingFlyer
-                ref={flyerRef}
-                customer={customer}
-                fundraiserInfo={flyerData || customer.fundraiser_info}
-                branding={branding}
             />
 
             {/* PIPELINE ACTIONS (Contextual) */}
