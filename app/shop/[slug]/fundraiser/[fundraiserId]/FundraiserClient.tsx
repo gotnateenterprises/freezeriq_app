@@ -2,13 +2,8 @@
 
 import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
-import { Heart, ShoppingBag, ArrowLeft, Info, ChevronRight, ChevronDown, UtensilsCrossed, Mail } from 'lucide-react';
-import CartDrawer from '@/components/shop/CartDrawer';
-import DeliciousGrid from '@/components/shop/DeliciousGrid';
-import PurchaseSidebar from '@/components/shop/PurchaseSidebar';
-import FilterBar from '@/components/shop/FilterBar';
+import { Heart, ArrowLeft, Info, ChevronRight, ChevronDown, UtensilsCrossed, Mail, CalendarDays, MapPin, Clock, Timer } from 'lucide-react';
 import BundleDetailsModal from '@/components/shop/BundleDetailsModal';
-import { useCart } from '@/context/CartContext';
 
 export default function FundraiserClient({
     business,
@@ -18,8 +13,8 @@ export default function FundraiserClient({
     slug,
     fundraiserId
 }: any) {
-    const { addToCart } = useCart();
-    const [activeFilters, setActiveFilters] = useState<string[]>([]);
+
+
     const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
     const [selectedBundle, setSelectedBundle] = useState<any>(null);
     const primaryColor = business.branding?.primary_color || '#4f46e5';
@@ -55,57 +50,44 @@ export default function FundraiserClient({
     const bundles = business.bundles || [];
     const mainBundle = bundles[0];
 
-    // Collect all recipes across ALL bundles for the "On The Menu" grid
-    const allRecipes = useMemo(() => {
-        const seen = new Set<string>();
-        const recipes: any[] = [];
-        bundles.forEach((b: any) => {
-            (b.items || []).forEach((c: any) => {
-                const r = c.recipe;
-                if (!r || !r.name) return;
-                const key = r.name;
-                if (!seen.has(key)) {
-                    seen.add(key);
-                    recipes.push(r);
-                }
-            });
-        });
-        return recipes;
-    }, [bundles]);
-
-    // Compute Dynamic Tags from ALL bundle recipes
-    const availableTags = useMemo(() => {
-        const tags = new Set<string>();
-        allRecipes.forEach((r: any) => {
-            if (r.macros) r.macros.split(',').forEach((t: string) => {
-                const trimmed = t.trim();
-                if (trimmed) tags.add(trimmed);
-            });
-            if (r.allergens) r.allergens.split(',').forEach((t: string) => {
-                const trimmed = t.trim();
-                if (trimmed) tags.add(trimmed);
-            });
-        });
-        return Array.from(tags).sort();
-    }, [allRecipes]);
-
-    const filteredRecipes = useMemo(() => {
-        if (activeFilters.length === 0) return allRecipes;
-
-        return allRecipes.filter((r: any) => {
-            const recipeTags = [
-                ...(r.macros ? r.macros.split(',').map((t: string) => t.trim().toLowerCase()) : []),
-                ...(r.allergens ? r.allergens.split(',').map((t: string) => t.trim().toLowerCase()) : [])
-            ];
-            return activeFilters.every((f: string) => recipeTags.includes(f.toLowerCase()));
-        });
-    }, [allRecipes, activeFilters]);
-
-    const handleToggleFilter = (tag: string) => {
-        setActiveFilters(prev =>
-            prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
-        );
+    // Fundraiser date helpers
+    const formatDate = (dateVal: any) => {
+        if (!dateVal) return null;
+        try {
+            const d = new Date(dateVal);
+            if (isNaN(d.getTime())) return null;
+            return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+        } catch { return null; }
     };
+
+    const formatTime = (dateVal: any) => {
+        if (!dateVal) return null;
+        try {
+            const d = new Date(dateVal);
+            if (isNaN(d.getTime())) return null;
+            const hours = d.getHours();
+            const mins = d.getMinutes();
+            if (hours === 0 && mins === 0) return null; // midnight = no time set
+            return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        } catch { return null; }
+    };
+
+    const daysLeft = useMemo(() => {
+        const endDate = campaign.end_date;
+        if (!endDate) return null;
+        try {
+            const end = new Date(endDate);
+            if (isNaN(end.getTime())) return null;
+            const now = new Date();
+            const diff = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+            return Math.max(0, diff);
+        } catch { return null; }
+    }, [campaign.end_date]);
+
+    const endDateStr = formatDate(campaign.end_date);
+    const deliveryDateStr = formatDate(campaign.delivery_date);
+    const deliveryTimeStr = formatTime(campaign.delivery_date) || (campaign.delivery_time ? String(campaign.delivery_time) : null);
+    const pickupLocation = campaign.pickup_location || null;
 
     const handleOpenBundleModal = (bundle: any) => {
         setSelectedBundle(bundle);
@@ -210,18 +192,18 @@ export default function FundraiserClient({
             </div>
 
             {/* === Main Content Area === */}
-            <main className="max-w-7xl mx-auto px-3 sm:px-6 -mt-8 sm:-mt-12 relative z-20">
-                <div className="flex flex-col-reverse lg:flex-row gap-8 sm:gap-12 lg:gap-16">
+            <main className="max-w-4xl mx-auto px-3 sm:px-6 -mt-8 sm:-mt-12 relative z-20">
+                <div className="flex flex-col gap-8 sm:gap-12">
 
-                    {/* Left Column: Bundles + Menu + About */}
-                    <div className="flex-1 min-w-0 space-y-10 sm:space-y-16">
+                    {/* Main Content */}
+                    <div className="w-full space-y-10 sm:space-y-16">
 
                         {/* === Bundle Cards Section === */}
                         {bundles.length > 0 && (
                             <section className="space-y-4 sm:space-y-6">
                                 <div className="flex items-center gap-2">
                                     <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600">
-                                        <ShoppingBag size={18} />
+                                        <UtensilsCrossed size={18} />
                                     </div>
                                     <h2 className="text-lg sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight uppercase">Order a Bundle to Support Us</h2>
                                 </div>
@@ -243,27 +225,81 @@ export default function FundraiserClient({
                             </section>
                         )}
 
-                        {/* === On The Menu (All Recipes) === */}
-                        {allRecipes.length > 0 && (
-                            <div className="space-y-4 sm:space-y-6">
-                                <div className="flex items-center gap-2">
+                        {/* === Fundraiser Details (replaces On The Menu) === */}
+                        {(endDateStr || deliveryDateStr || pickupLocation) && (
+                            <section className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm p-5 sm:p-8">
+                                <div className="flex items-center gap-2 mb-5 sm:mb-6">
                                     <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600">
-                                        <UtensilsCrossed size={18} />
+                                        <CalendarDays size={18} />
                                     </div>
-                                    <h2 className="text-lg sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight uppercase">On The Menu</h2>
+                                    <h2 className="text-lg sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight uppercase">Fundraiser Details</h2>
                                 </div>
 
-                                {availableTags.length > 0 && (
-                                    <FilterBar
-                                        availableTags={availableTags}
-                                        activeFilters={activeFilters}
-                                        onToggleFilter={handleToggleFilter}
-                                        primaryColor={primaryColor}
-                                    />
-                                )}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
+                                    {/* Order Deadline */}
+                                    <div className="flex items-start gap-3 p-3 sm:p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl sm:rounded-2xl">
+                                        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${primaryColor}15` }}>
+                                            <CalendarDays size={16} style={{ color: primaryColor }} />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Order Deadline</p>
+                                            <p className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">{endDateStr || 'TBD'}</p>
+                                        </div>
+                                    </div>
 
-                                <DeliciousGrid recipes={filteredRecipes} />
-                            </div>
+                                    {/* Pickup / Delivery Date */}
+                                    <div className="flex items-start gap-3 p-3 sm:p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl sm:rounded-2xl">
+                                        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${primaryColor}15` }}>
+                                            <MapPin size={16} style={{ color: primaryColor }} />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Pickup / Delivery Date</p>
+                                            <p className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">{deliveryDateStr || 'TBD'}</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Time */}
+                                    {deliveryTimeStr && (
+                                        <div className="flex items-start gap-3 p-3 sm:p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl sm:rounded-2xl">
+                                            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${primaryColor}15` }}>
+                                                <Clock size={16} style={{ color: primaryColor }} />
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Time</p>
+                                                <p className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">{deliveryTimeStr}</p>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Pickup Location */}
+                                    {pickupLocation && (
+                                        <div className="flex items-start gap-3 p-3 sm:p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl sm:rounded-2xl">
+                                            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${primaryColor}15` }}>
+                                                <MapPin size={16} style={{ color: primaryColor }} />
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Pickup Location</p>
+                                                <p className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">{pickupLocation}</p>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Days Left */}
+                                    {daysLeft !== null && (
+                                        <div className="flex items-start gap-3 p-3 sm:p-4 rounded-xl sm:rounded-2xl sm:col-span-2" style={{ backgroundColor: daysLeft > 0 ? `${primaryColor}10` : '#fef2f2' }}>
+                                            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: daysLeft > 0 ? `${primaryColor}20` : '#fee2e2' }}>
+                                                <Timer size={16} style={{ color: daysLeft > 0 ? primaryColor : '#ef4444' }} />
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Days Left</p>
+                                                <p className="text-lg sm:text-xl font-black" style={{ color: daysLeft > 0 ? primaryColor : '#ef4444' }}>
+                                                    {daysLeft > 0 ? `${daysLeft} day${daysLeft !== 1 ? 's' : ''} left` : 'Ended'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </section>
                         )}
 
                         {/* === About Section === */}
@@ -279,40 +315,8 @@ export default function FundraiserClient({
                             </section>
                         )}
                     </div>
-
-                    {/* Right Column: Purchase Sidebar (sticky on desktop, full-width on mobile) */}
-                    <div className="w-full lg:w-[400px] lg:sticky lg:top-8 lg:self-start space-y-6 sm:space-y-8">
-                        {mainBundle && (
-                            <PurchaseSidebar
-                                bundle={mainBundle}
-                                primaryColor={primaryColor}
-                            />
-                        )}
-
-                        <div className="p-6 sm:p-10 bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl sm:rounded-[2.5rem] text-white space-y-4 sm:space-y-6 shadow-2xl shadow-indigo-500/20 text-center flex flex-col items-center">
-                            <h4 className="text-lg sm:text-xl font-black leading-tight">Host Your Own Fundraiser</h4>
-                            <p className="text-indigo-100 text-xs sm:text-sm font-medium leading-relaxed">
-                                Need to raise money for your team, school, or church? Freezer meals are the perfect fundraiser.
-                            </p>
-                            <Link
-                                href={`/shop/${slug}/raise-funds`}
-                                className="inline-flex items-center gap-2 bg-white text-indigo-600 px-5 sm:px-6 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest transition-transform hover:scale-105 shadow-xl shadow-indigo-900/40"
-                            >
-                                Learn More
-                                <ChevronRight size={14} strokeWidth={3} />
-                            </Link>
-                        </div>
-                    </div>
                 </div>
             </main>
-
-            <CartDrawer
-                primaryColor={primaryColor}
-                businessId={business.id}
-                slug={slug}
-                campaignId={fundraiserId}
-                campaignParticipantLabel={campaign.participant_label}
-            />
 
             {selectedBundle && (
                 <BundleDetailsModal
@@ -320,19 +324,6 @@ export default function FundraiserClient({
                     onClose={() => { setIsBundleModalOpen(false); setSelectedBundle(null); }}
                     bundle={selectedBundle}
                     primaryColor={primaryColor}
-                    onAddToCart={(quantity) => {
-                        addToCart({
-                            bundleId: selectedBundle.id,
-                            name: selectedBundle.name,
-                            price: Number(selectedBundle.price || 0),
-                            image_url: selectedBundle.image_url || '',
-                            serving_tier: selectedBundle.serving_tier || 'family',
-                            quantity: quantity,
-                            isSubscription: false
-                        });
-                        setIsBundleModalOpen(false);
-                        setSelectedBundle(null);
-                    }}
                 />
             )}
         </div>
@@ -431,7 +422,7 @@ function BundleCard({ bundle, primaryColor, onViewDetails, mailtoUrl }: {
                     onClick={onViewDetails}
                     className="w-full mt-2 py-2.5 rounded-xl sm:rounded-2xl font-bold text-[10px] sm:text-xs transition-all border hover:shadow-sm flex items-center justify-center gap-1.5 text-slate-500 hover:text-slate-700 border-slate-200 dark:border-slate-700 dark:hover:bg-slate-800"
                 >
-                    View Details
+                    View Menu
                 </button>
             </div>
         </div>

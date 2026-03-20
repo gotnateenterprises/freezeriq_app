@@ -367,6 +367,30 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
             });
         }
 
+        // Sync fundraiser_info fields to the most recent FundraiserCampaign
+        // The CRM form saves these to customer.fundraiser_info (JSON), but
+        // flyer/packet download routes read from campaign table columns.
+        if (body.fundraiser_info) {
+            const fi = body.fundraiser_info;
+            const latestCampaign = await prisma.fundraiserCampaign.findFirst({
+                where: { customer_id: orgId },
+                orderBy: { created_at: 'desc' },
+                select: { id: true },
+            });
+
+            if (latestCampaign) {
+                await prisma.fundraiserCampaign.update({
+                    where: { id: latestCampaign.id },
+                    data: {
+                        delivery_date: fi.delivery_date ? new Date(fi.delivery_date) : undefined,
+                        pickup_location: fi.pickup_location || undefined,
+                        checks_payable: fi.checks_payable_to || undefined,
+                        end_date: fi.deadline ? new Date(fi.deadline) : undefined,
+                    },
+                });
+            }
+        }
+
         return NextResponse.json({ success: true, newId: orgId });
     } catch (e: any) {
         console.error("Update Error:", e);

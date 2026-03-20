@@ -36,3 +36,5 @@ next-env.d.ts
 # backups
 /backups
 /scripts
+
+.env.production

@@ -44,6 +44,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
                 start_date: body.start_date ? new Date(body.start_date) : undefined,
                 end_date: body.end_date ? new Date(body.end_date) : undefined,
                 delivery_date: body.delivery_date ? new Date(body.delivery_date) : undefined,
+                pickup_location: body.pickup_location ?? undefined,
+                checks_payable: body.checks_payable ?? undefined,
                 goal_amount: body.goal_amount ? Number(body.goal_amount) : undefined,
                 about_text: body.about_text,
                 mission_text: body.mission_text,

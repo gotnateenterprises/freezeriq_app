@@ -8,7 +8,7 @@ interface BundleDetailsModalProps {
     onClose: () => void;
     bundle: any;
     primaryColor: string;
-    onAddToCart: (quantity: number) => void;
+    onAddToCart?: (quantity: number) => void;
 }
 
 export default function BundleDetailsModal({ isOpen, onClose, bundle, primaryColor, onAddToCart }: BundleDetailsModalProps) {
@@ -159,8 +159,8 @@ export default function BundleDetailsModal({ isOpen, onClose, bundle, primaryCol
                                     </div>
                                 </div>
                                 <button
-                                    onClick={() => onAddToCart(1)}
-                                    style={{ backgroundColor: primaryColor }}
+                                    onClick={() => onAddToCart?.(1)}
+                                    style={{ backgroundColor: primaryColor, display: onAddToCart ? undefined : 'none' }}
                                     className="w-full h-20 rounded-[2.5rem] font-black text-white shadow-[0_24px_48px_-12px_rgba(20,184,166,0.4)] hover:shadow-[0_32px_64px_-16px_rgba(20,184,166,0.5)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-4 text-xl tracking-tight"
                                 >
                                     <ShoppingBag size={28} />
