@@ -81,6 +81,7 @@ async function getData(slug: string, fundraiserId: string) {
             SELECT * FROM bundles 
             WHERE business_id = ${business.id} 
             AND is_active = true
+            AND show_on_storefront = true
             ORDER BY name ASC
         `;
     }

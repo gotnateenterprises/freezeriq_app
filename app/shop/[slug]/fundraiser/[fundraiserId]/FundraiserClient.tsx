@@ -214,7 +214,7 @@ export default function FundraiserClient({
                 <div className="flex flex-col-reverse lg:flex-row gap-8 sm:gap-12 lg:gap-16">
 
                     {/* Left Column: Bundles + Menu + About */}
-                    <div className="flex-1 space-y-10 sm:space-y-16">
+                    <div className="flex-1 min-w-0 space-y-10 sm:space-y-16">
 
                         {/* === Bundle Cards Section === */}
                         {bundles.length > 0 && (
