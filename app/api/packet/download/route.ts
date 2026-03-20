@@ -38,6 +38,7 @@ export async function GET(req: Request) {
                 customer: {
                     select: {
                         name: true,
+                        contact_name: true,
                         business_id: true,
                     },
                 },
@@ -77,7 +78,7 @@ export async function GET(req: Request) {
                 WHERE business_id = ${businessId}
                 AND is_active = true
                 ORDER BY name ASC
-                LIMIT 2
+                LIMIT 10
             `;
         }
 
@@ -132,10 +133,15 @@ export async function GET(req: Request) {
             if (business) businessName = business.name;
         }
 
-        // 7. Build public URL
-        const publicUrl = `https://freezeriq-app.vercel.app/fundraiser/${campaign.public_token}`;
+        // 7. Build public URL from request origin (same strategy as promo-scripts)
+        const origin = new URL(req.url).origin;
+        const publicUrl = `${origin}/fundraiser/${campaign.public_token}`;
 
         // 8. Generate full packet ZIP
+        //    coordinatorName: prefer customer.contact_name, fall back to campaign.name
+        const coordinatorName =
+            (campaign.customer as any)?.contact_name || campaign.name;
+
         const zipBuffer = await generateFullPacket({
             campaignName: campaign.name,
             organizationName: orgName,
@@ -149,7 +155,7 @@ export async function GET(req: Request) {
             pickupLocation: campaign.pickup_location || '',
             checksPayable: campaign.checks_payable || '',
             publicUrl,
-            coordinatorName: campaign.name, // fallback — no dedicated field
+            coordinatorName,
             bundles: flyerBundles,
             branding,
         });

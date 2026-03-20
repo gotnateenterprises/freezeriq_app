@@ -37,7 +37,8 @@ async function getData(slug: string, fundraiserId: string) {
 
     // 3. Fetch Campaign
     const campaigns: any[] = await prisma.$queryRaw`
-        SELECT fc.*, c.name as organization_name, c.contact_email as coordinator_email 
+        SELECT fc.*, c.name as organization_name, c.contact_email as coordinator_email,
+               c.fundraiser_info as customer_fundraiser_info
         FROM fundraiser_campaigns fc
         JOIN customers c ON fc.customer_id = c.id
         WHERE fc.id = ${fundraiserId} 

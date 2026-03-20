@@ -129,7 +129,11 @@ export async function GET(req: Request) {
             if (business) businessName = business.name;
         }
 
-        // 7. Generate PDF
+        // 7. Build public URL from request origin (same strategy as promo-scripts)
+        const origin = new URL(req.url).origin;
+        const publicUrl = `${origin}/fundraiser/${campaign.public_token}`;
+
+        // 8. Generate PDF
         const buffer = await generateFlyer({
             campaignName: campaign.name,
             organizationName: orgName,
@@ -142,12 +146,12 @@ export async function GET(req: Request) {
                 : '',
             pickupLocation: campaign.pickup_location || '',
             checksPayable: campaign.checks_payable || '',
-            publicUrl: `https://freezeriq-app.vercel.app/fundraiser/${campaign.public_token}`,
+            publicUrl,
             bundles: flyerBundles,
             branding,
         });
 
-        // 8. Return PDF download
+        // 9. Return PDF download
         const safeOrgName = orgName.replace(/[^a-zA-Z0-9_-]/g, '_');
 
         return new NextResponse(new Uint8Array(buffer), {

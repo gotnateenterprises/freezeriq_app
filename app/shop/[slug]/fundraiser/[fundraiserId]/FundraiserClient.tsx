@@ -85,9 +85,13 @@ export default function FundraiserClient({
     }, [campaign.end_date]);
 
     const endDateStr = formatDate(campaign.end_date);
-    const deliveryDateStr = formatDate(campaign.delivery_date);
-    const deliveryTimeStr = formatTime(campaign.delivery_date) || (campaign.delivery_time ? String(campaign.delivery_time) : null);
-    const pickupLocation = campaign.pickup_location || null;
+
+    // Fallback: CRM stores these in customer.fundraiser_info (JSONB).
+    // The sync to campaign columns may not have run for older campaigns.
+    const fi = campaign.customer_fundraiser_info || {};
+    const deliveryDateStr = formatDate(campaign.delivery_date) || formatDate(fi.delivery_date);
+    const deliveryTimeStr = formatTime(campaign.delivery_date) || (campaign.delivery_time ? String(campaign.delivery_time) : null) || (fi.delivery_time ? String(fi.delivery_time) : null);
+    const pickupLocation = campaign.pickup_location || fi.pickup_location || null;
 
     const handleOpenBundleModal = (bundle: any) => {
         setSelectedBundle(bundle);

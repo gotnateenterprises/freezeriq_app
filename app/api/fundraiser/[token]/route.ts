@@ -22,9 +22,12 @@ export async function GET(
                 mission_text: true,
                 payment_instructions: true,
                 external_payment_link: true,
+                delivery_date: true,
+                pickup_location: true,
                 customer: {
                     select: {
                         name: true,
+                        fundraiser_info: true,
                     }
                 },
                 orders: {
