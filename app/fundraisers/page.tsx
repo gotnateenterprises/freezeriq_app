@@ -32,6 +32,7 @@ interface Fundraiser {
     customer_id: string;
     customer: {
         name: string;
+        contact_name?: string | null;
     };
     business_slug: string;
     is_placeholder?: boolean;
@@ -176,7 +177,7 @@ export default function FundraisersPage() {
                         <thead>
                             <tr className="bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-700">
                                 <th className="px-5 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[28%]">Campaign</th>
-                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[20%]">Partner</th>
+                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[20%]">Coordinator</th>
                                 <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[12%]">Status</th>
                                 <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[12%]">Dates</th>
                                 <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest text-right w-[18%]">Progress</th>
@@ -208,7 +209,12 @@ export default function FundraisersPage() {
                                     <td className="px-4 py-4">
                                         <div className="flex items-center gap-2">
                                             <Building2 size={14} className="text-slate-400 flex-shrink-0" />
-                                            <p className="font-bold text-sm text-slate-700 dark:text-slate-300 truncate">{item.customer.name}</p>
+                                            <div className="min-w-0">
+                                                <p className="font-bold text-sm text-slate-700 dark:text-slate-300 truncate">{item.customer.contact_name || item.customer.name}</p>
+                                                {item.customer.contact_name && (
+                                                    <p className="text-[10px] font-bold text-slate-400 truncate">{item.customer.name}</p>
+                                                )}
+                                            </div>
                                         </div>
                                     </td>
                                     <td className="px-4 py-4">
@@ -265,6 +271,13 @@ export default function FundraisersPage() {
                                                     <Users size={15} />
                                                 </Link>
                                             )}
+                                            <Link
+                                                href={`/customers/${item.customer_id}?tab=fundraisers&action=invoice&campaignId=${item.id}`}
+                                                className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-emerald-600 transition-all"
+                                                title="Create Invoice"
+                                            >
+                                                <Receipt size={15} />
+                                            </Link>
                                             <Link
                                                 href={`/customers/${item.customer_id}?tab=fundraisers`}
                                                 className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-indigo-600 transition-all"
