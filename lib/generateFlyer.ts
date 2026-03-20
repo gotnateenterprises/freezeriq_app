@@ -96,9 +96,42 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     const doc = new jsPDF({ unit: 'mm', format: 'letter' });
     let y = MARGIN;
 
-    // Determine serving tier labels + prices for the details box
-    const familyBundle = input.bundles.find(b => b.servingTier === 'family');
-    const coupleBundle = input.bundles.find(b => b.servingTier === 'couple');
+    // ── Deduplicate bundles into "menus" ──
+    // Each menu may have a family and couple variant in the bundles table.
+    // Group by base name (strip " (Serves 2)" suffix) so each menu shows once.
+    interface Menu {
+        baseName: string;
+        familyPrice: number | null;
+        couplePrice: number | null;
+        meals: string[];  // from whichever variant has meals (prefer family)
+    }
+
+    const menuMap = new Map<string, Menu>();
+    for (const b of input.bundles) {
+        // Normalise name: strip trailing "(Serves 2)" or "(serves 2)" etc.
+        const baseName = b.name
+            .replace(/\s*\(serves\s*2\)$/i, '')
+            .trim();
+        let menu = menuMap.get(baseName);
+        if (!menu) {
+            menu = { baseName, familyPrice: null, couplePrice: null, meals: [] };
+            menuMap.set(baseName, menu);
+        }
+        if (b.servingTier === 'couple') {
+            menu.couplePrice = b.price;
+            // Use couple meals only if we don't have any yet
+            if (menu.meals.length === 0) menu.meals = b.meals;
+        } else {
+            // family (default)
+            menu.familyPrice = b.price;
+            menu.meals = b.meals;  // prefer family meals
+        }
+    }
+    const menus = Array.from(menuMap.values()).slice(0, 2);
+
+    // Global pricing — pick from first menu that has each tier
+    const globalFamilyPrice = menus.find(m => m.familyPrice !== null)?.familyPrice;
+    const globalCouplePrice = menus.find(m => m.couplePrice !== null)?.couplePrice;
 
     // ═══════════════════════════════════════════════════════════════
     // PAGE 1: Fundraiser Details + Bundle Meals
@@ -159,40 +192,28 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     const locLines = doc.splitTextToSize(input.pickupLocation || 'TBD', CONTENT_W / 2 - 50);
     doc.text(locLines, leftCol + 35, detailsY + 16);
 
-    // Right column: Pricing
+    // Right column: Pricing (each bundle available in both sizes)
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...hexToRgb(secondary));
-    doc.text('PRICING', rightCol, detailsY);
+    doc.text('PRICING (per bundle)', rightCol, detailsY);
 
-    let priceY = detailsY + 8;
-    if (familyBundle) {
+    let priceY = detailsY + 9;
+    if (globalFamilyPrice !== null && globalFamilyPrice !== undefined) {
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...textDark);
-        doc.text(`Family Size:`, rightCol, priceY);
+        doc.text('Family Size:', rightCol, priceY);
         doc.setTextColor(...hexToRgb(primary));
-        doc.text(`$${familyBundle.price.toFixed(2)}`, rightCol + 28, priceY);
-        priceY += 8;
+        doc.text(`$${globalFamilyPrice.toFixed(2)}`, rightCol + 28, priceY);
+        priceY += 9;
     }
-    if (coupleBundle) {
+    if (globalCouplePrice !== null && globalCouplePrice !== undefined) {
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...textDark);
-        doc.text(`Serves 2:`, rightCol, priceY);
+        doc.text('Serves 2:', rightCol, priceY);
         doc.setTextColor(...hexToRgb(primary));
-        doc.text(`$${coupleBundle.price.toFixed(2)}`, rightCol + 28, priceY);
-        priceY += 8;
-    }
-    // If bundles don't match standard tiers, show them generically
-    if (!familyBundle && !coupleBundle) {
-        input.bundles.slice(0, 2).forEach((b, i) => {
-            doc.setFontSize(10);
-            doc.setFont('helvetica', 'bold');
-            doc.setTextColor(...textDark);
-            doc.text(`${b.name}:`, rightCol, priceY + i * 8);
-            doc.setTextColor(...hexToRgb(primary));
-            doc.text(`$${b.price.toFixed(2)}`, rightCol + 28, priceY + i * 8);
-        });
+        doc.text(`$${globalCouplePrice.toFixed(2)}`, rightCol + 28, priceY);
     }
 
     y += detailsBoxH + 6;
@@ -215,80 +236,81 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     });
     y += 22;
 
-    // ── BUNDLE MEAL SECTIONS (side-by-side) ──
+    // ── BUNDLE MEAL CARDS (Family Size meals only) ──
     doc.setFontSize(13);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...textDark);
     doc.text("What's Included", PAGE_W / 2, y + 4, { align: 'center' });
-    y += 10;
 
-    const displayBundles = input.bundles.slice(0, 2);
-    const bundleColW = displayBundles.length === 1
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textLight);
+    doc.text('(Family Size shown  -  also available in Serves 2)', PAGE_W / 2, y + 9, { align: 'center' });
+    y += 14;
+
+    const bundleColW = menus.length === 1
         ? CONTENT_W
         : (CONTENT_W - 8) / 2;
 
-    displayBundles.forEach((bundle, i) => {
-        const bx = displayBundles.length === 1
+    // Pre-calculate card heights so both cards can be the same height
+    const mealLineH = 4.5;
+    const headerH = 14;
+    const paddingH = 6;
+    const cardHeights = menus.map(menu => {
+        let totalLines = 0;
+        menu.meals.forEach(meal => {
+            const lines = doc.splitTextToSize(`-  ${meal}`, bundleColW - 14);
+            totalLines += lines.length;
+        });
+        return headerH + totalLines * mealLineH + paddingH;
+    });
+    const uniformCardH = Math.max(...cardHeights, 40);
+
+    menus.forEach((menu, i) => {
+        const bx = menus.length === 1
             ? MARGIN
             : MARGIN + i * (bundleColW + 8);
-        let by = y;
+        const by = y;
 
-        // Bundle card background
+        // Card background
         doc.setFillColor(248, 250, 252); // slate-50
         doc.setDrawColor(...hexToRgb(secondary));
         doc.setLineWidth(0.6);
+        roundedRect(doc, bx, by, bundleColW, uniformCardH, 4, 'FD');
 
-        // Calculate card height based on meals – each meal line ~4mm, header ~14mm, padding ~6mm
-        const mealLineH = 4;
-        const headerH = 16;
-        const paddingH = 6;
-        const cardHeight = headerH + bundle.meals.length * mealLineH + paddingH;
-        roundedRect(doc, bx, by, bundleColW, Math.max(cardHeight, 40), 4, 'FD');
-
-        // Bundle name + serving tier + price header
-        const servingLabel = bundle.servingTier === 'couple'
-            ? 'Serves 2'
-            : bundle.servingTier === 'family'
-                ? 'Family Size'
-                : bundle.servingTier;
-
-        doc.setFontSize(10);
+        // Card title: "BUNDLE 1" / "BUNDLE 2" (or base name if only 1)
+        const cardTitle = menus.length === 1
+            ? menu.baseName.toUpperCase()
+            : `BUNDLE ${i + 1}`;
+        doc.setFontSize(11);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...hexToRgb(secondary));
-        doc.text(bundle.name.toUpperCase(), bx + bundleColW / 2, by + 6, { align: 'center' });
-
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...textLight);
-        doc.text(`${servingLabel}  •  $${bundle.price.toFixed(2)}`, bx + bundleColW / 2, by + 11, { align: 'center' });
+        doc.text(cardTitle, bx + bundleColW / 2, by + 7, { align: 'center' });
 
         // Divider line
         doc.setDrawColor(...hexToRgb(primary));
         doc.setLineWidth(0.4);
-        doc.line(bx + 6, by + 14, bx + bundleColW - 6, by + 14);
+        doc.line(bx + 6, by + 11, bx + bundleColW - 6, by + 11);
 
-        // Meal list — show ALL meals
-        let my = by + 18;
+        // Meal list
+        let my = by + 16;
         doc.setFontSize(8.5);
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(30, 41, 59);
-        if (bundle.meals.length > 0) {
-            bundle.meals.forEach((meal) => {
-                const mealText = `✔  ${meal}`;
-                const lines = doc.splitTextToSize(mealText, bundleColW - 12);
-                doc.text(lines, bx + 6, my);
+        if (menu.meals.length > 0) {
+            menu.meals.forEach((meal) => {
+                const mealText = `-  ${meal}`;
+                const lines = doc.splitTextToSize(mealText, bundleColW - 14);
+                doc.text(lines, bx + 7, my);
                 my += lines.length * mealLineH;
             });
         } else {
             doc.setTextColor(...textLight);
-            doc.text('Meals to be announced', bx + 6, my);
+            doc.text('Meals to be announced', bx + 7, my);
         }
     });
 
-    // Advance past the tallest bundle card
-    const maxMealCount = Math.max(...displayBundles.map(b => b.meals.length), 0);
-    const tallestCard = 16 + maxMealCount * 4 + 6;
-    y += Math.max(tallestCard, 40) + 6;
+    y += uniformCardH + 6;
 
     // ── QR CODE + CTA ──
     try {
@@ -343,8 +365,10 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     doc.setFontSize(18);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...textDark);
-    doc.text(`${input.organizationName} — Fundraiser Order Form`, PAGE_W / 2, y + 6, { align: 'center' });
-    y += 12;
+    const formTitle = `${input.organizationName} - Fundraiser Order Form`;
+    const formTitleLines = doc.splitTextToSize(formTitle, CONTENT_W);
+    doc.text(formTitleLines, PAGE_W / 2, y + 6, { align: 'center' });
+    y += formTitleLines.length * 7 + 4;
     doc.setFillColor(...hexToRgb(primary));
     doc.rect(MARGIN, y, CONTENT_W, 1, 'F');
     y += 8;
@@ -374,56 +398,63 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     doc.line(formX + 96, y + 1, MARGIN + CONTENT_W - 6, y + 1);
     y += 14;
 
-    // ── Bundle Order Table ──
-    // Table header
+    // ── Order Table ──
+    // Header row
     doc.setFillColor(...hexToRgb(secondary));
     roundedRect(doc, MARGIN, y, CONTENT_W, 10, 3, 'F');
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(255, 255, 255);
     doc.text('Bundle', MARGIN + 6, y + 7);
-    doc.text('Serving Size', MARGIN + 60, y + 7);
-    doc.text('Price', MARGIN + 110, y + 7);
+    doc.text('Size', MARGIN + 68, y + 7);
+    doc.text('Price', MARGIN + 108, y + 7);
     doc.text('Qty', MARGIN + 135, y + 7);
     doc.text('Total', MARGIN + 155, y + 7);
     y += 12;
 
-    // Table rows — one row per bundle
+    // One section per menu, with sub-rows for Family Size and Serves 2
     doc.setFontSize(9);
-    displayBundles.forEach((bundle, i) => {
-        const rowY = y + i * 14;
-        const servLabel = bundle.servingTier === 'couple'
-            ? 'Serves 2'
-            : bundle.servingTier === 'family'
-                ? 'Family Size (5-6)'
-                : bundle.servingTier;
+    menus.forEach((menu, mi) => {
+        const menuLabel = menus.length === 1 ? menu.baseName : `Bundle ${mi + 1}`;
 
-        // Alternating row bg
-        if (i % 2 === 0) {
+        // Family Size row
+        if (mi % 2 === 0) {
             doc.setFillColor(248, 250, 252);
-            doc.rect(MARGIN, rowY - 3, CONTENT_W, 12, 'F');
+            doc.rect(MARGIN, y - 3, CONTENT_W, 12, 'F');
         }
-
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...textDark);
-        doc.text(bundle.name, MARGIN + 6, rowY + 4);
-
+        doc.text(menuLabel, MARGIN + 6, y + 4);
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(...textLight);
-        doc.text(servLabel, MARGIN + 60, rowY + 4);
-
+        doc.text('Family Size', MARGIN + 68, y + 4);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...hexToRgb(primary));
-        doc.text(`$${bundle.price.toFixed(2)}`, MARGIN + 110, rowY + 4);
-
-        // Qty and Total blanks
+        const fp = menu.familyPrice ?? globalFamilyPrice ?? 0;
+        doc.text(`$${fp.toFixed(2)}`, MARGIN + 108, y + 4);
         doc.setDrawColor(203, 213, 225);
         doc.setLineWidth(0.3);
-        doc.line(MARGIN + 132, rowY + 5, MARGIN + 148, rowY + 5);
-        doc.line(MARGIN + 152, rowY + 5, MARGIN + CONTENT_W - 6, rowY + 5);
+        doc.line(MARGIN + 132, y + 5, MARGIN + 148, y + 5);
+        doc.line(MARGIN + 152, y + 5, MARGIN + CONTENT_W - 6, y + 5);
+        y += 12;
+
+        // Serves 2 row
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...textDark);
+        doc.text('', MARGIN + 6, y + 4); // blank bundle name for sub-row
+        doc.setTextColor(...textLight);
+        doc.text('Serves 2', MARGIN + 68, y + 4);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...hexToRgb(primary));
+        const cp = menu.couplePrice ?? globalCouplePrice ?? 0;
+        doc.text(`$${cp.toFixed(2)}`, MARGIN + 108, y + 4);
+        doc.setDrawColor(203, 213, 225);
+        doc.line(MARGIN + 132, y + 5, MARGIN + 148, y + 5);
+        doc.line(MARGIN + 152, y + 5, MARGIN + CONTENT_W - 6, y + 5);
+        y += 14;
     });
 
-    y += displayBundles.length * 14 + 6;
+    y += 4;
 
     // Grand total line
     doc.setFontSize(11);
