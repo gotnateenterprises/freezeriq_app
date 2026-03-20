@@ -1,9 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Plus, ExternalLink, Calendar, Target, Megaphone, Loader2, Settings } from 'lucide-react';
+import { Plus, ExternalLink, Calendar, Target, Megaphone, Loader2, Settings, Package } from 'lucide-react';
 import { toast } from 'sonner';
 import { useParams, useRouter } from 'next/navigation';
+
+interface BundleOption {
+    id: string;
+    name: string;
+    price: number | null;
+    is_active: boolean;
+}
 
 interface Fundraiser {
     id: string;
@@ -37,19 +44,95 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
         group_label: ''
     });
 
+    // Bundle assignment state
+    const [allBundles, setAllBundles] = useState<BundleOption[]>([]);
+    const [editingBundlesId, setEditingBundlesId] = useState<string | null>(null);
+    const [selectedBundleIds, setSelectedBundleIds] = useState<Set<string>>(new Set());
+    const [bundleCountMap, setBundleCountMap] = useState<Record<string, number>>({});
+    const [savingBundles, setSavingBundles] = useState(false);
+
     useEffect(() => {
         fetchCampaigns();
+        fetchAllBundles();
     }, [customerId]);
+
+    async function fetchAllBundles() {
+        try {
+            const res = await fetch('/api/bundles');
+            const data = await res.json();
+            if (res.ok) setAllBundles(data.filter((b: any) => b.is_active));
+        } catch (error) {
+            console.error('Failed to load bundles', error);
+        }
+    }
 
     async function fetchCampaigns() {
         try {
             const res = await fetch(`/api/campaigns?customerId=${customerId}`);
             const data = await res.json();
-            if (res.ok) setCampaigns(data);
+            if (res.ok) {
+                setCampaigns(data);
+                // Fetch bundle counts for each campaign
+                const counts: Record<string, number> = {};
+                await Promise.all(data.map(async (c: Fundraiser) => {
+                    try {
+                        const r = await fetch(`/api/campaigns/${c.id}/bundles`);
+                        const d = await r.json();
+                        counts[c.id] = d.bundleIds?.length || 0;
+                    } catch {
+                        counts[c.id] = 0;
+                    }
+                }));
+                setBundleCountMap(counts);
+            }
         } catch (error) {
             console.error('Failed to load campaigns', error);
         } finally {
             setLoading(false);
+        }
+    }
+
+    async function openBundleEditor(campaignId: string) {
+        setEditingLabelsId(null); // close labels panel if open
+        setEditingBundlesId(campaignId);
+        try {
+            const res = await fetch(`/api/campaigns/${campaignId}/bundles`);
+            const data = await res.json();
+            setSelectedBundleIds(new Set(data.bundleIds || []));
+        } catch {
+            setSelectedBundleIds(new Set());
+        }
+    }
+
+    function toggleBundleSelection(bundleId: string) {
+        setSelectedBundleIds(prev => {
+            const next = new Set(prev);
+            if (next.has(bundleId)) next.delete(bundleId);
+            else next.add(bundleId);
+            return next;
+        });
+    }
+
+    async function saveBundleAssignments(campaignId: string) {
+        setSavingBundles(true);
+        try {
+            const res = await fetch(`/api/campaigns/${campaignId}/bundles`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bundleIds: Array.from(selectedBundleIds) })
+            });
+            if (res.ok) {
+                toast.success('Bundle assignments saved!');
+                setEditingBundlesId(null);
+                setBundleCountMap(prev => ({ ...prev, [campaignId]: selectedBundleIds.size }));
+            } else {
+                const err = await res.json();
+                toast.error(err.error || 'Failed to save');
+            }
+        } catch {
+            toast.error('Failed to save bundle assignments');
+        } finally {
+            setSavingBundles(false);
         }
     }
 
@@ -244,6 +327,15 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                         <Calendar className="w-4 h-4 text-slate-400" />
                                         <span>Ends: {campaign.end_date ? new Date(campaign.end_date).toLocaleDateString() : 'No date set'}</span>
                                     </div>
+                                    <div className="flex items-center gap-1.5">
+                                        <Package className="w-4 h-4 text-slate-400" />
+                                        <span>
+                                            {bundleCountMap[campaign.id]
+                                                ? `${bundleCountMap[campaign.id]} bundle${bundleCountMap[campaign.id] !== 1 ? 's' : ''} assigned`
+                                                : 'All bundles (default)'
+                                            }
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
 
@@ -254,7 +346,15 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                 </div>
                                 <div className="flex gap-2">
                                     <button
+                                        onClick={() => openBundleEditor(campaign.id)}
+                                        className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 rounded-lg transition-colors"
+                                        title="Assign Bundles"
+                                    >
+                                        <Package className="w-4 h-4" />
+                                    </button>
+                                    <button
                                         onClick={() => {
+                                            setEditingBundlesId(null); // close bundles panel if open
                                             setEditingLabelsId(campaign.id);
                                             setEditData({
                                                 participant_label: campaign.participant_label || 'Seller',
@@ -287,7 +387,7 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                             </div>
                         </div>
 
-                        {/* Inline Edit Mode */}
+                        {/* Inline Label Edit */}
                         {editingLabelsId === campaign.id && (
                             <div className="mt-2 pt-4 border-t border-slate-100 dark:border-slate-700/50 bg-slate-50/50 dark:bg-slate-900/20 p-4 rounded-xl">
                                 <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-3">Update Labels</p>
@@ -322,6 +422,66 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                     >
                                         Save Labels
                                     </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Inline Bundle Assignment */}
+                        {editingBundlesId === campaign.id && (
+                            <div className="mt-2 pt-4 border-t border-slate-100 dark:border-slate-700/50 bg-slate-50/50 dark:bg-slate-900/20 p-4 rounded-xl">
+                                <p className="text-[10px] font-black text-purple-500 uppercase tracking-widest mb-1">Assign Bundles</p>
+                                <p className="text-[10px] text-slate-400 mb-3">Select which bundles appear on this campaign's public page. Leave all unchecked to show all bundles.</p>
+                                {allBundles.length === 0 ? (
+                                    <p className="text-sm text-slate-400 italic">No active bundles found for this business.</p>
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                                        {allBundles.map(bundle => (
+                                            <label
+                                                key={bundle.id}
+                                                className={`flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-all ${
+                                                    selectedBundleIds.has(bundle.id)
+                                                        ? 'border-purple-300 bg-purple-50 dark:bg-purple-900/20 dark:border-purple-700'
+                                                        : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                                                }`}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedBundleIds.has(bundle.id)}
+                                                    onChange={() => toggleBundleSelection(bundle.id)}
+                                                    className="rounded border-slate-300 text-purple-600 focus:ring-purple-500"
+                                                />
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm font-bold text-slate-700 dark:text-slate-200 truncate">{bundle.name}</p>
+                                                    {bundle.price && (
+                                                        <p className="text-[10px] text-slate-400">${Number(bundle.price).toFixed(2)}</p>
+                                                    )}
+                                                </div>
+                                            </label>
+                                        ))}
+                                    </div>
+                                )}
+                                <div className="flex items-center justify-between mt-4">
+                                    <p className="text-[10px] text-slate-400">
+                                        {selectedBundleIds.size === 0
+                                            ? 'No bundles selected — all bundles will be shown'
+                                            : `${selectedBundleIds.size} bundle${selectedBundleIds.size !== 1 ? 's' : ''} selected`
+                                        }
+                                    </p>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => setEditingBundlesId(null)}
+                                            className="text-xs font-bold text-slate-400 hover:text-slate-600"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            onClick={() => saveBundleAssignments(campaign.id)}
+                                            disabled={savingBundles}
+                                            className="text-xs font-bold text-purple-600 hover:text-purple-800 disabled:opacity-50"
+                                        >
+                                            {savingBundles ? 'Saving...' : 'Save Bundles'}
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         )}

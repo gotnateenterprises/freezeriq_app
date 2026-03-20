@@ -17,17 +17,52 @@ import {
     Users,
     MousePointer2,
     Calendar,
-    Target
+    Target,
+    X,
+    Copy,
+    Check
 } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
+import CopyButton from '@/components/coordinator/CopyButton';
 
 export default function SuccessGuide() {
     const params = useParams();
     const token = params.token as string;
     const [campaign, setCampaign] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [isGenerating, setIsGenerating] = useState(false);
+    const [generatedContent, setGeneratedContent] = useState('');
+    const [generatingChannel, setGeneratingChannel] = useState('');
+    const [aiRemaining, setAiRemaining] = useState<number | null>(null);
+    const [previewModal, setPreviewModal] = useState<{ title: string; icon: React.ReactNode; text: string } | null>(null);
+    const [modalCopied, setModalCopied] = useState(false);
+
+    const handleGenerate = async (channel: string) => {
+        setIsGenerating(true);
+        setGeneratingChannel(channel);
+        setGeneratedContent('');
+        try {
+            const res = await fetch(`/api/coordinator/${token}/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ channel })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                toast.error(data.error || 'Generation failed');
+                return;
+            }
+            setGeneratedContent(data.content);
+            setAiRemaining(data.remaining);
+            toast.success(`${channel.charAt(0).toUpperCase() + channel.slice(1)} content generated!`);
+        } catch {
+            toast.error('Network error. Please try again.');
+        } finally {
+            setIsGenerating(false);
+        }
+    };
 
     useEffect(() => {
         if (!token) return;
@@ -184,65 +219,143 @@ export default function SuccessGuide() {
                 <div className="bg-indigo-600 rounded-[2.5rem] p-10 text-white space-y-8">
                     <div className="space-y-2">
                         <h3 className="text-3xl font-black tracking-tight">Social Media Strategy</h3>
-                        <p className="text-indigo-100 font-medium opacity-80 italic">Copy & paste these ideas for maximum reach!</p>
+                        <p className="text-indigo-100 font-medium opacity-80 italic">Ready-to-use templates + AI-powered custom content!</p>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-white/10 rounded-2xl p-6 border border-white/10 hover:bg-white/[0.15] transition-colors">
-                            <Facebook className="mb-4 text-indigo-300" size={32} />
-                            <h4 className="font-black text-lg mb-2">Facebook Post</h4>
-                            <p className="text-sm text-indigo-50 italic">"Dinner is solved! Support [Group Name] by ordering your Freezer Chef meals. We are 45% of the way to our goal! Order here: [Link]"</p>
-                        </div>
-                        <div className="bg-white/10 rounded-2xl p-6 border border-white/10 hover:bg-white/[0.15] transition-colors">
-                            <MessageSquare className="mb-4 text-indigo-300" size={32} />
-                            <h4 className="font-black text-lg mb-2">WhatsApp / Text</h4>
-                            <p className="text-sm text-indigo-50 italic">"Hey everyone! We're raising money for the playground. Checkout our live scoreboard here and grab some easy dinners! 🍲 [Link]"</p>
-                        </div>
-                    </div>
+                    {/* Static Templates — click to preview full text */}
+                    {(() => {
+                        const progress = campaign?.goal_amount ? Math.round((Number(campaign.total_sales || 0) / Number(campaign.goal_amount)) * 100) : 45;
+                        const templates = [
+                            {
+                                key: 'facebook',
+                                title: 'Facebook Post',
+                                icon: <Facebook className="text-indigo-300" size={32} />,
+                                preview: `"Dinner is solved! Support ${campaign?.customer?.name || '[Group Name]'} by ordering your Freezer Chef meals. We are ${progress}% of the way to our goal! Order here: [Link]"`,
+                                fullText: `Dinner is solved! Support ${campaign?.customer?.name || '[Group Name]'} by ordering your Freezer Chef meals. We are ${progress}% of the way to our $${Number(campaign?.goal_amount || 1000).toLocaleString()} goal! Order here: ${publicUrl}`,
+                            },
+                            {
+                                key: 'whatsapp',
+                                title: 'WhatsApp / Text',
+                                icon: <MessageSquare className="text-indigo-300" size={32} />,
+                                preview: `"Hey everyone! We're raising money for ${campaign?.customer?.name || 'the group'}. Check out our live scoreboard and grab some easy dinners! \ud83c\udf72 [Link]"`,
+                                fullText: `Hey everyone! We're raising money for ${campaign?.customer?.name || 'the group'}. Check out our live scoreboard and grab some easy dinners! \ud83c\udf72 ${publicUrl}`,
+                            },
+                            {
+                                key: 'email',
+                                title: 'Email Template',
+                                icon: <Mail className="text-indigo-300" size={32} />,
+                                preview: `"Hi there! I'm reaching out because ${campaign?.customer?.name || 'our organization'} is running a fundraiser. We're selling Freezer Chef meals \u2014 delicious, easy-to-prepare meals..."`,
+                                fullText: `Hi there!\n\nI'm reaching out because ${campaign?.customer?.name || 'our organization'} is running the "${campaign?.name || 'our'}" fundraiser! We're selling Freezer Chef meals \u2014 delicious, easy-to-prepare meals you can stock in your freezer.\n\n\ud83c\udfaf Our goal: $${Number(campaign?.goal_amount || 1000).toLocaleString()}\n\ud83d\udcca Progress: ${progress}%\n\ud83d\udd17 Order here: ${publicUrl}\n\nEvery order helps us get closer to our goal. Thank you for your support!\n\nWarmly,\n${campaign?.customer?.name || 'The Team'}`,
+                                span2: true,
+                            },
+                        ];
+                        return (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {templates.map((t) => (
+                                    <button
+                                        key={t.key}
+                                        onClick={() => { setPreviewModal({ title: t.title, icon: t.icon, text: t.fullText }); setModalCopied(false); }}
+                                        className={`bg-white/10 rounded-2xl p-6 border border-white/10 text-left hover:bg-white/20 hover:border-indigo-300/50 transition-all cursor-pointer active:scale-[0.98] group ${
+                                            (t as any).span2 ? 'md:col-span-2' : ''
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between mb-4">
+                                            {t.icon}
+                                            <span className="text-xs font-bold text-indigo-200 bg-white/10 px-2 py-1 rounded-lg group-hover:bg-white/20 transition-colors">👁 Preview &amp; Copy</span>
+                                        </div>
+                                        <h4 className="font-black text-lg mb-2">{t.title}</h4>
+                                        <p className="text-sm text-indigo-50 italic line-clamp-2">{t.preview}</p>
+                                    </button>
+                                ))}
+                            </div>
+                        );
+                    })()}
 
-                    {/* Gemini AI Powered Content Section */}
+                    {/* AI Generator Section */}
                     <div className="pt-8 border-t border-white/10 space-y-6">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-indigo-400 rounded-xl flex items-center justify-center text-white shadow-lg">
-                                <Rocket size={20} />
-                            </div>
-                            <div>
-                                <h4 className="text-xl font-black tracking-tight">AI Content Helper (Gemini)</h4>
-                                <p className="text-indigo-200 text-xs font-bold uppercase tracking-widest">Powered by Google Gemini</p>
-                            </div>
-                        </div>
-
-                        <div className="bg-indigo-900/40 rounded-3xl p-6 border border-indigo-400/30 space-y-4">
-                            <p className="text-sm text-indigo-100 leading-relaxed font-medium">
-                                Struggling to write the perfect description? Use Google's Gemini AI to do it for you!
-                                Paste one of these prompts into <a href="https://gemini.google.com" target="_blank" className="font-black underline hover:text-white transition-colors">Gemini</a> for instant results:
-                            </p>
-
-                            <div className="space-y-3">
-                                <div className="bg-white/5 rounded-xl p-4 border border-white/10 group cursor-pointer hover:bg-white/10 transition-all"
-                                    onClick={() => {
-                                        navigator.clipboard.writeText(`Write an energetic Facebook post for our fundraiser "${campaign?.name}". Our goal is to raise $${campaign?.goal_amount}. We are selling Freezer Chef meals. Mention that dinner is finally solved!`);
-                                        toast.success("AI Prompt Copied!");
-                                    }}>
-                                    <p className="text-xs font-black text-indigo-300 uppercase tracking-widest mb-1">Facebook Post Prompt</p>
-                                    <p className="text-[11px] text-indigo-50 font-mono italic">"Write an energetic Facebook post for our fundraiser..."</p>
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-indigo-400 rounded-xl flex items-center justify-center text-white shadow-lg">
+                                    <Rocket size={20} />
                                 </div>
-                                <div className="bg-white/5 rounded-xl p-4 border border-white/10 group cursor-pointer hover:bg-white/10 transition-all"
-                                    onClick={() => {
-                                        navigator.clipboard.writeText(`Write a short, friendly text message to send to my friends and family about the "${campaign?.name}" fundraiser. Mention solving dinner with Freezer Chef and include this link: ${publicUrl}`);
-                                        toast.success("AI Prompt Copied!");
-                                    }}>
-                                    <p className="text-xs font-black text-indigo-300 uppercase tracking-widest mb-1">Text Message Prompt</p>
-                                    <p className="text-[11px] text-indigo-50 font-mono italic">"Write a short, friendly text message to my friends..."</p>
+                                <div>
+                                    <h4 className="text-xl font-black tracking-tight">AI Content Generator</h4>
+                                    <p className="text-indigo-200 text-xs font-bold uppercase tracking-widest">Powered by Google Gemini</p>
                                 </div>
                             </div>
+                            <div className="text-right">
+                                <p className="text-xs font-black text-indigo-200 uppercase tracking-widest">
+                                    {aiRemaining !== null ? `${aiRemaining} of 40 remaining` : ''}
+                                </p>
+                            </div>
                         </div>
 
-                        <div className="pt-2">
-                            <p className="text-center font-black uppercase text-xs tracking-[0.2em] text-indigo-200">
-                                Pro Tip: The more details you give Gemini, the better the copy!
-                            </p>
+                        <p className="text-sm text-indigo-100 leading-relaxed font-medium">
+                            Generate custom marketing copy for any channel — instantly! Your fundraiser details are automatically included.
+                        </p>
+
+                        <div className="grid grid-cols-2 gap-3">
+                            {[
+                                { channel: 'facebook', label: '📘 Facebook', icon: Facebook },
+                                { channel: 'text', label: '💬 Text / SMS', icon: MessageSquare },
+                                { channel: 'email', label: '📧 Email', icon: Mail },
+                                { channel: 'instagram', label: '📸 Instagram', icon: Target }
+                            ].map(({ channel, label }) => (
+                                <button
+                                    key={channel}
+                                    onClick={() => handleGenerate(channel)}
+                                    disabled={isGenerating || aiRemaining === 0}
+                                    className={`p-4 rounded-2xl border text-left transition-all ${
+                                        aiRemaining === 0
+                                            ? 'bg-white/5 border-white/10 opacity-50 cursor-not-allowed'
+                                            : 'bg-white/5 border-white/10 hover:bg-white/15 hover:border-indigo-300/50 cursor-pointer active:scale-95'
+                                    }`}
+                                >
+                                    <p className="text-sm font-black">{label}</p>
+                                    <p className="text-[10px] text-indigo-200 mt-1">
+                                        {isGenerating && generatingChannel === channel ? 'Generating...' : 'Click to generate'}
+                                    </p>
+                                </button>
+                            ))}
                         </div>
+
+                        {aiRemaining === 0 && (
+                            <p className="text-center text-xs font-bold text-indigo-200 bg-white/5 rounded-xl p-3">
+                                ✅ You&apos;ve used all 40 AI generations! Use the templates above or copy and edit previous results.
+                            </p>
+                        )}
+
+                        {isGenerating && (
+                            <div className="flex items-center justify-center gap-3 py-6">
+                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                <p className="text-sm font-bold text-indigo-100 animate-pulse">Creating your {generatingChannel} content...</p>
+                            </div>
+                        )}
+
+                        {generatedContent && !isGenerating && (
+                            <div className="bg-indigo-900/40 rounded-3xl p-6 border border-indigo-400/30 space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <p className="text-xs font-black text-indigo-300 uppercase tracking-widest">Generated Content</p>
+                                    <CopyButton text={generatedContent} label="Content Copied!" />
+                                </div>
+                                <textarea
+                                    value={generatedContent}
+                                    onChange={(e) => setGeneratedContent(e.target.value)}
+                                    rows={5}
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm text-white font-medium resize-y focus:outline-none focus:ring-2 focus:ring-indigo-400/50"
+                                />
+                                <div className="flex gap-3">
+                                    {generatingChannel === 'facebook' && (
+                                        <button
+                                            onClick={() => window.open('https://www.facebook.com/', '_blank')}
+                                            className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 px-4 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all active:scale-95"
+                                        >
+                                            <Facebook size={16} /> Open Facebook
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -270,6 +383,70 @@ export default function SuccessGuide() {
                     </Link>
                 </div>
             </main>
+
+            {/* Preview Modal */}
+            {previewModal && (
+                <div
+                    className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                    onClick={() => setPreviewModal(null)}
+                >
+                    <div
+                        className="w-full max-w-lg bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 duration-300"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Modal Header */}
+                        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600">
+                                    {previewModal.icon}
+                                </div>
+                                <h3 className="text-lg font-black text-slate-900">{previewModal.title}</h3>
+                            </div>
+                            <button
+                                onClick={() => setPreviewModal(null)}
+                                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
+                            >
+                                <X size={16} className="text-slate-500" />
+                            </button>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div className="px-6 py-6 max-h-[60vh] overflow-y-auto">
+                            <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200">
+                                <p className="text-sm text-slate-700 whitespace-pre-line leading-relaxed font-medium">
+                                    {previewModal.text}
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="px-6 py-5 border-t border-slate-100 flex gap-3">
+                            <button
+                                onClick={async () => {
+                                    await navigator.clipboard.writeText(previewModal.text);
+                                    setModalCopied(true);
+                                    toast.success(`${previewModal.title} copied!`);
+                                    setTimeout(() => setModalCopied(false), 2500);
+                                }}
+                                className={`flex-1 py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all active:scale-95 ${
+                                    modalCopied
+                                        ? 'bg-emerald-500 text-white'
+                                        : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/20'
+                                }`}
+                            >
+                                {modalCopied ? <Check size={18} /> : <Copy size={18} />}
+                                {modalCopied ? 'Copied to Clipboard!' : 'Copy Full Text'}
+                            </button>
+                            <button
+                                onClick={() => setPreviewModal(null)}
+                                className="px-5 py-3.5 rounded-2xl font-bold text-sm bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all active:scale-95"
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Sticky Mobile Share */}
             <div className="fixed bottom-6 left-0 right-0 px-6 z-40 md:hidden">

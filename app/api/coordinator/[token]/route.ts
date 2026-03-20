@@ -37,6 +37,8 @@ export async function GET(
                         business_id: true,
                         business: {
                             select: {
+                                name: true,
+                                logo_url: true,
                                 plan: true,
                                 subscription_status: true
                             }

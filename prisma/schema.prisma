@@ -253,6 +253,7 @@ model Bundle {
   catalog            Catalog?           @relation(fields: [catalog_id], references: [id])
   order_items        OrderItem[]
   storefront_configs StorefrontConfig[]
+  campaign_bundles   CampaignBundle[]
 
   @@map("bundles")
 }
@@ -482,11 +483,41 @@ model FundraiserCampaign {
   participant_label     String     @default("Seller")
   group_label           String?
   is_group_enabled      Boolean    @default(false)
+  ai_generation_count   Int        @default(0)
   documents             Document[]
   customer              Customer   @relation(fields: [customer_id], references: [id], onDelete: Cascade)
   orders                Order[]
+  campaign_bundles      CampaignBundle[]
+  coordinator_actions   CoordinatorActionEvent[]
 
   @@map("fundraiser_campaigns")
+}
+
+model CoordinatorActionEvent {
+  id          String             @id @default(uuid())
+  campaign_id String
+  action_type String
+  source      String?            // "mobile" | "desktop"
+  metadata    Json?
+  created_at  DateTime           @default(now())
+  campaign    FundraiserCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+
+  @@index([campaign_id])
+  @@index([created_at])
+  @@map("coordinator_action_events")
+}
+
+model CampaignBundle {
+  id          String             @id @default(uuid())
+  campaign_id String
+  bundle_id   String
+  position    Int                @default(0)
+  campaign    FundraiserCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+  bundle      Bundle             @relation(fields: [bundle_id], references: [id], onDelete: Cascade)
+
+  @@unique([campaign_id, bundle_id])
+  @@index([campaign_id])
+  @@map("campaign_bundles")
 }
 
 model TrainingResource {

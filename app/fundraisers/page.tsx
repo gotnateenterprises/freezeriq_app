@@ -175,62 +175,62 @@ export default function FundraisersPage() {
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-700">
-                                <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest">Campaign</th>
-                                <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest">Partner</th>
-                                <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest">Status</th>
-                                <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest">Dates</th>
-                                <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest text-right">Progress</th>
-                                <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest"></th>
+                                <th className="px-5 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[28%]">Campaign</th>
+                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[20%]">Partner</th>
+                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[12%]">Status</th>
+                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[12%]">Dates</th>
+                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest text-right w-[18%]">Progress</th>
+                                <th className="px-2 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[10%]"></th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50">
                             {isLoading ? (
                                 <tr>
-                                    <td colSpan={6} className="px-8 py-20 text-center text-slate-400 animate-pulse font-bold">Loading Fundraisers...</td>
+                                    <td colSpan={6} className="px-5 py-20 text-center text-slate-400 animate-pulse font-bold">Loading Fundraisers...</td>
                                 </tr>
                             ) : filtered.length === 0 ? (
                                 <tr>
-                                    <td colSpan={6} className="px-8 py-20 text-center text-slate-400 italic">No fundraisers found.</td>
+                                    <td colSpan={6} className="px-5 py-20 text-center text-slate-400 italic">No fundraisers found.</td>
                                 </tr>
                             ) : filtered.map(item => (
                                 <tr key={item.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
-                                    <td className="px-8 py-6">
-                                        <div className="flex items-center gap-4">
-                                            <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center text-indigo-600 group-hover:scale-110 transition-transform">
-                                                <Megaphone size={20} />
+                                    <td className="px-5 py-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center text-indigo-600 group-hover:scale-110 transition-transform flex-shrink-0">
+                                                <Megaphone size={16} />
                                             </div>
-                                            <div>
-                                                <p className="font-black text-slate-900 dark:text-white text-lg">{item.name}</p>
-                                                <p className="text-xs font-bold text-slate-400 uppercase tracking-tighter">ID: {item.id.slice(0, 8)}</p>
+                                            <div className="min-w-0">
+                                                <p className="font-black text-slate-900 dark:text-white text-sm leading-tight truncate">{item.name}</p>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">ID: {item.id.slice(0, 8)}</p>
                                             </div>
                                         </div>
                                     </td>
-                                    <td className="px-8 py-6">
+                                    <td className="px-4 py-4">
                                         <div className="flex items-center gap-2">
-                                            <Building2 size={16} className="text-slate-400" />
-                                            <p className="font-bold text-slate-700 dark:text-slate-300">{item.customer.name}</p>
+                                            <Building2 size={14} className="text-slate-400 flex-shrink-0" />
+                                            <p className="font-bold text-sm text-slate-700 dark:text-slate-300 truncate">{item.customer.name}</p>
                                         </div>
                                     </td>
-                                    <td className="px-8 py-6">
-                                        <span className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest ${item.status === 'Active' ? 'bg-emerald-100 text-emerald-700' :
+                                    <td className="px-4 py-4">
+                                        <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${item.status === 'Active' ? 'bg-emerald-100 text-emerald-700' :
                                             item.status === 'Lead' ? 'bg-amber-100 text-amber-700' :
                                                 'bg-slate-100 text-slate-600'
                                             }`}>
                                             {item.status}
                                         </span>
                                     </td>
-                                    <td className="px-8 py-6">
-                                        <div className="space-y-1">
-                                            <p className="text-sm font-bold text-slate-600 dark:text-slate-400">
+                                    <td className="px-4 py-4">
+                                        <div className="space-y-0.5">
+                                            <p className="text-xs font-bold text-slate-600 dark:text-slate-400 whitespace-nowrap">
                                                 {item.start_date ? format(new Date(item.start_date), 'MMM d, yyyy') : 'No date'}
                                             </p>
                                             {item.end_date && (
-                                                <p className="text-[10px] font-black text-slate-300 uppercase">to {format(new Date(item.end_date), 'MMM d, yyyy')}</p>
+                                                <p className="text-[10px] font-black text-slate-300 uppercase whitespace-nowrap">to {format(new Date(item.end_date), 'MMM d, yyyy')}</p>
                                             )}
                                         </div>
                                     </td>
-                                    <td className="px-8 py-6">
-                                        <div className="flex flex-col items-end gap-1.5 min-w-[120px]">
+                                    <td className="px-4 py-4">
+                                        <div className="flex flex-col items-end gap-1">
                                             <div className="flex justify-between w-full text-[10px] font-black font-mono">
                                                 <span className="text-indigo-600">${item.sales_total || 0}</span>
                                                 <span className="text-slate-400">Goal: ${item.goal_amount || 0}</span>
@@ -243,43 +243,34 @@ export default function FundraisersPage() {
                                             </div>
                                         </div>
                                     </td>
-                                    <td className="px-8 py-6 text-right">
-                                        <div className="flex items-center justify-end gap-2">
+                                    <td className="px-2 py-4 text-right">
+                                        <div className="flex items-center justify-end gap-0.5">
                                             {!item.is_placeholder && (
                                                 <Link
                                                     href={`/shop/${item.business_slug}/fundraiser/${item.id}`}
                                                     target="_blank"
-                                                    className="p-3 hover:bg-white dark:hover:bg-slate-700 rounded-2xl text-slate-400 hover:text-pink-600 transition-all shadow-sm border border-transparent hover:border-pink-100 dark:hover:border-pink-900/30"
+                                                    className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-pink-600 transition-all"
                                                     title="View Public Page"
                                                 >
-                                                    <ExternalLink size={20} />
+                                                    <ExternalLink size={15} />
                                                 </Link>
                                             )}
                                             {!item.is_placeholder && item.portal_token && (
                                                 <Link
                                                     href={`/coordinator/${item.portal_token}`}
                                                     target="_blank"
-                                                    className="p-3 hover:bg-white dark:hover:bg-slate-700 rounded-2xl text-slate-400 hover:text-purple-600 transition-all shadow-sm border border-transparent hover:border-purple-100 dark:hover:border-purple-900/30 inline-flex items-center gap-2 group/btn"
-                                                    title="Coordinator Portal Sneak Peek"
+                                                    className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-purple-600 transition-all"
+                                                    title="Coordinator Portal"
                                                 >
-                                                    <span className="text-[10px] font-black uppercase tracking-widest opacity-0 group-hover/btn:opacity-100 transition-opacity whitespace-nowrap">Portal</span>
-                                                    <Users size={20} />
+                                                    <Users size={15} />
                                                 </Link>
                                             )}
                                             <Link
                                                 href={`/customers/${item.customer_id}?tab=fundraisers`}
-                                                className="p-3 hover:bg-white dark:hover:bg-slate-700 rounded-2xl text-slate-400 hover:text-indigo-600 transition-all shadow-sm border border-transparent hover:border-slate-100 inline-flex items-center gap-2 group/btn"
+                                                className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-indigo-600 transition-all"
+                                                title="Manage"
                                             >
-                                                <span className="text-[10px] font-black uppercase tracking-widest opacity-0 group-hover/btn:opacity-100 transition-opacity">Manage</span>
-                                                <ChevronRight size={20} />
-                                            </Link>
-                                            <Link
-                                                href={`/invoices?action=new&customerId=${item.customer_id}`}
-                                                className="p-3 hover:bg-white dark:hover:bg-slate-700 rounded-2xl text-slate-400 hover:text-emerald-600 transition-all shadow-sm border border-transparent hover:border-slate-100 inline-flex items-center gap-2 group/btn"
-                                                title="Create Invoice"
-                                            >
-                                                <span className="text-[10px] font-black uppercase tracking-widest opacity-0 group-hover/btn:opacity-100 transition-opacity">Invoice</span>
-                                                <Receipt size={20} />
+                                                <ChevronRight size={15} />
                                             </Link>
                                         </div>
                                     </td>

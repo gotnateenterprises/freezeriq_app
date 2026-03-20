@@ -95,7 +95,7 @@ const generateMarketingTemplate = (name: string, info: any, campaign?: any) => {
 <p>Hi ${name || 'there'}!</p>
 <p>Great news! Your fundraiser is all set up and ready to go.</p>
 
-<div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 20px 0;">
+${(portalUrl || guideUrl || scoreboardUrl) ? `<div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 20px 0;">
     <h3 style="margin-top: 0; color: #4f46e5;">🚀 Your Coordinator Toolkit</h3>
     <p>We've created a private dashboard for you to track orders and a public scoreboard for your supporters:</p>
     <ul style="padding-left: 20px;">
@@ -103,7 +103,7 @@ const generateMarketingTemplate = (name: string, info: any, campaign?: any) => {
         ${guideUrl ? `<li><strong>Success Guide:</strong> <a href="${guideUrl}">How to Smash Your Goal</a><br><em>(Tips for social media, payments, and promotion)</em></li>` : ''}
         ${scoreboardUrl ? `<li><strong>Public Scoreboard:</strong> <a href="${scoreboardUrl}">${scoreboardUrl}</a><br><em>(Share this with your parents and community!)</em></li>` : ''}
     </ul>
-</div>
+</div>` : ''}
 
 <p>Attached to this email, you'll find your <strong>Offline Marketing Packet</strong>, including:</p>
 <ul>
@@ -307,7 +307,8 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
             const pdfBase64 = doc.output('datauristring').split(',')[1];
             return {
                 filename: `Marketing Packet - ${customer.name}.pdf`,
-                content: pdfBase64
+                content: pdfBase64,
+                contentType: 'application/pdf'
             };
         } catch (e) {
             console.error("Flyer generation failed", e);
@@ -739,8 +740,13 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
                                                 if (res.ok) {
                                                     const blob = await res.blob();
                                                     const buffer = await blob.arrayBuffer();
-                                                    // Convert ArrayBuffer to Base64
-                                                    const base64 = Buffer.from(buffer).toString('base64');
+                                                    // Convert ArrayBuffer to Base64 (browser-safe)
+                                                    const bytes = new Uint8Array(buffer);
+                                                    let binary = '';
+                                                    for (let i = 0; i < bytes.length; i++) {
+                                                        binary += String.fromCharCode(bytes[i]);
+                                                    }
+                                                    const base64 = btoa(binary);
                                                     trackingSheet = {
                                                         filename: 'Freezer_Chef_Order_Tracking.xlsx',
                                                         content: base64,
@@ -748,9 +754,11 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
                                                     };
                                                 } else {
                                                     console.error("Failed to generate tracking sheet");
+                                                    alert("Tracking sheet could not be generated. The email will be sent without it.");
                                                 }
                                             } catch (e) {
                                                 console.error("Error fetching tracking sheet", e);
+                                                alert("Tracking sheet could not be generated. The email will be sent without it.");
                                             }
 
                                             // 3. Attach Both

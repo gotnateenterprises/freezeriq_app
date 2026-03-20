@@ -58,7 +58,7 @@ export default function EmailComposeModal({ isOpen, onClose, onSend, initialSubj
         setAttachments(attachments.filter((_, i) => i !== index));
     };
 
-    const handlePreviewAttachment = (file: { filename: string; content: string }) => {
+    const handlePreviewAttachment = (file: { filename: string; content: string; contentType?: string }) => {
         try {
             const byteCharacters = atob(file.content);
             const byteNumbers = new Array(byteCharacters.length);
@@ -66,7 +66,11 @@ export default function EmailComposeModal({ isOpen, onClose, onSend, initialSubj
                 byteNumbers[i] = byteCharacters.charCodeAt(i);
             }
             const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], { type: 'application/pdf' });
+            const mimeType = file.contentType
+                || (file.filename.endsWith('.xlsx') ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                : file.filename.endsWith('.pdf') ? 'application/pdf'
+                : 'application/octet-stream');
+            const blob = new Blob([byteArray], { type: mimeType });
             const url = URL.createObjectURL(blob);
             window.open(url, '_blank');
             // Clean up URL after some time
