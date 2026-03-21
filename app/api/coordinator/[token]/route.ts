@@ -28,8 +28,8 @@ export async function GET(
     try {
         const { token } = await params;
 
-        // 1. Fetch Campaign with Business Info
-        const campaign = await prisma.fundraiserCampaign.findFirst({
+        // 1. Fetch Campaign with Business Info — try portal_token first, fall back to id
+        let campaign = await prisma.fundraiserCampaign.findFirst({
             where: { portal_token: token },
             include: {
                 customer: {
@@ -68,6 +68,46 @@ export async function GET(
             }
         });
 
+        // Fallback: try looking up by campaign id if portal_token didn't match
+        if (!campaign) {
+            campaign = await prisma.fundraiserCampaign.findFirst({
+                where: { id: token },
+                include: {
+                    customer: {
+                        select: {
+                            name: true,
+                            business_id: true,
+                            business: {
+                                select: {
+                                    name: true,
+                                    logo_url: true,
+                                    plan: true,
+                                    subscription_status: true
+                                }
+                            }
+                        }
+                    },
+                    orders: {
+                        orderBy: { created_at: 'desc' },
+                        select: {
+                            id: true,
+                            participant_name: true,
+                            customer_name: true,
+                            total_amount: true,
+                            created_at: true,
+                            source: true,
+                            items: {
+                                select: {
+                                    quantity: true,
+                                    variant_size: true,
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
         if (!campaign) {
             return NextResponse.json({ error: "Portal not found" }, { status: 404 });
         }
@@ -84,29 +124,34 @@ export async function GET(
         }
 
         // 4. Fetch campaign-assigned bundles (or fallback to all active bundles)
-        const campaignBundles: any[] = await prisma.$queryRaw`
-            SELECT bundle_id FROM campaign_bundles
-            WHERE campaign_id = ${campaign.id}
-            ORDER BY position ASC
-        `;
-        const assignedBundleIds = campaignBundles.map((cb: any) => cb.bundle_id);
+        let bundles: any[] = [];
+        try {
+            const campaignBundles: any[] = await prisma.$queryRaw`
+                SELECT bundle_id FROM campaign_bundles
+                WHERE campaign_id = ${campaign.id}
+                ORDER BY position ASC
+            `;
+            const assignedBundleIds = campaignBundles.map((cb: any) => cb.bundle_id);
 
-        let bundles: any[];
-        if (assignedBundleIds.length > 0) {
-            bundles = await prisma.$queryRaw`
-                SELECT id, name, COALESCE(price, 0) as price, serving_tier FROM bundles
-                WHERE id IN(${Prisma.join(assignedBundleIds)})
-                AND business_id = ${businessId}
-                AND is_active = true
-                ORDER BY array_position(${assignedBundleIds}::text[], id::text)
-            `;
-        } else {
-            bundles = await prisma.$queryRaw`
-                SELECT id, name, COALESCE(price, 0) as price, serving_tier FROM bundles
-                WHERE business_id = ${businessId}
-                AND is_active = true
-                ORDER BY name ASC
-            `;
+            if (assignedBundleIds.length > 0) {
+                bundles = await prisma.$queryRaw`
+                    SELECT id, name, COALESCE(price, 0) as price, serving_tier FROM bundles
+                    WHERE id IN(${Prisma.join(assignedBundleIds)})
+                    AND business_id = ${businessId}
+                    AND is_active = true
+                    ORDER BY array_position(${assignedBundleIds}::text[], id::text)
+                `;
+            } else {
+                bundles = await prisma.$queryRaw`
+                    SELECT id, name, COALESCE(price, 0) as price, serving_tier FROM bundles
+                    WHERE business_id = ${businessId}
+                    AND is_active = true
+                    ORDER BY name ASC
+                `;
+            }
+        } catch (bundleErr) {
+            console.error("Bundle fetch error (non-blocking):", bundleErr);
+            // Continue with empty bundles — don't block portal access
         }
 
         return NextResponse.json({
