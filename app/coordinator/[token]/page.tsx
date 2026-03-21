@@ -115,16 +115,9 @@ export default function CoordinatorPortal() {
     const fetchCampaign = async () => {
         if (!token) return;
 
-        // Gating Check
-        const session = await fetch('/api/auth/session').then(r => r.json());
-        const userPlan = session?.user?.plan;
-        const isSuperAdmin = (session?.user as any)?.isSuperAdmin;
-
-        if (userPlan && userPlan !== 'ENTERPRISE' && userPlan !== 'ULTIMATE' && userPlan !== 'FREE' && !isSuperAdmin) {
-            setHasAccess(false);
-            setIsLoading(false);
-            return;
-        }
+        // Access is validated server-side by the /api/coordinator/[token] route
+        // via portal_token lookup. No client-side plan gating needed — coordinators
+        // are external users who access via private links (CONSTITUTION §15).
 
         try {
             const res = await fetch(`/api/coordinator/${token}`);

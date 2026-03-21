@@ -1,17 +1,51 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, FormEvent } from 'react';
 import { useParams } from 'next/navigation';
-import { CheckCircle, ArrowRight, DollarSign, Calendar, Users, Heart } from 'lucide-react';
+import { CheckCircle, ArrowRight, DollarSign, Users, Heart, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-import StorefrontHero from '@/components/shop/StorefrontHero';
-import StorefrontFooter from '@/components/shop/StorefrontFooter';
+import { toast } from 'sonner';
 
 export default function RaiseFundsPage() {
     const { slug } = useParams();
-    // In a real app, we'd fetch tenant branding here. For now, we'll use defaults or context if available.
-    // For specific tenant color, we might need to fetch or use a layout wrapper.
-    // Standardizing on indigo/emerald for this sales page for now.
+    const [loading, setLoading] = useState(false);
+    const [submitted, setSubmitted] = useState(false);
+    const [formData, setFormData] = useState({
+        name: '',
+        email: '',
+        phone: '',
+        orgName: '',
+        website: '',
+        deliveryLocation: '',
+        cause: '',
+        notes: ''
+    });
+
+    const scrollToForm = () => {
+        document.getElementById('contact-form')?.scrollIntoView({ behavior: 'smooth' });
+    };
+
+    const handleSubmit = async (e: FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        try {
+            const res = await fetch('/api/public/fundraiser-request', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...formData, slug })
+            });
+
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to submit request');
+
+            setSubmitted(true);
+            toast.success('Request submitted! We\'ll be in touch soon.');
+        } catch (err: any) {
+            toast.error(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
@@ -32,7 +66,10 @@ export default function RaiseFundsPage() {
                         Stop selling wrapping paper. Sell healthy, family-friendly freezer meals that your community actually wants.
                     </p>
                     <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
-                        <button className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-xl font-black text-lg transition-all shadow-lg shadow-indigo-500/25 flex items-center gap-2">
+                        <button
+                            onClick={scrollToForm}
+                            className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-xl font-black text-lg transition-all shadow-lg shadow-indigo-500/25 flex items-center gap-2"
+                        >
                             Start a Fundraiser
                             <ArrowRight size={20} />
                         </button>
@@ -47,8 +84,8 @@ export default function RaiseFundsPage() {
             <section className="py-16 px-6 max-w-4xl mx-auto text-center space-y-6">
                 <h2 className="text-3xl font-black text-slate-900 dark:text-white">Simple, Profitable, and Stress-Free!</h2>
                 <p className="text-lg text-slate-600 dark:text-slate-300 leading-relaxed">
-                    When you choose Freezer Chef, you’re offering more than a fundraiser—you’re delivering delicious, homemade-style meals that bring comfort to tables and support to your Cause & Community!
-                    With over 10 years of experience, we know what it takes to make your event a success. Your group <strong>earns 20% of all sales</strong>, and we’re with you every step of the way.
+                    When you choose Freezer Chef, you're offering more than a fundraiser—you're delivering delicious, homemade-style meals that bring comfort to tables and support to your Cause &amp; Community!
+                    With over 10 years of experience, we know what it takes to make your event a success. Your group <strong>earns 20% of all sales</strong>, and we're with you every step of the way.
                 </p>
             </section>
 
@@ -118,61 +155,120 @@ export default function RaiseFundsPage() {
             {/* Contact Form */}
             <section id="contact-form" className="py-24 px-6 bg-slate-50 dark:bg-slate-800/50">
                 <div className="max-w-2xl mx-auto bg-white dark:bg-slate-900 p-8 md:p-12 rounded-[2.5rem] shadow-xl">
-                    <div className="text-center mb-8">
-                        <h2 className="text-3xl font-black mb-3">Request a Fundraiser</h2>
-                        <p className="text-slate-500">Ready to get started? Fill out the form below and we'll be in touch.</p>
-                    </div>
-
-                    <form className="space-y-6">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-2">
-                                <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Full Name *</label>
-                                <input type="text" required className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+                    {submitted ? (
+                        <div className="text-center py-12 space-y-6">
+                            <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto text-emerald-500">
+                                <CheckCircle className="w-10 h-10" />
                             </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Email *</label>
-                                <input type="email" required className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+                            <h2 className="text-3xl font-black text-slate-900 dark:text-white">Request Received!</h2>
+                            <p className="text-slate-500 max-w-md mx-auto">Thank you, {formData.name.split(' ')[0]}! We&apos;ll review your request and be in touch within 1–2 business days.</p>
+                            <Link href={`/shop/${slug}`} className="inline-block mt-4 px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all">
+                                Back to Store
+                            </Link>
+                        </div>
+                    ) : (
+                        <>
+                            <div className="text-center mb-8">
+                                <h2 className="text-3xl font-black mb-3">Request a Fundraiser</h2>
+                                <p className="text-slate-500">Ready to get started? Fill out the form below and we'll be in touch.</p>
                             </div>
-                        </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-2">
-                                <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Phone Number *</label>
-                                <input type="tel" required className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Organization Name *</label>
-                                <input type="text" required className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
-                            </div>
-                        </div>
+                            <form onSubmit={handleSubmit} className="space-y-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Full Name *</label>
+                                        <input
+                                            type="text" required
+                                            value={formData.name}
+                                            onChange={e => setFormData({ ...formData, name: e.target.value })}
+                                            className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Email *</label>
+                                        <input
+                                            type="email" required
+                                            value={formData.email}
+                                            onChange={e => setFormData({ ...formData, email: e.target.value })}
+                                            className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                        />
+                                    </div>
+                                </div>
 
-                        <div className="space-y-2">
-                            <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Website</label>
-                            <input type="url" className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
-                        </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Phone Number *</label>
+                                        <input
+                                            type="tel" required
+                                            value={formData.phone}
+                                            onChange={e => setFormData({ ...formData, phone: e.target.value })}
+                                            className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Organization Name *</label>
+                                        <input
+                                            type="text" required
+                                            value={formData.orgName}
+                                            onChange={e => setFormData({ ...formData, orgName: e.target.value })}
+                                            className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                        />
+                                    </div>
+                                </div>
 
-                        <div className="space-y-2">
-                            <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Delivery Location *</label>
-                            <input type="text" required className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
-                        </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Website</label>
+                                    <input
+                                        type="url"
+                                        value={formData.website}
+                                        onChange={e => setFormData({ ...formData, website: e.target.value })}
+                                        className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                    />
+                                </div>
 
-                        <div className="space-y-2">
-                            <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Tell us about your cause</label>
-                            <textarea rows={3} className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"></textarea>
-                        </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Delivery Location *</label>
+                                    <input
+                                        type="text" required
+                                        value={formData.deliveryLocation}
+                                        onChange={e => setFormData({ ...formData, deliveryLocation: e.target.value })}
+                                        className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                    />
+                                </div>
 
-                        <div className="space-y-2">
-                            <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Notes</label>
-                            <textarea rows={2} className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"></textarea>
-                        </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Tell us about your cause</label>
+                                    <textarea
+                                        rows={3}
+                                        value={formData.cause}
+                                        onChange={e => setFormData({ ...formData, cause: e.target.value })}
+                                        className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                    />
+                                </div>
 
-                        <button type="submit" className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl shadow-lg transition-transform hover:scale-[1.02] active:scale-95">
-                            Submit Request
-                        </button>
-                        <p className="text-xs text-center text-slate-400 mt-4">
-                            Protected by reCAPTCHA and the Google Privacy Policy and Terms of Service.
-                        </p>
-                    </form>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Notes</label>
+                                    <textarea
+                                        rows={2}
+                                        value={formData.notes}
+                                        onChange={e => setFormData({ ...formData, notes: e.target.value })}
+                                        className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                    />
+                                </div>
+
+                                <button
+                                    type="submit"
+                                    disabled={loading}
+                                    className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl shadow-lg transition-transform hover:scale-[1.02] active:scale-95 disabled:opacity-70 flex items-center justify-center gap-2"
+                                >
+                                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Submit Request'}
+                                </button>
+                                <p className="text-xs text-center text-slate-400 mt-4">
+                                    Protected by reCAPTCHA and the Google Privacy Policy and Terms of Service.
+                                </p>
+                            </form>
+                        </>
+                    )}
                 </div>
             </section>
         </div>

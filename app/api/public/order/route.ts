@@ -59,29 +59,34 @@ export async function POST(req: Request) {
         }
 
         // Resolve each item's price from DB — reject if no valid price
-        const resolvedItems = items.map((item: any) => {
-            let serverPrice: number;
+        let resolvedItems: any[];
+        try {
+            resolvedItems = items.map((item: any) => {
+                let serverPrice: number;
 
-            if (item.bundleId === 'manual_upsell') {
-                if (manualUpsellPrice === null || manualUpsellPrice <= 0) {
-                    throw new Error(`Upsell item "${item.name}" has no valid price configured`);
+                if (item.bundleId === 'manual_upsell') {
+                    if (manualUpsellPrice === null || manualUpsellPrice <= 0) {
+                        throw new Error(`Upsell item "${item.name}" has no valid price configured`);
+                    }
+                    serverPrice = manualUpsellPrice;
+                } else if (item.bundleId) {
+                    const dbPrice = bundlePriceMap.get(item.bundleId);
+                    if (dbPrice === undefined) {
+                        throw new Error(`Bundle not found for this business`);
+                    }
+                    if (!dbPrice || dbPrice <= 0) {
+                        throw new Error(`Bundle "${item.name}" has no valid price`);
+                    }
+                    serverPrice = dbPrice;
+                } else {
+                    throw new Error(`Item "${item.name}" has no bundle reference`);
                 }
-                serverPrice = manualUpsellPrice;
-            } else if (item.bundleId) {
-                const dbPrice = bundlePriceMap.get(item.bundleId);
-                if (dbPrice === undefined) {
-                    throw new Error(`Bundle not found for this business`);
-                }
-                if (!dbPrice || dbPrice <= 0) {
-                    throw new Error(`Bundle "${item.name}" has no valid price`);
-                }
-                serverPrice = dbPrice;
-            } else {
-                throw new Error(`Item "${item.name}" has no bundle reference`);
-            }
 
-            return { ...item, serverPrice };
-        });
+                return { ...item, serverPrice };
+            });
+        } catch (validationErr: any) {
+            return NextResponse.json({ error: validationErr.message }, { status: 400 });
+        }
 
         const serverTotal = resolvedItems.reduce(
             (sum: number, item: any) => sum + (item.serverPrice * item.quantity), 0

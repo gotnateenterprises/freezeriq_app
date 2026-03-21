@@ -47,6 +47,56 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
     const handleSubmit = async () => {
         setLoading(true);
         try {
+            // Fundraiser campaign orders: coordinators collect payments externally
+            // (Venmo, cash, check) — use the offline /api/public/order path.
+            if (campaignId) {
+                const res = await fetch('/api/public/order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        items,
+                        customer: formData,
+                        businessId,
+                        slug,
+                        campaignId
+                    })
+                });
+
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to place order');
+
+                setPaymentData(data.paymentData);
+                setStep('success');
+                toast.success('Order placed successfully!');
+                return;
+            }
+
+            // Regular storefront orders: attempt Stripe Checkout first.
+            // /api/checkout/session creates the DB order + returns a Stripe URL.
+            const stripeRes = await fetch('/api/checkout/session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    businessId,
+                    items,
+                    orderTotal: cartTotal,
+                    customerName: formData.name,
+                    customerEmail: formData.email,
+                    customerPhone: formData.phone,
+                    customerNotes: formData.notes
+                })
+            });
+
+            const stripeData = await stripeRes.json();
+
+            if (stripeRes.ok && stripeData.url) {
+                // Redirect to Stripe Checkout — payment collected on tenant's connected account
+                window.location.href = stripeData.url;
+                return;
+            }
+
+            // Stripe not available (tenant hasn't connected Stripe) — fall back to
+            // offline-payment /api/public/order path so the order is still captured.
             const res = await fetch('/api/public/order', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -54,8 +104,7 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
                     items,
                     customer: formData,
                     businessId,
-                    slug,
-                    campaignId
+                    slug
                 })
             });
 

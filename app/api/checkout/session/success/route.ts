@@ -37,6 +37,11 @@ export async function GET(req: Request) {
             return NextResponse.json({ success: true, orderId: existingOrder.id });
         }
 
+        if (existingOrder.status !== 'pending') {
+            // Only promote orders awaiting payment confirmation
+            return new NextResponse('Order not eligible for payment confirmation', { status: 400 });
+        }
+
         // 2. Fetch business
         const business = await prisma.business.findUnique({
             where: { id: businessId }

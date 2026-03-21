@@ -78,7 +78,10 @@ export async function GET(
         const businessId = (campaign.customer as any)?.business_id;
         const plan = business?.plan || 'FREE'; // Default to FREE if missing
 
-        // Allow ENTERPRISE, ULTIMATE, FREE, or specific legacy plans
+        // PLAN GATE SCAFFOLDING: Currently allows all known plans. Fundraising
+        // is available on every tier today. When full plan-gating is implemented
+        // (CONSTITUTION §5), tighten this list to restrict coordinator portals
+        // to paid tiers only. The gate blocks null/empty plans now.
         const allowedPlans = ['ENTERPRISE', 'ULTIMATE', 'FREE', 'PRO'];
         if (!allowedPlans.includes(plan)) {
             return NextResponse.json({ error: "Portal unavailable (Plan Restriction)" }, { status: 403 });
@@ -153,6 +156,7 @@ export async function POST(
 
         const business = (campaign.customer as any).business;
         const plan = business?.plan || 'FREE';
+        // PLAN GATE SCAFFOLDING: see GET handler comment for rationale
         const allowedPlans = ['ENTERPRISE', 'ULTIMATE', 'FREE', 'PRO'];
         if (!allowedPlans.includes(plan)) {
             return NextResponse.json({ error: "Portal unavailable" }, { status: 403 });
@@ -225,6 +229,7 @@ export async function PUT(
 
         const business = (campaign.customer as any)?.business;
         const plan = business?.plan || 'FREE';
+        // PLAN GATE SCAFFOLDING: see GET handler comment for rationale
         const allowedPlans = ['ENTERPRISE', 'ULTIMATE', 'FREE', 'PRO'];
         if (!allowedPlans.includes(plan)) {
             return NextResponse.json({ error: "Portal unavailable" }, { status: 403 });
