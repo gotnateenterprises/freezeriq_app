@@ -17,9 +17,27 @@ export async function POST(req: Request) {
             return new NextResponse('Business not found', { status: 404 });
         }
 
-        // @ts-ignore
-        if (!business.stripe_account_id || (process.env.NODE_ENV !== 'development' && !business.charges_enabled)) {
+        // Resolve Stripe Connected Account from Integration (source of truth)
+        const stripeIntegration = await prisma.integration.findUnique({
+            where: {
+                business_id_provider: {
+                    business_id: businessId,
+                    provider: 'stripe'
+                }
+            }
+        });
+
+        const connectedAccountId = stripeIntegration?.access_token;
+
+        if (!connectedAccountId) {
             return NextResponse.json({ error: 'Checkout is temporarily unavailable for this kitchen (Stripe Onboarding Incomplete).' }, { status: 400 });
+        }
+
+        if (process.env.NODE_ENV !== 'development') {
+            const acct = await stripe.accounts.retrieve(connectedAccountId);
+            if (!acct.charges_enabled) {
+                return NextResponse.json({ error: 'Checkout is temporarily unavailable for this kitchen (Stripe Onboarding Incomplete).' }, { status: 400 });
+            }
         }
 
         // 2. Resolve Customer (Optional: if they are logged into the Account Portal)
@@ -47,15 +65,14 @@ export async function POST(req: Request) {
             };
         });
 
-        // 4. Calculate Application Fee (FreezerIQ SaaS Monitization)
-        // Order Total is expected in dollars (e.g., 50.00). Stripe uses cents.
+        // 4. Calculate Application Fee (FreezerIQ SaaS Monetization)
+        // TODO: Platform fee configuration not yet implemented. Set to 0 until fee settings are built.
         const totalAmountCents = Math.round(orderTotal * 100);
         let applicationFeeAmountCents = 0;
+        const platformFeePercent = 0;
 
-        // @ts-ignore
-        if (business.platform_fee_percent > 0) {
-            // @ts-ignore
-            applicationFeeAmountCents = Math.round(totalAmountCents * (business.platform_fee_percent / 100));
+        if (platformFeePercent > 0) {
+            applicationFeeAmountCents = Math.round(totalAmountCents * (platformFeePercent / 100));
         }
 
         // 5. Generate Database Order First (Pending Stripe Payment)
@@ -78,13 +95,8 @@ export async function POST(req: Request) {
                 external_id: externalId,
                 source: 'storefront',
                 status: 'pending',
-                // @ts-ignore
-                payment_status: 'pending',
                 total_amount: orderTotal,
-                platform_fee_amount: applicationFeeAmountCents / 100,
                 customer_name: customerName,
-                customer_email: customerEmail || customerEmailInput,
-                customer_phone: customerPhone,
                 delivery_date: deliveryDate ? new Date(deliveryDate) : null,
                 items: {
                     create: items.map((item: any) => ({
@@ -125,8 +137,7 @@ export async function POST(req: Request) {
 
         const stripeSession = await stripe.checkout.sessions.create(
             sessionParams,
-            // @ts-ignore
-            { stripeAccount: business.stripe_account_id } // The MAGIC of Stripe Connect!
+            { stripeAccount: connectedAccountId }
         );
 
         return NextResponse.json({ url: stripeSession.url });

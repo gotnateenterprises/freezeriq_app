@@ -1,6 +1,15 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 
+/** Masks a full name to first name + last initial for public privacy. */
+function maskName(name: string | null | undefined): string | null {
+    if (!name) return null;
+    const parts = name.trim().split(/\s+/);
+    if (parts.length < 2) return parts[0]; // single name stays as-is
+    return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+}
+
+
 export async function GET(
     req: Request,
     { params }: { params: Promise<{ token: string }> }
@@ -34,7 +43,6 @@ export async function GET(
                     orderBy: { created_at: 'desc' },
                     select: {
                         customer_name: true,
-                        total_amount: true,
                         created_at: true,
                         // Bundle-unit progress needs item-level data
                         items: {
@@ -52,7 +60,13 @@ export async function GET(
             return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
         }
 
-        return NextResponse.json(campaign);
+        // Privacy: mask supporter names to first name + last initial
+        const maskedOrders = (campaign as any).orders.map((order: any) => ({
+            ...order,
+            customer_name: maskName(order.customer_name),
+        }));
+
+        return NextResponse.json({ ...(campaign as any), orders: maskedOrders });
 
     } catch (e: any) {
         console.error("Fetch Public Scoreboard Error:", e);

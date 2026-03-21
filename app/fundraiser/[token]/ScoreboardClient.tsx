@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { computeFundraiserProgress, formatBundleCount } from '@/lib/fundraiserMetrics';
+import { computeFundraiserProgress, formatBundleCount, computeBundleUnitsFromItems } from '@/lib/fundraiserMetrics';
 import {
     Megaphone,
     TrendingUp,
@@ -203,7 +203,7 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
                                         </div>
                                     </div>
                                     <div className="text-right">
-                                        <p className="text-indigo-600 font-black text-lg">+${order.total_amount}</p>
+                                        <p className="text-indigo-600 font-black text-lg">+{formatBundleCount(computeBundleUnitsFromItems(order.items || []))} {computeBundleUnitsFromItems(order.items || []) === 1 ? 'bundle' : 'bundles'}</p>
                                     </div>
                                 </div>
                             ))
