@@ -129,6 +129,12 @@ export default function CoordinatorPortal() {
         try {
             const res = await fetch(`/api/coordinator/${token}`);
             const data = await res.json();
+            if (!res.ok || data.error) {
+                console.error('Coordinator API error:', data.error);
+                setCampaign(null);
+                setIsLoading(false);
+                return;
+            }
             setCampaign(data);
             setIsLoading(false);
 

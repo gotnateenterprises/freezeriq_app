@@ -41,6 +41,12 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
         try {
             const res = await fetch(`/api/fundraiser/${token}`);
             const data = await res.json();
+            if (!res.ok || data.error) {
+                console.error('Scoreboard API error:', data.error);
+                setCampaign(null);
+                setIsLoading(false);
+                return;
+            }
             setCampaign(data);
             setIsLoading(false);
         } catch (err) {

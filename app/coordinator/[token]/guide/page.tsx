@@ -78,9 +78,18 @@ export default function SuccessGuide() {
                 }
 
                 fetch(`/api/coordinator/${token}`)
-                    .then(res => res.json())
+                    .then(res => {
+                        if (!res.ok) {
+                            console.error('Guide page: coordinator API returned', res.status);
+                            setIsLoading(false);
+                            return null;
+                        }
+                        return res.json();
+                    })
                     .then(data => {
-                        setCampaign(data);
+                        if (data && !data.error) {
+                            setCampaign(data);
+                        }
                         setIsLoading(false);
                     })
                     .catch(() => setIsLoading(false));

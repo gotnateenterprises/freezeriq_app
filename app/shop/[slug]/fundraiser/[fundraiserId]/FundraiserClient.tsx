@@ -327,6 +327,9 @@ export default function FundraiserClient({
                     onClose={() => { setIsBundleModalOpen(false); setSelectedBundle(null); }}
                     bundle={selectedBundle}
                     primaryColor={primaryColor}
+                    fundraiserMode={true}
+                    coordinatorEmail={coordinatorEmail}
+                    campaignName={campaign.organization_name || campaign.name || ''}
                 />
             )}
         </div>
