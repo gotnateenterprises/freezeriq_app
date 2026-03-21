@@ -105,17 +105,22 @@ export async function POST(req: NextRequest) {
                 if (base64Image) {
                     const buffer = Buffer.from(base64Image, 'base64');
                     const filename = `recipe-ai-gen-${uuidv4()}.png`;
-                    const url = await uploadToS3(buffer, filename, 'image/png');
 
-                    console.log(`[GrabImage] Successfully generated and saved to S3: ${url}`);
-                    return NextResponse.json({
-                        url,
-                        source: 'imagen-3-generation'
-                    });
+                    try {
+                        const url = await uploadToS3(buffer, filename, 'image/png');
+                        console.log(`[GrabImage] Successfully generated and saved to S3: ${url}`);
+                        return NextResponse.json({
+                            url,
+                            source: 'imagen-3-generation'
+                        });
+                    } catch (uploadErr: any) {
+                        console.warn(`[GrabImage] Image generated but S3 upload failed (${uploadErr.message}). Falling back to placeholder.`);
+                        // Fall through to placeholder instead of crashing
+                    }
                 }
             } catch (err: any) {
                 console.error('[GrabImage] Imagen Generation Error:', err.message);
-                return NextResponse.json({ error: `AI Image Generation failed: ${err.message}` }, { status: 500 });
+                // Fall through to placeholder instead of returning 500
             }
         }
 
