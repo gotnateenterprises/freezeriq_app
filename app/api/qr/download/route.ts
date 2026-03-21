@@ -28,13 +28,14 @@ export async function GET(req: Request) {
             );
         }
 
-        // 1. Fetch campaign to validate token and get public_token for URL
+        // 1. Fetch campaign to validate token and get data for URL
         const campaign = await prisma.fundraiserCampaign.findFirst({
             where: { portal_token: token },
             select: {
+                id: true,
                 public_token: true,
                 customer: {
-                    select: { name: true },
+                    select: { name: true, business_id: true },
                 },
             },
         });
@@ -47,7 +48,24 @@ export async function GET(req: Request) {
         }
 
         const orgName = campaign.customer?.name || 'Organization';
-        const publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
+
+        // Build public URL → shop order page (not the old scoreboard)
+        const businessId = campaign.customer?.business_id;
+        let publicUrl: string;
+        if (businessId) {
+            const business = await prisma.business.findUnique({
+                where: { id: businessId },
+                select: { slug: true },
+            });
+            if (business?.slug) {
+                const origin = new URL(req.url).origin;
+                publicUrl = `${origin}/shop/${business.slug}/fundraiser/${campaign.id}`;
+            } else {
+                publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
+            }
+        } else {
+            publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
+        }
 
         // 2. Generate QR code
         const qr = await generateQrCode(publicUrl);

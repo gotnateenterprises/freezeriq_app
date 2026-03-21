@@ -124,18 +124,25 @@ export async function GET(req: Request) {
             }
         }
 
-        // 6. Fetch business name
+        // 6. Fetch business name + slug
         let businessName = 'FreezerIQ';
+        let businessSlug: string | null = null;
         if (businessId) {
             const business = await prisma.business.findUnique({
                 where: { id: businessId },
-                select: { name: true },
+                select: { name: true, slug: true },
             });
-            if (business) businessName = business.name;
+            if (business) {
+                businessName = business.name;
+                businessSlug = business.slug;
+            }
         }
 
-        // 7. Build public URL from request origin
-        const publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
+        // 7. Build public URL → shop order page (not the old scoreboard)
+        const origin = new URL(req.url).origin;
+        const publicUrl = businessSlug
+            ? `${origin}/shop/${businessSlug}/fundraiser/${campaign.id}`
+            : buildPublicFundraiserUrl(req, campaign.public_token!);
 
         // 8. Generate full packet ZIP
         //    coordinatorName: prefer customer.contact_name, fall back to campaign.name

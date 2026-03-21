@@ -71,6 +71,7 @@ export default function CoordinatorPortal() {
     const [campaignAssets, setCampaignAssets] = useState<CampaignAsset[]>([]);
     const [promoScripts, setPromoScripts] = useState<PromoScriptsResponse | null>(null);
     const [copiedEmail, setCopiedEmail] = useState(false);
+    const [copiedScoreboard, setCopiedScoreboard] = useState(false);
     const [actionSummary, setActionSummary] = useState<CoordinatorActionSummary | null>(null);
 
     // ── Non-blocking action tracker ────────────────────────
@@ -158,11 +159,33 @@ export default function CoordinatorPortal() {
         }
     };
 
+    // ── URL helpers ── Shop order page (drives sales) vs. scoreboard ──
+    const getShopOrderUrl = () => {
+        const slug = (campaign?.customer as any)?.business?.slug;
+        if (slug && campaign?.id) {
+            return `${window.location.origin}/shop/${slug}/fundraiser/${campaign.id}`;
+        }
+        // Fallback: old scoreboard URL
+        return `${window.location.origin}/fundraiser/${campaign?.public_token}`;
+    };
+
+    const getScoreboardUrl = () => {
+        return `${window.location.origin}/fundraiser/${campaign?.public_token}`;
+    };
+
     const handleCopy = () => {
-        const url = `${window.location.origin}/fundraiser/${campaign?.public_token}`;
+        const url = getShopOrderUrl();
         navigator.clipboard.writeText(url);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
+    };
+
+    const handleCopyScoreboard = () => {
+        const url = getScoreboardUrl();
+        navigator.clipboard.writeText(url);
+        setCopiedScoreboard(true);
+        toast.success('Scoreboard link copied!');
+        setTimeout(() => setCopiedScoreboard(false), 2000);
     };
 
     const handleCopyTextMessage = () => {
@@ -204,9 +227,8 @@ export default function CoordinatorPortal() {
     // ── Smart Share Handlers ───────────────────────────────
 
     const getPublicUrl = () => {
-        if (promoScripts?.publicUrl) return promoScripts.publicUrl;
-        if (campaign?.public_token) return `${window.location.origin}/fundraiser/${campaign.public_token}`;
-        return '';
+        // Prefer shop order page URL (drives sales)
+        return getShopOrderUrl();
     };
 
     const handleShareUniversal = async () => {
@@ -559,6 +581,13 @@ export default function CoordinatorPortal() {
                             View Scripts
                         </Link>
                     </div>
+                    <button
+                        onClick={handleCopyScoreboard}
+                        className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                    >
+                        <Activity size={14} />
+                        {copiedScoreboard ? 'Copied!' : 'Share Scoreboard Link'}
+                    </button>
                 </div>
 
                 {/* Quick Actions */}

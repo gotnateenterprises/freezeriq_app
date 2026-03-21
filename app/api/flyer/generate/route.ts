@@ -143,15 +143,22 @@ export async function POST(req: Request) {
 
         // 8. Fetch business name
         let businessName = 'FreezerIQ';
+        let businessSlug: string | null = null;
         const business = await prisma.business.findUnique({
             where: { id: businessId },
-            select: { name: true },
+            select: { name: true, slug: true },
         });
-        if (business) businessName = business.name;
+        if (business) {
+            businessName = business.name;
+            businessSlug = business.slug;
+        }
 
-        // 9. Build public URL from request origin
+        // 9. Build public URL → shop order page (not the old scoreboard)
+        const origin = new URL(req.url).origin;
         const publicUrl = campaign.public_token
-            ? buildPublicFundraiserUrl(req, campaign.public_token)
+            ? (businessSlug
+                ? `${origin}/shop/${businessSlug}/fundraiser/${campaign.id}`
+                : buildPublicFundraiserUrl(req, campaign.public_token))
             : '';
 
         // 10. Generate PDF

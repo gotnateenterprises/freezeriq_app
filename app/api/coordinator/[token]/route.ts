@@ -39,6 +39,7 @@ export async function GET(
                         business: {
                             select: {
                                 name: true,
+                                slug: true,
                                 logo_url: true,
                                 plan: true,
                                 subscription_status: true
