@@ -23,10 +23,23 @@ export async function POST(req: NextRequest) {
         // Webhooks can contain multiple entries
         if (body.object === 'page') {
             for (const entry of body.entry) {
+                // Resolve business from Meta Page ID via integration mapping
+                const pageId = entry.id;
+                const integration = await prisma.integration.findFirst({
+                    where: { provider: 'meta', realm_id: pageId }
+                });
+
+                if (!integration) {
+                    console.warn('Meta webhook: no integration found for page ID:', pageId);
+                    continue;
+                }
+
+                const businessId = integration.business_id;
+
                 // 1. Handle Messaging (Direct Messages)
                 if (entry.messaging) {
                     for (const message of entry.messaging) {
-                        await handleMessage(message);
+                        await handleMessage(message, businessId);
                     }
                 }
 
@@ -34,9 +47,9 @@ export async function POST(req: NextRequest) {
                 if (entry.changes) {
                     for (const change of entry.changes) {
                         if (change.field === 'feed') {
-                            await handleFeedChange(change.value);
+                            await handleFeedChange(change.value, businessId);
                         } else if (change.field === 'leadgen') {
-                            await handleLeadgen(change.value);
+                            await handleLeadgen(change.value, businessId);
                         }
                     }
                 }
@@ -50,7 +63,7 @@ export async function POST(req: NextRequest) {
     }
 }
 
-async function handleMessage(messaging: any) {
+async function handleMessage(messaging: any, businessId: string) {
     const senderId = messaging.sender.id;
     const text = messaging.message?.text;
 
@@ -58,6 +71,7 @@ async function handleMessage(messaging: any) {
 
     await prisma.activity.create({
         data: {
+            business_id: businessId,
             type: 'message',
             external_id: messaging.message.mid,
             content: text,
@@ -67,12 +81,13 @@ async function handleMessage(messaging: any) {
     });
 }
 
-async function handleFeedChange(value: any) {
+async function handleFeedChange(value: any, businessId: string) {
     // Only interested in comments for now
     if (value.item !== 'comment' || value.verb !== 'add') return;
 
     await prisma.activity.create({
         data: {
+            business_id: businessId,
             type: 'comment',
             external_id: value.comment_id,
             content: value.message,
@@ -85,7 +100,7 @@ async function handleFeedChange(value: any) {
     });
 }
 
-async function handleLeadgen(value: any) {
+async function handleLeadgen(value: any, businessId: string) {
     const leadgenId = value.leadgen_id;
     const pageId = value.page_id;
 
@@ -114,6 +129,7 @@ async function handleLeadgen(value: any) {
                     contact_name: nameField
                 },
                 create: {
+                    business_id: businessId,
                     external_id: leadgenId,
                     name: nameField || 'New Meta Lead',
                     contact_email: emailField,
@@ -126,6 +142,7 @@ async function handleLeadgen(value: any) {
             // Also add to activity feed
             await prisma.activity.create({
                 data: {
+                    business_id: businessId,
                     type: 'lead',
                     external_id: leadgenId,
                     content: `New lead captured: ${nameField || emailField}`,

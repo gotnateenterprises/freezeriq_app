@@ -28,7 +28,7 @@ export async function GET(
     try {
         const { token } = await params;
 
-        // 1. Fetch Campaign with Business Info — try portal_token first, fall back to id
+        // 1. Fetch Campaign with Business Info by portal_token (private coordinator access)
         let campaign = await prisma.fundraiserCampaign.findFirst({
             where: { portal_token: token },
             include: {
@@ -68,47 +68,8 @@ export async function GET(
             }
         });
 
-        // Fallback: try looking up by campaign id if portal_token didn't match
         if (!campaign) {
-            campaign = await prisma.fundraiserCampaign.findFirst({
-                where: { id: token },
-                include: {
-                    customer: {
-                        select: {
-                            name: true,
-                            business_id: true,
-                            business: {
-                                select: {
-                                    name: true,
-                                    logo_url: true,
-                                    plan: true,
-                                    subscription_status: true
-                                }
-                            }
-                        }
-                    },
-                    orders: {
-                        orderBy: { created_at: 'desc' },
-                        select: {
-                            id: true,
-                            participant_name: true,
-                            customer_name: true,
-                            total_amount: true,
-                            created_at: true,
-                            source: true,
-                            items: {
-                                select: {
-                                    quantity: true,
-                                    variant_size: true,
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        if (!campaign) {
+            console.warn(`Coordinator GET: no campaign found for token (length=${token.length})`);
             return NextResponse.json({ error: "Portal not found" }, { status: 404 });
         }
 
@@ -243,18 +204,30 @@ export async function PUT(
     { params }: { params: Promise<{ token: string }> }
 ) {
     try {
-        // Note: Ideally we'd have a checkEnterprisePlan helper here, 
-        // but for now we'll rely on the token being private and the frontend gating.
         const { token } = await params;
         const body = await req.json();
         const { paymentInstructions, externalPaymentLink } = body;
 
         const campaign = await prisma.fundraiserCampaign.findFirst({
-            where: { portal_token: token }
+            where: { portal_token: token },
+            include: {
+                customer: {
+                    include: {
+                        business: { select: { plan: true } }
+                    }
+                }
+            }
         });
 
         if (!campaign) {
             return NextResponse.json({ error: "Portal not found" }, { status: 404 });
+        }
+
+        const business = (campaign.customer as any)?.business;
+        const plan = business?.plan || 'FREE';
+        const allowedPlans = ['ENTERPRISE', 'ULTIMATE', 'FREE', 'PRO'];
+        if (!allowedPlans.includes(plan)) {
+            return NextResponse.json({ error: "Portal unavailable" }, { status: 403 });
         }
 
         const updated = await prisma.fundraiserCampaign.update({
