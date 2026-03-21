@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import { computeFundraiserProgress, formatBundleCount } from '@/lib/fundraiserMetrics';
 import {
     Megaphone,
     TrendingUp,
@@ -60,7 +61,8 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
     };
 
     const shareOnWhatsApp = () => {
-        const text = encodeURIComponent(`Check out this fundraiser for ${campaign?.customer?.name || 'a great cause'}! We've already raised $${campaign?.total_sales}. Support us here: ${window.location.href}`);
+        const metrics = computeFundraiserProgress(campaign?.bundle_goal, campaign?.total_sales, campaign?.orders || []);
+        const text = encodeURIComponent(`Check out this fundraiser for ${campaign?.customer?.name || 'a great cause'}! ${formatBundleCount(metrics.totalBundlesSold)} bundles sold so far. Support us here: ${window.location.href}`);
         window.open(`https://wa.me/?text=${text}`, '_blank');
     };
 
@@ -82,7 +84,8 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
         );
     }
 
-    const progress = Math.min(((campaign.total_sales || 0) / (campaign.goal_amount || 1)) * 100, 100);
+    const metrics = computeFundraiserProgress(campaign.bundle_goal, campaign.total_sales, campaign.orders || []);
+    const progress = metrics.progressPercent;
 
     return (
         <div className="min-h-screen bg-[#FDFCFB] text-slate-900 selection:bg-indigo-100">
@@ -109,8 +112,8 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
                 {/* Scoreboard Card */}
                 <div className="bg-white rounded-[2.5rem] p-10 shadow-2xl shadow-indigo-600/10 border border-slate-100 text-center">
                     <div className="space-y-2 mb-8">
-                        <p className="text-6xl font-black tracking-tighter text-slate-900">${campaign.total_sales || 0}</p>
-                        <p className="text-sm font-black text-slate-400 uppercase tracking-widest">Raised So Far</p>
+                        <p className="text-6xl font-black tracking-tighter text-slate-900">{formatBundleCount(metrics.totalBundlesSold)}</p>
+                        <p className="text-sm font-black text-slate-400 uppercase tracking-widest">Bundles Sold</p>
                     </div>
 
                     {/* Progress Bar */}
@@ -127,8 +130,8 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
                             </div>
                         </div>
                         <div className="flex justify-between mt-3 px-1">
-                            <span className="text-xs font-black text-slate-300 uppercase tracking-widest">$0</span>
-                            <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Goal: ${campaign.goal_amount}</span>
+                            <span className="text-xs font-black text-slate-300 uppercase tracking-widest">0</span>
+                            <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Goal: {metrics.bundleGoal} Bundles</span>
                         </div>
                     </div>
 

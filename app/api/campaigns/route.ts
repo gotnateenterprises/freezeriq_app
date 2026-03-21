@@ -21,7 +21,7 @@ export async function POST(req: Request) {
         const {
             customerId,
             name,
-            goalAmount,
+            bundleGoal,
             endDate,
             missionText, // Optional
             aboutText, // Optional
@@ -40,7 +40,8 @@ export async function POST(req: Request) {
             data: {
                 customer_id: customerId,
                 name,
-                goal_amount: goalAmount ? Number(goalAmount) : undefined,
+                // @ts-ignore - Stale client
+                bundle_goal: bundleGoal ? Number(bundleGoal) : undefined,
                 end_date: endDate ? new Date(endDate) : undefined,
                 // @ts-ignore - Stale client
                 mission_text: missionText,

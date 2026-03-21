@@ -10,7 +10,7 @@ import { format } from 'date-fns';
 interface MarketingAssetGeneratorProps {
     campaign: {
         name: string;
-        goal_amount?: number;
+        bundle_goal?: number;
         end_date?: string | Date;
         pickup_location?: string;
         delivery_date?: string | Date;
@@ -153,8 +153,8 @@ export default function MarketingAssetGenerator({
                     <div className="flex-1 flex flex-col justify-center items-center w-full space-y-8">
                         <div className="p-8 rounded-3xl w-full max-w-2xl" style={{ backgroundColor: '#eef2ff', border: '2px solid #e0e7ff' }}>
                             <h3 className="text-3xl font-bold mb-2" style={{ color: '#312e81' }}>{campaign.name}</h3>
-                            {Number(campaign.goal_amount) > 0 && (
-                                <p className="text-xl font-medium" style={{ color: '#4f46e5' }}>Help us reach our goal of ${Number(campaign.goal_amount).toLocaleString()}!</p>
+                            {Number(campaign.bundle_goal) > 0 && (
+                                <p className="text-xl font-medium" style={{ color: '#4f46e5' }}>Help us reach our goal of {Number(campaign.bundle_goal)} bundles!</p>
                             )}
                         </div>
 
@@ -202,7 +202,7 @@ export default function MarketingAssetGenerator({
                         <h2 className="text-3xl font-bold uppercase tracking-widest mb-4" style={{ color: '#a5b4fc' }}>Support Our Fundraiser</h2>
                         <h1 className="text-7xl font-black leading-tight mb-8">{organizationName}</h1>
                         <div className="inline-block px-8 py-4 rounded-2xl" style={{ backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }}>
-                            <p className="text-2xl font-medium">Goal: <span className="font-bold" style={{ color: '#ffffff' }}>${Number(campaign.goal_amount).toLocaleString()}</span></p>
+                            <p className="text-2xl font-medium">Goal: <span className="font-bold" style={{ color: '#ffffff' }}>{Number(campaign.bundle_goal) || 100} Bundles</span></p>
                         </div>
                     </div>
 

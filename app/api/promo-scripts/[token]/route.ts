@@ -15,6 +15,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { generatePromoScripts, type BundleSummary } from '@/lib/generatePromoScripts';
+import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
 
 export async function GET(
     req: Request,
@@ -82,8 +83,7 @@ export async function GET(
         }
 
         // 3. Build public fundraiser URL
-        const origin = new URL(req.url).origin;
-        const publicUrl = `${origin}/fundraiser/${campaign.public_token}`;
+        const publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
 
         // 4. Generate scripts
         const bundleSummaries: BundleSummary[] = bundles.map(b => ({

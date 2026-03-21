@@ -17,6 +17,7 @@ interface Fundraiser {
     name: string;
     status: string;
     goal_amount: number | null;
+    bundle_goal: number | null;
     total_sales: number;
     end_date: string | null;
     public_token: string | null;
@@ -33,7 +34,7 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
     const [editingLabelsId, setEditingLabelsId] = useState<string | null>(null);
     const [newCampaign, setNewCampaign] = useState({
         name: '',
-        goalAmount: '',
+        bundleGoal: '',
         endDate: '',
         participantLabel: 'Seller',
         groupLabel: ''
@@ -146,7 +147,7 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                 body: JSON.stringify({
                     customerId,
                     name: newCampaign.name,
-                    goalAmount: newCampaign.goalAmount,
+                    bundleGoal: newCampaign.bundleGoal ? Number(newCampaign.bundleGoal) : undefined,
                     endDate: newCampaign.endDate,
                     participantLabel: newCampaign.participantLabel,
                     groupLabel: newCampaign.groupLabel
@@ -156,7 +157,7 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
             if (!res.ok) throw new Error(data.error);
 
             toast.success('Campaign created!');
-            setNewCampaign({ name: '', goalAmount: '', endDate: '', participantLabel: 'Seller', groupLabel: '' });
+            setNewCampaign({ name: '', bundleGoal: '', endDate: '', participantLabel: 'Seller', groupLabel: '' });
             setIsCreating(false);
             fetchCampaigns();
         } catch (error: any) {
@@ -240,14 +241,15 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                 />
                             </div>
                             <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Fundraising Goal ($)</label>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Bundle Goal</label>
                                 <input
                                     type="number"
                                     className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold"
-                                    placeholder="5000"
-                                    value={newCampaign.goalAmount}
-                                    onChange={e => setNewCampaign({ ...newCampaign, goalAmount: e.target.value })}
+                                    placeholder="e.g. 100"
+                                    value={newCampaign.bundleGoal}
+                                    onChange={e => setNewCampaign({ ...newCampaign, bundleGoal: e.target.value })}
                                 />
+                                <p className="text-[10px] text-slate-400 mt-1">How many bundles does this campaign aim to sell?</p>
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">End Date</label>
@@ -321,7 +323,7 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                 <div className="flex flex-wrap gap-4 text-sm text-slate-500">
                                     <div className="flex items-center gap-1.5">
                                         <Target className="w-4 h-4 text-slate-400" />
-                                        <span>Goal: ${campaign.goal_amount?.toLocaleString() || 'N/A'}</span>
+                                        <span>Goal: {campaign.bundle_goal || 100} Bundles</span>
                                     </div>
                                     <div className="flex items-center gap-1.5">
                                         <Calendar className="w-4 h-4 text-slate-400" />
@@ -341,7 +343,7 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
 
                             <div className="flex items-center gap-3 w-full md:w-auto">
                                 <div className="flex-1 md:flex-none text-right mr-4">
-                                    <p className="text-xs font-medium text-slate-500 uppercase">Raised so far</p>
+                                    <p className="text-xs font-medium text-slate-500 uppercase">Total Sales</p>
                                     <p className="text-xl font-black text-emerald-600">${Number(campaign.total_sales).toFixed(2)}</p>
                                 </div>
                                 <div className="flex gap-2">

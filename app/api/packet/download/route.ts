@@ -18,6 +18,7 @@ import { prisma } from '@/lib/db';
 import { generateFullPacket } from '@/lib/generateFullPacket';
 import type { FlyerBundle } from '@/lib/generateFlyer';
 import { Prisma } from '@prisma/client';
+import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
 
 export async function GET(req: Request) {
     try {
@@ -133,9 +134,8 @@ export async function GET(req: Request) {
             if (business) businessName = business.name;
         }
 
-        // 7. Build public URL from request origin (same strategy as promo-scripts)
-        const origin = new URL(req.url).origin;
-        const publicUrl = `${origin}/fundraiser/${campaign.public_token}`;
+        // 7. Build public URL from request origin
+        const publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
 
         // 8. Generate full packet ZIP
         //    coordinatorName: prefer customer.contact_name, fall back to campaign.name

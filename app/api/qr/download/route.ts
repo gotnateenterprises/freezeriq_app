@@ -14,6 +14,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { generateQrCode } from '@/lib/generateQrCode';
+import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
 
 export async function GET(req: Request) {
     try {
@@ -46,7 +47,7 @@ export async function GET(req: Request) {
         }
 
         const orgName = campaign.customer?.name || 'Organization';
-        const publicUrl = `https://freezeriq-app.vercel.app/fundraiser/${campaign.public_token}`;
+        const publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
 
         // 2. Generate QR code
         const qr = await generateQrCode(publicUrl);

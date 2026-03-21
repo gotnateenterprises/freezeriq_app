@@ -182,7 +182,7 @@ export default function DocumentCenter({ customer, existingDoc, onSave }: Docume
             .replace(/{{ContactEmail}}/g, customer.email || '')
             .replace(/{{Date}}/g, new Date().toLocaleDateString())
             .replace(/{{DeliveryAddress}}/g, customer.delivery_address || 'Not Provided')
-            .replace(/{{GoalAmount}}/g, '$1,000')
+            .replace(/{{GoalAmount}}/g, fundraiserInfo.bundle_goal ? `${fundraiserInfo.bundle_goal} bundles` : '100 bundles')
             // Fundraiser Specifics
             .replace(/{{FundraiserDeadline}}/g, fundraiserInfo.deadline ? new Date(fundraiserInfo.deadline).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : '____________')
             .replace(/{{FundraiserDeadlineTime}}/g, fundraiserInfo.deadline_time || '')

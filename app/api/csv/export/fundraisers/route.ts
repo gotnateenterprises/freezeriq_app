@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
             'Phone',
             'Start Date',
             'End Date',
-            'Goal Amount',
+            'Bundle Goal',
             'Total Sales',
             'Status',
             'Portal Token'

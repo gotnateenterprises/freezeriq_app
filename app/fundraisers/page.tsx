@@ -239,7 +239,7 @@ export default function FundraisersPage() {
                                         <div className="flex flex-col items-end gap-1">
                                             <div className="flex justify-between w-full text-[10px] font-black font-mono">
                                                 <span className="text-indigo-600">${item.sales_total || 0}</span>
-                                                <span className="text-slate-400">Goal: ${item.goal_amount || 0}</span>
+                                                <span className="text-slate-400">Goal: {item.goal_amount || 0} bundles</span>
                                             </div>
                                             <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-900 rounded-full overflow-hidden">
                                                 <div

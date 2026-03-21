@@ -28,6 +28,7 @@ export default function FundraiserSetup({ customer, onSave, allowCancel, onCance
         bundle1_name: customer.fundraiser_info?.bundle1_name || '', // NEW: Store Bundle Name
         bundle2_name: customer.fundraiser_info?.bundle2_name || '', // NEW: Store Bundle Name
         participant_label: customer.fundraiser_info?.participant_label || '', // NEW: Participant Label
+        bundle_goal: customer.fundraiser_info?.bundle_goal || 100,
         // Prices removed
     });
 
@@ -172,7 +173,7 @@ export default function FundraiserSetup({ customer, onSave, allowCancel, onCance
                 </div>
             </div>
 
-            <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                     <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Flyer Details / Extra Notes</label>
                     <textarea
@@ -193,7 +194,21 @@ export default function FundraiserSetup({ customer, onSave, allowCancel, onCance
                         placeholder="e.g. Student Name, Athlete, Scout..."
                     />
                     <p className="text-[10px] text-slate-400 mt-1">
-                        If set, customers will be asked "Which [Label] are you supporting?". Leave blank to disable.
+                        If set, customers will be asked &quot;Which [Label] are you supporting?&quot;. Leave blank to disable.
+                    </p>
+                </div>
+                <div>
+                    <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Bundle Goal</label>
+                    <input
+                        type="number"
+                        min={1}
+                        value={fundraiserInfo.bundle_goal}
+                        onChange={e => setFundraiserInfo({ ...fundraiserInfo, bundle_goal: Number(e.target.value) || 100 })}
+                        className="w-full p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold"
+                        placeholder="100"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">
+                        Target number of bundles to sell. Used in progress tracking &amp; emails.
                     </p>
                 </div>
             </div>

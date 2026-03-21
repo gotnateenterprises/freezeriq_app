@@ -15,6 +15,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { generateFlyer, type FlyerBundle } from '@/lib/generateFlyer';
 import { Prisma } from '@prisma/client';
+import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
 
 export async function GET(req: Request) {
     try {
@@ -129,9 +130,8 @@ export async function GET(req: Request) {
             if (business) businessName = business.name;
         }
 
-        // 7. Build public URL from request origin (same strategy as promo-scripts)
-        const origin = new URL(req.url).origin;
-        const publicUrl = `${origin}/fundraiser/${campaign.public_token}`;
+        // 7. Build public URL from request origin
+        const publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
 
         // 8. Generate PDF
         const buffer = await generateFlyer({

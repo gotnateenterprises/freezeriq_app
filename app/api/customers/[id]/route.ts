@@ -367,9 +367,10 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
             });
         }
 
-        // Sync fundraiser_info fields to the most recent FundraiserCampaign
+        // Sync fundraiser_info fields to the most recent FundraiserCampaign.
         // The CRM form saves these to customer.fundraiser_info (JSON), but
-        // flyer/packet download routes read from campaign table columns.
+        // flyer/packet/tracker download routes read from campaign table columns.
+        // All operational fields must be pushed here to prevent drift.
         if (body.fundraiser_info) {
             const fi = body.fundraiser_info;
             const latestCampaign = await prisma.fundraiserCampaign.findFirst({
@@ -382,10 +383,19 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
                 await prisma.fundraiserCampaign.update({
                     where: { id: latestCampaign.id },
                     data: {
+                        // Date fields
                         delivery_date: fi.delivery_date ? new Date(fi.delivery_date) : undefined,
+                        end_date: fi.deadline ? new Date(fi.deadline) : undefined,
+                        start_date: fi.start_date ? new Date(fi.start_date) : undefined,
+                        // Text fields
                         pickup_location: fi.pickup_location || undefined,
                         checks_payable: fi.checks_payable_to || undefined,
-                        end_date: fi.deadline ? new Date(fi.deadline) : undefined,
+                        participant_label: fi.participant_label || undefined,
+                        about_text: fi.about_text || undefined,
+                        mission_text: fi.mission_text || undefined,
+                        payment_instructions: fi.payment_instructions || undefined,
+                        external_payment_link: fi.external_payment_link || undefined,
+                        bundle_goal: fi.bundle_goal ? Number(fi.bundle_goal) : undefined,
                     },
                 });
             }

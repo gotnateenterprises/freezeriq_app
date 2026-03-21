@@ -14,12 +14,12 @@ export default function ProgressThermometer({ current, goal }: ProgressThermomet
         <div className="w-full">
             <div className="flex justify-between items-end mb-3">
                 <div>
-                    <p className="text-4xl font-black text-slate-900">${current.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
-                    <p className="text-sm font-bold text-slate-400">Total Raised So Far</p>
+                    <p className="text-4xl font-black text-slate-900">{current.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 1 })}</p>
+                    <p className="text-sm font-bold text-slate-400">Bundles Sold</p>
                 </div>
                 <div className="text-right">
-                    <p className="text-xl font-black text-slate-400">${goal.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
-                    <p className="text-xs font-black text-slate-300 uppercase tracking-tighter">Goal</p>
+                    <p className="text-xl font-black text-slate-400">{goal.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+                    <p className="text-xs font-black text-slate-300 uppercase tracking-tighter">Bundle Goal</p>
                 </div>
             </div>
 

@@ -155,7 +155,7 @@ export default function SuccessGuide() {
                         Let's CRUSH <br /> this fundraiser!
                     </h1>
                     <p className="text-lg text-slate-500 font-medium max-w-md mx-auto">
-                        Everything you need to promote {campaign?.name || 'your campaign'} and hit your <strong>${campaign?.goal_amount || '1,000'} goal</strong>.
+                        Everything you need to promote {campaign?.name || 'your campaign'} and hit your <strong>{campaign?.bundle_goal || '100'} bundle goal</strong>.
                     </p>
                 </div>
 
@@ -231,7 +231,7 @@ export default function SuccessGuide() {
                                 title: 'Facebook Post',
                                 icon: <Facebook className="text-indigo-300" size={32} />,
                                 preview: `"Dinner is solved! Support ${campaign?.customer?.name || '[Group Name]'} by ordering your Freezer Chef meals. We are ${progress}% of the way to our goal! Order here: [Link]"`,
-                                fullText: `Dinner is solved! Support ${campaign?.customer?.name || '[Group Name]'} by ordering your Freezer Chef meals. We are ${progress}% of the way to our $${Number(campaign?.goal_amount || 1000).toLocaleString()} goal! Order here: ${publicUrl}`,
+                                fullText: `Dinner is solved! Support ${campaign?.customer?.name || '[Group Name]'} by ordering your Freezer Chef meals. We are ${progress}% of the way to our ${Number(campaign?.bundle_goal || 100).toLocaleString()} bundle goal! Order here: ${publicUrl}`,
                             },
                             {
                                 key: 'whatsapp',
@@ -245,7 +245,7 @@ export default function SuccessGuide() {
                                 title: 'Email Template',
                                 icon: <Mail className="text-indigo-300" size={32} />,
                                 preview: `"Hi there! I'm reaching out because ${campaign?.customer?.name || 'our organization'} is running a fundraiser. We're selling Freezer Chef meals \u2014 delicious, easy-to-prepare meals..."`,
-                                fullText: `Hi there!\n\nI'm reaching out because ${campaign?.customer?.name || 'our organization'} is running the "${campaign?.name || 'our'}" fundraiser! We're selling Freezer Chef meals \u2014 delicious, easy-to-prepare meals you can stock in your freezer.\n\n\ud83c\udfaf Our goal: $${Number(campaign?.goal_amount || 1000).toLocaleString()}\n\ud83d\udcca Progress: ${progress}%\n\ud83d\udd17 Order here: ${publicUrl}\n\nEvery order helps us get closer to our goal. Thank you for your support!\n\nWarmly,\n${campaign?.customer?.name || 'The Team'}`,
+                                fullText: `Hi there!\n\nI'm reaching out because ${campaign?.customer?.name || 'our organization'} is running the "${campaign?.name || 'our'}" fundraiser! We're selling Freezer Chef meals \u2014 delicious, easy-to-prepare meals you can stock in your freezer.\n\n\ud83c\udfaf Our goal: ${Number(campaign?.bundle_goal || 100).toLocaleString()} bundles\n\ud83d\udcca Progress: ${progress}%\n\ud83d\udd17 Order here: ${publicUrl}\n\nEvery order helps us get closer to our goal. Thank you for your support!\n\nWarmly,\n${campaign?.customer?.name || 'The Team'}`,
                                 span2: true,
                             },
                         ];

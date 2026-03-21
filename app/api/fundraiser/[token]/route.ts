@@ -17,6 +17,7 @@ export async function GET(
                 start_date: true,
                 end_date: true,
                 goal_amount: true,
+                bundle_goal: true,
                 total_sales: true,
                 about_text: true,
                 mission_text: true,
@@ -27,16 +28,21 @@ export async function GET(
                 customer: {
                     select: {
                         name: true,
-                        fundraiser_info: true,
                     }
                 },
                 orders: {
                     orderBy: { created_at: 'desc' },
-                    take: 10, // Just labels for ticker
                     select: {
                         customer_name: true,
                         total_amount: true,
-                        created_at: true
+                        created_at: true,
+                        // Bundle-unit progress needs item-level data
+                        items: {
+                            select: {
+                                quantity: true,
+                                variant_size: true,
+                            }
+                        }
                     }
                 }
             }

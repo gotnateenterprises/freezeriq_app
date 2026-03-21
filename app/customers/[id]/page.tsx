@@ -279,7 +279,7 @@ export default function CustomerProfilePage({ params }: { params: Promise<{ id: 
                             : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-700 dark:hover:text-slate-300'}`}
                 >
                     <Megaphone size={18} className={customer.type === 'ORGANIZATION' && activeTab !== 'fundraisers' ? 'animate-pulse' : ''} />
-                    Fundraisers <span className="bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded-full text-xs">{(customer.campaigns || []).length}</span>
+                    Campaigns <span className="bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded-full text-xs">{(customer.campaigns || []).length}</span>
                 </button>
                 <button
                     onClick={() => setActiveTab('subscriptions')}

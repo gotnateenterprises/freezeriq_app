@@ -469,6 +469,7 @@ model FundraiserCampaign {
   pickup_location       String?
   checks_payable        String?
   goal_amount           Decimal?   @db.Decimal(10, 2)
+  bundle_goal           Int?       @default(100)
   total_sales           Decimal    @default(0) @db.Decimal(10, 2)
   customer_id           String
   created_at            DateTime   @default(now())

@@ -39,7 +39,7 @@ export async function GET(req: Request) {
                             <h3>1. Agreement Terms</h3>
                             <p>This agreement confirms that <strong>{{OrganizationName}}</strong> will participate in the Freezer Chef fundraising program.</p>
                             
-                            <h3>2. Financial Goal</h3>
+                            <h3>2. Campaign Goal</h3>
                             <p>The target goal for this campaign is <strong>{{GoalAmount}}</strong>.</p>
                             
                             <h3>3. Delivery</h3>

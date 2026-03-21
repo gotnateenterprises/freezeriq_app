@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { prisma } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import FundraiserClient from './FundraiserClient';
+import { computeFundraiserProgress } from '@/lib/fundraiserMetrics';
 
 // We need to fetch data on the server
 async function getData(slug: string, fundraiserId: string) {
@@ -48,14 +49,41 @@ async function getData(slug: string, fundraiserId: string) {
 
     if (!campaign) return null;
 
-    // 4. Fetch Orders for goal calculation
+    // 4. Fetch Orders with items for weighted bundle progress
     const orders: any[] = await prisma.$queryRaw`
-        SELECT total_amount FROM orders WHERE campaign_id = ${fundraiserId}
+        SELECT o.id, o.total_amount FROM orders o WHERE o.campaign_id = ${fundraiserId}
     `;
+    const orderIds = orders.map((o: any) => o.id);
 
-    // Calculate total raised
-    const raised = orders.reduce((sum: number, order: any) => sum + Number(order.total_amount), 0);
-    const progress = campaign.goal_amount ? Math.min((raised / Number(campaign.goal_amount)) * 100, 100) : 0;
+    let orderItems: any[] = [];
+    if (orderIds.length > 0) {
+        orderItems = await prisma.$queryRaw`
+            SELECT oi.order_id, oi.quantity, oi.variant_size,
+                   b.serving_tier
+            FROM order_items oi
+            LEFT JOIN bundles b ON oi.bundle_id = b.id
+            WHERE oi.order_id IN(${Prisma.join(orderIds)})
+        `;
+    }
+
+    // Group items by order for the shared metric utility
+    const ordersWithItems = orders.map((o: any) => ({
+        total_amount: o.total_amount,
+        items: orderItems
+            .filter((oi: any) => oi.order_id === o.id)
+            .map((oi: any) => ({
+                quantity: Number(oi.quantity) || 0,
+                variant_size: oi.variant_size,
+                serving_tier: oi.serving_tier,
+            })),
+    }));
+
+    // Use the shared weighted-bundle utility (single source of truth)
+    const bundleProgress = computeFundraiserProgress(
+        campaign.bundle_goal,
+        campaign.total_sales,
+        ordersWithItems
+    );
 
     // 5. Check for campaign-specific bundle assignments
     const campaignBundles: any[] = await prisma.$queryRaw`
@@ -122,7 +150,7 @@ async function getData(slug: string, fundraiserId: string) {
 
     (business as any).bundles = formattedBundles;
 
-    return { business, campaign, raised, progress };
+    return { business, campaign, bundleProgress };
 }
 
 export default async function FundraiserPage({ params }: { params: Promise<{ slug: string; fundraiserId: string }> }) {
@@ -131,14 +159,13 @@ export default async function FundraiserPage({ params }: { params: Promise<{ slu
 
     if (!data) notFound();
 
-    const { business, campaign, raised, progress } = data;
+    const { business, campaign, bundleProgress } = data;
 
     return (
         <FundraiserClient
             business={business}
             campaign={campaign}
-            raised={raised}
-            progress={progress}
+            bundleProgress={bundleProgress}
             slug={slug}
             fundraiserId={fundraiserId}
         />

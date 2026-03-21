@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { QRCodeSVG } from 'qrcode.react';
 import type { CampaignAsset } from '@/lib/campaignAssets';
 import type { PromoScriptsResponse } from '@/lib/generatePromoScripts';
+import { computeFundraiserProgress, formatBundleCount } from '@/lib/fundraiserMetrics';
 
 import {
     Megaphone,
@@ -21,6 +22,7 @@ import {
     ArrowRight,
     Loader2,
     DollarSign,
+    Package,
     User,
     Mail,
     Phone,
@@ -387,9 +389,10 @@ export default function CoordinatorPortal() {
         );
     }
 
-    const progress = Math.min(((campaign.total_sales || 0) / (campaign.goal_amount || 1)) * 100, 100);
-    const totalRaised = campaign.total_sales || 0;
-    const goal = campaign.goal_amount || 1;
+    const metrics = computeFundraiserProgress(campaign.bundle_goal, campaign.total_sales, campaign.orders || []);
+    const progress = metrics.progressPercent;
+    const totalBundlesSold = metrics.totalBundlesSold;
+    const bundleGoal = metrics.bundleGoal;
 
     // Days remaining
     const daysRemaining = campaign.end_date
@@ -398,9 +401,9 @@ export default function CoordinatorPortal() {
 
     // Dynamic coaching tip
     const getCoachingTip = () => {
-        if (totalRaised === 0) return { emoji: '💡', text: 'Share your link with 5 people to get your first order.' };
-        if (totalRaised < 0.5 * goal) return { emoji: '🔥', text: "You're gaining momentum! Share again today to keep it going." };
-        if (totalRaised >= 0.75 * goal) return { emoji: '🎉', text: 'Almost there! One more push can hit your goal!' };
+        if (totalBundlesSold === 0) return { emoji: '💡', text: 'Share your link with 5 people to get your first order.' };
+        if (totalBundlesSold < 0.5 * bundleGoal) return { emoji: '🔥', text: "You're gaining momentum! Share again today to keep it going." };
+        if (totalBundlesSold >= 0.75 * bundleGoal) return { emoji: '🎉', text: 'Almost there! One more push can hit your goal!' };
         return { emoji: '📈', text: 'Great progress — keep sharing to grow your sales!' };
     };
     const coachingTip = getCoachingTip();
@@ -456,11 +459,11 @@ export default function CoordinatorPortal() {
 
                         <div className="flex justify-between items-end mb-3">
                             <div>
-                                <p className="text-4xl font-black text-slate-900">${campaign.total_sales || 0}</p>
-                                <p className="text-sm font-bold text-slate-400">Total Raised So Far</p>
+                                <p className="text-4xl font-black text-slate-900">{formatBundleCount(totalBundlesSold)}</p>
+                                <p className="text-sm font-bold text-slate-400">Bundles Sold</p>
                             </div>
                             <div className="text-right">
-                                <p className="text-xl font-black text-slate-400">${campaign.goal_amount || 0}</p>
+                                <p className="text-xl font-black text-slate-400">{bundleGoal} Bundles</p>
                                 <p className="text-xs font-black text-slate-300 uppercase tracking-tighter">Goal</p>
                             </div>
                         </div>
@@ -477,6 +480,16 @@ export default function CoordinatorPortal() {
                         <p className="text-right text-xs font-black text-indigo-600 uppercase italic">
                             {progress.toFixed(0)}% Towards Goal!
                         </p>
+
+                        {/* Estimated Earnings */}
+                        {metrics.estimatedEarnings > 0 && (
+                            <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-2">
+                                <DollarSign size={16} className="text-emerald-500" />
+                                <p className="text-sm font-bold text-slate-500">
+                                    Estimated Fundraiser Earnings: <span className="text-emerald-600 font-black">${metrics.estimatedEarnings.toFixed(2)}</span>
+                                </p>
+                            </div>
+                        )}
 
                         {/* Dynamic Coaching Tip */}
                         <div className="mt-4 bg-indigo-50 rounded-2xl p-3 flex items-start gap-2">

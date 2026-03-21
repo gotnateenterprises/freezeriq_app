@@ -9,6 +9,7 @@ import FundraiserSetup from './FundraiserSetup';
 import { ShoppingBag, DollarSign, Mail, Phone, MapPin, User, StickyNote, Plus, Calendar, Eye, Loader2, Archive, RotateCcw, Sparkles, Tag, UtensilsCrossed, Clock } from 'lucide-react';
 import StatusPipeline from './StatusPipeline';
 import { STATUS_LABELS, STATUS_COLORS, type CustomerStatus } from '@/lib/statusConstants';
+import { buildFundraiserUrls } from '@/lib/fundraiserUrls';
 
 // Template Generator (Matches API for default preview)
 const generateIntroTemplate = (name: string, orgName?: string) => ({
@@ -84,10 +85,13 @@ ${bundles.length > 0 ? `
 });
 
 const generateMarketingTemplate = (name: string, info: any, campaign?: any) => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://freezeriq.com';
-    const portalUrl = campaign?.portal_token ? `${origin}/coordinator/${campaign.portal_token}` : null;
-    const scoreboardUrl = campaign?.public_token ? `${origin}/fundraiser/${campaign.public_token}` : null;
-    const guideUrl = campaign?.portal_token ? `${origin}/coordinator/${campaign.portal_token}/guide` : null;
+    const origin = typeof window !== 'undefined'
+        ? window.location.origin
+        : (process.env.NEXTAUTH_URL || 'http://localhost:3000');
+    const { coordinatorUrl: portalUrl, coordinatorGuideUrl: guideUrl, publicUrl: scoreboardUrl } = buildFundraiserUrls(origin, {
+        portalToken: campaign?.portal_token,
+        publicToken: campaign?.public_token,
+    });
 
     return {
         subject: `Your Fundraiser Marketing Materials are Ready!`,
@@ -113,7 +117,7 @@ const generateMarketingTemplate = (name: string, info: any, campaign?: any) => {
 
 <h3>Fundraiser Details Refresher:</h3>
 <ul>
-    <li><strong>Goal Amount:</strong> $${campaign?.goal_amount || info.goal_amount || '1,000'}</li>
+    <li><strong>Bundle Goal:</strong> ${campaign?.bundle_goal || info.bundle_goal || 100} Bundles</li>
     <li><strong>Order Deadline:</strong> ${info.deadline ? new Date(info.deadline + 'T12:00:00').toLocaleDateString() : 'TBD'}</li>
     <li><strong>Delivery Date:</strong> ${info.delivery_date ? new Date(info.delivery_date + 'T12:00:00').toLocaleDateString() : 'TBD'} @ ${info.delivery_time || 'TBD'}</li>
     <li><strong>Pickup Location:</strong> ${info.pickup_location || 'TBD'}</li>

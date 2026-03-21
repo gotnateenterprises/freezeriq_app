@@ -4,15 +4,17 @@ import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { Heart, ArrowLeft, Info, ChevronRight, ChevronDown, UtensilsCrossed, Mail, CalendarDays, MapPin, Clock, Timer } from 'lucide-react';
 import BundleDetailsModal from '@/components/shop/BundleDetailsModal';
+import { formatBundleCount, type FundraiserProgressResult } from '@/lib/fundraiserMetrics';
 
 export default function FundraiserClient({
     business,
     campaign,
-    raised,
-    progress,
+    bundleProgress,
     slug,
     fundraiserId
 }: any) {
+
+    const { totalBundlesSold, bundleGoal, progressPercent } = bundleProgress as FundraiserProgressResult;
 
 
     const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
@@ -40,12 +42,7 @@ export default function FundraiserClient({
         return `mailto:${coordinatorEmail}?subject=${subject}&body=${body}`;
     };
 
-    const formatCurrency = (amount: number) => {
-        return new Intl.NumberFormat('en-US', {
-            style: 'currency',
-            currency: 'USD',
-        }).format(amount);
-    };
+
 
     const bundles = business.bundles || [];
     const mainBundle = bundles[0];
@@ -153,12 +150,12 @@ export default function FundraiserClient({
 
                             <div className="flex justify-between items-end mb-4 sm:mb-6 relative z-10">
                                 <div className="text-left">
-                                    <p className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1 drop-shadow-sm">Raised</p>
-                                    <p className="text-3xl sm:text-5xl font-black text-white tracking-tight drop-shadow-md">{formatCurrency(raised)}</p>
+                                    <p className="text-[9px] sm:text-[10px] font-black text-white/70 uppercase tracking-[0.2em] mb-1 drop-shadow-sm">Bundles Sold</p>
+                                    <p className="text-3xl sm:text-5xl font-black text-white tracking-tight drop-shadow-md">{formatBundleCount(totalBundlesSold)}</p>
                                 </div>
                                 <div className="text-right">
-                                    <p className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1 drop-shadow-sm">Goal</p>
-                                    <p className="text-base sm:text-xl font-black text-slate-100 drop-shadow-md">{campaign.goal_amount ? formatCurrency(Number(campaign.goal_amount)) : 'No Goal Set'}</p>
+                                    <p className="text-[9px] sm:text-[10px] font-black text-white/70 uppercase tracking-[0.2em] mb-1 drop-shadow-sm">Goal</p>
+                                    <p className="text-base sm:text-xl font-black text-slate-100 drop-shadow-md">{formatBundleCount(bundleGoal)} Bundles</p>
                                 </div>
                             </div>
 
@@ -166,7 +163,7 @@ export default function FundraiserClient({
                             <div className="h-5 sm:h-6 bg-black/40 rounded-full overflow-hidden shadow-inner p-1 relative z-10 border border-white/10">
                                 <div
                                     className="h-full rounded-full transition-all duration-1000 ease-out relative shadow-[0_4px_12px_rgba(255,255,255,0.2)]"
-                                    style={{ width: `${progress}%`, backgroundColor: primaryColor }}
+                                    style={{ width: `${progressPercent}%`, backgroundColor: primaryColor }}
                                 >
                                     <div className="absolute inset-0 bg-gradient-to-r from-white/30 via-transparent to-transparent animate-[shimmer_2s_infinite]"></div>
                                 </div>
@@ -175,7 +172,9 @@ export default function FundraiserClient({
                             <div className="mt-5 sm:mt-8 flex items-center justify-center gap-2 py-3 sm:py-4 bg-white/40 rounded-xl sm:rounded-2xl border border-white/50 relative z-10 backdrop-blur-md shadow-inner px-3">
                                 <Heart className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-pink-600 fill-pink-600 drop-shadow-sm shrink-0" />
                                 <p className="text-[9px] sm:text-[10px] font-black text-pink-700 uppercase tracking-widest drop-shadow-sm">
-                                    Place an order to help us reach our goal!
+                                    {totalBundlesSold > 0
+                                        ? `${formatBundleCount(totalBundlesSold)} out of ${formatBundleCount(bundleGoal)} bundles purchased`
+                                        : 'Place an order to help us reach our bundle goal!'}
                                 </p>
                             </div>
 

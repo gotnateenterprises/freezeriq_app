@@ -19,6 +19,7 @@
  */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { Prisma } from '@prisma/client';
 
 export async function GET(
     req: Request,
@@ -45,7 +46,6 @@ export async function GET(
                         }
                     }
                 },
-                // 2. PRIVACY FIX: Only select fields needed for Leaderboard/Progress
                 orders: {
                     orderBy: { created_at: 'desc' },
                     select: {
@@ -54,8 +54,15 @@ export async function GET(
                         customer_name: true,
                         total_amount: true,
                         created_at: true,
-                        source: true
-                        // EXCLUDED: delivery_address, customer_email, phone, items
+                        source: true,
+                        // Bundle-unit progress needs item-level data (no PII)
+                        items: {
+                            select: {
+                                quantity: true,
+                                variant_size: true,
+                            }
+                        }
+                        // EXCLUDED: delivery_address, customer_email, phone
                     }
                 }
             }
@@ -76,19 +83,31 @@ export async function GET(
             return NextResponse.json({ error: "Portal unavailable (Plan Restriction)" }, { status: 403 });
         }
 
-        // 4. Fetch Active Bundles for the business
-        const bundles = await prisma.bundle.findMany({
-            where: {
-                business_id: businessId,
-                is_active: true
-            },
-            select: {
-                id: true,
-                name: true,
-                price: true,
-                serving_tier: true
-            }
-        });
+        // 4. Fetch campaign-assigned bundles (or fallback to all active bundles)
+        const campaignBundles: any[] = await prisma.$queryRaw`
+            SELECT bundle_id FROM campaign_bundles
+            WHERE campaign_id = ${campaign.id}
+            ORDER BY position ASC
+        `;
+        const assignedBundleIds = campaignBundles.map((cb: any) => cb.bundle_id);
+
+        let bundles: any[];
+        if (assignedBundleIds.length > 0) {
+            bundles = await prisma.$queryRaw`
+                SELECT id, name, COALESCE(price, 0) as price, serving_tier FROM bundles
+                WHERE id IN(${Prisma.join(assignedBundleIds)})
+                AND business_id = ${businessId}
+                AND is_active = true
+                ORDER BY array_position(${assignedBundleIds}::text[], id::text)
+            `;
+        } else {
+            bundles = await prisma.$queryRaw`
+                SELECT id, name, COALESCE(price, 0) as price, serving_tier FROM bundles
+                WHERE business_id = ${businessId}
+                AND is_active = true
+                ORDER BY name ASC
+            `;
+        }
 
         return NextResponse.json({
             ...campaign,

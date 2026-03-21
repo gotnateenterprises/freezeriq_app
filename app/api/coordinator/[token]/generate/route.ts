@@ -12,22 +12,21 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { callGemini, getGeminiApiKey } from '@/lib/ai/gemini';
+import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
 
 const MAX_GENERATIONS = 40;
 
 function buildPrompt(channel: string, campaign: any, publicUrl: string): string {
     const name = campaign.name || 'Our Fundraiser';
     const org = campaign.customer?.name || 'Our Organization';
-    const goal = campaign.goal_amount ? `$${Number(campaign.goal_amount).toLocaleString()}` : '$1,000';
-    const totalSales = Number(campaign.total_sales || 0);
-    const goalNum = Number(campaign.goal_amount || 1000);
-    const pct = goalNum > 0 ? Math.round((totalSales / goalNum) * 100) : 0;
-    const progress = `${pct}% ($${totalSales.toLocaleString()})`;
+    const bundleGoal = Number(campaign.bundle_goal) || 100;
+    // totalBundlesSold is passed from the caller or estimated from orders
+    const totalOrders = (campaign.orders || []).length;
     const endDate = campaign.end_date
         ? new Date(campaign.end_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
         : 'soon';
 
-    const base = `Fundraiser: "${name}" by ${org}. Goal: ${goal}. Progress: ${progress}. Orders due: ${endDate}. Order link: ${publicUrl}. They are selling Freezer Chef meals — delicious, easy-to-prepare freezer meals that solve dinner.`;
+    const base = `Fundraiser: "${name}" by ${org}. Goal: ${bundleGoal} bundles. Orders placed: ${totalOrders}. Orders due: ${endDate}. Order link: ${publicUrl}. They are selling Freezer Chef meals — delicious, easy-to-prepare freezer meals that solve dinner.`;
 
     switch (channel) {
         case 'facebook':
@@ -89,7 +88,7 @@ export async function POST(
             return NextResponse.json({ error: 'AI generation not configured. Contact support.' }, { status: 503 });
         }
 
-        const publicUrl = `https://freezeriq-app.vercel.app/fundraiser/${campaign.public_token}`;
+        const publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
         const prompt = buildPrompt(channel, campaign, publicUrl);
 
         let content: string;

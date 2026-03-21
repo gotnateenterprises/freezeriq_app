@@ -15,6 +15,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { generateTracker } from '@/lib/generateTracker';
+import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
 
 export async function GET(req: Request) {
     try {
@@ -82,8 +83,7 @@ export async function GET(req: Request) {
 
         // 3. Map to TrackerInput shape
         //    coordinatorName: prefer customer.contact_name, fall back to campaign.name
-        const origin = new URL(req.url).origin;
-        const publicUrl = `${origin}/fundraiser/${campaign.public_token}`;
+        const publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
         const coordinatorName =
             (campaign.customer as any)?.contact_name || campaign.name;
 
