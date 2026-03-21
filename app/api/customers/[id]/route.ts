@@ -7,20 +7,27 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
+        console.log("[GET /api/customers/[id]] Step 1: Loading auth...");
         const { auth } = await import('@/auth');
+        console.log("[GET /api/customers/[id]] Step 2: Calling auth()...");
         const session = await auth();
+        console.log("[GET /api/customers/[id]] Step 3: Auth complete. businessId:", session?.user?.businessId);
         if (!session?.user?.businessId) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
+        console.log("[GET /api/customers/[id]] Step 4: Awaiting params...");
         const { id } = await params;
+        console.log("[GET /api/customers/[id]] Step 5: id =", id);
 
 
         // 1. Try finding Organization (only if ID is UUID)
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
         let org = null;
 
+        console.log("[GET /api/customers/[id]] Step 6: isUuid =", isUuid);
         if (isUuid) {
+            console.log("[GET /api/customers/[id]] Step 7: Running Prisma findUnique...");
             org = await prisma.customer.findUnique({
                 where: { id },
                 include: {
@@ -39,13 +46,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
                 }
             });
 
+            console.log("[GET /api/customers/[id]] Step 8: Query returned org =", org ? org.id : null);
+
             // Security Check
             if (org && org.business_id !== session.user.businessId) {
+                console.log("[GET /api/customers/[id]] Step 8b: Cross-tenant mismatch!", org.business_id, "!=", session.user.businessId);
                 return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
             }
         }
 
         if (org) {
+            console.log("[GET /api/customers/[id]] Step 9: Serializing org response...");
             const orgAny = org as any;
             return NextResponse.json({
                 id: org.id,
@@ -219,8 +230,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
         return NextResponse.json({ error: "Customer not found" }, { status: 404 });
 
-    } catch (e) {
-        return NextResponse.json({ error: "Server Error" }, { status: 500 });
+    } catch (e: any) {
+        console.error("[GET /api/customers/[id]] CRASH:", e?.message || e);
+        console.error("[GET /api/customers/[id]] Stack:", e?.stack);
+        return NextResponse.json({ error: "Server Error", detail: e?.message || "Unknown" }, { status: 500 });
     }
 }
 
