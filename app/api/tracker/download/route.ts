@@ -8,13 +8,14 @@
  * ACTOR: Fundraiser Coordinator
  * SCOPE: Single campaign (resolved from portal_token)
  *
- * BUNDLE LOGIC: Reuses the same assigned-bundle / fallback pattern
- * established in the flyer and packet download routes.
+ * TEMPLATE: Uses the same tracking_sheet.xlsx template as the
+ * marketing packet email attachment (/api/documents/tracking-sheet).
+ * Populates deadline, checks_payable_to, and bundle recipes from
+ * campaign data in the database.
  */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { generateTracker } from '@/lib/generateTracker';
-import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
+import path from 'path';
 
 export async function GET(req: Request) {
     try {
@@ -28,7 +29,7 @@ export async function GET(req: Request) {
             );
         }
 
-        // 1. Fetch campaign + customer (include contact_name for coordinator)
+        // 1. Fetch campaign + customer
         const campaign = await prisma.fundraiserCampaign.findFirst({
             where: { portal_token: token },
             include: {
@@ -49,49 +50,84 @@ export async function GET(req: Request) {
             );
         }
 
-        const businessId = (campaign.customer as any)?.business_id;
-        const orgName = (campaign.customer as any)?.name || 'Organization';
-
-        // 2. Fetch assigned bundles only (no fallback to all bundles)
+        // 2. Fetch assigned bundles with their recipe contents
         const campaignBundles = await prisma.campaignBundle.findMany({
             where: { campaign_id: campaign.id },
             orderBy: { position: 'asc' },
             include: {
                 bundle: {
-                    select: { id: true, name: true, price: true, serving_tier: true, is_active: true }
+                    select: {
+                        id: true,
+                        name: true,
+                        is_active: true,
+                        contents: {
+                            orderBy: { position: 'asc' },
+                            include: {
+                                recipe: { select: { name: true } }
+                            }
+                        }
+                    }
                 }
             }
         });
+
         const bundles = campaignBundles
             .filter(cb => cb.bundle.is_active)
             .map(cb => ({
-                id: cb.bundle.id,
                 name: cb.bundle.name,
-                price: cb.bundle.price,
-                serving_tier: cb.bundle.serving_tier
+                recipes: cb.bundle.contents.map(c => (c as any).recipe?.name).filter(Boolean)
             }));
 
-        // 3. Map to TrackerInput shape
-        //    coordinatorName: prefer customer.contact_name, fall back to campaign.name
-        const publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
-        const coordinatorName =
-            (campaign.customer as any)?.contact_name || campaign.name;
+        // 3. Load the SAME template used by the marketing packet
+        const ExcelJS = (await import('exceljs')).default;
+        const templatePath = path.resolve('./templates/tracking_sheet.xlsx');
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.readFile(templatePath);
 
-        const buffer = await generateTracker({
-            campaignName: campaign.name,
-            organizationName: orgName,
-            endDate: campaign.end_date
-                ? new Date(campaign.end_date).toISOString()
-                : '',
-            publicUrl,
-            coordinatorName,
-            bundles: bundles.map((b: any) => ({
-                name: b.name,
-                price: Number(b.price),
-            })),
-        });
+        const worksheet = workbook.worksheets[0];
 
-        // 4. Sanitise filename
+        // 4. Populate deadline (B4) — same logic as /api/documents/tracking-sheet
+        let formattedDeadline = '(Insert Date)';
+        if (campaign.end_date) {
+            const d = new Date(campaign.end_date);
+            formattedDeadline = d.toLocaleDateString('en-US', {
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric',
+            });
+        }
+
+        const cellB4 = worksheet.getCell('B4');
+        if (cellB4.value && typeof cellB4.value === 'string') {
+            cellB4.value = cellB4.value.replace('(Insert Date)', formattedDeadline);
+        } else {
+            cellB4.value = `All orders and money must be submitted by your group's deadline: ${formattedDeadline}`;
+        }
+
+        // 5. Populate checks payable (B5)
+        const payee = campaign.checks_payable || '_______________________';
+        const cellB5 = worksheet.getCell('B5');
+        if (cellB5.value && typeof cellB5.value === 'string') {
+            cellB5.value = cellB5.value.replace('(insert pay to organization)', payee);
+        } else {
+            cellB5.value = `All checks should be made payable to:  ${payee}`;
+        }
+
+        // 6. Populate bundle recipes (Column B rows 24-28, Column C rows 24-28)
+        if (bundles[0]?.recipes) {
+            for (let i = 0; i < 5; i++) {
+                worksheet.getCell(`B${24 + i}`).value = bundles[0].recipes[i] || '';
+            }
+        }
+        if (bundles[1]?.recipes) {
+            for (let i = 0; i < 5; i++) {
+                worksheet.getCell(`C${24 + i}`).value = bundles[1].recipes[i] || '';
+            }
+        }
+
+        // 7. Generate buffer and return
+        const buffer = await workbook.xlsx.writeBuffer();
+        const orgName = (campaign.customer as any)?.name || 'Organization';
         const safeOrgName = orgName.replace(/[^a-zA-Z0-9_-]/g, '_');
 
         return new NextResponse(buffer, {
