@@ -324,8 +324,8 @@ export default function CoordinatorPortal() {
 
     const handleEmailShare = async () => {
         const url = getPublicUrl();
-        const emailText = promoScripts?.scripts?.emailBlurb || `Check out this fundraiser! ${url}`;
-        const fullMessage = `${emailText}\n\nOrder here: ${url}`;
+        const emailText = promoScripts?.scripts?.emailBlurb;
+        const fullMessage = emailText || `Check out this fundraiser!\n\nOrder here:\n${url}`;
         await navigator.clipboard.writeText(fullMessage);
         const subject = encodeURIComponent(`Support ${campaign?.name || 'our fundraiser'}!`);
         const body = encodeURIComponent(fullMessage);

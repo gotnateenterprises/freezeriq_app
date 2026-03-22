@@ -150,7 +150,7 @@ function generateEmailBlurb(input: PromoScriptInput): string {
         email += bundleListShort(bundles, 4) + '\n\n';
     }
 
-    email += `Place your order here: ${publicUrl}\n`;
+    email += `Place your order here:\n${publicUrl}\n`;
 
     if (deadline) {
         email += `\n${deadline}\n`;
