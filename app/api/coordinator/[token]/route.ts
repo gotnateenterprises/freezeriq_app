@@ -19,7 +19,6 @@
  */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { Prisma } from '@prisma/client';
 
 export async function GET(
     req: Request,
@@ -88,32 +87,26 @@ export async function GET(
             return NextResponse.json({ error: "Portal unavailable (Plan Restriction)" }, { status: 403 });
         }
 
-        // 4. Fetch campaign-assigned bundles (or fallback to all active bundles)
+        // 4. Fetch campaign-assigned bundles only (no fallback to all bundles)
         let bundles: any[] = [];
         try {
-            const campaignBundles: any[] = await prisma.$queryRaw`
-                SELECT bundle_id FROM campaign_bundles
-                WHERE campaign_id = ${campaign.id}
-                ORDER BY position ASC
-            `;
-            const assignedBundleIds = campaignBundles.map((cb: any) => cb.bundle_id);
-
-            if (assignedBundleIds.length > 0) {
-                bundles = await prisma.$queryRaw`
-                    SELECT id, name, COALESCE(price, 0) as price, serving_tier FROM bundles
-                    WHERE id IN(${Prisma.join(assignedBundleIds)})
-                    AND business_id = ${businessId}
-                    AND is_active = true
-                    ORDER BY array_position(${assignedBundleIds}::text[], id::text)
-                `;
-            } else {
-                bundles = await prisma.$queryRaw`
-                    SELECT id, name, COALESCE(price, 0) as price, serving_tier FROM bundles
-                    WHERE business_id = ${businessId}
-                    AND is_active = true
-                    ORDER BY name ASC
-                `;
-            }
+            const campaignBundles = await prisma.campaignBundle.findMany({
+                where: { campaign_id: campaign.id },
+                orderBy: { position: 'asc' },
+                include: {
+                    bundle: {
+                        select: { id: true, name: true, price: true, serving_tier: true, is_active: true }
+                    }
+                }
+            });
+            bundles = campaignBundles
+                .filter(cb => cb.bundle.is_active)
+                .map(cb => ({
+                    id: cb.bundle.id,
+                    name: cb.bundle.name,
+                    price: cb.bundle.price ?? 0,
+                    serving_tier: cb.bundle.serving_tier
+                }));
         } catch (bundleErr) {
             console.error("Bundle fetch error (non-blocking):", bundleErr);
             // Continue with empty bundles — don't block portal access
