@@ -187,11 +187,11 @@ export default function FundraisersPage() {
                         <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50">
                             {isLoading ? (
                                 <tr>
-                                    <td colSpan={6} className="px-5 py-20 text-center text-slate-400 animate-pulse font-bold">Loading Fundraisers...</td>
+                                    <td colSpan={6} className="px-5 py-20 text-center text-slate-400 animate-pulse font-bold">Loading Campaigns...</td>
                                 </tr>
                             ) : filtered.length === 0 ? (
                                 <tr>
-                                    <td colSpan={6} className="px-5 py-20 text-center text-slate-400 italic">No fundraisers found.</td>
+                                    <td colSpan={6} className="px-5 py-20 text-center text-slate-400 italic">No campaigns found.</td>
                                 </tr>
                             ) : filtered.map(item => (
                                 <tr key={item.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
@@ -279,7 +279,7 @@ export default function FundraisersPage() {
                                                 <Receipt size={15} />
                                             </Link>
                                             <Link
-                                                href={`/customers/${item.customer_id}?tab=fundraisers`}
+                                                href={`/fundraisers/${item.customer_id}?tab=fundraisers`}
                                                 className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-indigo-600 transition-all"
                                                 title="Manage"
                                             >

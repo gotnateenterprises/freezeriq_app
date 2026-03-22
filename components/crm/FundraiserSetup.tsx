@@ -72,7 +72,7 @@ export default function FundraiserSetup({ customer, onSave, allowCancel, onCance
         try {
             console.log("Saving Fundraiser Info:", fundraiserInfo);
             await onSave(fundraiserInfo);
-            alert("Fundraiser details saved successfully!");
+            alert("Campaign details saved successfully!");
         } catch (e) {
             console.error("Save failed:", e);
             alert("Failed to save changes.");
@@ -83,7 +83,7 @@ export default function FundraiserSetup({ customer, onSave, allowCancel, onCance
 
     return (
         <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 w-full relative">
-            <h3 className="text-xl font-black text-slate-900 dark:text-white mb-2">Fundraiser Details</h3>
+            <h3 className="text-xl font-black text-slate-900 dark:text-white mb-2">Campaign Details</h3>
             <p className="text-slate-500 mb-6">Enter these details to auto-fill the sales sheet.</p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">

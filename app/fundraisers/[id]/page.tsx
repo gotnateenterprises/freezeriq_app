@@ -178,7 +178,7 @@ export default function FundraiserProfilePage({ params }: { params: Promise<{ id
                 <div className="text-red-500 font-bold text-xl">{customer?.error || "Partner not found."}</div>
                 <p className="text-slate-500">You may have switched businesses or this fundraiser no longer exists.</p>
                 <Link href="/fundraisers" className="inline-block px-6 py-2 bg-indigo-600 text-white rounded-xl font-bold">
-                    Back to Fundraisers
+                    Back to Campaigns
                 </Link>
             </div>
         );
@@ -271,6 +271,7 @@ export default function FundraiserProfilePage({ params }: { params: Promise<{ id
                     customer={customer}
                     onUpdateCustomer={handleUpdateProfile}
                     onEditProfile={() => setIsEditingProfile(true)}
+                    onNavigateToCampaigns={() => setActiveTab('campaigns')}
                 />
             )}
 

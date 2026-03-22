@@ -785,7 +785,7 @@ export default function CustomerOverview({ customer, onUpdateCustomer, onEditPro
                         {/* ACTIVE STAGE: Show Info Summary */}
                         {['ACTIVE', 'PRODUCTION', 'DELIVERY', 'COMPLETE'].includes(status) && (
                             <div className="bg-slate-50 dark:bg-slate-900/30 p-6 rounded-2xl border border-slate-100 dark:border-slate-800">
-                                <h4 className="font-bold text-slate-900 dark:text-white mb-4">Fundraiser Details</h4>
+                                <h4 className="font-bold text-slate-900 dark:text-white mb-4">Campaign Details</h4>
                                 <FundraiserSetup
                                     customer={customer}
                                     onSave={async (data) => await onUpdateCustomer({ fundraiser_info: data })}

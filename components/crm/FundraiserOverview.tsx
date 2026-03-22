@@ -6,7 +6,7 @@ import Link from 'next/link';
 import EmailComposeModal from './EmailComposeModal';
 import FundraiserSetup from './FundraiserSetup';
 
-import { ShoppingBag, DollarSign, Mail, Phone, MapPin, User, StickyNote, Plus, Calendar, Eye, Loader2, Archive, RotateCcw, Sparkles, Tag, UtensilsCrossed, Clock } from 'lucide-react';
+import { ShoppingBag, DollarSign, Mail, Phone, MapPin, User, StickyNote, Plus, Calendar, Eye, Loader2, Archive, RotateCcw, Sparkles, Tag, UtensilsCrossed, Clock, Megaphone } from 'lucide-react';
 import StatusPipeline from './StatusPipeline';
 import { STATUS_LABELS, STATUS_COLORS, type CustomerStatus } from '@/lib/statusConstants';
 import { validateLaunchReadiness, launchReadinessMessage } from '@/lib/validateLaunchReadiness';
@@ -182,9 +182,10 @@ interface CustomerOverviewProps {
     customer: any;
     onUpdateCustomer: (updates: any) => Promise<void>;
     onEditProfile: () => void;
+    onNavigateToCampaigns?: () => void;
 }
 
-export default function FundraiserOverview({ customer, onUpdateCustomer, onEditProfile }: CustomerOverviewProps) {
+export default function FundraiserOverview({ customer, onUpdateCustomer, onEditProfile, onNavigateToCampaigns }: CustomerOverviewProps) {
     // State
     const [notes, setNotes] = useState(customer.notes || '');
     const [typingTimeout, setTypingTimeout] = useState<NodeJS.Timeout | null>(null);
@@ -654,7 +655,17 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
                                         <h4 className="font-bold text-emerald-900 dark:text-emerald-100 mb-1">Step 3: Marketing Packet</h4>
                                         <p className="text-sm text-emerald-600 dark:text-emerald-300">Once details are saved below, send the official flyer and order forms.</p>
                                     </div>
-                                    <button
+                                    <div className="flex items-center gap-2">
+                                        {onNavigateToCampaigns && (
+                                            <button
+                                                onClick={onNavigateToCampaigns}
+                                                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg shadow-sm flex items-center gap-2"
+                                            >
+                                                <Megaphone size={16} />
+                                                Create Campaign
+                                            </button>
+                                        )}
+                                        <button
                                         onClick={async () => {
                                             // Launch Readiness Gate
                                             const readiness = validateLaunchReadiness(customer);
@@ -710,6 +721,7 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
                                         {isGeneratingFlyer ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}
                                         Send Marketing Packet
                                     </button>
+                                    </div>
                                 </div>
 
                                 <FundraiserSetup
@@ -746,7 +758,7 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
                         {/* ACTIVE STAGE: Show Info Summary */}
                         {['ACTIVE', 'PRODUCTION', 'DELIVERY', 'COMPLETE'].includes(status) && (
                             <div className="bg-slate-50 dark:bg-slate-900/30 p-6 rounded-2xl border border-slate-100 dark:border-slate-800">
-                                <h4 className="font-bold text-slate-900 dark:text-white mb-4">Fundraiser Details</h4>
+                                <h4 className="font-bold text-slate-900 dark:text-white mb-4">Campaign Details</h4>
                                 <FundraiserSetup
                                     customer={customer}
                                     onSave={async (data) => await onUpdateCustomer({ fundraiser_info: data })}
