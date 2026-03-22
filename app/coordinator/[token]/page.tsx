@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import type { CampaignAsset } from '@/lib/campaignAssets';
 import type { PromoScriptsResponse } from '@/lib/generatePromoScripts';
 import { computeFundraiserProgress, formatBundleCount } from '@/lib/fundraiserMetrics';
+import { Instagram } from 'lucide-react';
 
 import {
     Plus,
@@ -95,7 +96,43 @@ export default function CoordinatorPortal() {
             setAiContent(data.content);
             setAiRemaining(data.remaining);
             trackAction('ai_generate_' + channel);
-            toast.success(`${channel.charAt(0).toUpperCase() + channel.slice(1)} content generated!`);
+
+            // Auto-execute channel-aware action after generation
+            const content = data.content as string;
+            await navigator.clipboard.writeText(content);
+
+            if (channel === 'facebook') {
+                toast.success('Copied! Paste into Facebook when it opens.');
+                const url = getPublicUrl();
+                window.open(
+                    `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`,
+                    '_blank',
+                    'width=600,height=400'
+                );
+            } else if (channel === 'text') {
+                const isMobile = typeof navigator !== 'undefined' &&
+                    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+                if (isMobile) {
+                    toast.success('Copied! Opening your messages...');
+                    window.location.href = `sms:?&body=${encodeURIComponent(content)}`;
+                } else {
+                    toast.success('Copied! Paste into your text message to send.');
+                }
+            } else if (channel === 'email') {
+                const subject = encodeURIComponent(`Support ${campaign?.name || 'our fundraiser'}!`);
+                const body = encodeURIComponent(content);
+                // mailto: has a ~2000 char limit in practice
+                if (content.length < 1800) {
+                    toast.success('Copied! Paste into your email when it opens.');
+                    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+                } else {
+                    toast.success('Copied! Paste into your email.');
+                }
+            } else if (channel === 'instagram') {
+                toast.success('Copied! Paste into Instagram as your caption.');
+            } else {
+                toast.success('Content copied to clipboard!');
+            }
         } catch {
             toast.error('Network error. Please try again.');
         } finally {
@@ -303,18 +340,81 @@ export default function CoordinatorPortal() {
     const handleFacebookShare = async () => {
         const url = getPublicUrl();
         const fbText = promoScripts?.scripts?.facebook;
-        // Copy the FB post text first
         if (fbText) {
             await navigator.clipboard.writeText(fbText);
-            toast.success('Post copied — paste into Facebook!');
+            toast.success('Copied! Paste into Facebook when it opens.');
         }
-        // Open Facebook share dialog
         window.open(
             `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`,
             '_blank',
             'width=600,height=400'
         );
         trackAction('share_facebook');
+    };
+
+    const handleEmailShare = async () => {
+        const url = getPublicUrl();
+        const emailText = promoScripts?.scripts?.emailBlurb || `Check out this fundraiser! ${url}`;
+        const fullMessage = `${emailText}\n\nOrder here: ${url}`;
+        await navigator.clipboard.writeText(fullMessage);
+        const subject = encodeURIComponent(`Support ${campaign?.name || 'our fundraiser'}!`);
+        const body = encodeURIComponent(fullMessage);
+        if (fullMessage.length < 1800) {
+            toast.success('Copied! Paste into your email when it opens.');
+            window.location.href = `mailto:?subject=${subject}&body=${body}`;
+        } else {
+            toast.success('Copied! Paste into your email.');
+        }
+        trackAction('share_email');
+    };
+
+    const handleInstagramShare = async () => {
+        const url = getPublicUrl();
+        const igText = promoScripts?.scripts?.textMessage || `Support our fundraiser! Link in bio: ${url}`;
+        await navigator.clipboard.writeText(igText);
+        toast.success('Copied! Paste into Instagram as your caption.');
+        trackAction('share_instagram');
+    };
+
+    // ── *WithContent helpers (for re-sharing edited AI content) ──
+    const handleFacebookShareWithContent = async (content: string) => {
+        await navigator.clipboard.writeText(content);
+        toast.success('Copied! Paste into Facebook when it opens.');
+        const url = getPublicUrl();
+        window.open(
+            `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`,
+            '_blank',
+            'width=600,height=400'
+        );
+    };
+
+    const handleSmsShareWithContent = async (content: string) => {
+        await navigator.clipboard.writeText(content);
+        const isMobile = typeof navigator !== 'undefined' &&
+            /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        if (isMobile) {
+            toast.success('Copied! Opening your messages...');
+            window.location.href = `sms:?&body=${encodeURIComponent(content)}`;
+        } else {
+            toast.success('Copied! Paste into your text message to send.');
+        }
+    };
+
+    const handleEmailShareWithContent = async (content: string) => {
+        await navigator.clipboard.writeText(content);
+        const subject = encodeURIComponent(`Support ${campaign?.name || 'our fundraiser'}!`);
+        const body = encodeURIComponent(content);
+        if (content.length < 1800) {
+            toast.success('Copied! Paste into your email when it opens.');
+            window.location.href = `mailto:?subject=${subject}&body=${body}`;
+        } else {
+            toast.success('Copied! Paste into your email.');
+        }
+    };
+
+    const handleInstagramShareWithContent = async (content: string) => {
+        await navigator.clipboard.writeText(content);
+        toast.success('Copied! Paste into Instagram as your caption.');
     };
 
     const handleDownloadTracker = async () => {
@@ -651,6 +751,20 @@ export default function CoordinatorPortal() {
                                 <Smartphone size={24} />
                                 <span>📱 Text / SMS</span>
                             </button>
+                            <button
+                                onClick={handleEmailShare}
+                                className="bg-purple-50 hover:bg-purple-100 text-purple-700 p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-purple-100"
+                            >
+                                <Mail size={24} />
+                                <span>📧 Email</span>
+                            </button>
+                            <button
+                                onClick={handleInstagramShare}
+                                className="bg-pink-50 hover:bg-pink-100 text-pink-700 p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-pink-100"
+                            >
+                                <Instagram size={24} />
+                                <span>📸 Instagram</span>
+                            </button>
                         </div>
                     </div>
 
@@ -718,11 +832,11 @@ export default function CoordinatorPortal() {
 
                     <div className="grid grid-cols-2 gap-2">
                         {[
-                            { channel: 'facebook', label: '📘 Facebook' },
-                            { channel: 'text', label: '💬 Text / SMS' },
-                            { channel: 'email', label: '📧 Email' },
-                            { channel: 'instagram', label: '📸 Instagram' }
-                        ].map(({ channel, label }) => (
+                            { channel: 'facebook', label: '📘 Facebook', sub: 'Generate for Facebook' },
+                            { channel: 'text', label: '💬 Text / SMS', sub: 'Generate for Text' },
+                            { channel: 'email', label: '📧 Email', sub: 'Generate for Email' },
+                            { channel: 'instagram', label: '📸 Instagram', sub: 'Generate for Instagram' }
+                        ].map(({ channel, label, sub }) => (
                             <button
                                 key={channel}
                                 onClick={() => handleAiGenerate(channel)}
@@ -735,11 +849,14 @@ export default function CoordinatorPortal() {
                             >
                                 <p className="text-xs font-black">{label}</p>
                                 <p className="text-[10px] text-indigo-200 mt-0.5">
-                                    {isAiGenerating && aiChannel === channel ? 'Generating...' : 'Click to generate'}
+                                    {isAiGenerating && aiChannel === channel ? 'Generating...' : sub}
                                 </p>
                             </button>
                         ))}
                     </div>
+                    <p className="text-[10px] text-indigo-200/70 font-medium text-center">
+                        Generate, then the message is copied and your app opens automatically.
+                    </p>
 
                     {aiRemaining === 0 && (
                         <p className="text-center text-xs font-bold text-indigo-200 bg-white/5 rounded-xl p-3">
@@ -757,8 +874,10 @@ export default function CoordinatorPortal() {
                     {aiContent && !isAiGenerating && (
                         <div className="bg-indigo-900/40 rounded-2xl p-4 border border-indigo-400/30 space-y-3">
                             <div className="flex items-center justify-between">
-                                <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">Generated Content</p>
-                                <CopyButton text={aiContent} label="Content Copied!" />
+                                <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">
+                                    {aiChannel ? `${aiChannel.charAt(0).toUpperCase() + aiChannel.slice(1)} Message` : 'Generated Content'}
+                                </p>
+                                <CopyButton text={aiContent} label="Message Copied!" />
                             </div>
                             <textarea
                                 value={aiContent}
@@ -766,6 +885,23 @@ export default function CoordinatorPortal() {
                                 rows={4}
                                 className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-xs text-white font-medium resize-y focus:outline-none focus:ring-2 focus:ring-indigo-400/50"
                             />
+                            {/* Channel-aware re-share action */}
+                            <button
+                                onClick={() => {
+                                    if (aiChannel === 'facebook') { handleFacebookShareWithContent(aiContent); }
+                                    else if (aiChannel === 'text') { handleSmsShareWithContent(aiContent); }
+                                    else if (aiChannel === 'email') { handleEmailShareWithContent(aiContent); }
+                                    else if (aiChannel === 'instagram') { handleInstagramShareWithContent(aiContent); }
+                                    else { navigator.clipboard.writeText(aiContent); toast.success('Message copied!'); }
+                                }}
+                                className="w-full bg-white/10 hover:bg-white/20 text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-2"
+                            >
+                                {aiChannel === 'facebook' && '📋 Copy & Open Facebook'}
+                                {aiChannel === 'text' && '📋 Copy & Send Text'}
+                                {aiChannel === 'email' && '📋 Copy & Open Email'}
+                                {aiChannel === 'instagram' && '📋 Copy Caption'}
+                                {!['facebook', 'text', 'email', 'instagram'].includes(aiChannel) && '📋 Copy Message'}
+                            </button>
                         </div>
                     )}
                 </div>
