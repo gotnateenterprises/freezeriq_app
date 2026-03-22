@@ -376,6 +376,10 @@ export default function CoordinatorPortal() {
 
     const handleAddOrder = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (selectedItems.length === 0) {
+            toast.error("Please select at least one bundle");
+            return;
+        }
         setIsSubmitting(true);
         try {
             const res = await fetch(`/api/coordinator/${token}`, {
@@ -387,7 +391,9 @@ export default function CoordinatorPortal() {
                     items: selectedItems.map(i => ({
                         bundleId: i.id,
                         quantity: i.quantity,
-                        variantSize: i.serving_tier || 'family'
+                        serving_tier: i.serving_tier || 'family',
+                        name: i.name,
+                        price: i.price
                     }))
                 })
             });
@@ -500,6 +506,16 @@ export default function CoordinatorPortal() {
                     </div>
                 )}
 
+                {/* Personalized Header */}
+                <div className="mb-4">
+                    <p className="text-sm text-slate-500 font-medium mb-1">
+                        Hey {campaign?.customer?.name?.split(" ")[0] || "there"} 👋
+                    </p>
+                    <h1 className="text-2xl md:text-3xl font-bold text-slate-900">
+                        Here&apos;s your Coordinator Panel
+                    </h1>
+                </div>
+
                 {/* Scoreboard Card */}
                 <div className="bg-white rounded-[2rem] p-8 shadow-xl shadow-indigo-500/5 border border-slate-100 relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-full -translate-y-12 translate-x-12 opacity-50" />
@@ -520,6 +536,7 @@ export default function CoordinatorPortal() {
                         </div>
 
                         {/* Progress Bar */}
+                        <p className="text-xs font-black text-slate-400 uppercase tracking-wide mb-1">Progress to Goal</p>
                         <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden mb-2">
                             <motion.div
                                 className="h-full bg-indigo-600"
@@ -537,15 +554,21 @@ export default function CoordinatorPortal() {
                             <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-2">
                                 <DollarSign size={16} className="text-emerald-500" />
                                 <p className="text-sm font-bold text-slate-500">
-                                    Estimated Fundraiser Earnings: <span className="text-emerald-600 font-black">${metrics.estimatedEarnings.toFixed(2)}</span>
+                                    💰 You&apos;ve earned: <span className="text-emerald-600 font-black">${metrics.estimatedEarnings.toFixed(2)}</span> so far
                                 </p>
                             </div>
                         )}
 
-                        {/* Dynamic Coaching Tip */}
-                        <div className="mt-4 bg-indigo-50 rounded-2xl p-3 flex items-start gap-2">
-                            <span className="text-lg">{coachingTip.emoji}</span>
-                            <p className="text-sm font-bold text-indigo-700">{coachingTip.text}</p>
+                        {/* Conditional Motivation */}
+                        <div className="mt-4 bg-indigo-50 rounded-2xl p-3 space-y-1">
+                            <p className="text-sm font-bold text-indigo-700">
+                                {totalBundlesSold === 0
+                                    ? '🔥 Let\'s get your first order today!'
+                                    : '🔥 You\'re gaining momentum — keep going!'}
+                            </p>
+                            <p className="text-sm font-medium text-indigo-600">
+                                🚀 Your next step: Share your fundraiser with 5 people to get your first order
+                            </p>
                         </div>
 
                         {/* Days Remaining */}
@@ -555,7 +578,7 @@ export default function CoordinatorPortal() {
                                 <span>
                                     {daysRemaining === 0
                                         ? '⏰ Last day — make it count!'
-                                        : `⏳ ${daysRemaining} day${daysRemaining !== 1 ? 's' : ''} left — keep pushing!`}
+                                        : `⏳ ${daysRemaining} day${daysRemaining !== 1 ? 's' : ''} left — now is the time to push!`}
                                 </span>
                             </div>
                         )}
@@ -571,66 +594,75 @@ export default function CoordinatorPortal() {
                 )}
 
                 {/* Quick Actions — unified action hub */}
-                <div className="bg-white rounded-[2rem] p-6 border border-slate-200 shadow-sm space-y-4">
+                <div className="bg-white rounded-[2rem] p-6 border border-slate-200 shadow-sm space-y-5">
                     <h2 className="text-lg font-black flex items-center gap-2">
                         <Rocket size={20} className="text-indigo-600" />
                         Quick Actions
                     </h2>
-                    <div className="grid grid-cols-2 gap-3">
-                        <button
-                            onClick={handleShareUniversal}
-                            className="bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 text-white p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 shadow-lg shadow-indigo-500/20"
-                        >
-                            <Share2 size={24} />
-                            <span>🚀 Share Fundraiser</span>
-                        </button>
-                        <button
-                            onClick={handleFacebookShare}
-                            className="bg-blue-50 hover:bg-blue-100 text-blue-700 p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-blue-100"
-                        >
-                            <Facebook size={24} />
-                            <span>📘 Facebook</span>
-                        </button>
-                        <button
-                            onClick={handleSmsShare}
-                            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-emerald-100"
-                        >
-                            <Smartphone size={24} />
-                            <span>📱 Text Blast</span>
-                        </button>
-                        <button
-                            onClick={() => setShowOrderModal(true)}
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 shadow-lg shadow-indigo-500/20"
-                        >
-                            <Plus size={24} strokeWidth={3} />
-                            <span>➕ Add Order</span>
-                        </button>
+
+                    {/* Primary CTA */}
+                    <button
+                        onClick={handleShareUniversal}
+                        className="w-full bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 text-white p-5 rounded-2xl font-black text-base flex items-center justify-center gap-3 transition-all active:scale-95 shadow-lg shadow-indigo-500/20"
+                    >
+                        <Share2 size={24} />
+                        🚀 Share Your Fundraiser
+                    </button>
+
+                    {/* Share Options */}
+                    <div className="space-y-2">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Share Options</p>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button
+                                onClick={handleFacebookShare}
+                                className="bg-blue-50 hover:bg-blue-100 text-blue-700 p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-blue-100"
+                            >
+                                <Facebook size={24} />
+                                <span>📘 Facebook</span>
+                            </button>
+                            <button
+                                onClick={handleSmsShare}
+                                className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-emerald-100"
+                            >
+                                <Smartphone size={24} />
+                                <span>📱 Text / SMS</span>
+                            </button>
+                        </div>
                     </div>
-                    {/* Secondary links row */}
-                    <div className="flex items-center justify-center gap-4 pt-1">
-                        <button
-                            onClick={handleCopy}
-                            className="text-xs font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1 transition-colors"
-                        >
-                            {copied ? <CheckCircle2 size={12} className="text-emerald-500" /> : <LinkIcon size={12} />}
-                            {copied ? 'Copied!' : 'Copy Order Page Link'}
-                        </button>
-                        <span className="text-slate-200">·</span>
-                        <button
-                            onClick={handleCopyScoreboard}
-                            className="text-xs font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1 transition-colors"
-                        >
-                            <Activity size={12} />
-                            {copiedScoreboard ? 'Copied!' : 'Copy Scoreboard Link'}
-                        </button>
-                        <span className="text-slate-200">·</span>
-                        <Link
-                            href={`/coordinator/${token}/guide`}
-                            className="text-xs font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1 transition-colors"
-                        >
-                            <Eye size={12} />
-                            View Scripts
-                        </Link>
+
+                    {/* More Tools */}
+                    <div className="space-y-2 mt-4">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">More Tools</p>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button
+                                onClick={() => setShowOrderModal(true)}
+                                className="bg-white hover:bg-slate-50 text-slate-700 p-4 rounded-2xl font-bold text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-slate-200"
+                            >
+                                <Plus size={22} strokeWidth={3} />
+                                <span>Add Order</span>
+                            </button>
+                            <button
+                                onClick={handleCopy}
+                                className="bg-white hover:bg-slate-50 text-slate-700 p-4 rounded-2xl font-bold text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-slate-200"
+                            >
+                                {copied ? <CheckCircle2 size={22} className="text-emerald-500" /> : <LinkIcon size={22} />}
+                                <span>{copied ? 'Copied!' : 'Copy Order Link'}</span>
+                            </button>
+                            <button
+                                onClick={handleCopyScoreboard}
+                                className="bg-white hover:bg-slate-50 text-slate-700 p-4 rounded-2xl font-bold text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-slate-200"
+                            >
+                                <Activity size={22} />
+                                <span>{copiedScoreboard ? 'Copied!' : 'Copy Scoreboard'}</span>
+                            </button>
+                            <Link
+                                href={`/coordinator/${token}/guide`}
+                                className="bg-white hover:bg-slate-50 text-slate-700 p-4 rounded-2xl font-bold text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-slate-200"
+                            >
+                                <Eye size={22} />
+                                <span>View Scripts</span>
+                            </Link>
+                        </div>
                     </div>
                 </div>
 
@@ -947,22 +979,35 @@ export default function CoordinatorPortal() {
                         </div>
                     ) : (
                         (campaign.orders || []).map((order: any) => (
-                            <div key={order.id} className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex justify-between items-center group">
-                                <div className="flex items-center gap-4">
-                                    <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 font-black">
-                                        {order.customer_name?.[0] || 'O'}
+                            <div key={order.id} className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm group">
+                                <div className="flex justify-between items-center">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 font-black">
+                                            {order.customer_name?.[0] || 'O'}
+                                        </div>
+                                        <div>
+                                            <p className="font-black text-slate-900">{order.customer_name || 'Anonymous'}</p>
+                                            <p className="text-xs font-bold text-slate-400">
+                                                {format(new Date(order.created_at), 'MMM d, h:mm a')}
+                                            </p>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <p className="font-black text-slate-900">{order.customer_name || 'Anonymous'}</p>
-                                        <p className="text-xs font-bold text-slate-400">
-                                            {format(new Date(order.created_at), 'MMM d, h:mm a')}
-                                        </p>
+                                    <div className="text-right">
+                                        <p className="font-black text-lg text-slate-900">${order.total_amount}</p>
+                                        <span className="text-[10px] font-black uppercase text-slate-300 tracking-tighter">{order.source}</span>
                                     </div>
                                 </div>
-                                <div className="text-right">
-                                    <p className="font-black text-lg text-slate-900">${order.total_amount}</p>
-                                    <span className="text-[10px] font-black uppercase text-slate-300 tracking-tighter">{order.source}</span>
-                                </div>
+                                {order.items && order.items.length > 0 && (
+                                    <div className="mt-3 pt-3 border-t border-slate-100">
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {order.items.map((item: any, idx: number) => (
+                                                <span key={idx} className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg text-xs font-bold">
+                                                    {item.item_name || 'Bundle'} × {item.quantity}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         ))
                     )}

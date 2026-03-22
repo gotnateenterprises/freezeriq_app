@@ -60,6 +60,7 @@ export async function GET(
                             select: {
                                 quantity: true,
                                 variant_size: true,
+                                item_name: true,
                             }
                         }
                         // EXCLUDED: delivery_address, customer_email, phone
@@ -173,7 +174,9 @@ export async function POST(
                     create: (items || []).map((item: any) => ({
                         bundle_id: item.bundleId || item.id,
                         quantity: item.quantity,
-                        variant_size: item.variantSize || item.serving_tier || 'family'
+                        variant_size: (item.serving_tier === 'family' || !item.serving_tier) ? 'serves_5' : 'serves_2',
+                        item_name: item.name || null,
+                        unit_price: item.price ?? null
                     }))
                 }
             }
