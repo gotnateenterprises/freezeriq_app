@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect } from 'react';
+
 import {
     Megaphone,
     ArrowLeft,
@@ -9,18 +10,12 @@ import {
     DollarSign,
     TrendingUp,
     Mail,
-    MessageSquare,
-    Facebook,
     ArrowRight,
     Star,
     Rocket,
     Users,
-    MousePointer2,
-    Calendar,
     Target,
-    X,
-    Copy,
-    Check
+    Facebook
 } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
@@ -36,8 +31,7 @@ export default function SuccessGuide() {
     const [generatedContent, setGeneratedContent] = useState('');
     const [generatingChannel, setGeneratingChannel] = useState('');
     const [aiRemaining, setAiRemaining] = useState<number | null>(null);
-    const [previewModal, setPreviewModal] = useState<{ title: string; icon: React.ReactNode; text: string } | null>(null);
-    const [modalCopied, setModalCopied] = useState(false);
+
 
     const handleGenerate = async (channel: string) => {
         setIsGenerating(true);
@@ -110,19 +104,19 @@ export default function SuccessGuide() {
         },
         {
             icon: <Megaphone className="text-emerald-600" />,
-            title: "2. The Public Scoreboard",
-            desc: "Your supporters will see this page. It's designed to bring energy and excitement!",
+            title: "2. The Public Order Form",
+            desc: "Your supporters see the live scoreboard and can place orders directly by emailing you!",
             tips: [
-                "Share this link on Facebook and in group chats.",
-                "Mention your goal frequently to motivate parents.",
-                "Watch the 'Recent Support' ticker grow in real-time."
+                "Share this link so supporters can browse meals and submit orders.",
+                "Orders are emailed directly to you for easy tracking.",
+                "The live scoreboard at the top keeps momentum going!"
             ],
             color: "bg-emerald-50"
         },
         {
             icon: <DollarSign className="text-amber-600" />,
             title: "3. Direct Online Payments",
-            desc: "Want payment to go directly to your organization's bank account or Venmo?",
+            desc: "Want payment to go directly to your organization's bank account, Venmo, or PayPal?",
             tips: [
                 "Add your payment link in the Portal settings.",
                 "Direct donors to use your specific payment link for faster processing.",
@@ -186,7 +180,7 @@ export default function SuccessGuide() {
                             <button
                                 onClick={() => {
                                     navigator.clipboard.writeText(publicUrl);
-                                    alert("Public Link Copied!");
+                                    toast.success("Public Link Copied!");
                                 }}
                                 className="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl text-xs font-black uppercase transition-all"
                             >
@@ -228,60 +222,11 @@ export default function SuccessGuide() {
                 <div className="bg-indigo-600 rounded-[2.5rem] p-10 text-white space-y-8">
                     <div className="space-y-2">
                         <h3 className="text-3xl font-black tracking-tight">Social Media Strategy</h3>
-                        <p className="text-indigo-100 font-medium opacity-80 italic">Ready-to-use templates + AI-powered custom content!</p>
+                        <p className="text-indigo-100 font-medium opacity-80 italic">AI-powered custom content for every channel!</p>
                     </div>
 
-                    {/* Static Templates — click to preview full text */}
-                    {(() => {
-                        const progress = campaign?.goal_amount ? Math.round((Number(campaign.total_sales || 0) / Number(campaign.goal_amount)) * 100) : 45;
-                        const templates = [
-                            {
-                                key: 'facebook',
-                                title: 'Facebook Post',
-                                icon: <Facebook className="text-indigo-300" size={32} />,
-                                preview: `"Dinner is solved! Support ${campaign?.customer?.name || '[Group Name]'} by ordering your Freezer Chef meals. We are ${progress}% of the way to our goal! Order here: [Link]"`,
-                                fullText: `Dinner is solved! Support ${campaign?.customer?.name || '[Group Name]'} by ordering your Freezer Chef meals. We are ${progress}% of the way to our ${Number(campaign?.bundle_goal || 100).toLocaleString()} bundle goal! Order here: ${publicUrl}`,
-                            },
-                            {
-                                key: 'whatsapp',
-                                title: 'WhatsApp / Text',
-                                icon: <MessageSquare className="text-indigo-300" size={32} />,
-                                preview: `"Hey everyone! We're raising money for ${campaign?.customer?.name || 'the group'}. Check out our live scoreboard and grab some easy dinners! \ud83c\udf72 [Link]"`,
-                                fullText: `Hey everyone! We're raising money for ${campaign?.customer?.name || 'the group'}. Check out our live scoreboard and grab some easy dinners! \ud83c\udf72 ${publicUrl}`,
-                            },
-                            {
-                                key: 'email',
-                                title: 'Email Template',
-                                icon: <Mail className="text-indigo-300" size={32} />,
-                                preview: `"Hi there! I'm reaching out because ${campaign?.customer?.name || 'our organization'} is running a fundraiser. We're selling Freezer Chef meals \u2014 delicious, easy-to-prepare meals..."`,
-                                fullText: `Hi there!\n\nI'm reaching out because ${campaign?.customer?.name || 'our organization'} is running the "${campaign?.name || 'our'}" fundraiser! We're selling Freezer Chef meals \u2014 delicious, easy-to-prepare meals you can stock in your freezer.\n\n\ud83c\udfaf Our goal: ${Number(campaign?.bundle_goal || 100).toLocaleString()} bundles\n\ud83d\udcca Progress: ${progress}%\n\ud83d\udd17 Order here: ${publicUrl}\n\nEvery order helps us get closer to our goal. Thank you for your support!\n\nWarmly,\n${campaign?.customer?.name || 'The Team'}`,
-                                span2: true,
-                            },
-                        ];
-                        return (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {templates.map((t) => (
-                                    <button
-                                        key={t.key}
-                                        onClick={() => { setPreviewModal({ title: t.title, icon: t.icon, text: t.fullText }); setModalCopied(false); }}
-                                        className={`bg-white/10 rounded-2xl p-6 border border-white/10 text-left hover:bg-white/20 hover:border-indigo-300/50 transition-all cursor-pointer active:scale-[0.98] group ${
-                                            (t as any).span2 ? 'md:col-span-2' : ''
-                                        }`}
-                                    >
-                                        <div className="flex items-center justify-between mb-4">
-                                            {t.icon}
-                                            <span className="text-xs font-bold text-indigo-200 bg-white/10 px-2 py-1 rounded-lg group-hover:bg-white/20 transition-colors">👁 Preview &amp; Copy</span>
-                                        </div>
-                                        <h4 className="font-black text-lg mb-2">{t.title}</h4>
-                                        <p className="text-sm text-indigo-50 italic line-clamp-2">{t.preview}</p>
-                                    </button>
-                                ))}
-                            </div>
-                        );
-                    })()}
-
                     {/* AI Generator Section */}
-                    <div className="pt-8 border-t border-white/10 space-y-6">
+                    <div className="space-y-6">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 bg-indigo-400 rounded-xl flex items-center justify-center text-white shadow-lg">
@@ -305,10 +250,10 @@ export default function SuccessGuide() {
 
                         <div className="grid grid-cols-2 gap-3">
                             {[
-                                { channel: 'facebook', label: '📘 Facebook', icon: Facebook },
-                                { channel: 'text', label: '💬 Text / SMS', icon: MessageSquare },
-                                { channel: 'email', label: '📧 Email', icon: Mail },
-                                { channel: 'instagram', label: '📸 Instagram', icon: Target }
+                                { channel: 'facebook', label: '📘 Facebook' },
+                                { channel: 'text', label: '💬 Text / SMS' },
+                                { channel: 'email', label: '📧 Email' },
+                                { channel: 'instagram', label: '📸 Instagram' }
                             ].map(({ channel, label }) => (
                                 <button
                                     key={channel}
@@ -393,69 +338,7 @@ export default function SuccessGuide() {
                 </div>
             </main>
 
-            {/* Preview Modal */}
-            {previewModal && (
-                <div
-                    className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-                    onClick={() => setPreviewModal(null)}
-                >
-                    <div
-                        className="w-full max-w-lg bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 duration-300"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        {/* Modal Header */}
-                        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600">
-                                    {previewModal.icon}
-                                </div>
-                                <h3 className="text-lg font-black text-slate-900">{previewModal.title}</h3>
-                            </div>
-                            <button
-                                onClick={() => setPreviewModal(null)}
-                                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
-                            >
-                                <X size={16} className="text-slate-500" />
-                            </button>
-                        </div>
 
-                        {/* Modal Body */}
-                        <div className="px-6 py-6 max-h-[60vh] overflow-y-auto">
-                            <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200">
-                                <p className="text-sm text-slate-700 whitespace-pre-line leading-relaxed font-medium">
-                                    {previewModal.text}
-                                </p>
-                            </div>
-                        </div>
-
-                        {/* Modal Footer */}
-                        <div className="px-6 py-5 border-t border-slate-100 flex gap-3">
-                            <button
-                                onClick={async () => {
-                                    await navigator.clipboard.writeText(previewModal.text);
-                                    setModalCopied(true);
-                                    toast.success(`${previewModal.title} copied!`);
-                                    setTimeout(() => setModalCopied(false), 2500);
-                                }}
-                                className={`flex-1 py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all active:scale-95 ${
-                                    modalCopied
-                                        ? 'bg-emerald-500 text-white'
-                                        : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/20'
-                                }`}
-                            >
-                                {modalCopied ? <Check size={18} /> : <Copy size={18} />}
-                                {modalCopied ? 'Copied to Clipboard!' : 'Copy Full Text'}
-                            </button>
-                            <button
-                                onClick={() => setPreviewModal(null)}
-                                className="px-5 py-3.5 rounded-2xl font-bold text-sm bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all active:scale-95"
-                            >
-                                Close
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* Sticky Mobile Share */}
             <div className="fixed bottom-6 left-0 right-0 px-6 z-40 md:hidden">
