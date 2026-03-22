@@ -97,42 +97,12 @@ export default function CoordinatorPortal() {
             setAiRemaining(data.remaining);
             trackAction('ai_generate_' + channel);
 
-            // Auto-execute channel-aware action after generation
+            // Auto-copy generated content to clipboard
             const content = data.content as string;
             await navigator.clipboard.writeText(content);
 
-            if (channel === 'facebook') {
-                toast.success('Copied! Paste into Facebook when it opens.');
-                const url = getPublicUrl();
-                window.open(
-                    `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`,
-                    '_blank',
-                    'width=600,height=400'
-                );
-            } else if (channel === 'text') {
-                const isMobile = typeof navigator !== 'undefined' &&
-                    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-                if (isMobile) {
-                    toast.success('Copied! Opening your messages...');
-                    window.location.href = `sms:?&body=${encodeURIComponent(content)}`;
-                } else {
-                    toast.success('Copied! Paste into your text message to send.');
-                }
-            } else if (channel === 'email') {
-                const subject = encodeURIComponent(`Support ${campaign?.name || 'our fundraiser'}!`);
-                const body = encodeURIComponent(content);
-                // mailto: has a ~2000 char limit in practice
-                if (content.length < 1800) {
-                    toast.success('Copied! Paste into your email when it opens.');
-                    window.location.href = `mailto:?subject=${subject}&body=${body}`;
-                } else {
-                    toast.success('Copied! Paste into your email.');
-                }
-            } else if (channel === 'instagram') {
-                toast.success('Copied! Paste into Instagram as your caption.');
-            } else {
-                toast.success('Content copied to clipboard!');
-            }
+            const channelName = channel.charAt(0).toUpperCase() + channel.slice(1);
+            toast.success(`${channelName} message copied! Use the share button below to open your app.`);
         } catch {
             toast.error('Network error. Please try again.');
         } finally {
