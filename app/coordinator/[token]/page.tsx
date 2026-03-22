@@ -2,13 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { QRCodeSVG } from 'qrcode.react';
 import type { CampaignAsset } from '@/lib/campaignAssets';
 import type { PromoScriptsResponse } from '@/lib/generatePromoScripts';
 import { computeFundraiserProgress, formatBundleCount } from '@/lib/fundraiserMetrics';
 
 import {
-    Megaphone,
     Plus,
     TrendingUp,
     Target,
@@ -64,7 +62,6 @@ export default function CoordinatorPortal() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showOrderModal, setShowOrderModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
-    const [showMobileQR, setShowMobileQR] = useState(false);
     const [copied, setCopied] = useState(false);
     const [copiedFb, setCopiedFb] = useState(false);
     const [copiedText, setCopiedText] = useState(false);
@@ -438,7 +435,7 @@ export default function CoordinatorPortal() {
                 <div className="max-w-xl mx-auto flex justify-between items-center">
                     <div className="flex items-center gap-2">
                         <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white">
-                            <Megaphone size={16} />
+                            <Target size={16} />
                         </div>
                         <span className="font-black tracking-tight text-lg">Coordinator Portal</span>
                     </div>
@@ -540,173 +537,79 @@ export default function CoordinatorPortal() {
                     />
                 )}
 
-                {/* 🚀 Start Here Section */}
-                <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-[2rem] p-6 border border-emerald-200 shadow-sm space-y-4">
+                {/* Quick Actions — unified action hub */}
+                <div className="bg-white rounded-[2rem] p-6 border border-slate-200 shadow-sm space-y-4">
                     <h2 className="text-lg font-black flex items-center gap-2">
-                        <Rocket size={20} className="text-emerald-600" />
-                        🚀 Start Here
+                        <Rocket size={20} className="text-indigo-600" />
+                        Quick Actions
                     </h2>
-                    <div className="space-y-2">
-                        <div className="flex items-start gap-3">
-                            <span className="w-6 h-6 rounded-full bg-emerald-600 text-white text-xs font-black flex items-center justify-center shrink-0 mt-0.5">1</span>
-                            <p className="text-sm font-bold text-slate-700">Copy your fundraiser link</p>
-                        </div>
-                        <div className="flex items-start gap-3">
-                            <span className="w-6 h-6 rounded-full bg-emerald-600 text-white text-xs font-black flex items-center justify-center shrink-0 mt-0.5">2</span>
-                            <p className="text-sm font-bold text-slate-700">Post it on Facebook</p>
-                        </div>
-                        <div className="flex items-start gap-3">
-                            <span className="w-6 h-6 rounded-full bg-emerald-600 text-white text-xs font-black flex items-center justify-center shrink-0 mt-0.5">3</span>
-                            <p className="text-sm font-bold text-slate-700">Text 5 friends</p>
-                        </div>
-                        <div className="flex items-start gap-3">
-                            <span className="w-6 h-6 rounded-full bg-emerald-600 text-white text-xs font-black flex items-center justify-center shrink-0 mt-0.5">4</span>
-                            <p className="text-sm font-bold text-slate-700">Check progress daily</p>
-                        </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <button
+                            onClick={handleShareUniversal}
+                            className="bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 text-white p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 shadow-lg shadow-indigo-500/20"
+                        >
+                            <Share2 size={24} />
+                            <span>🚀 Share Fundraiser</span>
+                        </button>
+                        <button
+                            onClick={handleFacebookShare}
+                            className="bg-blue-50 hover:bg-blue-100 text-blue-700 p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-blue-100"
+                        >
+                            <Facebook size={24} />
+                            <span>📘 Facebook</span>
+                        </button>
+                        <button
+                            onClick={handleSmsShare}
+                            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-emerald-100"
+                        >
+                            <Smartphone size={24} />
+                            <span>📱 Text Blast</span>
+                        </button>
+                        <button
+                            onClick={() => setShowOrderModal(true)}
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 shadow-lg shadow-indigo-500/20"
+                        >
+                            <Plus size={24} strokeWidth={3} />
+                            <span>➕ Add Order</span>
+                        </button>
                     </div>
-                    <p className="text-xs font-bold text-emerald-600 italic">This is how you get orders — share it everywhere!</p>
-                    <div className="flex gap-2">
+                    {/* Secondary links row */}
+                    <div className="flex items-center justify-center gap-4 pt-1">
                         <button
                             onClick={handleCopy}
-                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all active:scale-95"
+                            className="text-xs font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1 transition-colors"
                         >
-                            {copied ? <CheckCircle2 size={16} /> : <Copy size={16} />}
-                            {copied ? 'Copied!' : 'Copy Fundraiser Link'}
+                            {copied ? <CheckCircle2 size={12} className="text-emerald-500" /> : <LinkIcon size={12} />}
+                            {copied ? 'Copied!' : 'Copy Order Page Link'}
                         </button>
+                        <span className="text-slate-200">·</span>
+                        <button
+                            onClick={handleCopyScoreboard}
+                            className="text-xs font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1 transition-colors"
+                        >
+                            <Activity size={12} />
+                            {copiedScoreboard ? 'Copied!' : 'Copy Scoreboard Link'}
+                        </button>
+                        <span className="text-slate-200">·</span>
                         <Link
                             href={`/coordinator/${token}/guide`}
-                            className="flex-1 bg-white hover:bg-slate-50 text-slate-900 py-3 rounded-2xl font-black text-sm border border-emerald-200 flex items-center justify-center gap-2 transition-all active:scale-95"
+                            className="text-xs font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1 transition-colors"
                         >
-                            <Eye size={16} />
+                            <Eye size={12} />
                             View Scripts
                         </Link>
                     </div>
-                    <button
-                        onClick={handleCopyScoreboard}
-                        className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95"
-                    >
-                        <Activity size={14} />
-                        {copiedScoreboard ? 'Copied!' : 'Share Scoreboard Link'}
-                    </button>
                 </div>
 
-                {/* Quick Actions */}
-                <div className="grid grid-cols-2 gap-4">
-                    <button
-                        onClick={() => setShowOrderModal(true)}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white p-6 rounded-3xl font-black shadow-lg shadow-indigo-500/20 flex flex-col items-center gap-3 transition-all active:scale-95"
-                    >
-                        <Plus size={32} strokeWidth={3} />
-                        <span className="text-sm">Add Offline Order</span>
-                    </button>
-                    <button
-                        onClick={handleCopy}
-                        className="bg-white hover:bg-slate-50 text-slate-900 p-6 rounded-3xl font-black border border-slate-200 shadow-sm flex flex-col items-center gap-3 transition-all active:scale-95"
-                    >
-                        {copied ? <CheckCircle2 size={32} className="text-emerald-500" /> : <Share2 size={32} />}
-                        <span className="text-sm">{copied ? 'Copied!' : 'Copy & Share Fundraiser Link'}</span>
-                    </button>
-                </div>
-
-                {/* View & Track Orders */}
-                <button
-                    onClick={() => document.getElementById('recent-orders')?.scrollIntoView({ behavior: 'smooth' })}
-                    className="w-full bg-slate-900 hover:bg-black text-white p-4 rounded-2xl font-bold shadow-lg shadow-slate-900/10 flex items-center justify-center gap-2 transition-all active:scale-95"
-                >
-                    <Eye size={20} />
-                    <span>🧾 View & Track Orders</span>
-                </button>
-
-                {/* Open on Phone QR */}
-                <button
-                    onClick={() => setShowMobileQR(!showMobileQR)}
-                    className="w-full bg-white hover:bg-slate-50 text-slate-900 p-4 rounded-2xl font-bold border border-slate-200 shadow-sm flex items-center justify-center gap-2 transition-all active:scale-95"
-                >
-                    <Smartphone size={20} />
-                    <span>{showMobileQR ? 'Hide QR Code' : 'Open on Phone'}</span>
-                </button>
-                {showMobileQR && (
-                    <div className="bg-white rounded-[2rem] p-8 border border-slate-200 shadow-sm flex flex-col items-center gap-4 animate-in slide-in-from-top-2 duration-200">
-                        <div className="bg-white p-3 rounded-2xl border-2 border-slate-900 shadow-lg">
-                            <QRCodeSVG value={typeof window !== 'undefined' ? window.location.href : ''} size={180} level="H" includeMargin />
-                        </div>
-                        <p className="text-sm font-bold text-slate-500 text-center">Scan to open this portal on your phone</p>
-                    </div>
-                )}
-
-                {/* 📣 Sales Toolkit */}
+                {/* 📋 Copy Scripts & Downloads */}
                 <div className="bg-white rounded-[2rem] p-6 border border-slate-200 shadow-sm space-y-5">
                     {/* Section Header */}
                     <div>
                         <h2 className="text-lg font-black flex items-center gap-2">
-                            <Megaphone size={20} className="text-pink-600" />
-                            📣 Sales Toolkit
+                            <Copy size={20} className="text-slate-600" />
+                            📋 Copy Scripts & Downloads
                         </h2>
                     </div>
-
-                    {/* Value Message */}
-                    <div className="bg-gradient-to-br from-emerald-50/80 to-teal-50/60 rounded-2xl p-4 border border-emerald-100/80">
-                        <p className="text-base font-black text-slate-800 leading-snug">
-                            More Sales. Less Effort.
-                        </p>
-                        <p className="text-sm text-slate-500 font-medium mt-1 leading-relaxed">
-                            Everything below is ready to use so you can promote your fundraiser in minutes — not hours.
-                        </p>
-                        <p className="text-xs text-slate-400 font-medium mt-1">
-                            Just copy, download, or share. No designing, no guesswork, no wasted time.
-                        </p>
-                    </div>
-
-                    {/* ── Smart Share Actions (Primary) ── */}
-                    <div className="space-y-2">
-                        <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider flex items-center gap-1.5">
-                            <Rocket size={12} />
-                            🚀 Quick Share — Start Here
-                        </p>
-                        <div className="grid grid-cols-1 gap-3">
-                            <button
-                                onClick={handleShareUniversal}
-                                className="bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 text-white p-5 rounded-2xl font-bold text-base flex items-center gap-4 transition-all active:scale-[0.98] shadow-lg shadow-indigo-500/20"
-                            >
-                                <div className="w-11 h-11 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
-                                    <Share2 size={22} />
-                                </div>
-                                <div className="text-left">
-                                    <span className="block">🚀 Share Fundraiser</span>
-                                    <span className="text-xs font-medium text-white/70 block">Uses your phone's share menu or copies to clipboard</span>
-                                </div>
-                            </button>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <button
-                                    onClick={handleSmsShare}
-                                    className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 p-4 rounded-2xl font-bold text-sm flex items-center gap-3 transition-all active:scale-95 border border-emerald-100"
-                                >
-                                    <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center flex-shrink-0">
-                                        <Smartphone size={18} />
-                                    </div>
-                                    <div className="text-left">
-                                        <span className="block">📱 Send Text Blast</span>
-                                        <span className="text-xs font-medium text-emerald-600/70 block">Opens messaging app with text ready</span>
-                                    </div>
-                                </button>
-                                <button
-                                    onClick={handleFacebookShare}
-                                    className="bg-blue-50 hover:bg-blue-100 text-blue-700 p-4 rounded-2xl font-bold text-sm flex items-center gap-3 transition-all active:scale-95 border border-blue-100"
-                                >
-                                    <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
-                                        <Facebook size={18} />
-                                    </div>
-                                    <div className="text-left">
-                                        <span className="block">📘 Share on Facebook</span>
-                                        <span className="text-xs font-medium text-blue-600/70 block">Copies post + opens Facebook</span>
-                                    </div>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Divider */}
-                    <div className="border-t border-slate-100" />
 
                     {/* ── Copy Scripts (Secondary) ── */}
                     <div className="space-y-2">
@@ -930,14 +833,7 @@ export default function CoordinatorPortal() {
                     {(campaign.orders || []).length === 0 ? (
                         <div className="bg-white rounded-3xl p-10 text-center border-2 border-dashed border-slate-200 space-y-2">
                             <p className="text-slate-500 font-bold">No orders yet — let&apos;s get your first one!</p>
-                            <p className="text-slate-400 text-sm">Start by sharing your fundraiser link today.</p>
-                            <button
-                                onClick={handleCopy}
-                                className="mt-3 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl font-bold text-sm transition-all active:scale-95 inline-flex items-center gap-2"
-                            >
-                                <Share2 size={16} />
-                                {copied ? 'Copied!' : 'Copy Fundraiser Link'}
-                            </button>
+                            <p className="text-slate-400 text-sm">Use <span className="font-bold text-slate-500">Quick Actions</span> above to share your order page link and start selling.</p>
                         </div>
                     ) : (
                         (campaign.orders || []).map((order: any) => (
