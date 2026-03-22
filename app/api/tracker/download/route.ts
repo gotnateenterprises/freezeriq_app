@@ -13,7 +13,6 @@
  */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { Prisma } from '@prisma/client';
 import { generateTracker } from '@/lib/generateTracker';
 import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
 
@@ -53,33 +52,24 @@ export async function GET(req: Request) {
         const businessId = (campaign.customer as any)?.business_id;
         const orgName = (campaign.customer as any)?.name || 'Organization';
 
-        // 2. Fetch assigned bundles (or fallback to active business bundles)
-        //    Same pattern as flyer/packet/promo-scripts download routes
-        const campaignBundles: any[] = await prisma.$queryRaw`
-            SELECT bundle_id FROM campaign_bundles
-            WHERE campaign_id = ${campaign.id}
-            ORDER BY position ASC
-        `;
-        const assignedBundleIds = campaignBundles.map(cb => cb.bundle_id);
-
-        let bundles: any[];
-        if (assignedBundleIds.length > 0) {
-            bundles = await prisma.$queryRaw`
-                SELECT id, name, price, serving_tier FROM bundles
-                WHERE id IN(${Prisma.join(assignedBundleIds)})
-                AND business_id = ${businessId}
-                AND is_active = true
-                ORDER BY array_position(${assignedBundleIds}::text[], id::text)
-            `;
-        } else {
-            bundles = await prisma.$queryRaw`
-                SELECT id, name, price, serving_tier FROM bundles
-                WHERE business_id = ${businessId}
-                AND is_active = true
-                ORDER BY name ASC
-                LIMIT 10
-            `;
-        }
+        // 2. Fetch assigned bundles only (no fallback to all bundles)
+        const campaignBundles = await prisma.campaignBundle.findMany({
+            where: { campaign_id: campaign.id },
+            orderBy: { position: 'asc' },
+            include: {
+                bundle: {
+                    select: { id: true, name: true, price: true, serving_tier: true, is_active: true }
+                }
+            }
+        });
+        const bundles = campaignBundles
+            .filter(cb => cb.bundle.is_active)
+            .map(cb => ({
+                id: cb.bundle.id,
+                name: cb.bundle.name,
+                price: cb.bundle.price,
+                serving_tier: cb.bundle.serving_tier
+            }));
 
         // 3. Map to TrackerInput shape
         //    coordinatorName: prefer customer.contact_name, fall back to campaign.name
