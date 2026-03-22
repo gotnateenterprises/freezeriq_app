@@ -170,10 +170,10 @@ export default function SuccessGuide() {
                             <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center text-indigo-400">
                                 <Share2 size={24} />
                             </div>
-                            <h2 className="text-2xl font-black tracking-tight">Promote Your Scoreboard</h2>
+                            <h2 className="text-2xl font-black tracking-tight">Promote Your Online Order Form</h2>
                         </div>
                         <p className="text-slate-400 font-medium">
-                            The Live Scoreboard is your secret weapon. When people see the progress bar moving, they are 3x more likely to support you!
+                            Share this link everywhere — texts, emails, Facebook, word-of-mouth! The more people who see your order form, the faster you hit your goal. Every share counts!
                         </p>
                         <div className="bg-white/5 rounded-2xl p-4 flex items-center justify-between gap-4 border border-white/10 group">
                             <code className="text-xs font-mono text-indigo-300 truncate">{publicUrl}</code>

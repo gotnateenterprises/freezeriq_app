@@ -48,6 +48,7 @@ import { motion } from 'framer-motion';
 import { useParams } from 'next/navigation';
 import UpgradeRequired from '@/components/UpgradeRequired';
 import MarketingAssetGenerator from '@/components/marketing/MarketingAssetGenerator';
+import CopyButton from '@/components/coordinator/CopyButton';
 
 import Leaderboard from '@/components/coordinator/Leaderboard';
 import Confetti from 'react-confetti';
@@ -70,6 +71,38 @@ export default function CoordinatorPortal() {
     const [copiedEmail, setCopiedEmail] = useState(false);
     const [copiedScoreboard, setCopiedScoreboard] = useState(false);
     const [actionSummary, setActionSummary] = useState<CoordinatorActionSummary | null>(null);
+
+    // ── AI Content Generator state ──
+    const [isAiGenerating, setIsAiGenerating] = useState(false);
+    const [aiContent, setAiContent] = useState('');
+    const [aiChannel, setAiChannel] = useState('');
+    const [aiRemaining, setAiRemaining] = useState<number | null>(null);
+
+    const handleAiGenerate = async (channel: string) => {
+        setIsAiGenerating(true);
+        setAiChannel(channel);
+        setAiContent('');
+        try {
+            const res = await fetch(`/api/coordinator/${token}/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ channel })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                toast.error(data.error || 'Generation failed');
+                return;
+            }
+            setAiContent(data.content);
+            setAiRemaining(data.remaining);
+            trackAction('ai_generate_' + channel);
+            toast.success(`${channel.charAt(0).toUpperCase() + channel.slice(1)} content generated!`);
+        } catch {
+            toast.error('Network error. Please try again.');
+        } finally {
+            setIsAiGenerating(false);
+        }
+    };
 
     // ── Non-blocking action tracker ────────────────────────
     const trackAction = (action_type: string) => {
@@ -721,6 +754,83 @@ export default function CoordinatorPortal() {
                             </button>
                         );
                     })()}
+                </div>
+
+                {/* ── AI Content Generator ── */}
+                <div className="bg-indigo-600 rounded-[2rem] p-5 text-white space-y-5">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 bg-indigo-400 rounded-xl flex items-center justify-center text-white shadow-lg">
+                                <Rocket size={16} />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-sm">AI Content Generator</h3>
+                                <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest">Powered by Google Gemini</p>
+                            </div>
+                        </div>
+                        {aiRemaining !== null && (
+                            <p className="text-[10px] font-black text-indigo-200 uppercase tracking-widest">
+                                {aiRemaining} of 40 left
+                            </p>
+                        )}
+                    </div>
+
+                    <p className="text-xs text-indigo-100 leading-relaxed font-medium">
+                        Generate custom promo copy for any channel — instantly! Your fundraiser details are included automatically.
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-2">
+                        {[
+                            { channel: 'facebook', label: '📘 Facebook' },
+                            { channel: 'text', label: '💬 Text / SMS' },
+                            { channel: 'email', label: '📧 Email' },
+                            { channel: 'instagram', label: '📸 Instagram' }
+                        ].map(({ channel, label }) => (
+                            <button
+                                key={channel}
+                                onClick={() => handleAiGenerate(channel)}
+                                disabled={isAiGenerating || aiRemaining === 0}
+                                className={`p-3 rounded-xl border text-left transition-all ${
+                                    aiRemaining === 0
+                                        ? 'bg-white/5 border-white/10 opacity-50 cursor-not-allowed'
+                                        : 'bg-white/5 border-white/10 hover:bg-white/15 hover:border-indigo-300/50 cursor-pointer active:scale-95'
+                                }`}
+                            >
+                                <p className="text-xs font-black">{label}</p>
+                                <p className="text-[10px] text-indigo-200 mt-0.5">
+                                    {isAiGenerating && aiChannel === channel ? 'Generating...' : 'Click to generate'}
+                                </p>
+                            </button>
+                        ))}
+                    </div>
+
+                    {aiRemaining === 0 && (
+                        <p className="text-center text-xs font-bold text-indigo-200 bg-white/5 rounded-xl p-3">
+                            ✅ You&apos;ve used all 40 AI generations! Use the copy scripts above or edit previous results.
+                        </p>
+                    )}
+
+                    {isAiGenerating && (
+                        <div className="flex items-center justify-center gap-3 py-4">
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            <p className="text-xs font-bold text-indigo-100 animate-pulse">Creating your {aiChannel} content...</p>
+                        </div>
+                    )}
+
+                    {aiContent && !isAiGenerating && (
+                        <div className="bg-indigo-900/40 rounded-2xl p-4 border border-indigo-400/30 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">Generated Content</p>
+                                <CopyButton text={aiContent} label="Content Copied!" />
+                            </div>
+                            <textarea
+                                value={aiContent}
+                                onChange={(e) => setAiContent(e.target.value)}
+                                rows={4}
+                                className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-xs text-white font-medium resize-y focus:outline-none focus:ring-2 focus:ring-indigo-400/50"
+                            />
+                        </div>
+                    )}
                 </div>
 
                 {/* ── Engagement Insight ── */}
