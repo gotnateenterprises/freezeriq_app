@@ -34,6 +34,7 @@ export async function GET(
                 customer: {
                     select: {
                         name: true,
+                        contact_name: true,
                         business_id: true,
                         business: {
                             select: {

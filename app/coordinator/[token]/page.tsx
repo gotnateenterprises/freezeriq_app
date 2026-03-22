@@ -81,7 +81,6 @@ export default function CoordinatorPortal() {
     const handleAiGenerate = async (channel: string) => {
         setIsAiGenerating(true);
         setAiChannel(channel);
-        setAiContent('');
         try {
             const res = await fetch(`/api/coordinator/${token}/generate`, {
                 method: 'POST',
@@ -494,86 +493,111 @@ export default function CoordinatorPortal() {
                 />
             )}
 
-            <main className="max-w-xl mx-auto p-6 space-y-6">
+            <main className="max-w-xl mx-auto px-4 sm:px-6 py-4 space-y-5">
                 {/* Tenant/Business Logo */}
                 {campaign.customer?.business?.logo_url && (
-                    <div className="flex flex-col items-center justify-center pt-2 mb-0">
+                    <div className="flex flex-col items-center justify-center pt-1 mb-0">
                         <img
                             src={campaign.customer.business.logo_url}
                             alt={campaign.customer.business.name || 'Business Logo'}
-                            className="max-h-[60px] max-w-[200px] object-contain"
+                            className="max-h-[48px] max-w-[180px] object-contain"
                         />
                     </div>
                 )}
 
                 {/* Personalized Header */}
-                <div className="mb-4">
-                    <p className="text-sm text-slate-500 font-medium mb-1">
-                        Hey {campaign?.customer?.name?.split(" ")[0] || "there"} 👋
+                <div className="mb-1">
+                    <p className="text-sm text-slate-500 font-medium mb-0.5">
+                        Hey {campaign?.customer?.contact_name?.split(" ")[0] || "there"} 👋
                     </p>
-                    <h1 className="text-2xl md:text-3xl font-bold text-slate-900">
+                    <h1 className="text-xl md:text-2xl font-bold text-slate-900 leading-tight">
                         Here&apos;s your Coordinator Panel
                     </h1>
                 </div>
 
                 {/* Scoreboard Card */}
-                <div className="bg-white rounded-[2rem] p-8 shadow-xl shadow-indigo-500/5 border border-slate-100 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-full -translate-y-12 translate-x-12 opacity-50" />
+                {/* ── SECTION: Start Here ── */}
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">📍 Start Here</p>
+
+                <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-md shadow-indigo-500/5 border border-slate-100 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-50 rounded-full -translate-y-10 translate-x-10 opacity-40" />
 
                     <div className="relative">
-                        <p className="text-sm font-black text-indigo-600 uppercase tracking-widest mb-2">Live Progress</p>
-                        <h1 className="text-3xl font-black text-slate-900 mb-6">{campaign.name}</h1>
+                        <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-1">Live Progress</p>
+                        <h2 className="text-xl sm:text-2xl font-black text-slate-900 mb-4 leading-tight">{campaign.name}</h2>
 
-                        <div className="flex justify-between items-end mb-3">
+                        <div className="flex justify-between items-end mb-2">
                             <div>
-                                <p className="text-4xl font-black text-slate-900">{formatBundleCount(totalBundlesSold)}</p>
-                                <p className="text-sm font-bold text-slate-400">Bundles Sold</p>
+                                <p className="text-3xl sm:text-4xl font-black text-slate-900">{formatBundleCount(totalBundlesSold)}</p>
+                                <p className="text-xs font-bold text-slate-400">Bundles Sold</p>
                             </div>
                             <div className="text-right">
-                                <p className="text-xl font-black text-slate-400">{bundleGoal} Bundles</p>
-                                <p className="text-xs font-black text-slate-300 uppercase tracking-tighter">Goal</p>
+                                <p className="text-base font-black text-slate-300">{bundleGoal} goal</p>
                             </div>
                         </div>
 
                         {/* Progress Bar */}
-                        <p className="text-xs font-black text-slate-400 uppercase tracking-wide mb-1">Progress to Goal</p>
-                        <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden mb-2">
+                        <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden mb-1">
                             <motion.div
-                                className="h-full bg-indigo-600"
+                                className="h-full bg-indigo-600 rounded-full"
                                 initial={{ width: 0 }}
                                 animate={{ width: `${progress}%` }}
                                 transition={{ type: 'spring', bounce: 0.25, duration: 1.5, delay: 0.2 }}
                             />
                         </div>
-                        <p className="text-right text-xs font-black text-indigo-600 uppercase italic">
-                            {progress.toFixed(0)}% Towards Goal!
+                        <p className="text-right text-[10px] font-bold text-indigo-500">
+                            {progress.toFixed(0)}%
                         </p>
 
                         {/* Estimated Earnings */}
                         {metrics.estimatedEarnings > 0 && (
-                            <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-2">
-                                <DollarSign size={16} className="text-emerald-500" />
+                            <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-1.5">
                                 <p className="text-sm font-bold text-slate-500">
                                     💰 You&apos;ve earned: <span className="text-emerald-600 font-black">${metrics.estimatedEarnings.toFixed(2)}</span> so far
                                 </p>
                             </div>
                         )}
 
-                        {/* Conditional Motivation */}
-                        <div className="mt-4 bg-indigo-50 rounded-2xl p-3 space-y-1">
-                            <p className="text-sm font-bold text-indigo-700">
-                                {totalBundlesSold === 0
-                                    ? '🔥 Let\'s get your first order today!'
-                                    : '🔥 You\'re gaining momentum — keep going!'}
-                            </p>
-                            <p className="text-sm font-medium text-indigo-600">
-                                🚀 Your next step: Share your fundraiser with 5 people to get your first order
-                            </p>
+                        {/* Progressive Coaching Tips */}
+                        <div className="mt-3 bg-indigo-50 rounded-xl p-2.5 space-y-0.5">
+                            {(() => {
+                                const actions = actionSummary?.totalActions || 0;
+                                if (progress >= 100) return (
+                                    <>
+                                        <p className="text-sm font-bold text-indigo-700">🎉 Goal reached!</p>
+                                        <p className="text-sm font-medium text-indigo-600">Keep sharing — every extra order counts toward your fundraiser.</p>
+                                    </>
+                                );
+                                if (totalBundlesSold >= 0.5 * bundleGoal) return (
+                                    <>
+                                        <p className="text-sm font-bold text-indigo-700">🔥 Almost there!</p>
+                                        <p className="text-sm font-medium text-indigo-600">One more push to hit your goal — share again today.</p>
+                                    </>
+                                );
+                                if (totalBundlesSold >= 1) return (
+                                    <>
+                                        <p className="text-sm font-bold text-indigo-700">📈 Step 3: Great start!</p>
+                                        <p className="text-sm font-medium text-indigo-600">Most sales come from 3+ touches — share your link again today.</p>
+                                    </>
+                                );
+                                if (totalBundlesSold === 0 && actions > 0) return (
+                                    <>
+                                        <p className="text-sm font-bold text-indigo-700">📣 Step 2: Expand your reach</p>
+                                        <p className="text-sm font-medium text-indigo-600">Post to Facebook or send a group text to get your first order.</p>
+                                    </>
+                                );
+                                return (
+                                    <>
+                                        <p className="text-sm font-bold text-indigo-700">🚀 Step 1: Share your fundraiser</p>
+                                        <p className="text-sm font-medium text-indigo-600">Send your link to 5 family members or friends to get started.</p>
+                                    </>
+                                );
+                            })()}
                         </div>
 
                         {/* Days Remaining */}
                         {daysRemaining !== null && (
-                            <div className="mt-3 flex items-center gap-2 text-sm font-bold text-slate-500">
+                            <div className="mt-2 flex items-center gap-1.5 text-xs font-bold text-slate-400">
                                 <Clock size={14} />
                                 <span>
                                     {daysRemaining === 0
@@ -593,25 +617,25 @@ export default function CoordinatorPortal() {
                     />
                 )}
 
-                {/* Quick Actions — unified action hub */}
-                <div className="bg-white rounded-[2rem] p-6 border border-slate-200 shadow-sm space-y-5">
-                    <h2 className="text-lg font-black flex items-center gap-2">
-                        <Rocket size={20} className="text-indigo-600" />
+                {/* ── SECTION: Share & Promote ── */}
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">📣 Share & Promote</p>
+
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
+                    <h2 className="text-base font-black flex items-center gap-2">
+                        <Rocket size={18} className="text-indigo-600" />
                         Quick Actions
                     </h2>
 
-                    {/* Primary CTA */}
-                    <button
-                        onClick={handleShareUniversal}
-                        className="w-full bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 text-white p-5 rounded-2xl font-black text-base flex items-center justify-center gap-3 transition-all active:scale-95 shadow-lg shadow-indigo-500/20"
-                    >
-                        <Share2 size={24} />
-                        🚀 Share Your Fundraiser
-                    </button>
-
-                    {/* Share Options */}
-                    <div className="space-y-2">
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Share Options</p>
+                    {/* ── 📢 Share Online ── */}
+                    <div className="space-y-3">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">📢 Share Online</p>
+                        <button
+                            onClick={handleShareUniversal}
+                            className="w-full bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 text-white p-5 rounded-2xl font-black text-base flex items-center justify-center gap-3 transition-all active:scale-95 shadow-lg shadow-indigo-500/20"
+                        >
+                            <Share2 size={24} />
+                            🚀 Share Your Fundraiser
+                        </button>
                         <div className="grid grid-cols-2 gap-3">
                             <button
                                 onClick={handleFacebookShare}
@@ -630,9 +654,12 @@ export default function CoordinatorPortal() {
                         </div>
                     </div>
 
-                    {/* More Tools */}
-                    <div className="space-y-2 mt-4">
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">More Tools</p>
+                    {/* Divider */}
+                    <div className="border-t border-slate-100" />
+
+                    {/* ── 🗂️ Offline Tools ── */}
+                    <div className="space-y-2">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">🗂️ Offline Tools</p>
                         <div className="grid grid-cols-2 gap-3">
                             <button
                                 onClick={() => setShowOrderModal(true)}
@@ -666,8 +693,85 @@ export default function CoordinatorPortal() {
                     </div>
                 </div>
 
+                {/* ── AI Content Generator ── */}
+                <div className="bg-indigo-600 rounded-2xl p-4 text-white space-y-4">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 bg-indigo-400 rounded-xl flex items-center justify-center text-white shadow-lg">
+                                <Rocket size={16} />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-sm">AI Content Generator</h3>
+                                <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest">Powered by Google Gemini</p>
+                            </div>
+                        </div>
+                        {aiRemaining !== null && (
+                            <p className="text-[10px] font-black text-indigo-200 uppercase tracking-widest">
+                                {aiRemaining} of 40 left
+                            </p>
+                        )}
+                    </div>
+
+                    <p className="text-xs text-indigo-100 leading-relaxed font-medium">
+                        Generate custom promo copy for any channel — instantly! Your fundraiser details are included automatically.
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-2">
+                        {[
+                            { channel: 'facebook', label: '📘 Facebook' },
+                            { channel: 'text', label: '💬 Text / SMS' },
+                            { channel: 'email', label: '📧 Email' },
+                            { channel: 'instagram', label: '📸 Instagram' }
+                        ].map(({ channel, label }) => (
+                            <button
+                                key={channel}
+                                onClick={() => handleAiGenerate(channel)}
+                                disabled={isAiGenerating || aiRemaining === 0}
+                                className={`p-3 rounded-xl border text-left transition-all ${
+                                    aiRemaining === 0
+                                        ? 'bg-white/5 border-white/10 opacity-50 cursor-not-allowed'
+                                        : 'bg-white/5 border-white/10 hover:bg-white/15 hover:border-indigo-300/50 cursor-pointer active:scale-95'
+                                }`}
+                            >
+                                <p className="text-xs font-black">{label}</p>
+                                <p className="text-[10px] text-indigo-200 mt-0.5">
+                                    {isAiGenerating && aiChannel === channel ? 'Generating...' : 'Click to generate'}
+                                </p>
+                            </button>
+                        ))}
+                    </div>
+
+                    {aiRemaining === 0 && (
+                        <p className="text-center text-xs font-bold text-indigo-200 bg-white/5 rounded-xl p-3">
+                            ✅ You&apos;ve used all 40 AI generations! Use the copy scripts below or edit previous results.
+                        </p>
+                    )}
+
+                    {isAiGenerating && (
+                        <div className="flex items-center justify-center gap-3 py-4">
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            <p className="text-xs font-bold text-indigo-100 animate-pulse">Creating your {aiChannel} content...</p>
+                        </div>
+                    )}
+
+                    {aiContent && !isAiGenerating && (
+                        <div className="bg-indigo-900/40 rounded-2xl p-4 border border-indigo-400/30 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">Generated Content</p>
+                                <CopyButton text={aiContent} label="Content Copied!" />
+                            </div>
+                            <textarea
+                                value={aiContent}
+                                onChange={(e) => setAiContent(e.target.value)}
+                                rows={4}
+                                className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-xs text-white font-medium resize-y focus:outline-none focus:ring-2 focus:ring-indigo-400/50"
+                            />
+                        </div>
+                    )}
+                </div>
+
                 {/* 📋 Copy Scripts & Downloads */}
-                <div className="bg-white rounded-[2rem] p-6 border border-slate-200 shadow-sm space-y-5">
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
                     {/* Section Header */}
                     <div>
                         <h2 className="text-lg font-black flex items-center gap-2">
@@ -788,85 +892,8 @@ export default function CoordinatorPortal() {
                     })()}
                 </div>
 
-                {/* ── AI Content Generator ── */}
-                <div className="bg-indigo-600 rounded-[2rem] p-5 text-white space-y-5">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 bg-indigo-400 rounded-xl flex items-center justify-center text-white shadow-lg">
-                                <Rocket size={16} />
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-sm">AI Content Generator</h3>
-                                <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest">Powered by Google Gemini</p>
-                            </div>
-                        </div>
-                        {aiRemaining !== null && (
-                            <p className="text-[10px] font-black text-indigo-200 uppercase tracking-widest">
-                                {aiRemaining} of 40 left
-                            </p>
-                        )}
-                    </div>
-
-                    <p className="text-xs text-indigo-100 leading-relaxed font-medium">
-                        Generate custom promo copy for any channel — instantly! Your fundraiser details are included automatically.
-                    </p>
-
-                    <div className="grid grid-cols-2 gap-2">
-                        {[
-                            { channel: 'facebook', label: '📘 Facebook' },
-                            { channel: 'text', label: '💬 Text / SMS' },
-                            { channel: 'email', label: '📧 Email' },
-                            { channel: 'instagram', label: '📸 Instagram' }
-                        ].map(({ channel, label }) => (
-                            <button
-                                key={channel}
-                                onClick={() => handleAiGenerate(channel)}
-                                disabled={isAiGenerating || aiRemaining === 0}
-                                className={`p-3 rounded-xl border text-left transition-all ${
-                                    aiRemaining === 0
-                                        ? 'bg-white/5 border-white/10 opacity-50 cursor-not-allowed'
-                                        : 'bg-white/5 border-white/10 hover:bg-white/15 hover:border-indigo-300/50 cursor-pointer active:scale-95'
-                                }`}
-                            >
-                                <p className="text-xs font-black">{label}</p>
-                                <p className="text-[10px] text-indigo-200 mt-0.5">
-                                    {isAiGenerating && aiChannel === channel ? 'Generating...' : 'Click to generate'}
-                                </p>
-                            </button>
-                        ))}
-                    </div>
-
-                    {aiRemaining === 0 && (
-                        <p className="text-center text-xs font-bold text-indigo-200 bg-white/5 rounded-xl p-3">
-                            ✅ You&apos;ve used all 40 AI generations! Use the copy scripts above or edit previous results.
-                        </p>
-                    )}
-
-                    {isAiGenerating && (
-                        <div className="flex items-center justify-center gap-3 py-4">
-                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            <p className="text-xs font-bold text-indigo-100 animate-pulse">Creating your {aiChannel} content...</p>
-                        </div>
-                    )}
-
-                    {aiContent && !isAiGenerating && (
-                        <div className="bg-indigo-900/40 rounded-2xl p-4 border border-indigo-400/30 space-y-3">
-                            <div className="flex items-center justify-between">
-                                <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">Generated Content</p>
-                                <CopyButton text={aiContent} label="Content Copied!" />
-                            </div>
-                            <textarea
-                                value={aiContent}
-                                onChange={(e) => setAiContent(e.target.value)}
-                                rows={4}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-xs text-white font-medium resize-y focus:outline-none focus:ring-2 focus:ring-indigo-400/50"
-                            />
-                        </div>
-                    )}
-                </div>
-
                 {/* ── Engagement Insight ── */}
-                <div className="bg-white rounded-[2rem] p-5 border border-slate-200 shadow-sm">
+                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
                     <div className="flex items-center gap-2 mb-3">
                         <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center">
                             <Activity size={16} className="text-emerald-600" />
@@ -913,6 +940,9 @@ export default function CoordinatorPortal() {
                     <span>Payment Settings</span>
                 </button>
 
+                {/* ── SECTION: Info & Details ── */}
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">📄 Info & Details</p>
+
                 {/* Success Toolkit CTA */}
                 <Link
                     href={`/coordinator/${token}/guide`}
@@ -932,7 +962,7 @@ export default function CoordinatorPortal() {
                 </Link>
 
                 {/* Info Section */}
-                <div className="bg-white rounded-[2rem] p-6 border border-slate-200 shadow-sm">
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
                     <h2 className="text-lg font-black mb-4 flex items-center gap-2">
                         <TrendingUp size={20} className="text-indigo-600" />
                         Campaign Details
@@ -973,13 +1003,13 @@ export default function CoordinatorPortal() {
                         </span>
                     </h2>
                     {(campaign.orders || []).length === 0 ? (
-                        <div className="bg-white rounded-3xl p-10 text-center border-2 border-dashed border-slate-200 space-y-2">
+                        <div className="bg-white rounded-2xl p-8 text-center border-2 border-dashed border-slate-200 space-y-2">
                             <p className="text-slate-500 font-bold">No orders yet — let&apos;s get your first one!</p>
                             <p className="text-slate-400 text-sm">Use <span className="font-bold text-slate-500">Quick Actions</span> above to share your order page link and start selling.</p>
                         </div>
                     ) : (
                         (campaign.orders || []).map((order: any) => (
-                            <div key={order.id} className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm group">
+                            <div key={order.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm group">
                                 <div className="flex justify-between items-center">
                                     <div className="flex items-center gap-4">
                                         <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 font-black">
@@ -1017,7 +1047,7 @@ export default function CoordinatorPortal() {
             {/* Offline Order Modal */}
             {showOrderModal && (
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-300 overflow-y-auto">
-                    <div className="bg-white w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 mt-10 shadow-2xl relative animate-in slide-in-from-bottom-10 duration-300">
+                    <div className="bg-white w-full max-w-lg rounded-t-2xl sm:rounded-2xl p-6 mt-10 shadow-2xl relative animate-in slide-in-from-bottom-10 duration-300">
                         <button
                             onClick={() => setShowOrderModal(false)}
                             className="absolute top-6 right-6 p-2 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"

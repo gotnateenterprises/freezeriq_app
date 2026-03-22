@@ -38,7 +38,7 @@ export default function Leaderboard({ orders, participantLabel = 'Seller' }: Lea
 
     if (rankings.length === 0) {
         return (
-            <div className="bg-white rounded-[2rem] p-8 border border-slate-200 shadow-sm text-center">
+            <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm text-center">
                 <div className="w-16 h-16 bg-yellow-50 rounded-full flex items-center justify-center mx-auto mb-4 text-yellow-500">
                     <Trophy size={32} />
                 </div>
@@ -51,7 +51,7 @@ export default function Leaderboard({ orders, participantLabel = 'Seller' }: Lea
     }
 
     return (
-        <div className="bg-white rounded-[2rem] p-8 border border-slate-200 shadow-sm">
+        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
             <div className="flex items-center gap-3 mb-6">
                 <div className="p-2 bg-yellow-100 text-yellow-600 rounded-xl">
                     <Trophy size={20} />
