@@ -29,7 +29,7 @@ const generateIntroTemplate = (name: string, orgName?: string) => ({
 <h3>It’s super simple:</h3>
 <ol>
     <li><strong>Pick a Date:</strong> choose a Tuesday, Wednesday, or Thursday for delivery.</li>
-    <li><strong>Share the Love:</strong> We provide beautiful flyers and forms effectively done for you.</li>
+    <li><strong>Share the Love:</strong> We provide beautiful flyers and forms plus your own online order page and a personal Coordinator Dashboard to track everything in real time.</li>
     <li><strong>Delivery Day:</strong> We bring the meals right to you—distribution takes just 15-30 minutes!</li>
 </ol>
 
@@ -55,7 +55,7 @@ const generateInfoTemplate = (name: string, bundles: any[]) => ({
 <ol>
     <li><strong>Choose Your Bundles:</strong> Take a look at the Bundles below and let us know which 2 Bundles you'd like to offer (e.g., Family Friendly & Keto).</li>
     <li><strong>Pick Your Date:</strong> Choose your desired delivery date, time and delivery location. We will confirm date if available or get back with an alternative date.</li>
-    <li><strong>We Create Your Marketing:</strong> Once you decide, we will build a custom order form, flyer and order tracking form just for your group to start selling!</li>
+    <li><strong>We Create Your Marketing:</strong> Once you decide, we will build a custom flyer, order tracking form, <em>plus</em> a personal online order page where supporters can order directly and a Coordinator Dashboard so you can track sales in real time!</li>
 </ol>
 
 <p>Please complete the short form below with all of the information we need to get you set up in our system and your custom marketing materials ready to go!</p>

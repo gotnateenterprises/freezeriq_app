@@ -22,7 +22,7 @@ const EMAIL_TEMPLATES = {
             <h3>It’s super simple:</h3>
             <ol>
                 <li><strong>Pick a Date:</strong> choose a Tuesday, Wednesday, or Thursday for delivery.</li>
-                <li><strong>Share the Love:</strong> We provide beautiful flyers and forms effectively done for you.</li>
+                <li><strong>Share the Love:</strong> We provide beautiful flyers and forms plus your own online order page and a personal Coordinator Dashboard to track everything in real time.</li>
                 <li><strong>Delivery Day:</strong> We bring the meals right to you—distribution takes just 15-30 minutes!</li>
             </ol>
 
