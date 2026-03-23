@@ -31,6 +31,7 @@ export type PromoScriptsResponse = {
         facebook: string;
         textMessage: string;
         emailBlurb: string;
+        emailBlurbHtml: string;
     };
 };
 
@@ -150,7 +151,7 @@ function generateEmailBlurb(input: PromoScriptInput): string {
         email += bundleListShort(bundles, 4) + '\n\n';
     }
 
-    email += `Place your order here:\n${publicUrl}\n`;
+    email += `👉 Order Your Freezer Meals: ${publicUrl}\n`;
 
     if (deadline) {
         email += `\n${deadline}\n`;
@@ -159,6 +160,35 @@ function generateEmailBlurb(input: PromoScriptInput): string {
     email += `\nThank you for your support!`;
 
     return email;
+}
+
+function generateEmailBlurbHtml(input: PromoScriptInput): string {
+    const { organizationName, publicUrl, endDate, bundles } = input;
+    const deadline = deadlineLine(endDate);
+
+    let html = `<p>We're excited to share that ${organizationName} is hosting a freezer meal fundraiser! `;
+    html += `It's easy — just pick your favorite meal bundles, place your order online, and stock your freezer with `;
+    html += `delicious, ready-to-heat meals while supporting ${organizationName}.</p>`;
+
+    if (bundles.length > 0) {
+        html += `<p><strong>Available bundles:</strong><br>`;
+        const show = bundles.slice(0, 4);
+        html += show.map(formatBundleLine).join('<br>');
+        if (bundles.length > 4) {
+            html += `<br>and ${bundles.length - 4} more option${bundles.length - 4 > 1 ? 's' : ''}`;
+        }
+        html += `</p>`;
+    }
+
+    html += `<p>👉 <a href="${publicUrl}" style="color:#6366f1;font-weight:bold;">Order Your Freezer Meals Here</a></p>`;
+
+    if (deadline) {
+        html += `<p>⏰ ${deadline}</p>`;
+    }
+
+    html += `<p>Thank you for your support!</p>`;
+
+    return html;
 }
 
 // ── Main Export ─────────────────────────────────────────────
@@ -172,6 +202,7 @@ export function generatePromoScripts(input: PromoScriptInput): PromoScriptsRespo
             facebook: generateFacebook(input),
             textMessage: generateTextMessage(input),
             emailBlurb: generateEmailBlurb(input),
+            emailBlurbHtml: generateEmailBlurbHtml(input),
         },
     };
 }

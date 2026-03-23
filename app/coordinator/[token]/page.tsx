@@ -248,14 +248,27 @@ export default function CoordinatorPortal() {
         setTimeout(() => setCopiedFb(false), 2000);
     };
 
-    const handleCopyEmailBlurb = () => {
+    const handleCopyEmailBlurb = async () => {
         if (!promoScripts?.scripts?.emailBlurb) {
             toast.error('Promo scripts are still loading. Try again in a moment.');
             return;
         }
-        navigator.clipboard.writeText(promoScripts.scripts.emailBlurb);
+        // Copy as rich text (HTML) so hyperlinks survive paste into email clients
+        try {
+            const htmlContent = promoScripts.scripts.emailBlurbHtml || promoScripts.scripts.emailBlurb;
+            const plainContent = promoScripts.scripts.emailBlurb;
+            await navigator.clipboard.write([
+                new ClipboardItem({
+                    'text/html': new Blob([htmlContent], { type: 'text/html' }),
+                    'text/plain': new Blob([plainContent], { type: 'text/plain' }),
+                }),
+            ]);
+        } catch {
+            // Fallback to plain text
+            await navigator.clipboard.writeText(promoScripts.scripts.emailBlurb);
+        }
         setCopiedEmail(true);
-        toast.success('Email blurb copied!');
+        toast.success('Email blurb copied with clickable link!');
         trackAction('copy_email_blurb');
         setTimeout(() => setCopiedEmail(false), 2000);
     };
