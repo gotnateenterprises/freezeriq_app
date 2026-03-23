@@ -63,6 +63,7 @@ export async function GET(req: Request) {
         return NextResponse.redirect(accountLink.url);
     } catch (error: any) {
         console.error("Stripe Account Creation Error:", error);
-        return NextResponse.redirect(`${appUrl}/settings?error=stripe_init_failed`);
+        const msg = encodeURIComponent(error?.message || 'Unknown error');
+        return NextResponse.redirect(`${appUrl}/settings?error=stripe_init_failed&detail=${msg}`);
     }
 }
