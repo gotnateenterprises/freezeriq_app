@@ -339,6 +339,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                                     <PurchaseSidebar
                                         bundle={purchaseModalBundle}
                                         primaryColor={branding.primary_color}
+                                        onClose={() => setShowPurchaseModal(false)}
                                     />
                                 </div>
                             </motion.div>

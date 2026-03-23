@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, ShoppingBag, Info, Loader2, Sparkles } from 'lucide-react';
+import { Check, ShoppingBag, Info, Loader2, Sparkles, ArrowRight, ShoppingCart } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 
 interface PurchaseSidebarProps {
@@ -15,10 +15,11 @@ interface PurchaseSidebarProps {
         serving_tier?: string;
     };
     primaryColor: string;
+    onClose?: () => void;
 }
 
-export default function PurchaseSidebar({ bundle, primaryColor }: PurchaseSidebarProps) {
-    const { addToCart } = useCart();
+export default function PurchaseSidebar({ bundle, primaryColor, onClose }: PurchaseSidebarProps) {
+    const { addToCart, setIsCartOpen } = useCart();
     const [isSubscription, setIsSubscription] = useState(true);
     const [servingSize, setServingSize] = useState<'large' | 'medium'>(
         bundle.serving_tier === 'couples' ? 'medium' : 'large'
@@ -30,6 +31,7 @@ export default function PurchaseSidebar({ bundle, primaryColor }: PurchaseSideba
     // Reset quantity and sync serving size when bundle changes
     useEffect(() => {
         setQuantity(1);
+        setShowSuccess(false);
         setServingSize(bundle.serving_tier === 'couples' ? 'medium' : 'large');
     }, [bundle.id, bundle.serving_tier]);
 
@@ -53,7 +55,6 @@ export default function PurchaseSidebar({ bundle, primaryColor }: PurchaseSideba
         setTimeout(() => {
             setIsAdding(false);
             setShowSuccess(true);
-            setTimeout(() => setShowSuccess(false), 3000);
         }, 800);
     };
 
@@ -194,29 +195,69 @@ export default function PurchaseSidebar({ bundle, primaryColor }: PurchaseSideba
                 </button>
             </div>
 
-            {/* Benefits List */}
-            <div className="mt-10 pt-8 border-t border-indigo-100/30 dark:border-slate-800 space-y-5">
-                {[
-                    "Easy-to-use Slow Cooker Meals",
-                    "A Mom-Built local business",
-                    "Perfect for busy weeknights",
-                    "Hand-prepped with fresh ingredients"
-                ].map((benefit, i) => (
-                    <div key={i} className="flex items-center gap-4 text-slate-500 dark:text-slate-400">
-                        <div className="w-6 h-6 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/50 text-indigo-600 flex items-center justify-center shadow-sm">
-                            <Check size={14} strokeWidth={3} />
+            {/* Post-add navigation OR benefits */}
+            <AnimatePresence mode="wait">
+                {showSuccess ? (
+                    <motion.div
+                        key="nav-buttons"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0 }}
+                        className="mt-6 space-y-3"
+                    >
+                        <button
+                            onClick={() => {
+                                if (onClose) onClose();
+                            }}
+                            className="w-full py-4 rounded-[2rem] border-2 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-black text-sm uppercase tracking-widest hover:border-indigo-300 hover:text-indigo-600 transition-all flex items-center justify-center gap-2"
+                        >
+                            <ArrowRight size={16} className="rotate-180" />
+                            Continue Shopping
+                        </button>
+                        <button
+                            onClick={() => {
+                                if (onClose) onClose();
+                                setIsCartOpen(true);
+                            }}
+                            style={{ backgroundColor: primaryColor }}
+                            className="w-full py-4 rounded-[2rem] text-white font-black text-sm uppercase tracking-widest shadow-lg hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+                        >
+                            <ShoppingCart size={16} />
+                            View Cart &rarr; Checkout
+                        </button>
+                    </motion.div>
+                ) : (
+                    <motion.div
+                        key="benefits"
+                        initial={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                    >
+                        {/* Benefits List */}
+                        <div className="mt-10 pt-8 border-t border-indigo-100/30 dark:border-slate-800 space-y-5">
+                            {[
+                                "Easy-to-use Slow Cooker Meals",
+                                "A Mom-Built local business",
+                                "Perfect for busy weeknights",
+                                "Hand-prepped with fresh ingredients"
+                            ].map((benefit, i) => (
+                                <div key={i} className="flex items-center gap-4 text-slate-500 dark:text-slate-400">
+                                    <div className="w-6 h-6 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/50 text-indigo-600 flex items-center justify-center shadow-sm">
+                                        <Check size={14} strokeWidth={3} />
+                                    </div>
+                                    <span className="text-[10px] font-black tracking-widest uppercase">{benefit}</span>
+                                </div>
+                            ))}
                         </div>
-                        <span className="text-[10px] font-black tracking-widest uppercase">{benefit}</span>
-                    </div>
-                ))}
-            </div>
 
-            <div className="mt-8 p-6 bg-indigo-50/30 dark:bg-indigo-950/20 rounded-[2rem] flex items-start gap-4 border border-indigo-100/20">
-                <Info size={20} className="text-indigo-400 shrink-0" />
-                <p className="text-[10px] text-indigo-600/60 dark:text-indigo-400/60 leading-relaxed font-black uppercase tracking-wider">
-                    Our monthly menu rotates on the 1st. Subscriptions are automatically updated to the newest items!
-                </p>
-            </div>
+                        <div className="mt-8 p-6 bg-indigo-50/30 dark:bg-indigo-950/20 rounded-[2rem] flex items-start gap-4 border border-indigo-100/20">
+                            <Info size={20} className="text-indigo-400 shrink-0" />
+                            <p className="text-[10px] text-indigo-600/60 dark:text-indigo-400/60 leading-relaxed font-black uppercase tracking-wider">
+                                Our monthly menu rotates on the 1st. Subscriptions are automatically updated to the newest items!
+                            </p>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }
