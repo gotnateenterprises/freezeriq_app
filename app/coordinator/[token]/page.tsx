@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { toast } from 'sonner';
+import { toast, Toaster } from 'sonner';
 import type { CampaignAsset } from '@/lib/campaignAssets';
 import type { PromoScriptsResponse } from '@/lib/generatePromoScripts';
 import { computeFundraiserProgress, formatBundleCount } from '@/lib/fundraiserMetrics';
@@ -502,11 +502,13 @@ export default function CoordinatorPortal() {
                 setSelectedItems([]);
                 fetchCampaign(); // Refresh data
             } else {
-                toast.error("Failed to save order");
+                const errBody = await res.json().catch(() => null);
+                console.error('Save order failed:', res.status, errBody);
+                toast.error(errBody?.error || `Failed to save order (${res.status})`);
             }
-        } catch (err) {
+        } catch (err: any) {
             console.error("Failed to add order", err);
-            toast.error("An error occurred");
+            toast.error(err?.message || "Network error — please try again");
         } finally {
             setIsSubmitting(false);
         }
@@ -566,6 +568,7 @@ export default function CoordinatorPortal() {
 
     return (
         <div className="min-h-screen bg-slate-50 pb-20">
+            <Toaster position="top-center" toastOptions={{ duration: 4000 }} />
             {/* Nav: Premium Glassmorphism */}
             <div className="bg-white/70 backdrop-blur-xl border-b border-white/20 px-6 py-4 sticky top-0 z-10 shadow-sm">
                 <div className="max-w-xl mx-auto flex justify-between items-center">
