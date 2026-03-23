@@ -79,55 +79,97 @@ export async function GET(req: Request) {
             orderBy: { created_at: 'asc' }
         });
 
+        // --- Helper: shorten a bundle name for column headers ---
+        const shortenBundleName = (name: string): string => {
+            // e.g. "Q1 - Comfort Foods (Serves a Family of 4)" → "Q1 - Comfort Foods\n(Family)"
+            // e.g. "Q1 - Clean Eating/Paleo (Serves 2)" → "Q1 - Clean Eating/Paleo\n(Serves 2)"
+            const match = name.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+            if (match) {
+                const label = match[1].trim();
+                let size = match[2].trim();
+                // Shorten "Serves a Family of 4" → "Family"
+                if (/family/i.test(size)) size = 'Family';
+                return `${label}\n(${size})`;
+            }
+            return name;
+        };
+
         // 4. Build the Excel workbook
         const ExcelJS = (await import('exceljs')).default;
         const workbook = new ExcelJS.Workbook();
         const worksheet = workbook.addWorksheet('Pickup Sheet');
 
-        // Define columns: #, Customer Name, Phone, [one per bundle], Total Bundles
-        const columns: { header: string; key: string; width: number }[] = [
-            { header: '#', key: 'rowNum', width: 6 },
-            { header: 'Customer Name', key: 'customerName', width: 28 },
-            { header: 'Phone', key: 'phone', width: 18 },
-        ];
+        // --- Campaign title rows ---
+        const campaignTitle = campaign.name || 'Fundraiser';
+        const orgName = (campaign.customer as any)?.name || 'Organization';
 
+        // Row 1: Campaign title
+        worksheet.mergeCells('A1:H1');
+        const titleCell = worksheet.getCell('A1');
+        titleCell.value = campaignTitle;
+        titleCell.font = { bold: true, size: 16, color: { argb: 'FF1E293B' } };
+        titleCell.alignment = { horizontal: 'left', vertical: 'middle' };
+        worksheet.getRow(1).height = 28;
+
+        // Row 2: Subtitle
+        worksheet.mergeCells('A2:H2');
+        const subtitleCell = worksheet.getCell('A2');
+        subtitleCell.value = orgName ? `${orgName} — Pickup Sheet` : 'Pickup Sheet';
+        subtitleCell.font = { size: 11, color: { argb: 'FF64748B' } };
+        subtitleCell.alignment = { horizontal: 'left', vertical: 'middle' };
+        worksheet.getRow(2).height = 20;
+
+        // Row 3: Spacer
+        worksheet.getRow(3).height = 8;
+
+        // --- Build header columns (row 4) ---
+        const bundleColumns: { header: string; key: string; width: number }[] = [];
         for (const b of bundles) {
-            columns.push({
-                header: b.name,
+            bundleColumns.push({
+                header: shortenBundleName(b.name),
                 key: `bundle_${b.id}`,
-                width: 16
+                width: 20
             });
         }
 
-        columns.push({ header: 'Total Bundles', key: 'totalBundles', width: 14 });
+        const allColumns = [
+            { header: '#', key: 'rowNum', width: 6 },
+            { header: 'Customer', key: 'customerName', width: 26 },
+            { header: 'Phone', key: 'phone', width: 16 },
+            ...bundleColumns,
+            { header: 'Total\nBundles', key: 'totalBundles', width: 12 },
+        ];
 
-        worksheet.columns = columns;
+        // Manually set headers in row 4 since we used rows 1-3 for the title
+        const HEADER_ROW = 4;
+        allColumns.forEach((col, idx) => {
+            const cell = worksheet.getCell(HEADER_ROW, idx + 1);
+            cell.value = col.header;
+            cell.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
+            cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+            cell.border = {
+                bottom: { style: 'thin', color: { argb: 'FF3730A3' } },
+            };
+            // Set column width
+            worksheet.getColumn(idx + 1).width = col.width;
+        });
+        worksheet.getRow(HEADER_ROW).height = 36;
 
-        // Style header row
-        const headerRow = worksheet.getRow(1);
-        headerRow.font = { bold: true, size: 11 };
-        headerRow.alignment = { horizontal: 'center' };
-        headerRow.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FF4F46E5' }
-        };
-        headerRow.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
-
-        // Bundle total accumulators
+        // Bundle total accumulators (unchanged math)
         const bundleTotals: Record<string, number> = {};
         for (const b of bundles) {
             bundleTotals[b.id] = 0;
         }
         let grandTotal = 0;
 
-        // Populate rows
+        // Populate data rows (starting at row 5)
         orders.forEach((order, idx) => {
-            const rowData: Record<string, any> = {
-                rowNum: idx + 1,
-                customerName: order.customer_name || '(unknown)',
-                phone: (order as any).phone || '',
-            };
+            const rowValues: any[] = [
+                idx + 1,
+                order.customer_name || '(unknown)',
+                (order as any).phone || '',
+            ];
 
             let orderTotal = 0;
             for (const b of bundles) {
@@ -135,39 +177,44 @@ export async function GET(req: Request) {
                     item => item.bundle_id === b.id
                 );
                 const qty = matchingItems.reduce((sum, item) => sum + item.quantity, 0);
-                rowData[`bundle_${b.id}`] = qty || '';
+                rowValues.push(qty || '');
                 orderTotal += qty;
                 bundleTotals[b.id] += qty;
             }
 
-            rowData.totalBundles = orderTotal;
+            rowValues.push(orderTotal);
             grandTotal += orderTotal;
 
-            worksheet.addRow(rowData);
+            const dataRow = worksheet.addRow(rowValues);
+            // Alternate row shading for scannability
+            if (idx % 2 === 1) {
+                dataRow.eachCell((cell) => {
+                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+                });
+            }
+            // Center-align quantity columns
+            for (let c = 4; c <= 3 + bundles.length + 1; c++) {
+                dataRow.getCell(c).alignment = { horizontal: 'center' };
+            }
         });
 
         // Add totals row
-        const totalsRowData: Record<string, any> = {
-            rowNum: '',
-            customerName: 'TOTALS',
-            phone: '',
-        };
+        const totalsValues: any[] = ['', 'TOTALS', ''];
         for (const b of bundles) {
-            totalsRowData[`bundle_${b.id}`] = bundleTotals[b.id];
+            totalsValues.push(bundleTotals[b.id]);
         }
-        totalsRowData.totalBundles = grandTotal;
+        totalsValues.push(grandTotal);
 
-        const totalsRow = worksheet.addRow(totalsRowData);
+        const totalsRow = worksheet.addRow(totalsValues);
         totalsRow.font = { bold: true, size: 11 };
-        totalsRow.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FFF1F5F9' }
-        };
+        totalsRow.eachCell((cell, colNumber) => {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+            cell.border = { top: { style: 'medium', color: { argb: 'FF4F46E5' } } };
+            if (colNumber >= 4) cell.alignment = { horizontal: 'center' };
+        });
 
         // 5. Generate buffer and return
         const buffer = await workbook.xlsx.writeBuffer();
-        const orgName = (campaign.customer as any)?.name || 'Organization';
         const safeOrgName = orgName.replace(/[^a-zA-Z0-9_-]/g, '_');
 
         return new NextResponse(buffer, {
