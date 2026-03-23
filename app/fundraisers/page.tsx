@@ -28,6 +28,7 @@ interface Fundraiser {
     start_date: string;
     end_date: string;
     goal_amount: number;
+    bundle_goal: number;
     sales_total: number;
     customer_id: string;
     customer: {
@@ -239,12 +240,21 @@ export default function FundraisersPage() {
                                         <div className="flex flex-col items-end gap-1">
                                             <div className="flex justify-between w-full text-[10px] font-black font-mono">
                                                 <span className="text-indigo-600">${item.sales_total || 0}</span>
-                                                <span className="text-slate-400">Goal: {item.goal_amount || 0} bundles</span>
+                                                <span className="text-slate-400">
+                                                    {item.bundle_goal > 0 && item.goal_amount > 0
+                                                        ? `Goal: $${item.goal_amount} · ${item.bundle_goal} bundles`
+                                                        : item.bundle_goal > 0
+                                                            ? `Goal: ${item.bundle_goal} bundles`
+                                                            : item.goal_amount > 0
+                                                                ? `Goal: $${item.goal_amount}`
+                                                                : 'No goal set'
+                                                    }
+                                                </span>
                                             </div>
                                             <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-900 rounded-full overflow-hidden">
                                                 <div
                                                     className="h-full bg-indigo-600 transition-all duration-1000"
-                                                    style={{ width: `${Math.min(((item.sales_total || 0) / (item.goal_amount || 1)) * 100, 100)}%` }}
+                                                    style={{ width: `${Math.min(((item.sales_total || 0) / (item.goal_amount || item.bundle_goal || 1)) * 100, 100)}%` }}
                                                 />
                                             </div>
                                         </div>

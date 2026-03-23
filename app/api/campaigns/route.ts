@@ -112,6 +112,7 @@ export async function GET(req: Request) {
                     start_date: true,
                     end_date: true,
                     goal_amount: true,
+                    bundle_goal: true,
                     total_sales: true,
                     participant_label: true,
                     group_label: true,
@@ -147,6 +148,7 @@ export async function GET(req: Request) {
                             start_date: fc.start_date,
                             end_date: fc.end_date,
                             goal_amount: Number(fc.goal_amount || 0),
+                            bundle_goal: Number((fc as any).bundle_goal || 0),
                             sales_total: Number(fc.total_sales || 0),
                             customer_id: c.id,
                             customer: { name: c.name, contact_name: (c as any).contact_name || null },
@@ -169,6 +171,7 @@ export async function GET(req: Request) {
                         is_placeholder: true,
                         business_slug: businessSlug,
                         goal_amount: 0,
+                        bundle_goal: 0,
                         sales_total: 0
                     });
                 }
