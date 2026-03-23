@@ -171,6 +171,7 @@ export async function POST(
                 business_id: business.id,
                 customer_id: campaign.customer_id,
                 campaign_id: campaign.id,
+                phone: phone || null,
                 items: {
                     create: (items || []).map((item: any) => ({
                         bundle_id: item.bundleId || item.id,

@@ -417,6 +417,34 @@ export default function CoordinatorPortal() {
         }
     };
 
+    const handleDownloadPickupSheet = async () => {
+        if (!token || !campaign) {
+            toast.error('Campaign not loaded yet. Please wait.');
+            return;
+        }
+        try {
+            const downloadToken = campaign.portal_token || token;
+            const res = await fetch(`/api/tracker/pickup-sheet?token=${downloadToken}`);
+            if (!res.ok) {
+                const body = await res.json().catch(() => null);
+                throw new Error(body?.error || `Download failed (${res.status})`);
+            }
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'pickup-sheet.xlsx';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            trackAction('download_pickup_sheet');
+        } catch (err: any) {
+            console.error('Download pickup sheet error:', err);
+            toast.error(err.message || 'Failed to download pickup sheet');
+        }
+    };
+
     // State for selected items in manual order
     const [selectedItems, setSelectedItems] = useState<any[]>([]);
 
@@ -685,6 +713,22 @@ export default function CoordinatorPortal() {
                         orders={campaign.orders || []}
                         participantLabel={campaign.participant_label}
                     />
+                )}
+
+                {/* ── Step 1 Onboarding Card — visible only when 0 orders ── */}
+                {(campaign.orders || []).length === 0 && (
+                    <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm mb-4">
+                        <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Getting Started</p>
+                        <h3 className="text-lg font-bold text-slate-900 mt-1">🚀 Step 1: Log Your First Order</h3>
+                        <p className="text-sm text-slate-600 mt-1">Start strong — most successful fundraisers begin with one quick order.</p>
+                        <button
+                            onClick={() => setShowOrderModal(true)}
+                            className="mt-4 w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity active:scale-[0.98]"
+                        >
+                            + Add Your First Order
+                        </button>
+                        <p className="text-xs text-slate-500 mt-2 text-center">Cash, Venmo, or in-person sales — takes less than 30 seconds</p>
+                    </div>
                 )}
 
                 {/* ── SECTION: Share & Promote ── */}
@@ -972,6 +1016,14 @@ export default function CoordinatorPortal() {
                                     >
                                         <LinkIcon size={14} />
                                         <span>{qrAsset?.label || 'Download QR Code'}</span>
+                                    </button>
+                                    <button
+                                        onClick={handleDownloadPickupSheet}
+                                        className="p-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 transition-all border bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 active:scale-95"
+                                        title="Download a delivery-day pickup sheet with all orders"
+                                    >
+                                        <Download size={14} />
+                                        <span>Pickup Sheet</span>
                                     </button>
                                 </div>
                             );

@@ -6,7 +6,7 @@ import Link from 'next/link';
 import EmailComposeModal from './EmailComposeModal';
 import FundraiserSetup from './FundraiserSetup';
 
-import { ShoppingBag, DollarSign, Mail, Phone, MapPin, User, StickyNote, Plus, Calendar, Eye, Loader2, Archive, RotateCcw, Sparkles, Tag, UtensilsCrossed, Clock, Megaphone } from 'lucide-react';
+import { ShoppingBag, DollarSign, Mail, Phone, MapPin, User, StickyNote, Plus, Calendar, Eye, Loader2, Archive, RotateCcw, Sparkles, Tag, UtensilsCrossed, Clock, Megaphone, Package } from 'lucide-react';
 import StatusPipeline from './StatusPipeline';
 import { STATUS_LABELS, STATUS_COLORS, type CustomerStatus } from '@/lib/statusConstants';
 import { validateLaunchReadiness, launchReadinessMessage } from '@/lib/validateLaunchReadiness';
@@ -198,6 +198,10 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
     const [status, setStatus] = useState<CustomerStatus>(normalizedStatus);
     const [isArchived, setIsArchived] = useState(customer.archived || false);
 
+    // Bundle totals state
+    const [bundleTotals, setBundleTotals] = useState<{ bundleId: string; bundleName: string; totalQuantity: number }[]>([]);
+    const [bundleGrandTotal, setBundleGrandTotal] = useState(0);
+
 
     const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
     const [emailDraft, setEmailDraft] = useState({ subject: '', html: '' });
@@ -231,6 +235,23 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
             setBranding(data);
         }).catch(err => console.error('Error fetching branding:', err));
     }, []);
+
+    // Fetch bundle totals when campaign is in active+ status
+    useEffect(() => {
+        if (!activeCampaign?.id) return;
+        const activeStatuses = ['ACTIVE', 'PRODUCTION', 'DELIVERY', 'COMPLETE'];
+        if (!activeStatuses.includes(status)) return;
+
+        fetch(`/api/campaigns/${activeCampaign.id}/bundle-totals`)
+            .then(res => res.ok ? res.json() : null)
+            .then(data => {
+                if (data?.bundleTotals) {
+                    setBundleTotals(data.bundleTotals);
+                    setBundleGrandTotal(data.grandTotal || 0);
+                }
+            })
+            .catch(() => { /* bundle totals fetch failure is non-blocking */ });
+    }, [activeCampaign?.id, status]);
 
     // Sync state with props (e.g., after global Save Changes)
     useEffect(() => {
@@ -765,6 +786,27 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
                                     onPreview={handlePreviewFlyer}
                                     onPreviewTracker={handlePreviewTracker}
                                 />
+                            </div>
+                        )}
+
+                        {/* Bundle Totals Card — visible for ACTIVE+ campaigns */}
+                        {['ACTIVE', 'PRODUCTION', 'DELIVERY', 'COMPLETE'].includes(status) && bundleTotals.length > 0 && (
+                            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <Package size={18} className="text-indigo-600" />
+                                    <h4 className="font-bold text-slate-900 dark:text-white">Bundle Totals</h4>
+                                    <span className="ml-auto text-xs font-bold text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded-full">
+                                        {bundleGrandTotal} total
+                                    </span>
+                                </div>
+                                <div className="space-y-2">
+                                    {bundleTotals.map(bt => (
+                                        <div key={bt.bundleId} className="flex items-center justify-between bg-slate-50 dark:bg-slate-900/30 rounded-xl px-4 py-2.5">
+                                            <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">{bt.bundleName}</span>
+                                            <span className="text-sm font-black text-indigo-600 dark:text-indigo-400">{bt.totalQuantity}</span>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         )}
                     </div>

@@ -316,6 +316,7 @@ model Order {
   delivery_address  String?
   delivery_sequence Int?                @default(0)
   participant_name  String?             @map("participant_name")
+  phone             String?
   items             OrderItem[]
   business          Business?           @relation(fields: [business_id], references: [id])
   campaign          FundraiserCampaign? @relation(fields: [campaign_id], references: [id])
