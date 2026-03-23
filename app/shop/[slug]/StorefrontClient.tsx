@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { ShoppingBag, Users, ArrowRight, ArrowLeft, MessageSquare, Tag } from 'lucide-react';
+import { ShoppingBag, Users, ArrowRight, ArrowLeft, MessageSquare, Tag, X } from 'lucide-react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import JsonLd from '@/components/JsonLd';
@@ -17,7 +17,6 @@ import StorefrontFooter from '@/components/shop/StorefrontFooter';
 import StorefrontProductCard from '@/components/shop/StorefrontProductCard';
 import WeeklyBundles from '@/components/shop/WeeklyBundles';
 import SurplusWaitlist from '@/components/shop/SurplusWaitlist';
-import DeliciousGrid from '@/components/shop/DeliciousGrid';
 import PurchaseSidebar from '@/components/shop/PurchaseSidebar';
 import PublicRecipeDetail from '@/components/shop/PublicRecipeDetail';
 import FreezerIQLandingPage from '@/components/shop/FreezerIQLandingPage';
@@ -111,6 +110,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
     const [selectedPublicRecipe, setSelectedPublicRecipe] = useState<any | null>(null);
     const [showPurchaseModal, setShowPurchaseModal] = useState(false);
     const [purchaseModalBundle, setPurchaseModalBundle] = useState<any>(null);
+    const [mealsPopupBundle, setMealsPopupBundle] = useState<any | null>(null);
 
     useEffect(() => {
         async function fetchStorefront() {
@@ -259,12 +259,10 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
         if (el) el.scrollIntoView({ behavior: 'smooth' });
     };
 
-    const handleSelectBundle = (bundleId: string) => {
-        setActiveBundleId(bundleId);
-        // Smooth scroll to the meals grid
-        const mealsGrid = document.getElementById('meals-grid');
-        if (mealsGrid) {
-            mealsGrid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const handleViewMeals = (bundleId: string) => {
+        const bundle = monthlyBundles.find(b => b.id === bundleId);
+        if (bundle) {
+            setMealsPopupBundle(bundle);
         }
     };
 
@@ -341,6 +339,96 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                                         bundle={purchaseModalBundle}
                                         primaryColor={branding.primary_color}
                                     />
+                                </div>
+                            </motion.div>
+                        </div>
+                    )}
+                </AnimatePresence>
+
+                {/* Bundle Meals Popup */}
+                <AnimatePresence>
+                    {mealsPopupBundle && (
+                        <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center">
+                            <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                onClick={() => setMealsPopupBundle(null)}
+                                className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+                            />
+                            <motion.div
+                                initial={{ opacity: 0, y: 40 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: 40 }}
+                                transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+                                className="relative w-full max-w-lg z-10 max-h-[85vh] flex flex-col"
+                            >
+                                <div className="bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+                                    {/* Header */}
+                                    <div className="sticky top-0 z-10 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 px-5 py-4 flex items-center justify-between">
+                                        <div className="min-w-0">
+                                            <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-0.5" style={{ color: branding.primary_color }}>What&apos;s Inside</p>
+                                            <h3 className="text-lg font-black text-slate-900 dark:text-white truncate">{mealsPopupBundle.name}</h3>
+                                        </div>
+                                        <button
+                                            onClick={() => setMealsPopupBundle(null)}
+                                            className="shrink-0 w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center justify-center text-slate-500 transition-colors ml-3"
+                                        >
+                                            <X size={18} />
+                                        </button>
+                                    </div>
+
+                                    {/* Meal list */}
+                                    <div className="flex-1 overflow-y-auto px-5 py-4">
+                                        {mealsPopupBundle.contents && mealsPopupBundle.contents.length > 0 ? (
+                                            <ul className="space-y-3">
+                                                {mealsPopupBundle.contents.map((item: any, idx: number) => (
+                                                    <li
+                                                        key={idx}
+                                                        className="flex items-start gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800"
+                                                    >
+                                                        <span className="shrink-0 w-6 h-6 rounded-full text-[10px] font-black flex items-center justify-center text-white mt-0.5" style={{ backgroundColor: branding.primary_color }}>
+                                                            {item.quantity || 1}
+                                                        </span>
+                                                        <div className="min-w-0">
+                                                            <p className="font-bold text-sm text-slate-900 dark:text-white leading-snug">{item.recipe?.name || 'Meal'}</p>
+                                                            {item.recipe?.description && (
+                                                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">{item.recipe.description}</p>
+                                                            )}
+                                                            {item.recipe?.container_type && (
+                                                                <span className="inline-block text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">{item.recipe.container_type}</span>
+                                                            )}
+                                                        </div>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        ) : (
+                                            <div className="text-center py-8 text-slate-400">
+                                                <ShoppingBag size={24} className="mx-auto mb-2 opacity-50" />
+                                                <p className="text-sm font-medium">Meal details coming soon</p>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Footer CTA */}
+                                    <div className="sticky bottom-0 z-10 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 px-5 py-4">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className="text-sm text-slate-500 font-medium">{mealsPopupBundle.serving_tier?.replace(/_/g, ' ')}</span>
+                                            <span className="text-xl font-black text-slate-900 dark:text-white">${Number(mealsPopupBundle.price).toFixed(2)}</span>
+                                        </div>
+                                        <button
+                                            onClick={() => {
+                                                setMealsPopupBundle(null);
+                                                setPurchaseModalBundle(mealsPopupBundle);
+                                                setShowPurchaseModal(true);
+                                            }}
+                                            className="w-full py-3.5 rounded-2xl text-white font-black text-sm uppercase tracking-widest shadow-lg hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+                                            style={{ backgroundColor: branding.primary_color }}
+                                        >
+                                            <ShoppingBag size={16} />
+                                            Add to Cart
+                                        </button>
+                                    </div>
                                 </div>
                             </motion.div>
                         </div>
@@ -427,7 +515,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
 
                     {/* Lower Section: Bundles */}
                     <div className="pb-20 w-full overflow-hidden">
-                        <div className="space-y-16 w-full max-w-full">
+                        <div className="w-full max-w-full">
 
                             {/* Monthly Bundles Container */}
                             <div id="shop-bundles" className="scroll-mt-32 w-full max-w-full">
@@ -439,24 +527,9 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                                         setPurchaseModalBundle(bundle);
                                         setShowPurchaseModal(true);
                                     }}
-                                    onSelect={handleSelectBundle}
+                                    onSelect={(bundleId) => setActiveBundleId(bundleId)}
                                     activeBundleId={activeBundleId || ''}
-                                />
-                            </div>
-
-                            {/* Featured Recipes Grid (Reflects active bundle) */}
-                            <div className="space-y-6 scroll-mt-24 w-full" id="meals-grid">
-                                <div className="flex items-center gap-2 mb-4">
-                                    <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600">
-                                        <ShoppingBag size={20} />
-                                    </div>
-                                    <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight uppercase tracking-[0.1em]">
-                                        Menu: {featuredBundle?.name}
-                                    </h2>
-                                </div>
-                                <DeliciousGrid
-                                    recipes={featuredBundle?.contents?.map((c: any) => c.recipe).filter(Boolean) || []}
-                                    onItemClick={(recipe) => setSelectedPublicRecipe(recipe)}
+                                    onViewMeals={handleViewMeals}
                                 />
                             </div>
                         </div>

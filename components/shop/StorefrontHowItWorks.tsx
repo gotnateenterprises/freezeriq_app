@@ -9,56 +9,51 @@ interface StorefrontHowItWorksProps {
 }
 
 export default function StorefrontHowItWorks({ content }: StorefrontHowItWorksProps) {
-    const scrollContainerRef = React.useRef<HTMLDivElement>(null);
-
-    // Auto-scroll removed to fix mobile jitter.
-    // Native CSS snapping and touch-momentum are used instead.
-
     const steps = [
         {
             icon: ShoppingBag,
             title: "Choose Your Bundle",
             desc: "Select our Family Size or Serves 2 meal bundle from our rotating monthly menu.",
             color: "text-brand-teal",
-            bg: "bg-teal-50/50 dark:bg-teal-900/10",
-            badge: "Browse"
+            bg: "bg-teal-50/60 dark:bg-teal-900/20",
+            num: "01"
         },
         {
             icon: Truck,
             title: "We Deliver to You",
             desc: "We prep, freeze, and deliver right to your doorstep or pickup spot.",
             color: "text-brand-teal",
-            bg: "bg-teal-50/50 dark:bg-teal-900/10",
-            badge: "Deliver"
+            bg: "bg-teal-50/60 dark:bg-teal-900/20",
+            num: "02"
         },
         {
             icon: UtensilsCrossed,
             title: "Cook & Enjoy",
             desc: "No prep needed. Just put in your crockpot, Insta-pot or oven, and dinner is served!",
             color: "text-brand-teal",
-            bg: "bg-teal-50/50 dark:bg-teal-900/10",
-            badge: "Enjoy"
+            bg: "bg-teal-50/60 dark:bg-teal-900/20",
+            num: "03"
         }
     ];
 
     return (
-        <section className="py-16 md:py-24 border-b border-indigo-50/50 dark:border-slate-800/50 relative z-10 overflow-hidden w-full">
-            <div className="max-w-7xl mx-auto w-full">
-                <div className="text-center mb-12 md:mb-20 px-6">
+        <section className="py-10 md:py-16 relative z-10 w-full">
+            <div className="max-w-2xl mx-auto w-full px-4">
+                <div className="text-center mb-8 md:mb-10">
                     <motion.span
                         initial={{ opacity: 0, y: 10 }}
                         whileInView={{ opacity: 1, y: 0 }}
                         viewport={{ once: true }}
-                        className="text-brand-teal dark:text-teal-400 font-black tracking-[0.2em] uppercase text-[10px] mb-3 block"
+                        className="text-brand-teal dark:text-teal-400 font-black tracking-[0.2em] uppercase text-[10px] mb-2 block"
                     >
-                        Simple & Seamless
+                        Simple &amp; Seamless
                     </motion.span>
                     <motion.h2
                         initial={{ opacity: 0, y: 10 }}
                         whileInView={{ opacity: 1, y: 0 }}
                         viewport={{ once: true }}
                         transition={{ delay: 0.1 }}
-                        className="text-3xl md:text-5xl font-black text-slate-900 dark:text-white tracking-tight"
+                        className="text-2xl md:text-4xl font-black text-slate-900 dark:text-white tracking-tight"
                     >
                         The Process
                     </motion.h2>
@@ -69,43 +64,38 @@ export default function StorefrontHowItWorks({ content }: StorefrontHowItWorksPr
                         initial={{ opacity: 0, y: 20 }}
                         whileInView={{ opacity: 1, y: 0 }}
                         viewport={{ once: true }}
-                        className="max-w-3xl mx-auto px-6"
                     >
-                        <div className="bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl p-8 md:p-16 rounded-[2rem] border border-white dark:border-white/5 shadow-xl shadow-teal-500/5 text-center">
-                            <p className="text-base md:text-xl text-slate-600 dark:text-slate-300 font-medium leading-relaxed whitespace-pre-wrap">
+                        <div className="bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl p-6 md:p-10 rounded-2xl border border-white dark:border-white/5 shadow-lg shadow-teal-500/5 text-center">
+                            <p className="text-base md:text-lg text-slate-600 dark:text-slate-300 font-medium leading-relaxed whitespace-pre-wrap">
                                 {content}
                             </p>
                         </div>
                     </motion.div>
                 ) : (
-                    <div className="flex overflow-x-auto snap-x snap-mandatory gap-6 md:gap-16 pb-8 px-6 md:grid md:grid-cols-3 relative hide-scrollbar w-full" style={{ msOverflowStyle: 'none', scrollbarWidth: 'none' }}>
-                        <style jsx>{`
-                            div::-webkit-scrollbar {
-                                display: none;
-                            }
-                        `}</style>
-                        {/* Connecting Line (Desktop Only) - Feminized */}
-                        <div className="hidden md:block absolute top-16 left-[10%] right-[10%] h-px bg-linear-to-r from-transparent via-teal-100 dark:via-teal-900/30 to-transparent z-0" />
-
+                    <div className="flex flex-col gap-3 md:gap-4">
                         {steps.map((step, idx) => (
                             <motion.div
                                 key={idx}
-                                initial={{ opacity: 0, y: 20 }}
-                                whileInView={{ opacity: 1, y: 0 }}
+                                initial={{ opacity: 0, x: -10 }}
+                                whileInView={{ opacity: 1, x: 0 }}
                                 viewport={{ once: true }}
-                                transition={{ delay: idx * 0.1 }}
-                                className="relative z-10 flex flex-col items-center text-center group w-[80vw] max-w-[300px] shrink-0 md:w-auto snap-center"
+                                transition={{ delay: idx * 0.08 }}
+                                className={`flex items-center gap-4 p-4 md:p-5 rounded-2xl ${step.bg} border border-white/60 dark:border-white/5`}
                             >
-                                <div className={`relative w-32 h-32 rounded-[3.5rem] ${step.bg} flex items-center justify-center mb-6 transition-all duration-500 group-hover:rounded-[2.5rem] group-hover:scale-110 group-hover:shadow-[0_24px_48px_-12px_rgba(79,70,229,0.1)] border border-white dark:border-white/5`}>
-                                    <div className="absolute top-0 right-0 -translate-y-1/4 translate-x-1/4 bg-white dark:bg-slate-800 px-3 py-1 rounded-full shadow-sm border border-teal-50 dark:border-slate-700">
-                                        <span className="text-[10px] font-black text-brand-teal uppercase tracking-wider">{step.badge}</span>
-                                    </div>
-                                    <step.icon size={48} className={step.color} strokeWidth={1.5} />
+                                <div className={`shrink-0 w-12 h-12 md:w-14 md:h-14 rounded-xl ${step.bg} flex items-center justify-center border border-teal-100/50 dark:border-teal-800/30`}>
+                                    <step.icon size={24} className={step.color} strokeWidth={1.5} />
                                 </div>
-                                <h3 className="text-xl md:text-2xl font-black mb-3 text-slate-900 dark:text-white tracking-tight">{step.title}</h3>
-                                <p className="text-slate-500 dark:text-slate-400 font-medium leading-relaxed max-w-[280px]">
-                                    {step.desc}
-                                </p>
+                                <div className="flex-1 min-w-0">
+                                    <h3 className="text-base md:text-lg font-black text-slate-900 dark:text-white tracking-tight leading-snug">
+                                        {step.title}
+                                    </h3>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 font-medium leading-snug mt-0.5">
+                                        {step.desc}
+                                    </p>
+                                </div>
+                                <span className="shrink-0 text-[10px] font-black text-brand-teal/40 tracking-widest hidden sm:block">
+                                    {step.num}
+                                </span>
                             </motion.div>
                         ))}
                     </div>
