@@ -82,8 +82,22 @@ export async function GET(
             `;
         }
 
-        // 3. Build public fundraiser URL
-        const publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
+        // 3. Build public fundraiser URL → prefer shop order page
+        const origin = new URL(req.url).origin;
+        let publicUrl: string;
+        if (businessId) {
+            const business = await prisma.business.findUnique({
+                where: { id: businessId },
+                select: { slug: true },
+            });
+            if (business?.slug) {
+                publicUrl = `${origin}/shop/${business.slug}/fundraiser/${campaign.id}`;
+            } else {
+                publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
+            }
+        } else {
+            publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
+        }
 
         // 4. Generate scripts
         const bundleSummaries: BundleSummary[] = bundles.map(b => ({

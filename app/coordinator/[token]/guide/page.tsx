@@ -128,7 +128,10 @@ export default function SuccessGuide() {
 
     if (isLoading) return <div className="min-h-screen flex items-center justify-center font-black animate-pulse">Loading Your Toolkit...</div>;
 
-    const publicUrl = `${window.location.origin}/fundraiser/${campaign?.public_token}`;
+    const slug = (campaign?.customer as any)?.business?.slug;
+    const publicUrl = slug && campaign?.id
+        ? `${window.location.origin}/shop/${slug}/fundraiser/${campaign.id}`
+        : `${window.location.origin}/fundraiser/${campaign?.public_token}`;
     const portalUrl = `${window.location.origin}/coordinator/${token}`;
 
     return (
@@ -354,7 +357,7 @@ export default function SuccessGuide() {
                     }}
                     className="w-full bg-indigo-600 text-white py-5 rounded-full font-black shadow-2xl shadow-indigo-500/40 flex items-center justify-center gap-3 active:scale-95 transition-all"
                 >
-                    <Share2 size={24} /> Share Public Scoreboard
+                    <Share2 size={24} /> Share Order Page
                 </button>
             </div>
         </div>
