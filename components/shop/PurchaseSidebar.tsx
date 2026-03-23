@@ -20,7 +20,7 @@ interface PurchaseSidebarProps {
 
 export default function PurchaseSidebar({ bundle, primaryColor, onClose }: PurchaseSidebarProps) {
     const { addToCart, setIsCartOpen } = useCart();
-    const [isSubscription, setIsSubscription] = useState(true);
+    const [isSubscription, setIsSubscription] = useState(false); // Hidden for now — default to one-time
     const [quantity, setQuantity] = useState(1);
     const [isAdding, setIsAdding] = useState(false);
     const [showSuccess, setShowSuccess] = useState(false);
@@ -63,7 +63,9 @@ export default function PurchaseSidebar({ bundle, primaryColor, onClose }: Purch
                 </p>
             </div>
 
-            {/* Price Selection */}
+            {/* Subscribe & Save toggle — hidden until backend is built.
+               To re-enable: change `false &&` to `true &&` and set isSubscription default to true. */}
+            {false && (
             <div className="space-y-3 mb-8">
                 <button
                     onClick={() => setIsSubscription(true)}
@@ -110,6 +112,12 @@ export default function PurchaseSidebar({ bundle, primaryColor, onClose }: Purch
                         <p className="text-lg font-black text-slate-400">${bundlePrice.toFixed(2)}</p>
                     </div>
                 </button>
+            </div>
+            )}
+
+            {/* Price display (shown while Subscribe & Save is hidden) */}
+            <div className="mb-8 px-1">
+                <p className="text-3xl font-black text-slate-900 dark:text-white">${bundlePrice.toFixed(2)}</p>
             </div>
 
 
