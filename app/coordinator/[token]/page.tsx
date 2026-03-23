@@ -710,6 +710,15 @@ export default function CoordinatorPortal() {
                     </div>
                 </div>
 
+                {/* ── Add New Order — prominent CTA ── */}
+                <button
+                    onClick={() => setShowOrderModal(true)}
+                    className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2.5 transition-all active:scale-[0.97] shadow-lg shadow-purple-500/25"
+                >
+                    <Plus size={22} strokeWidth={3} />
+                    Add New Order
+                </button>
+
                 {/* Leaderboard - Only show if name collection is enabled */}
                 {campaign.participant_label && (
                     <Leaderboard
@@ -792,13 +801,7 @@ export default function CoordinatorPortal() {
                     <div className="space-y-2">
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">🗂️ Offline Tools</p>
                         <div className="grid grid-cols-2 gap-3">
-                            <button
-                                onClick={() => setShowOrderModal(true)}
-                                className="bg-white hover:bg-slate-50 text-slate-700 p-4 rounded-2xl font-bold text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-slate-200"
-                            >
-                                <Plus size={22} strokeWidth={3} />
-                                <span>Add Order</span>
-                            </button>
+
                             <button
                                 onClick={handleCopy}
                                 className="bg-white hover:bg-slate-50 text-slate-700 p-4 rounded-2xl font-bold text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-slate-200"
