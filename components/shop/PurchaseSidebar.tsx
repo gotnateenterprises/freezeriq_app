@@ -21,19 +21,15 @@ interface PurchaseSidebarProps {
 export default function PurchaseSidebar({ bundle, primaryColor, onClose }: PurchaseSidebarProps) {
     const { addToCart, setIsCartOpen } = useCart();
     const [isSubscription, setIsSubscription] = useState(true);
-    const [servingSize, setServingSize] = useState<'large' | 'medium'>(
-        bundle.serving_tier === 'couples' ? 'medium' : 'large'
-    );
     const [quantity, setQuantity] = useState(1);
     const [isAdding, setIsAdding] = useState(false);
     const [showSuccess, setShowSuccess] = useState(false);
 
-    // Reset quantity and sync serving size when bundle changes
+    // Reset quantity when bundle changes
     useEffect(() => {
         setQuantity(1);
         setShowSuccess(false);
-        setServingSize(bundle.serving_tier === 'couples' ? 'medium' : 'large');
-    }, [bundle.id, bundle.serving_tier]);
+    }, [bundle.id]);
 
     const bundlePrice = Number(bundle.price || 0);
     const price = isSubscription ? bundlePrice * 0.9 : bundlePrice;
@@ -47,7 +43,7 @@ export default function PurchaseSidebar({ bundle, primaryColor, onClose }: Purch
             name: bundle.name,
             price: price,
             image_url: bundle.image_url || '',
-            serving_tier: bundle.serving_tier || (servingSize === 'large' ? 'family' : 'couples'),
+            serving_tier: bundle.serving_tier || 'family',
             quantity: quantity,
             isSubscription: isSubscription
         });
@@ -116,30 +112,6 @@ export default function PurchaseSidebar({ bundle, primaryColor, onClose }: Purch
                 </button>
             </div>
 
-            {/* Serving Size Toggle */}
-            <div className="space-y-3 mb-8 w-full">
-                <label className="text-[10px] font-black uppercase text-indigo-400 tracking-[0.2em] ml-1">Select Size</label>
-                <div className="bg-slate-50 dark:bg-slate-950 p-1.5 rounded-2xl flex flex-col min-[400px]:flex-row border border-indigo-50/50 dark:border-slate-800 w-full max-w-full">
-                    <button
-                        onClick={() => setServingSize('large')}
-                        className={`flex-1 py-3 px-2 rounded-xl font-black text-[9px] sm:text-[10px] uppercase tracking-wider transition-all min-w-0 ${servingSize === 'large'
-                            ? "bg-white dark:bg-slate-800 text-indigo-600 shadow-xl"
-                            : "text-slate-400 hover:text-slate-600"
-                            }`}
-                    >
-                        Large <span className="hidden sm:inline">(5-6)</span>
-                    </button>
-                    <button
-                        onClick={() => setServingSize('medium')}
-                        className={`flex-1 py-3 px-2 rounded-xl font-black text-[9px] sm:text-[10px] uppercase tracking-wider transition-all min-w-0 ${servingSize === 'medium'
-                            ? "bg-white dark:bg-slate-800 text-indigo-600 shadow-xl"
-                            : "text-slate-400 hover:text-slate-600"
-                            }`}
-                    >
-                        Small <span className="hidden sm:inline">(2-3)</span>
-                    </button>
-                </div>
-            </div>
 
             {/* Quantity Selector */}
             <div className="flex items-center justify-between mb-8 px-1">
