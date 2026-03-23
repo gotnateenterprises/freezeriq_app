@@ -12,15 +12,37 @@ export async function GET(req: Request) {
             return new NextResponse('Missing session_id', { status: 400 });
         }
 
-        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        // Resolve connected account BEFORE retrieving the session
+        // (the session was created on the connected account, not on the platform)
+        const businessId = url.searchParams.get('business_id');
+        let connectedAccountId: string | undefined;
+
+        if (businessId) {
+            const stripeIntegration = await prisma.integration.findUnique({
+                where: {
+                    business_id_provider: {
+                        business_id: businessId,
+                        provider: 'stripe'
+                    }
+                }
+            });
+            connectedAccountId = stripeIntegration?.access_token ?? undefined;
+        }
+
+        const session = await stripe.checkout.sessions.retrieve(
+            sessionId,
+            connectedAccountId ? { stripeAccount: connectedAccountId } : undefined
+        );
 
         if (!session || session.payment_status !== 'paid') {
             return new NextResponse('Payment not completed', { status: 400 });
         }
 
-        const { businessId, orderId } = session.metadata || {};
+        // Use metadata from the Stripe session as the canonical source
+        const metaBusinessId = session.metadata?.businessId;
+        const orderId = session.metadata?.orderId;
 
-        if (!businessId || !orderId) {
+        if (!metaBusinessId || !orderId) {
             return new NextResponse('Invalid session metadata', { status: 400 });
         }
 
@@ -41,27 +63,6 @@ export async function GET(req: Request) {
             // Only promote orders awaiting payment confirmation
             return new NextResponse('Order not eligible for payment confirmation', { status: 400 });
         }
-
-        // 2. Fetch business
-        const business = await prisma.business.findUnique({
-            where: { id: businessId }
-        });
-
-        if (!business) {
-            return new NextResponse('Business not found', { status: 404 });
-        }
-
-        // Resolve Stripe Connected Account from Integration (source of truth)
-        const stripeIntegration = await prisma.integration.findUnique({
-            where: {
-                business_id_provider: {
-                    business_id: businessId,
-                    provider: 'stripe'
-                }
-            }
-        });
-
-        const connectedAccountId = stripeIntegration?.access_token;
 
         // 3. Calculate stats
         let platformFeeAmount = 0;

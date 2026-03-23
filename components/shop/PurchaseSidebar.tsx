@@ -20,23 +20,18 @@ interface PurchaseSidebarProps {
 export default function PurchaseSidebar({ bundle, primaryColor }: PurchaseSidebarProps) {
     const { addToCart } = useCart();
     const [isSubscription, setIsSubscription] = useState(true);
-    const [servingSize, setServingSize] = useState<'large' | 'medium'>('large'); // 'large' or 'medium'
+    const [servingSize, setServingSize] = useState<'large' | 'medium'>(
+        bundle.serving_tier === 'couples' ? 'medium' : 'large'
+    );
     const [quantity, setQuantity] = useState(1);
     const [isAdding, setIsAdding] = useState(false);
     const [showSuccess, setShowSuccess] = useState(false);
 
+    // Reset quantity and sync serving size when bundle changes
     useEffect(() => {
         setQuantity(1);
-    }, [bundle.id]);
-
-    // Auto-select size based on bundle tier
-    useEffect(() => {
-        if (bundle.serving_tier === 'family') {
-            setServingSize('large');
-        } else if (bundle.serving_tier === 'couples') {
-            setServingSize('medium');
-        }
-    }, [bundle.serving_tier, bundle.id]);
+        setServingSize(bundle.serving_tier === 'couples' ? 'medium' : 'large');
+    }, [bundle.id, bundle.serving_tier]);
 
     const bundlePrice = Number(bundle.price || 0);
     const price = isSubscription ? bundlePrice * 0.9 : bundlePrice;

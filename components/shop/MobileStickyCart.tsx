@@ -12,7 +12,7 @@ interface MobileStickyCartProps {
 }
 
 export default function MobileStickyCart({ bundle, primaryColor }: MobileStickyCartProps) {
-    const { addToCart, setIsCartOpen } = useCart();
+    const { setIsCartOpen } = useCart();
     const [isVisible, setIsVisible] = useState(false);
 
     // Only show after scrolling down a bit past the hero
@@ -34,14 +34,6 @@ export default function MobileStickyCart({ bundle, primaryColor }: MobileStickyC
     const textClass = getContrastTextClass(primaryColor || '#0ea5e9');
 
     const handleCheckout = () => {
-        addToCart({
-            bundleId: bundle.id,
-            name: bundle.name,
-            price: Number(bundle.price),
-            image_url: bundle.image_url,
-            serving_tier: bundle.serving_tier,
-            quantity: 1
-        });
         setIsCartOpen(true);
     };
 

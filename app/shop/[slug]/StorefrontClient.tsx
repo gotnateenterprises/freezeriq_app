@@ -295,6 +295,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                     primaryColor={branding.primary_color}
                     businessId={business.id}
                     slug={business.slug}
+                    storefrontConfig={storefrontConfig}
                 />
 
                 <MobileStickyCart

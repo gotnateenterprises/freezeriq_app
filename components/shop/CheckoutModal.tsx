@@ -77,9 +77,8 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    businessId,
+                    slug,
                     items,
-                    orderTotal: cartTotal,
                     customerName: formData.name,
                     customerEmail: formData.email,
                     customerPhone: formData.phone,
@@ -333,6 +332,11 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
                     )}
                     <p className="text-slate-500 mt-2">{formData.email}</p>
                 </div>
+                {/* Discount code hint — actual entry is on the Stripe checkout page */}
+                {!campaignId && (
+                    <p className="text-xs text-indigo-500 font-medium pt-2">Have a discount code? You can enter it on the payment page.</p>
+                )}
+
                 <div className="pt-4">
                     <h2 className="text-5xl font-serif text-slate-900">${cartTotal.toFixed(2)}</h2>
                     <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2">Total Due Today</p>
@@ -348,7 +352,9 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
                     {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <>Complete My Order <Heart className="w-5 h-5 fill-white" /></>}
                 </button>
                 <p className="text-center text-xs text-slate-400 px-8 leading-relaxed">
-                    By confirming, you agree to receive order updates. No payment is required until pickup/delivery is confirmed.
+                    {campaignId
+                        ? 'By confirming, you agree to receive order updates. No payment is required until pickup/delivery is confirmed.'
+                        : 'By confirming, you agree to receive order updates. Payment is due today. Delivery or pickup will be scheduled afterward.'}
                 </p>
             </div>
         </motion.div>
