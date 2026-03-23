@@ -224,24 +224,42 @@ export default function CoordinatorPortal() {
         setTimeout(() => setCopiedScoreboard(false), 2000);
     };
 
-    const handleCopyTextMessage = () => {
+    // Helper: convert plain text with URLs into HTML with clickable anchor tags
+    const copyAsRichText = async (plainText: string, prebuiltHtml?: string) => {
+        const htmlContent = prebuiltHtml || plainText
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/\n/g, '<br>')
+            .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#6366f1;font-weight:bold;">Campaign Fundraiser</a>');
+        try {
+            await navigator.clipboard.write([
+                new ClipboardItem({
+                    'text/html': new Blob([htmlContent], { type: 'text/html' }),
+                    'text/plain': new Blob([plainText], { type: 'text/plain' }),
+                }),
+            ]);
+        } catch {
+            await navigator.clipboard.writeText(plainText);
+        }
+    };
+
+    const handleCopyTextMessage = async () => {
         if (!promoScripts?.scripts?.textMessage) {
             toast.error('Promo scripts are still loading. Try again in a moment.');
             return;
         }
-        navigator.clipboard.writeText(promoScripts.scripts.textMessage);
+        await copyAsRichText(promoScripts.scripts.textMessage);
         setCopiedText(true);
         toast.success('Text message copied!');
         trackAction('copy_text_message');
         setTimeout(() => setCopiedText(false), 2000);
     };
 
-    const handleCopyFacebookPost = () => {
+    const handleCopyFacebookPost = async () => {
         if (!promoScripts?.scripts?.facebook) {
             toast.error('Promo scripts are still loading. Try again in a moment.');
             return;
         }
-        navigator.clipboard.writeText(promoScripts.scripts.facebook);
+        await copyAsRichText(promoScripts.scripts.facebook);
         setCopiedFb(true);
         toast.success('Facebook post copied!');
         trackAction('copy_facebook_post');
@@ -253,22 +271,9 @@ export default function CoordinatorPortal() {
             toast.error('Promo scripts are still loading. Try again in a moment.');
             return;
         }
-        // Copy as rich text (HTML) so hyperlinks survive paste into email clients
-        try {
-            const htmlContent = promoScripts.scripts.emailBlurbHtml || promoScripts.scripts.emailBlurb;
-            const plainContent = promoScripts.scripts.emailBlurb;
-            await navigator.clipboard.write([
-                new ClipboardItem({
-                    'text/html': new Blob([htmlContent], { type: 'text/html' }),
-                    'text/plain': new Blob([plainContent], { type: 'text/plain' }),
-                }),
-            ]);
-        } catch {
-            // Fallback to plain text
-            await navigator.clipboard.writeText(promoScripts.scripts.emailBlurb);
-        }
+        await copyAsRichText(promoScripts.scripts.emailBlurb, promoScripts.scripts.emailBlurbHtml);
         setCopiedEmail(true);
-        toast.success('Email blurb copied with clickable link!');
+        toast.success('Email blurb copied!');
         trackAction('copy_email_blurb');
         setTimeout(() => setCopiedEmail(false), 2000);
     };
