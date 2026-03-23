@@ -6,6 +6,8 @@ import { ThemeProvider } from '@/components/ThemeProvider';
 import TenantThemeProvider from '@/components/TenantThemeProvider';
 import { AuthProvider } from '@/components/AuthProvider';
 import { auth } from '@/auth';
+import { Analytics } from '@vercel/analytics/react';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 
 const jakarta = Plus_Jakarta_Sans({ subsets: ["latin"], variable: '--font-jakarta' });
 const playfair = Playfair_Display({ subsets: ["latin"], variable: '--font-playfair' });
@@ -44,6 +46,8 @@ export default async function RootLayout({
                         </LayoutWrapper>
                     </AuthProvider>
                 </ThemeProvider>
+                <Analytics />
+                <SpeedInsights />
             </body>
         </html>
     );
