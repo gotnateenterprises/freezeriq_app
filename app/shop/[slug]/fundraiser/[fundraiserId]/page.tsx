@@ -3,7 +3,57 @@ import { prisma } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import FundraiserClient from './FundraiserClient';
 import { computeFundraiserProgress } from '@/lib/fundraiserMetrics';
+import type { Metadata } from 'next';
 
+// ── OG Metadata (controls Facebook link preview) ───────────
+export async function generateMetadata({ params }: { params: Promise<{ slug: string; fundraiserId: string }> }): Promise<Metadata> {
+    const { slug, fundraiserId } = await params;
+
+    const business = await prisma.business.findUnique({
+        where: { slug },
+        select: { id: true, name: true },
+    });
+
+    if (!business) return { title: 'Fundraiser Not Found' };
+
+    // Get tenant branding name
+    const brandingRecords: any[] = await prisma.$queryRaw`
+        SELECT b.business_name FROM tenant_branding b
+        JOIN users u ON b.user_id = u.id
+        WHERE u.business_id = ${business.id} AND u.role = 'ADMIN'
+        LIMIT 1
+    `;
+    const tenantName = brandingRecords[0]?.business_name
+        && brandingRecords[0].business_name !== 'FreezerIQ'
+        && brandingRecords[0].business_name !== 'Freezer IQ'
+        ? brandingRecords[0].business_name
+        : business.name || 'Freezer Chef';
+
+    // Get campaign org name
+    const campaigns: any[] = await prisma.$queryRaw`
+        SELECT fc.name, c.name as organization_name
+        FROM fundraiser_campaigns fc
+        JOIN customers c ON fc.customer_id = c.id
+        WHERE fc.id = ${fundraiserId}
+        LIMIT 1
+    `;
+    const campaign = campaigns[0];
+    const orgName = campaign?.organization_name || 'Fundraiser';
+
+    const title = `${orgName} Fundraiser — ${tenantName}`;
+    const description = `Support ${orgName} with easy freezer meals from ${tenantName}! Browse meal bundles, place your order online, and stock your freezer while making a difference.`;
+
+    return {
+        title,
+        description,
+        openGraph: {
+            title,
+            description,
+            siteName: tenantName,
+            type: 'website',
+        },
+    };
+}
 // We need to fetch data on the server
 async function getData(slug: string, fundraiserId: string) {
     // 1. Fetch Business
