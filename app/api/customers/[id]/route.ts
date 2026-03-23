@@ -424,6 +424,13 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+        const businessId = session.user.businessId;
+
         const { id } = await params;
 
         // Ensure it's a UUID (Organization)
@@ -432,9 +439,12 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
             return NextResponse.json({ error: "Cannot delete transient customers (linked to orders). Please Archive instead." }, { status: 400 });
         }
 
-        // Check if exists
+        // Check if exists and belongs to this tenant
         const org = await prisma.customer.findUnique({ where: { id }, include: { orders: true } });
         if (!org) return NextResponse.json({ error: "Customer not found" }, { status: 404 });
+        if (org.business_id !== businessId) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+        }
 
         if (org.orders.length > 0) {
             return NextResponse.json({ error: "Cannot delete customer with existing orders. Mark as Churned instead." }, { status: 400 });

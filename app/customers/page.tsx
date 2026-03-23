@@ -198,6 +198,9 @@ function CustomersContent() {
             const res = await fetch(`/api/customers/${id}`, { method: 'DELETE' });
             if (res.ok) {
                 setCustomers(prev => prev.filter(c => c.id !== id));
+            } else {
+                const err = await res.json().catch(() => null);
+                alert(err?.error || "Failed to delete customer");
             }
         } catch (e) {
             alert("Delete failed");
