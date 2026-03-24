@@ -634,6 +634,30 @@ export default function CoordinatorPortal() {
                     </h1>
                 </div>
 
+                {/* ── Step 1 Onboarding / Success — directly under heading ── */}
+                {(campaign.orders || []).length === 0 ? (
+                    <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
+                        <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Getting Started</p>
+                        <h3 className="text-lg font-bold text-slate-900 mt-1">🚀 Step 1: Log Your First Order</h3>
+                        <p className="text-sm text-slate-600 mt-1">Start strong — most successful fundraisers begin with one quick order.</p>
+                        <button
+                            onClick={() => setShowOrderModal(true)}
+                            className="mt-4 w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity active:scale-[0.98]"
+                        >
+                            + Add Your First Order
+                        </button>
+                        <p className="text-xs text-slate-500 mt-2 text-center">Cash, Venmo, or in-person sales — takes less than 30 seconds</p>
+                    </div>
+                ) : (
+                    <div className="bg-emerald-50 rounded-xl px-4 py-3 border border-emerald-100 flex items-center gap-2.5">
+                        <span className="text-lg">🎉</span>
+                        <div>
+                            <p className="text-sm font-bold text-emerald-800">You&apos;re off to a great start!</p>
+                            <p className="text-xs text-emerald-600">Nice work — keep the orders coming.</p>
+                        </div>
+                    </div>
+                )}
+
                 {/* Scoreboard Card */}
                 {/* ── SECTION: Start Here ── */}
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">📍 Start Here</p>
@@ -745,21 +769,7 @@ export default function CoordinatorPortal() {
                     />
                 )}
 
-                {/* ── Step 1 Onboarding Card — visible only when 0 orders ── */}
-                {(campaign.orders || []).length === 0 && (
-                    <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm mb-4">
-                        <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Getting Started</p>
-                        <h3 className="text-lg font-bold text-slate-900 mt-1">🚀 Step 1: Log Your First Order</h3>
-                        <p className="text-sm text-slate-600 mt-1">Start strong — most successful fundraisers begin with one quick order.</p>
-                        <button
-                            onClick={() => setShowOrderModal(true)}
-                            className="mt-4 w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity active:scale-[0.98]"
-                        >
-                            + Add Your First Order
-                        </button>
-                        <p className="text-xs text-slate-500 mt-2 text-center">Cash, Venmo, or in-person sales — takes less than 30 seconds</p>
-                    </div>
-                )}
+                {/* Step 1 card relocated above Live Progress — see new location above */}
 
                 {/* ── SECTION: Share & Promote ── */}
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">📣 Share & Promote</p>
