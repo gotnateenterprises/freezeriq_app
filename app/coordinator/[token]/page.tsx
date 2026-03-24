@@ -1051,18 +1051,24 @@ export default function CoordinatorPortal() {
                                         <LinkIcon size={14} />
                                         <span>{qrAsset?.label || 'Download QR Code'}</span>
                                     </button>
-                                    <button
-                                        onClick={handleDownloadPickupSheet}
-                                        className="p-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 transition-all border bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 active:scale-95"
-                                        title="Download a delivery-day pickup sheet with all orders"
-                                    >
-                                        <Download size={14} />
-                                        <span>Pickup Sheet</span>
-                                    </button>
                                 </div>
                             );
                         })()}
+                        {/* ── Pickup Sheet — full-width delivery-day CTA ── */}
+                        <button
+                            onClick={handleDownloadPickupSheet}
+                            className="w-full mt-2 p-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2.5 transition-all border bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 active:scale-95"
+                            title="Download a delivery-day pickup sheet with all orders"
+                        >
+                            <span className="relative flex h-2.5 w-2.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                            </span>
+                            📦 Print LIVE Pickup Sheet — Delivery Day
+                            <Download size={14} className="ml-auto flex-shrink-0" />
+                        </button>
                     </div>
+
 
                     {/* ── Full Packet (tertiary) ── */}
                     {(() => {
