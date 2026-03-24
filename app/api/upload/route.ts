@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { uploadToS3 } from '@/lib/s3';
+import { auth } from '@/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +14,11 @@ function getExtension(filename: string) {
 
 export async function POST(request: NextRequest) {
     try {
+        const session = await auth();
+        if (!session?.user?.id) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const formData = await request.formData();
         const file = formData.get('file') as File;
 

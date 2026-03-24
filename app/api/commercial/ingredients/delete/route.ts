@@ -1,14 +1,28 @@
 import { NextResponse } from 'next/server';
+import { auth } from '@/auth';
 import { prisma } from '@/lib/db';
 
 export async function POST(req: Request) {
     try {
+        const session = await auth();
+        if (!session?.user?.id || !(session.user as any).businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+        const businessId = (session.user as any).businessId;
+
         const body = await req.json();
         const { id } = body;
 
         if (!id) return NextResponse.json({ error: "ID required" }, { status: 400 });
 
-        // Check compatibility (optional, but Prisma throws P2003 if FK constraint fails)
+        // Verify ingredient belongs to this business before deleting
+        const ingredient = await prisma.ingredient.findFirst({
+            where: { id, business_id: businessId }
+        });
+        if (!ingredient) {
+            return NextResponse.json({ error: "Ingredient not found" }, { status: 404 });
+        }
+
         try {
             await prisma.ingredient.delete({
                 where: { id }

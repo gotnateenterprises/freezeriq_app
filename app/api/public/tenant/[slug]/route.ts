@@ -24,14 +24,8 @@ export async function GET(
 
         if (!business) {
             console.log(`[Storefront API] Business not found for slug: "${slug}"`);
-            const allBusinesses = await prisma.business.findMany({
-                select: { name: true, slug: true },
-                take: 5
-            });
             return NextResponse.json({
-                error: 'Business not found',
-                attempted_slug: slug,
-                available_shops: allBusinesses
+                error: 'Business not found'
             }, { status: 404 });
         }
 
@@ -222,8 +216,7 @@ export async function GET(
         console.error('Public API Error:', error);
         return NextResponse.json({
             error: 'Internal Server Error',
-            details: error.message,
-            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+            details: 'Something went wrong. Please try again.'
         }, { status: 500 });
     }
 }

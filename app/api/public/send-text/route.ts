@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { auth } from '@/auth';
 import twilio from 'twilio';
 
 // Initialize the Twilio client if credentials exist in the environment
@@ -10,6 +11,11 @@ const client = accountSid && authToken ? twilio(accountSid, authToken) : null;
 
 export async function POST(req: Request) {
     try {
+        const session = await auth();
+        if (!session?.user?.id) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const body = await req.json();
         const { to, message } = body;
 
