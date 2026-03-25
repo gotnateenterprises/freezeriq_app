@@ -13,7 +13,8 @@ export async function GET() {
         const pendingOrders = await prisma.order.findMany({
             where: {
                 business_id: businessId,
-                status: { in: [OrderStatus.pending, OrderStatus.production_ready] }
+                status: { in: [OrderStatus.pending, OrderStatus.production_ready] },
+                NOT: { source: 'storefront', status: OrderStatus.pending }
             },
             include: {
                 customer: {

@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 
 interface Order {
     id: string;
-    customer: { name: string; type: string };
+    customer: { name: string; type: string } | null;
     created_at: string;
     total_amount: number;
     items: {
@@ -150,10 +150,10 @@ export default function HoldingArea({ orders, onRefresh }: HoldingAreaProps) {
                                     <div>
                                         <div className="flex items-center gap-2">
                                             <h4 className="font-black text-slate-900 dark:text-white text-lg">
-                                                {order.customer.name}
+                                                {order.customer?.name || 'Unknown Customer'}
                                             </h4>
                                             <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-500 text-[10px] font-bold uppercase rounded-md">
-                                                {order.customer.type}
+                                                {order.customer?.type || 'guest'}
                                             </span>
                                         </div>
                                         <p className="text-xs font-bold text-slate-400">
