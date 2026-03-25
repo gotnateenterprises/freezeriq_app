@@ -415,6 +415,36 @@ function InvoicesContent() {
         }
     };
 
+    const handleMarkPaid = async (invoice: Invoice) => {
+        if (invoice.status === 'PAID') return;
+        try {
+            const res = await fetch('/api/tenant/invoices', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: invoice.id,
+                    customer_id: invoice.customer_id,
+                    items: invoice.items,
+                    total_amount: invoice.total_amount,
+                    tax_amount: invoice.tax_amount,
+                    due_date: invoice.due_date,
+                    status: 'PAID',
+                    fundraiser_profit_percent: invoice.fundraiser_profit_percent,
+                    fundraiser_profit_amount: invoice.fundraiser_profit_amount
+                })
+            });
+            if (res.ok) {
+                toast.success('Invoice marked as paid');
+                fetchInvoices();
+            } else {
+                const err = await res.json();
+                toast.error(err.error || 'Failed to update invoice');
+            }
+        } catch {
+            toast.error('Failed to mark invoice as paid');
+        }
+    };
+
     const handleEditInvoice = (invoice: Invoice) => {
         setInvoiceToEdit(invoice);
         setIsComposeOpen(true);
@@ -621,6 +651,15 @@ function InvoicesContent() {
                                     </td>
                                     <td className="px-6 py-5 text-right">
                                         <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            {inv.status !== 'PAID' && (
+                                                <button
+                                                    onClick={() => handleMarkPaid(inv)}
+                                                    className="p-2 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg text-slate-400 hover:text-emerald-600 transition-all shadow-sm"
+                                                    title="Mark as Paid"
+                                                >
+                                                    <CheckCircle2 className="w-4 h-4" />
+                                                </button>
+                                            )}
                                             <button
                                                 onClick={() => handleDownloadPDF(inv)}
                                                 className="p-2 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-indigo-600 transition-all shadow-sm"
