@@ -23,6 +23,18 @@ export async function GET(req: NextRequest) {
             }
         }
 
+        // Week filter: only return orders within a 7-day window (or null delivery_date)
+        const deliveryWeekStart = searchParams.get('delivery_week_start');
+        if (deliveryWeekStart) {
+            const weekStart = new Date(deliveryWeekStart);
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekEnd.getDate() + 7);
+            whereClause.OR = [
+                { delivery_date: { gte: weekStart, lt: weekEnd } },
+                { delivery_date: null }
+            ];
+        }
+
         const session = await auth();
         if (!session?.user?.businessId) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

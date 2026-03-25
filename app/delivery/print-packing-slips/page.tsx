@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Printer, Box } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react'; // Assuming this package is available as used in other print pages
 import Link from 'next/link';
@@ -24,6 +24,9 @@ interface Order {
 
 export default function PrintPackingSlipsPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const deliveryWeekStart = searchParams.get('delivery_week_start');
+    const weekParam = deliveryWeekStart ? `&delivery_week_start=${deliveryWeekStart}` : '';
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
     const [logo, setLogo] = useState<string | null>(null);
@@ -38,7 +41,7 @@ export default function PrintPackingSlipsPage() {
         const fetchData = async () => {
             try {
                 // Fetch Orders
-                const ordersRes = await fetch('/api/orders?status=pending,production_ready,completed,COMPLETED,APPROVED,IN_PRODUCTION&include_details=true');
+                const ordersRes = await fetch(`/api/orders?status=pending,production_ready,completed,COMPLETED,APPROVED,IN_PRODUCTION&include_details=true${weekParam}`);
                 const ordersData = await ordersRes.json();
                 const ordersArray = Array.isArray(ordersData) ? ordersData : [];
                 const sorted = ordersArray.sort((a: any, b: any) =>

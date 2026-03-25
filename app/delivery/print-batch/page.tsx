@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { QRCodeSVG } from 'qrcode.react';
 import { Printer, AlertTriangle, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
@@ -153,6 +153,9 @@ function Avery5821Page({ labels, onSlotClick }: { labels: (LabelTemplate | null)
 // --- MAIN PAGE ---
 export default function BatchPrintPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const deliveryWeekStart = searchParams.get('delivery_week_start');
+    const weekParamFirst = deliveryWeekStart ? `?delivery_week_start=${deliveryWeekStart}` : '';
     const [isLoading, setIsLoading] = useState(true);
     const [jobs, setJobs] = useState<{ template: LabelTemplate, count: number, typeName: string }[]>([]);
     const [allSlots, setAllSlots] = useState<(LabelTemplate | null)[]>([]); // Flattened view for pagination
@@ -171,7 +174,7 @@ export default function BatchPrintPage() {
     const loadData = async () => {
         try {
             const [statsRes, invRes, labelsRes] = await Promise.all([
-                fetch('/api/delivery/stats'),
+                fetch(`/api/delivery/stats${weekParamFirst}`),
                 fetch('/api/delivery/inventory'),
                 fetch('/api/delivery/labels')
             ]);

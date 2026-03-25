@@ -1,21 +1,35 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-export async function GET() {
+export async function GET(req: NextRequest) {
     try {
         const { auth } = await import('@/auth');
         const session = await auth();
         if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-        // Fetch all pending or production-ready orders
-        // (Status: pending, production_ready)
+        const { searchParams } = new URL(req.url);
+        const deliveryWeekStart = searchParams.get('delivery_week_start');
+
+        const whereClause: any = {
+            status: { in: ['pending', 'production_ready', 'completed', 'COMPLETED', 'APPROVED', 'IN_PRODUCTION'] },
+            business_id: session.user.businessId
+        };
+
+        if (deliveryWeekStart) {
+            const weekStart = new Date(deliveryWeekStart);
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekEnd.getDate() + 7);
+            whereClause.OR = [
+                { delivery_date: { gte: weekStart, lt: weekEnd } },
+                { delivery_date: null }
+            ];
+        }
+
+        // Fetch active orders (optionally scoped to delivery week)
         const activeOrders = await prisma.order.findMany({
-            where: {
-                status: { in: ['pending', 'production_ready', 'completed', 'COMPLETED', 'APPROVED', 'IN_PRODUCTION'] },
-                business_id: session.user.businessId
-            },
+            where: whereClause,
             include: {
                 items: {
                     include: {

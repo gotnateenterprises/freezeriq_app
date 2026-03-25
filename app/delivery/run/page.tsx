@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Truck, MapPin, CheckCircle, ChevronDown, ChevronUp, AlertCircle, ArrowLeft } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 import SignaturePad from '@/components/SignaturePad';
 
 interface OrderItem {
@@ -27,6 +28,10 @@ interface Order {
 }
 
 export default function MobileDeliveryRunPage() {
+    const searchParams = useSearchParams();
+    const deliveryWeekStart = searchParams.get('delivery_week_start');
+    const weekParam = deliveryWeekStart ? `&delivery_week_start=${deliveryWeekStart}` : '';
+
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
     const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
@@ -37,7 +42,7 @@ export default function MobileDeliveryRunPage() {
     const fetchOrders = async () => {
         try {
             setLoading(true);
-            const res = await fetch('/api/orders?status=production_ready,READY_TO_SHIP');
+            const res = await fetch(`/api/orders?status=production_ready,READY_TO_SHIP${weekParam}`);
             if (!res.ok) throw new Error("Failed to load delivery queue");
             const data = await res.json();
 

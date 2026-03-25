@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Truck, ArrowLeft, Printer } from 'lucide-react';
 import Link from 'next/link';
 
@@ -34,13 +34,18 @@ export default function PrintManifestPage() {
     const [logo, setLogo] = useState<string | null>(null);
     const date = new Date().toLocaleDateString();
 
+    const searchParams = useSearchParams();
+    const deliveryWeekStart = searchParams.get('delivery_week_start');
+    const weekParam = deliveryWeekStart ? `&delivery_week_start=${deliveryWeekStart}` : '';
+    const weekParamFirst = deliveryWeekStart ? `?delivery_week_start=${deliveryWeekStart}` : '';
+
     useEffect(() => {
         const fetchData = async () => {
             try {
                 // Fetch Orders AND Stats in parallel
                 const [ordersRes, statsRes, bizRes] = await Promise.all([
-                    fetch('/api/orders?status=pending,production_ready,completed,COMPLETED,APPROVED,IN_PRODUCTION'),
-                    fetch('/api/delivery/stats'),
+                    fetch(`/api/orders?status=pending,production_ready,completed,COMPLETED,APPROVED,IN_PRODUCTION${weekParam}`),
+                    fetch(`/api/delivery/stats${weekParamFirst}`),
                     fetch('/api/business')
                 ]);
 
