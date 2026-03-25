@@ -445,6 +445,26 @@ function InvoicesContent() {
         }
     };
 
+    const handleDeleteInvoice = async (invoice: Invoice) => {
+        if (!confirm(`Delete invoice for ${invoice.customer.name}? This will also delete the linked order.`)) return;
+        try {
+            const res = await fetch('/api/tenant/invoices', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: invoice.id })
+            });
+            if (res.ok) {
+                toast.success('Invoice deleted');
+                fetchInvoices();
+            } else {
+                const err = await res.json();
+                toast.error(err.error || 'Failed to delete invoice');
+            }
+        } catch {
+            toast.error('Failed to delete invoice');
+        }
+    };
+
     const handleEditInvoice = (invoice: Invoice) => {
         setInvoiceToEdit(invoice);
         setIsComposeOpen(true);
@@ -686,7 +706,11 @@ function InvoicesContent() {
                                             >
                                                 <Edit className="w-4 h-4" />
                                             </button>
-                                            <button className="p-2 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition-all shadow-sm">
+                                            <button
+                                                onClick={() => handleDeleteInvoice(inv)}
+                                                className="p-2 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition-all shadow-sm"
+                                                title="Delete Invoice"
+                                            >
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
                                         </div>

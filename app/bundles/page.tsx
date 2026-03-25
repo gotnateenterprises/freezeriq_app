@@ -366,6 +366,21 @@ function BundlesList({ bundles, isLoading, refresh }: { bundles: any[], isLoadin
         }
     };
 
+    const handleDeleteBundle = async (bundle: any) => {
+        if (!confirm(`Delete "${bundle.name}"? This cannot be undone.`)) return;
+        try {
+            const res = await fetch(`/api/bundles/${bundle.id}`, { method: 'DELETE' });
+            if (res.ok) {
+                refresh();
+            } else {
+                const err = await res.json();
+                alert(err.error || 'Failed to delete bundle');
+            }
+        } catch {
+            alert('Error deleting bundle');
+        }
+    };
+
     const toggleStorefront = async (bundle: any) => {
         try {
             const newStatus = !bundle.show_on_storefront;
@@ -483,6 +498,13 @@ function BundlesList({ bundles, isLoading, refresh }: { bundles: any[], isLoadin
                                             {bundle.is_active !== false ? <Archive size={18} /> : <ArchiveRestore size={18} />}
                                         </button>
                                         <Link href={`/bundles/${bundle.id}`} className="text-indigo-600 font-medium text-sm hover:underline">Edit</Link>
+                                        <button
+                                            onClick={() => handleDeleteBundle(bundle)}
+                                            className="text-slate-400 hover:text-rose-600 transition-colors"
+                                            title="Delete Bundle"
+                                        >
+                                            <Trash2 size={18} />
+                                        </button>
                                     </td>
                                 </tr>
                             ))}

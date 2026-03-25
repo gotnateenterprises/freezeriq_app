@@ -144,8 +144,7 @@ export async function POST(request: Request) {
             body: body
         });
         return NextResponse.json({
-            error: error.message || 'Unknown creation error',
-            details: error.toString()
+            error: 'Something went wrong. Please try again.'
         }, { status: 500 });
     }
 }
@@ -314,8 +313,60 @@ export async function PUT(request: Request) {
             body: body
         });
         return NextResponse.json({
-            error: error.message || 'Unknown update error',
-            details: error.toString()
+            error: 'Something went wrong. Please try again.'
         }, { status: 500 });
+    }
+}
+
+export async function DELETE(request: Request) {
+    const session = await auth();
+    const businessId = session?.user?.businessId;
+
+    if (!businessId) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    try {
+        const { id } = await request.json();
+        if (!id) {
+            return NextResponse.json({ error: 'Invoice ID is required' }, { status: 400 });
+        }
+
+        await prisma.$transaction(async (tx) => {
+            // Verify invoice belongs to this business
+            // @ts-ignore
+            const invoice = await tx.invoice.findUnique({
+                where: { id, business_id: businessId },
+                include: { order: true }
+            });
+
+            if (!invoice) {
+                throw new Error('Invoice not found');
+            }
+
+            // Delete linked order and its items if exists
+            // @ts-ignore
+            if (invoice.order) {
+                // @ts-ignore
+                await tx.orderItem.deleteMany({ where: { order_id: invoice.order.id } });
+                // @ts-ignore
+                await tx.order.delete({ where: { id: invoice.order.id } });
+            }
+
+            // Delete invoice items
+            // @ts-ignore
+            await tx.invoiceItem.deleteMany({ where: { invoice_id: id } });
+
+            // Delete the invoice
+            // @ts-ignore
+            await tx.invoice.delete({ where: { id } });
+        });
+
+        return NextResponse.json({ success: true });
+    } catch (error: any) {
+        console.error('Invoice Delete Error:', error.message);
+        return NextResponse.json({
+            error: error.message === 'Invoice not found' ? 'Invoice not found' : 'Failed to delete invoice'
+        }, { status: error.message === 'Invoice not found' ? 404 : 500 });
     }
 }
