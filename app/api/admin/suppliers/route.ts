@@ -21,7 +21,7 @@ export async function GET() {
 
         return NextResponse.json(suppliers);
     } catch (error: any) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
     }
 }
 
@@ -49,6 +49,6 @@ export async function POST(req: Request) {
 
         return NextResponse.json(supplier);
     } catch (error: any) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
     }
 }

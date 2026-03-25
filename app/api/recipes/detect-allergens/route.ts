@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
         console.error('[DetectAllergens] Error:', error);
         return NextResponse.json({
             error: 'Failed to analyze allergens',
-            details: error.message
+            details: 'Something went wrong. Please try again.'
         }, { status: 500 });
     }
 }

@@ -199,7 +199,8 @@ export async function GET() {
         const recentOrders = await prisma.order.findMany({
             where: {
                 status: { not: 'delivered' as any },
-                business_id: businessId
+                business_id: businessId,
+                NOT: { source: 'storefront', status: 'pending' }
             },
             take: 5,
             orderBy: { created_at: 'desc' },
@@ -229,7 +230,8 @@ export async function GET() {
             where: {
                 order: {
                     status: { in: ['pending', 'production_ready'] as any },
-                    business_id: businessId
+                    business_id: businessId,
+                    NOT: { source: 'storefront', status: 'pending' }
                 }
             }
         });
@@ -239,7 +241,8 @@ export async function GET() {
             where: {
                 status: { in: ['pending', 'production_ready'] as any },
                 items: { none: {} },
-                business_id: businessId
+                business_id: businessId,
+                NOT: { source: 'storefront', status: 'pending' }
             },
             select: { total_amount: true }
         });

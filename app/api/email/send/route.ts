@@ -143,7 +143,7 @@ export async function POST(req: Request) {
 
         if (data.error) {
             console.error("Resend Error:", data.error);
-            return NextResponse.json({ error: data.error.message }, { status: 500 });
+            return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
         }
 
         // Update status after successful send

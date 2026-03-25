@@ -131,6 +131,6 @@ export async function POST(req: NextRequest) {
 
     } catch (error: any) {
         console.error('[GrabImage] Global Error:', error);
-        return NextResponse.json({ url: '/images/food-placeholder.png', error: error.message }, { status: 500 });
+        return NextResponse.json({ url: '/images/food-placeholder.png', error: 'Something went wrong. Please try again.' }, { status: 500 });
     }
 }

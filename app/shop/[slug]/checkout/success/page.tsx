@@ -12,6 +12,7 @@ export default function CheckoutSuccessPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const sessionId = searchParams.get('session_id');
+    const businessId = searchParams.get('business_id');
     const { clearCart } = useCart();
 
     const [loading, setLoading] = useState(true);
@@ -25,7 +26,9 @@ export default function CheckoutSuccessPage() {
 
         async function verifySession() {
             try {
-                const res = await fetch(`/api/checkout/session/success?session_id=${sessionId}`);
+                const params = new URLSearchParams({ session_id: sessionId! });
+                if (businessId) params.set('business_id', businessId);
+                const res = await fetch(`/api/checkout/session/success?${params.toString()}`);
                 const data = await res.json();
 
                 if (res.ok && data.success) {
@@ -87,9 +90,28 @@ export default function CheckoutSuccessPage() {
                     </div>
                 </div>
 
+                {/* What Happens Next */}
+                <div className="relative z-10 mt-2 bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 text-left space-y-3 border border-slate-100 dark:border-slate-700/50">
+                    <h3 className="text-sm font-black text-slate-600 dark:text-slate-300 uppercase tracking-widest">What Happens Next</h3>
+                    <ul className="space-y-2.5 text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
+                        <li className="flex items-start gap-2.5">
+                            <span className="mt-0.5 w-5 h-5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center flex-shrink-0 text-xs font-black">1</span>
+                            <span>You'll receive an email confirmation with your order details.</span>
+                        </li>
+                        <li className="flex items-start gap-2.5">
+                            <span className="mt-0.5 w-5 h-5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center flex-shrink-0 text-xs font-black">2</span>
+                            <span>We'll reach out to arrange delivery or pickup at a time that works for you.</span>
+                        </li>
+                        <li className="flex items-start gap-2.5">
+                            <span className="mt-0.5 w-5 h-5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center flex-shrink-0 text-xs font-black">3</span>
+                            <span>Watch your inbox — questions? Just reply to any email from us.</span>
+                        </li>
+                    </ul>
+                </div>
+
                 <div className="pt-8 relative z-10 flex flex-col gap-3">
-                    <Link href={`/shop/${slug}/account`} className="w-full text-white bg-indigo-600 hover:bg-indigo-700 font-bold transition-colors py-4 rounded-2xl shadow-lg shadow-indigo-100 dark:shadow-none">
-                        View My Account
+                    <Link href={`/shop/${slug}/login`} className="w-full text-white bg-indigo-600 hover:bg-indigo-700 font-bold transition-colors py-4 rounded-2xl shadow-lg shadow-indigo-100 dark:shadow-none">
+                        Sign In to Track Your Order
                     </Link>
                     <Link href={`/shop/${slug}`} className="w-full text-slate-400 font-bold hover:text-slate-600 transition-colors py-3">
                         Back to Storefront

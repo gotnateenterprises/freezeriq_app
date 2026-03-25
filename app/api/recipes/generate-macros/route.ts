@@ -100,7 +100,7 @@ IMPORTANT:
         });
         return NextResponse.json({
             error: 'System error generating macros',
-            details: error.message
+            details: 'Something went wrong. Please try again.'
         }, { status: 500 });
     }
 }

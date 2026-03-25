@@ -180,6 +180,6 @@ FreezerIQ saves a local copy of your database every time you click "Save".
         return NextResponse.json({ success: true, seededCount: resources.length });
     } catch (error: any) {
         console.error("[Seed API] Error:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
     }
 }

@@ -462,6 +462,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                     primaryColor={business.branding.primary_color}
                     heroImage={storefrontConfig?.hero_image_url || "/images/nostalgic-hero.jpg"}
                     logoUrl={business.branding.logo_url}
+                    slug={business.slug}
                 />
 
                 {/* Main Content Flow */}

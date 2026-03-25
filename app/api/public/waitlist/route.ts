@@ -61,6 +61,6 @@ export async function POST(req: Request) {
 
     } catch (error: any) {
         console.error('Waitlist Error:', error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
     }
 }

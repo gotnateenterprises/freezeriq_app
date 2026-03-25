@@ -18,6 +18,7 @@ export default async function CustomerDashboardPage({ params }: { params: Promis
         where: { id: session.customerId },
         include: {
             orders: {
+                where: { status: { not: 'pending' } },
                 orderBy: { created_at: 'desc' },
                 take: 5
             }

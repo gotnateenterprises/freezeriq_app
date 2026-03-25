@@ -78,7 +78,7 @@ export async function POST(request: Request) {
         console.error('AI Scraping Error:', error);
         return NextResponse.json({
             error: 'Failed to scrape website. Please enter information manually.',
-            details: error.message
+            details: 'Something went wrong. Please try again.'
         }, { status: 500 });
     }
 }

@@ -85,6 +85,6 @@ export async function POST(request: Request) {
         return NextResponse.json(run);
     } catch (error: any) {
         console.error("Create Production Run Error:", error);
-        return NextResponse.json({ error: error.message || 'Failed to create run' }, { status: 500 });
+        return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
     }
 }

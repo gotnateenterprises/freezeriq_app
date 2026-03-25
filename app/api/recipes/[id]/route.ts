@@ -173,7 +173,7 @@ export async function PUT(
         if (error.code) console.error('Prisma Error Code:', error.code);
         if (error.meta) console.error('Prisma Error Meta:', error.meta);
 
-        return NextResponse.json({ error: 'Failed to update recipe: ' + error.message }, { status: 500 });
+        return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
     }
 }
 
@@ -205,6 +205,6 @@ export async function DELETE(
         return NextResponse.json({ success: true });
     } catch (error: any) {
         console.error("Delete Error:", error);
-        return NextResponse.json({ error: 'Failed to delete recipe: ' + error.message }, { status: 500 });
+        return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
     }
 }

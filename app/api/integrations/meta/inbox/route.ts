@@ -87,6 +87,6 @@ export async function GET() {
         return NextResponse.json({ threads });
     } catch (error: any) {
         console.error('Inbox Fetch Error:', error);
-        return NextResponse.json({ error: 'Failed to fetch inbox threads', details: error.message }, { status: 500 });
+        return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
     }
 }

@@ -18,7 +18,8 @@ export async function POST(req: Request) {
             process.env.STRIPE_WEBHOOK_SECRET!
         );
     } catch (error: any) {
-        return NextResponse.json({ error: `Webhook Error: ${error.message}` }, { status: 400 });
+        console.error('[Stripe Platform Webhook] Signature verification failed:', error.message);
+        return NextResponse.json({ error: 'Webhook verification failed' }, { status: 400 });
     }
 
     // We'll cast inside the switch for better type safety

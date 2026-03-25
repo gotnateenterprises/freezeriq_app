@@ -7,8 +7,12 @@ export async function GET(req: NextRequest) {
     try {
         const { searchParams } = new URL(req.url);
         const status = searchParams.get('status');
+        const campaignId = searchParams.get('campaign_id');
 
         const whereClause: any = {};
+        if (campaignId) {
+            whereClause.campaign_id = campaignId;
+        }
         if (status) {
             // Handle multiple statuses like ?status=pending,production_ready
             const statuses = status.split(',');

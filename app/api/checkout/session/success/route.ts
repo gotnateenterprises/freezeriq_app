@@ -91,6 +91,6 @@ export async function GET(req: Request) {
 
     } catch (error: any) {
         console.error('[STRIPE_CHECKOUT_SUCCESS_CALLBACK]', error);
-        return new NextResponse(error.message || 'Internal Error', { status: 500 });
+        return new NextResponse('Something went wrong. Please try again.', { status: 500 });
     }
 }

@@ -1,7 +1,8 @@
 "use client";
 
-import { ArrowRight, Truck, CheckCircle, Calendar, ArrowDown, ChefHat } from 'lucide-react';
+import { ArrowRight, Truck, CheckCircle, Calendar, ArrowDown, ChefHat, User } from 'lucide-react';
 import { motion } from 'framer-motion';
+import Link from 'next/link';
 
 interface StorefrontHeroProps {
     headline: string;
@@ -10,6 +11,7 @@ interface StorefrontHeroProps {
     primaryColor: string;
     heroImage?: string; // Optional background image URL
     logoUrl?: string | null; // Optional business logo
+    slug: string;
 }
 
 export default function StorefrontHero({
@@ -18,7 +20,8 @@ export default function StorefrontHero({
     businessName,
     primaryColor,
     heroImage,
-    logoUrl
+    logoUrl,
+    slug
 }: StorefrontHeroProps) {
 
     const scrollToShop = () => {
@@ -51,6 +54,13 @@ export default function StorefrontHero({
                         {(!businessName || businessName === 'FreezerIQ' || businessName === 'Freezer IQ') ? 'Freezer Chef' : businessName}
                     </h2>
                 </div>
+                <Link
+                    href={`/shop/${slug}/login`}
+                    className="pointer-events-auto flex items-center gap-2 px-4 py-2 rounded-full bg-white/15 backdrop-blur-md border border-white/20 text-white text-xs font-bold uppercase tracking-widest hover:bg-white/25 transition-colors"
+                >
+                    <User size={14} />
+                    My Account
+                </Link>
             </nav>
 
             {/* Immersive Background Layer */}

@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
         });
         return NextResponse.json({
             error: 'System error generating description',
-            details: error.message
+            details: 'Something went wrong. Please try again.'
         }, { status: 500 });
     }
 }

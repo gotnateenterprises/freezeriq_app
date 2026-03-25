@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     } catch (error: any) {
         console.error('[FUNDRAISER_REQUEST]', error);
         return NextResponse.json(
-            { error: error.message || 'Internal Error' },
+            { error: 'Something went wrong. Please try again.' },
             { status: 500 }
         );
     }

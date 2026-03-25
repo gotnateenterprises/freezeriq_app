@@ -118,16 +118,15 @@ export default function PrintPackingSlipsPage() {
                     }
                 `}} />
 
-                {orders.flatMap(order => {
-                    // ... existing flatMap logic ...
-                    return order.items.flatMap((item, itemIdx) => {
+                {orders.flatMap((order: any) => {
+                    return order.items.flatMap((item: any, itemIdx: number) => {
                         const slips = [];
                         for (let i = 0; i < item.quantity; i++) {
                             slips.push({ order, item, itemIdx, copyIndex: i });
                         }
                         return slips;
                     });
-                }).map((slip, uniqueKey) => {
+                }).map((slip: any, uniqueKey: number) => {
                     const { order, item } = slip;
                     const bundle = item.bundle;
                     const contents = bundle?.contents || [];

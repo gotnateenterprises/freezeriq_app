@@ -5,6 +5,7 @@ import { useCart } from '@/context/CartContext';
 import { useState } from 'react';
 import CheckoutModal from './CheckoutModal';
 import { getContrastTextClass } from '@/lib/colorUtils';
+import Link from 'next/link';
 
 interface CartDrawerProps {
     primaryColor: string;
@@ -116,6 +117,12 @@ export default function CartDrawer({ primaryColor, businessId, slug, campaignId,
                         >
                             Continue Shopping
                         </button>
+                        <Link
+                            href={`/shop/${slug}/login`}
+                            className="w-full text-center text-xs text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors py-2 font-medium"
+                        >
+                            Already a customer? Sign in here
+                        </Link>
                     </div>
                 )}
             </div>

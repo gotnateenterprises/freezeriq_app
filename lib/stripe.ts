@@ -1,10 +1,14 @@
 
 import Stripe from 'stripe';
 
-// Use a placeholder during build if STRIPE_SECRET_KEY is not set
-// At runtime, the actual key will be required for Stripe operations to work
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder_for_build', {
-    apiVersion: '2026-01-28.clover', // Use latest stable API version (updated to match SDK requirements)
+if (!process.env.STRIPE_SECRET_KEY) {
+    throw new Error(
+        'STRIPE_SECRET_KEY is not set. Add it to .env.local (dev) or Vercel Environment Variables (prod).'
+    );
+}
+
+export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+    apiVersion: '2026-01-28.clover',
     typescript: true
 });
 

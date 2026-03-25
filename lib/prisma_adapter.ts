@@ -190,7 +190,16 @@ export class PrismaAdapter implements DBAdapter {
 
     async getOrders() {
         const orders = await prisma.order.findMany({
-            where: { business_id: this.businessId },
+            where: {
+                business_id: this.businessId,
+                // Exclude abandoned storefront checkout attempts (Stripe pre-payment
+                // placeholders that were never paid). Manual/Square/QB pending orders
+                // are intentionally preserved for the offline "Mark Paid" workflow.
+                NOT: {
+                    source: 'storefront',
+                    status: 'pending'
+                }
+            },
             orderBy: { created_at: 'desc' },
             include: {
                 customer: true,
@@ -229,7 +238,8 @@ export class PrismaAdapter implements DBAdapter {
                     { status: { in: ['pending', 'production_ready', 'APPROVED', 'IN_PRODUCTION'] as any } },
                     { customer: { status: 'PRODUCTION' } }
                 ],
-                business_id: this.businessId
+                business_id: this.businessId,
+                NOT: { source: 'storefront', status: 'pending' }
             },
             include: {
                 items: {

@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
         console.error('Recipe Image Upload Error:', error);
         return NextResponse.json({
             error: 'Failed to upload image',
-            details: error.message
+            details: 'Something went wrong. Please try again.'
         }, { status: 500 });
     }
 }
