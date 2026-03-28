@@ -129,7 +129,7 @@ export async function POST(request: Request) {
 
         const upsertQuery = `
             INSERT INTO storefront_configs (
-                business_id, hero_headline, hero_subheadline, hero_image_url, 
+                id, business_id, hero_headline, hero_subheadline, hero_image_url, 
                 our_story_headline, our_story_content, how_it_works_content, 
                 footer_text, marketing_video_url, trust_badges, testimonials,
                 upsell_bundle_id, upsell_title, upsell_description, 
@@ -139,7 +139,7 @@ export async function POST(request: Request) {
                 origin_address, origin_lat, origin_lng,
                 "updatedAt"
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, NOW()
+                gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, NOW()
             )
             ON CONFLICT (business_id) DO UPDATE SET
                 hero_headline = EXCLUDED.hero_headline,
