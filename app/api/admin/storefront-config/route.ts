@@ -139,7 +139,7 @@ export async function POST(request: Request) {
                 origin_address, origin_lat, origin_lng,
                 "updatedAt"
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, NOW()
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, NOW()
             )
             ON CONFLICT (business_id) DO UPDATE SET
                 hero_headline = EXCLUDED.hero_headline,
@@ -206,7 +206,7 @@ export async function POST(request: Request) {
         // Handle delivery zones CRUD (delete-all + re-insert)
         if (rawDeliveryZones !== undefined && savedConfig?.id) {
             // Delete existing zones for this config
-            await prisma.$queryRaw`
+            await prisma.$executeRaw`
                 DELETE FROM delivery_zones WHERE storefront_config_id = ${savedConfig.id}
             `;
 
@@ -217,7 +217,7 @@ export async function POST(request: Request) {
                 const zoneName = z.name || `Zone ${idx + 1}`;
                 const maxRadius = Number(z.max_radius_miles) || 0;
                 const zoneFee = Number(z.fee) || 0;
-                await prisma.$queryRaw`
+                await prisma.$executeRaw`
                     INSERT INTO delivery_zones (id, storefront_config_id, name, max_radius_miles, fee, sort_order)
                     VALUES (gen_random_uuid()::text, ${savedConfig.id}, ${zoneName}, ${maxRadius}, ${zoneFee}, ${idx})
                 `;
