@@ -41,7 +41,9 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
         notes: '',
         participantCode: ''
     });
-    const [fulfillmentType, setFulfillmentType] = useState<'pickup' | 'delivery'>('pickup');
+    const [fulfillmentType, setFulfillmentType] = useState<'pickup' | 'delivery'>(
+        storefrontConfig?.is_pickup_enabled === false ? 'delivery' : 'pickup'
+    );
     const [deliveryValidation, setDeliveryValidation] = useState<{
         status: 'idle' | 'loading' | 'ok' | 'error';
         zoneName?: string;
