@@ -40,10 +40,12 @@ export async function GET(request: Request) {
         // Fetch delivery zones if config exists
         let delivery_zones: any[] = [];
         if (config?.id) {
-            delivery_zones = await prisma.deliveryZone.findMany({
-                where: { storefront_config_id: config.id },
-                orderBy: { sort_order: 'asc' },
-            });
+            delivery_zones = await prisma.$queryRaw`
+                SELECT id, name, max_radius_miles, fee, sort_order
+                FROM delivery_zones
+                WHERE storefront_config_id = ${config.id}
+                ORDER BY sort_order ASC
+            `;
         }
 
         return NextResponse.json({
@@ -204,28 +206,30 @@ export async function POST(request: Request) {
         // Handle delivery zones CRUD (delete-all + re-insert)
         if (rawDeliveryZones !== undefined && savedConfig?.id) {
             // Delete existing zones for this config
-            await prisma.deliveryZone.deleteMany({
-                where: { storefront_config_id: savedConfig.id },
-            });
+            await prisma.$queryRaw`
+                DELETE FROM delivery_zones WHERE storefront_config_id = ${savedConfig.id}
+            `;
 
             // Re-insert zones if provided
             const zonesArray = Array.isArray(rawDeliveryZones) ? rawDeliveryZones : [];
-            if (zonesArray.length > 0) {
-                await prisma.deliveryZone.createMany({
-                    data: zonesArray.map((z: any, idx: number) => ({
-                        storefront_config_id: savedConfig.id,
-                        name: z.name || `Zone ${idx + 1}`,
-                        max_radius_miles: new Prisma.Decimal(Number(z.max_radius_miles) || 0),
-                        fee: new Prisma.Decimal(Number(z.fee) || 0),
-                        sort_order: idx,
-                    })),
-                });
+            for (let idx = 0; idx < zonesArray.length; idx++) {
+                const z = zonesArray[idx];
+                const zoneName = z.name || `Zone ${idx + 1}`;
+                const maxRadius = Number(z.max_radius_miles) || 0;
+                const zoneFee = Number(z.fee) || 0;
+                await prisma.$queryRaw`
+                    INSERT INTO delivery_zones (id, storefront_config_id, name, max_radius_miles, fee, sort_order)
+                    VALUES (gen_random_uuid()::text, ${savedConfig.id}, ${zoneName}, ${maxRadius}, ${zoneFee}, ${idx})
+                `;
             }
         }
 
         return NextResponse.json(savedConfig);
-    } catch (error) {
-        console.error("Error saving storefront config:", error);
-        return new NextResponse('Internal Server Error', { status: 500 });
+    } catch (error: any) {
+        console.error("Error saving storefront config:", error?.message || error);
+        return NextResponse.json(
+            { error: error?.message || 'Internal Server Error' },
+            { status: 500 }
+        );
     }
 }

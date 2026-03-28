@@ -29,14 +29,23 @@ export async function POST(req: Request) {
         const businessId = business.id;
         
         // 1b. Fetch Storefront Config for Tax/Delivery settings + zones
-        const storefrontConfig = await prisma.storefrontConfig.findUnique({
+        const storefrontConfig: any = await prisma.storefrontConfig.findUnique({
             where: { business_id: businessId },
-            include: {
-                delivery_zones: {
-                    orderBy: { sort_order: 'asc' },
-                },
-            },
         });
+
+        // Fetch delivery zones separately via raw SQL (avoids Prisma client cache issues)
+        let delivery_zones: any[] = [];
+        if (storefrontConfig?.id) {
+            delivery_zones = await prisma.$queryRaw`
+                SELECT id, name, max_radius_miles, fee, sort_order
+                FROM delivery_zones
+                WHERE storefront_config_id = ${storefrontConfig.id}
+                ORDER BY sort_order ASC
+            `;
+            storefrontConfig.delivery_zones = delivery_zones;
+        } else if (storefrontConfig) {
+            storefrontConfig.delivery_zones = [];
+        }
 
         const taxPercent = Number(storefrontConfig?.tax_percent || 0);
         const flatDeliveryFee = Number(storefrontConfig?.delivery_fee || 0);
