@@ -1,5 +1,6 @@
 import { Plus_Jakarta_Sans, Playfair_Display, DM_Serif_Display, Outfit } from "next/font/google";
 import Sidebar from '@/components/Sidebar';
+import { Toaster } from 'sonner';
 import './globals.css';
 
 import { ThemeProvider } from '@/components/ThemeProvider';
@@ -46,6 +47,7 @@ export default async function RootLayout({
                         </LayoutWrapper>
                     </AuthProvider>
                 </ThemeProvider>
+                <Toaster position="top-center" richColors />
                 <Analytics />
                 <SpeedInsights />
             </body>
