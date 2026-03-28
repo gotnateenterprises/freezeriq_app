@@ -351,9 +351,7 @@ export async function POST(req: Request) {
 
     } catch (error: any) {
         console.error('[CHECKOUT]', error);
-        const message = process.env.NODE_ENV === 'development'
-            ? `Checkout error: ${error.message || error}`
-            : 'Something went wrong. Please try again.';
+        const message = `Checkout error: ${error.message || error}`;
         return NextResponse.json({ error: message }, { status: 500 });
     }
 }
