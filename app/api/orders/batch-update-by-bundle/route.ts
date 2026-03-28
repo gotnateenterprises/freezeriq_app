@@ -28,20 +28,39 @@ export async function POST(req: Request) {
                     }
                 }
             },
-            select: { id: true }
+            select: { id: true, customer_id: true }
         });
 
         const orderIds = ordersToUpdate.map(o => o.id);
+        const customerIds = ordersToUpdate
+            .map(o => o.customer_id)
+            .filter((id): id is string => !!id);
 
         if (orderIds.length === 0) {
             return NextResponse.json({ count: 0, message: "No matching orders found" });
         }
 
-        const result = await prisma.order.updateMany({
-            where: {
-                id: { in: orderIds }
-            },
-            data: { status: newStatus }
+        // Use a transaction to update both orders and customers
+        const result = await prisma.$transaction(async (tx) => {
+            const updateCount = await tx.order.updateMany({
+                where: {
+                    id: { in: orderIds }
+                },
+                data: { status: newStatus }
+            });
+
+            // If we are marking as completed, also move customers to DELIVERY status
+            if (newStatus === 'completed' && customerIds.length > 0) {
+                await tx.customer.updateMany({
+                    where: {
+                        id: { in: customerIds },
+                        business_id: session.user.businessId
+                    },
+                    data: { status: 'DELIVERY' }
+                });
+            }
+
+            return updateCount;
         });
 
         return NextResponse.json({ count: result.count });

@@ -117,23 +117,8 @@ export class SquareOrderHandler {
             return sum + (item.base_price_money?.amount || 0) * parseInt(item.quantity, 10);
         }, 0);
 
-        // 1. Create Base Order
-        // Check if order exists first to avoid duplicates (UPSERT logic ideally)
-        // For now, let's just use createOrder but we might want to check existence.
-        // PrismaAdapter.createOrder usually does create, let's assume it handles id conflict or we should check.
-        // Actually, db.createOrder implementation needs to be checked.
-        // Assuming it's a simple create, we risk unique constraint error on UUID.
-        // But here we generate a NEW UUID every time for the same External ID? That's bad.
-        // We should check if external_id exists.
-
-        // Fix: Use a deterministic ID or check existence.
-        // Since we don't have findByExternalId in generic DB interface shown so far,
-        // let's rely on Prisma upsert if possible, or just catch error.
-
-        // For this iteration, I will keep the existing logic but use the payload.
-        // IMPORTANT: The existing logic generated a random UUID. 
-        // Real sync needs idempotent behavior.
-        // I'll leave the random UUID for now to match interface, but in reality we should fix this.
+        // Idempotent: IngestionDBAdapter.createOrder() upserts on external_id.
+        // Re-syncing the same Square order updates the existing record, never duplicates.
 
         // Create/Update Customer Record
         let dbCustomerId: string | null = null;
@@ -143,7 +128,6 @@ export class SquareOrderHandler {
         }
 
         const persistentOrderId = await this.db.createOrder({
-            id: crypto.randomUUID(),
             external_id: payload.order_id,
             source: 'square',
             created_at: payload.created_at,

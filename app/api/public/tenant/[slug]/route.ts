@@ -171,13 +171,26 @@ export async function GET(
             SELECT hero_headline, hero_subheadline, hero_image_url, our_story_headline, our_story_content,
                    how_it_works_content, footer_text, marketing_video_url, trust_badges, testimonials,
                    upsell_bundle_id, upsell_title, upsell_description, upsell_discount_percent,
-                   upsell_type, manual_upsell_name, manual_upsell_price, manual_upsell_image
+                   upsell_type, manual_upsell_name, manual_upsell_price, manual_upsell_image,
+                   tax_percent, delivery_fee, is_delivery_enabled, is_pickup_enabled, origin_address, id
             FROM storefront_configs
             WHERE business_id = ${business.id}
             LIMIT 1
         `;
 
         const storefrontConfig = storefrontConfigs[0] || null;
+
+        // 6b. Fetch delivery zones for this storefront config
+        if (storefrontConfig?.id) {
+            const zones: any[] = await prisma.$queryRaw`
+                SELECT id, name, max_radius_miles, fee
+                FROM delivery_zones
+                WHERE storefront_config_id = ${storefrontConfig.id}
+                ORDER BY max_radius_miles ASC
+            `;
+            storefrontConfig.delivery_zones = zones;
+            delete storefrontConfig.id; // Don't expose internal ID to client
+        }
 
         return NextResponse.json({
             business: {

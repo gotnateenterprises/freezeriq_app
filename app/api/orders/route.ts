@@ -31,7 +31,8 @@ export async function GET(req: NextRequest) {
             weekEnd.setDate(weekEnd.getDate() + 7);
             whereClause.OR = [
                 { delivery_date: { gte: weekStart, lt: weekEnd } },
-                { delivery_date: null }
+                { delivery_date: null },
+                { status: { in: ['completed', 'COMPLETED'] } }
             ];
         }
 
@@ -52,6 +53,7 @@ export async function GET(req: NextRequest) {
                 customer_name: true,
                 delivery_date: true,
                 delivery_address: true,
+                delivery_sequence: true,
                 status: true,
                 total_amount: true,
                 source: true,

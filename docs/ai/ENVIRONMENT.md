@@ -30,6 +30,20 @@
 > Tenant payment processing uses tenant-stored connected account credentials.
 > Mixing these is a critical bug per CONSTITUTION §9.
 
+### Square Tenant Commerce
+| Variable | Owner | Purpose |
+|----------|-------|---------|
+| `SQUARE_APP_ID` | Platform | Square Developer app ID (OAuth + Web Payments SDK) |
+| `SQUARE_APP_SECRET` | Platform | Square Developer app secret (OAuth token exchange) |
+| `SQUARE_ENVIRONMENT` | Platform | `sandbox` or `production` |
+| `SQUARE_WEBHOOK_SIGNATURE_KEY` | Platform | Webhook subscription signature key from Square Developer Console |
+| `SQUARE_WEBHOOK_NOTIFICATION_URL` | Platform | Webhook notification endpoint URL (must match Square subscription) |
+
+> [!NOTE]
+> These are **platform** credentials for FreezerIQ's Square Developer app.
+> Tenant-specific Square tokens are obtained via OAuth and stored in the Integration table.
+> This is tenant commerce infrastructure, NOT platform billing per CONSTITUTION §9.
+
 ### Storage (Cloudflare R2)
 | Variable | Owner | Purpose |
 |----------|-------|---------|

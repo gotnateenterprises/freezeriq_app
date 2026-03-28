@@ -1,5 +1,5 @@
-
 import Stripe from 'stripe';
+import { SubscriptionPlan } from '@prisma/client';
 
 if (!process.env.STRIPE_SECRET_KEY) {
     throw new Error(
@@ -13,6 +13,18 @@ export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 });
 
 /**
+ * Mapping of Business Subscription Plans to their corresponding Stripe Price IDs.
+ * These should be configured in your environment variables.
+ */
+export const PRICE_ID_MAP: Record<string, string | undefined> = {
+    [SubscriptionPlan.FREE]: undefined,
+    [SubscriptionPlan.BASE]: process.env.STRIPE_PRICE_BASE,
+    [SubscriptionPlan.PRO]: process.env.STRIPE_PRICE_PRO,
+    [SubscriptionPlan.ULTIMATE]: process.env.STRIPE_PRICE_ULTIMATE,
+    [SubscriptionPlan.ENTERPRISE]: process.env.STRIPE_PRICE_ENTERPRISE,
+};
+
+/**
  * Creates or retrieves a Stripe Customer ID for a business.
  */
 export async function getOrCreateStripeCustomer(
@@ -20,10 +32,7 @@ export async function getOrCreateStripeCustomer(
     email: string,
     name: string
 ): Promise<string> {
-    // Note: Ideally, you'd store stripe_customer_id in DB and check before creating.
-    // This function assumes the caller handles the DB check/update.
-
-    // 1. Search existing customers by email/metadata
+    // 1. Search existing customers by metadata
     const existing = await stripe.customers.search({
         query: `metadata['businessId']:'${businessId}'`,
     });
@@ -42,6 +51,39 @@ export async function getOrCreateStripeCustomer(
     });
 
     return newCustomer.id;
+}
+
+/**
+ * Creates a Stripe Checkout Session for a platform subscription.
+ */
+export async function createSubscriptionCheckoutSession(params: {
+    customerId: string;
+    priceId: string;
+    businessId: string;
+    successUrl: string;
+    cancelUrl: string;
+}) {
+    return await stripe.checkout.sessions.create({
+        customer: params.customerId,
+        line_items: [{ price: params.priceId, quantity: 1 }],
+        mode: 'subscription',
+        metadata: {
+            businessId: params.businessId,
+            type: 'platform_subscription',
+        },
+        success_url: params.successUrl,
+        cancel_url: params.cancelUrl,
+        allow_promotion_codes: true,
+        billing_address_collection: 'required',
+    });
+}
+
+/**
+ * Returns the SubscriptionPlan enum for a given Stripe Price ID.
+ */
+export function getPlanFromPriceId(priceId: string): SubscriptionPlan | undefined {
+    const entry = Object.entries(PRICE_ID_MAP).find(([_, id]) => id === priceId);
+    return entry ? (entry[0] as SubscriptionPlan) : undefined;
 }
 
 /**

@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/db';
 
 export async function GET(req: NextRequest) {
     try {
@@ -23,7 +21,8 @@ export async function GET(req: NextRequest) {
             weekEnd.setDate(weekEnd.getDate() + 7);
             whereClause.OR = [
                 { delivery_date: { gte: weekStart, lt: weekEnd } },
-                { delivery_date: null }
+                { delivery_date: null },
+                { status: { in: ['completed', 'COMPLETED'] } }
             ];
         }
 

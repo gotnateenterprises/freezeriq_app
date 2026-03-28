@@ -317,6 +317,12 @@ model Order {
   delivery_sequence Int?                @default(0)
   participant_name  String?             @map("participant_name")
   phone             String?
+  payment_processor      String?   // "stripe" | "square" | null (offline/manual)
+  processor_payment_id   String?   // Stripe PaymentIntent ID or Square Payment ID
+  fulfillment_type       FulfillmentType     @default(PICKUP)
+  tax_amount             Decimal             @default(0) @db.Decimal(10, 2)
+  delivery_fee           Decimal             @default(0) @db.Decimal(10, 2)
+  delivery_zone_name     String?             // Zone name for reporting (e.g. "Local", "Extended")
   items             OrderItem[]
   business          Business?           @relation(fields: [business_id], references: [id])
   campaign          FundraiserCampaign? @relation(fields: [campaign_id], references: [id])
@@ -557,6 +563,7 @@ model UserTrainingProgress {
 model StorefrontConfig {
   id                      String   @id @default(cuid())
   business_id             String   @unique
+  payment_provider        String   @default("stripe") // "stripe" | "square"
   hero_headline           String   @default("Welcome to Our Shop")
   hero_subheadline        String   @default("Delicious meals made fresh for you.")
   upsell_bundle_id        String?
@@ -579,8 +586,28 @@ model StorefrontConfig {
   testimonials            Json?
   business                Business @relation(fields: [business_id], references: [id])
   upsell_bundle           Bundle?  @relation(fields: [upsell_bundle_id], references: [id])
+  tax_percent             Decimal  @default(0) @db.Decimal(5, 2)
+  delivery_fee            Decimal  @default(0) @db.Decimal(10, 2)
+  is_delivery_enabled     Boolean  @default(true)
+  is_pickup_enabled       Boolean  @default(true)
+  origin_address          String?            // Tenant business address for delivery origin
+  origin_lat              Decimal?           @db.Decimal(10, 7)
+  origin_lng              Decimal?           @db.Decimal(10, 7)
+  delivery_zones          DeliveryZone[]
 
   @@map("storefront_configs")
+}
+
+model DeliveryZone {
+  id                   String           @id @default(cuid())
+  storefront_config_id String
+  name                 String           // "Local", "Extended", "Metro", etc.
+  max_radius_miles     Decimal          @db.Decimal(6, 2)
+  fee                  Decimal          @default(0) @db.Decimal(10, 2)
+  sort_order           Int              @default(0)
+  storefrontConfig     StorefrontConfig @relation(fields: [storefront_config_id], references: [id], onDelete: Cascade)
+
+  @@map("delivery_zones")
 }
 
 model Invoice {
@@ -653,6 +680,11 @@ model BusinessLead {
   updated_at DateTime @updatedAt
 
   @@map("business_leads")
+}
+
+enum FulfillmentType {
+  PICKUP
+  DELIVERY
 }
 
 enum SubscriptionPlan {

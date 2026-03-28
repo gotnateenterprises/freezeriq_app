@@ -13,7 +13,8 @@ export async function POST(req: Request) {
 
         const { provider } = await req.json();
 
-        if (!provider || (provider !== 'square' && provider !== 'qbo' && provider !== 'meta')) {
+        const allowedProviders = ['square', 'qbo', 'meta', 'stripe'];
+        if (!provider || !allowedProviders.includes(provider)) {
             return NextResponse.json({ error: "Invalid provider" }, { status: 400 });
         }
 
@@ -23,6 +24,14 @@ export async function POST(req: Request) {
                 business_id: businessId
             }
         });
+
+        // Reset payment provider to safe default when disconnecting Square
+        if (provider === 'square') {
+            await prisma.storefrontConfig.updateMany({
+                where: { business_id: businessId, payment_provider: 'square' },
+                data: { payment_provider: 'stripe' }
+            });
+        }
 
         return NextResponse.json({ success: true });
     } catch (e: any) {

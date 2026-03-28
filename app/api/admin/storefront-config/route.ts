@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/db';
 import { Prisma } from '@prisma/client';
+import { geocodeAddress } from '@/lib/delivery/zones';
 
 // GET /api/admin/storefront-config
 export async function GET(request: Request) {
@@ -26,7 +27,9 @@ export async function GET(request: Request) {
             SELECT hero_headline, hero_subheadline, hero_image_url, our_story_headline, our_story_content,
                    how_it_works_content, footer_text, marketing_video_url, trust_badges, testimonials,
                    upsell_bundle_id, upsell_title, upsell_description, upsell_discount_percent,
-                   upsell_type, manual_upsell_name, manual_upsell_price, manual_upsell_image
+                   upsell_type, manual_upsell_name, manual_upsell_price, manual_upsell_image,
+                   tax_percent, delivery_fee, is_delivery_enabled, is_pickup_enabled,
+                   origin_address, origin_lat, origin_lng, id
             FROM storefront_configs
             WHERE business_id = ${user.business.id}
             LIMIT 1
@@ -34,8 +37,18 @@ export async function GET(request: Request) {
 
         const config = storefrontConfigs[0] || null;
 
+        // Fetch delivery zones if config exists
+        let delivery_zones: any[] = [];
+        if (config?.id) {
+            delivery_zones = await prisma.deliveryZone.findMany({
+                where: { storefront_config_id: config.id },
+                orderBy: { sort_order: 'asc' },
+            });
+        }
+
         return NextResponse.json({
             ...config,
+            delivery_zones,
             business_slug: business?.slug,
             custom_domain: business?.custom_domain
         });
@@ -70,7 +83,13 @@ export async function POST(request: Request) {
             upsell_type,
             manual_upsell_name,
             manual_upsell_price,
-            manual_upsell_image
+            manual_upsell_image,
+            tax_percent,
+            delivery_fee,
+            is_delivery_enabled,
+            is_pickup_enabled,
+            origin_address,
+            delivery_zones: rawDeliveryZones
         } = body;
 
         const user = await prisma.user.findUnique({
@@ -95,6 +114,17 @@ export async function POST(request: Request) {
             }
         }
 
+        // Geocode origin address if provided
+        let originLat: Prisma.Decimal | null = null;
+        let originLng: Prisma.Decimal | null = null;
+        if (origin_address && origin_address.trim()) {
+            const geo = await geocodeAddress(origin_address.trim());
+            if (geo) {
+                originLat = new Prisma.Decimal(geo.lat.toFixed(7));
+                originLng = new Prisma.Decimal(geo.lng.toFixed(7));
+            }
+        }
+
         const upsertQuery = `
             INSERT INTO storefront_configs (
                 business_id, hero_headline, hero_subheadline, hero_image_url, 
@@ -102,9 +132,12 @@ export async function POST(request: Request) {
                 footer_text, marketing_video_url, trust_badges, testimonials,
                 upsell_bundle_id, upsell_title, upsell_description, 
                 upsell_discount_percent, upsell_type, manual_upsell_name, 
-                manual_upsell_price, manual_upsell_image, "updatedAt"
+                manual_upsell_price, manual_upsell_image, 
+                tax_percent, delivery_fee, is_delivery_enabled, is_pickup_enabled,
+                origin_address, origin_lat, origin_lng,
+                "updatedAt"
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW()
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, NOW()
             )
             ON CONFLICT (business_id) DO UPDATE SET
                 hero_headline = EXCLUDED.hero_headline,
@@ -125,6 +158,13 @@ export async function POST(request: Request) {
                 manual_upsell_name = EXCLUDED.manual_upsell_name,
                 manual_upsell_price = EXCLUDED.manual_upsell_price,
                 manual_upsell_image = EXCLUDED.manual_upsell_image,
+                tax_percent = EXCLUDED.tax_percent,
+                delivery_fee = EXCLUDED.delivery_fee,
+                is_delivery_enabled = EXCLUDED.is_delivery_enabled,
+                is_pickup_enabled = EXCLUDED.is_pickup_enabled,
+                origin_address = EXCLUDED.origin_address,
+                origin_lat = EXCLUDED.origin_lat,
+                origin_lng = EXCLUDED.origin_lng,
                 "updatedAt" = NOW()
             RETURNING *
         `;
@@ -148,12 +188,42 @@ export async function POST(request: Request) {
             upsell_type,
             manual_upsell_name,
             manual_upsell_price ? new Prisma.Decimal(manual_upsell_price) : null,
-            manual_upsell_image
+            manual_upsell_image,
+            tax_percent ? new Prisma.Decimal(tax_percent) : new Prisma.Decimal(0),
+            delivery_fee ? new Prisma.Decimal(delivery_fee) : new Prisma.Decimal(0),
+            is_delivery_enabled ?? true,
+            is_pickup_enabled ?? true,
+            origin_address?.trim() || null,
+            originLat,
+            originLng
         ];
 
         const results: any[] = await prisma.$queryRawUnsafe(upsertQuery, ...values);
+        const savedConfig = results[0];
 
-        return NextResponse.json(results[0]);
+        // Handle delivery zones CRUD (delete-all + re-insert)
+        if (rawDeliveryZones !== undefined && savedConfig?.id) {
+            // Delete existing zones for this config
+            await prisma.deliveryZone.deleteMany({
+                where: { storefront_config_id: savedConfig.id },
+            });
+
+            // Re-insert zones if provided
+            const zonesArray = Array.isArray(rawDeliveryZones) ? rawDeliveryZones : [];
+            if (zonesArray.length > 0) {
+                await prisma.deliveryZone.createMany({
+                    data: zonesArray.map((z: any, idx: number) => ({
+                        storefront_config_id: savedConfig.id,
+                        name: z.name || `Zone ${idx + 1}`,
+                        max_radius_miles: new Prisma.Decimal(Number(z.max_radius_miles) || 0),
+                        fee: new Prisma.Decimal(Number(z.fee) || 0),
+                        sort_order: idx,
+                    })),
+                });
+            }
+        }
+
+        return NextResponse.json(savedConfig);
     } catch (error) {
         console.error("Error saving storefront config:", error);
         return new NextResponse('Internal Server Error', { status: 500 });

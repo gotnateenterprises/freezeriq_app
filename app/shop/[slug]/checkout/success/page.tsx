@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams, useParams } from 'next/navigation';
-import { CheckCircle, Loader2 } from 'lucide-react';
+import { CheckCircle, Loader2, Clock } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import Link from 'next/link';
 import { toast } from 'sonner';
@@ -11,28 +11,42 @@ export default function CheckoutSuccessPage() {
     const { slug } = useParams() as { slug: string };
     const router = useRouter();
     const searchParams = useSearchParams();
-    const sessionId = searchParams.get('session_id');
+    const sessionId = searchParams.get('session_id');   // Stripe return
+    const squareOrderId = searchParams.get('order_id'); // Square return
     const businessId = searchParams.get('business_id');
     const { clearCart } = useCart();
 
     const [loading, setLoading] = useState(true);
     const [orderId, setOrderId] = useState<string | null>(null);
+    const [confirmed, setConfirmed] = useState(true);
 
     useEffect(() => {
-        if (!sessionId) {
+        // Must have either Stripe session_id or Square order_id
+        if (!sessionId && !squareOrderId) {
             router.replace(`/shop/${slug}`);
             return;
         }
 
         async function verifySession() {
             try {
-                const params = new URLSearchParams({ session_id: sessionId! });
-                if (businessId) params.set('business_id', businessId);
+                const params = new URLSearchParams();
+
+                if (squareOrderId) {
+                    // Square: verify via order_id (read-only DB check)
+                    params.set('order_id', squareOrderId);
+                    if (businessId) params.set('business_id', businessId);
+                } else {
+                    // Stripe: verify via session_id (existing flow)
+                    params.set('session_id', sessionId!);
+                    if (businessId) params.set('business_id', businessId);
+                }
+
                 const res = await fetch(`/api/checkout/session/success?${params.toString()}`);
                 const data = await res.json();
 
                 if (res.ok && data.success) {
                     setOrderId(data.orderId);
+                    setConfirmed(data.confirmed ?? true); // Stripe has no confirmed field → default true
                     clearCart();
                 } else {
                     toast.error(data.error || 'Failed to verify payment status.');
@@ -46,7 +60,7 @@ export default function CheckoutSuccessPage() {
         }
 
         verifySession();
-    }, [sessionId, slug, router, clearCart]);
+    }, [sessionId, squareOrderId, businessId, slug, router, clearCart]);
 
     if (loading) {
         return (
@@ -66,6 +80,45 @@ export default function CheckoutSuccessPage() {
                 <Link href={`/shop/${slug}`} className="px-8 py-3 bg-slate-900 text-white rounded-xl font-bold">
                     Return to Store
                 </Link>
+            </div>
+        );
+    }
+
+    // Square pending: payment completed but order promotion still in-flight.
+    // Show a neutral processing state — not a red error, not a green confirmed.
+    if (orderId && !confirmed) {
+        return (
+            <div className="min-h-screen bg-brand-cream dark:bg-slate-950 flex shadow-inner items-center justify-center p-6">
+                <div className="max-w-md w-full p-12 bg-white dark:bg-slate-900 rounded-[3rem] shadow-2xl border border-white dark:border-slate-800 text-center relative overflow-hidden">
+                    <div className="absolute top-0 left-0 right-0 h-32 bg-amber-500/10 dark:bg-amber-500/5" />
+
+                    <div className="w-24 h-24 bg-amber-100 dark:bg-amber-900/50 rounded-full flex items-center justify-center mx-auto text-amber-500 dark:text-amber-400 shadow-inner relative z-10 mb-8">
+                        <Clock className="w-12 h-12" />
+                    </div>
+
+                    <div className="space-y-4 relative z-10">
+                        <h2 className="text-4xl font-serif text-slate-900 dark:text-white leading-tight">Confirming Order...</h2>
+                        <p className="text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
+                            Your payment was received. We're finalizing your order now — this usually takes just a moment.
+                        </p>
+                        <div className="py-4">
+                            <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">Order #</span>
+                            <span className="font-mono text-lg text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-800 px-4 py-2 rounded-lg inline-block border border-slate-100 dark:border-slate-700">{orderId.split('-')[0].toUpperCase()}</span>
+                        </div>
+                    </div>
+
+                    <div className="pt-8 relative z-10 flex flex-col gap-3">
+                        <button
+                            onClick={() => window.location.reload()}
+                            className="w-full text-white bg-amber-600 hover:bg-amber-700 font-bold transition-colors py-4 rounded-2xl shadow-lg shadow-amber-100 dark:shadow-none"
+                        >
+                            Refresh Status
+                        </button>
+                        <Link href={`/shop/${slug}`} className="w-full text-slate-400 font-bold hover:text-slate-600 transition-colors py-3">
+                            Back to Storefront
+                        </Link>
+                    </div>
+                </div>
             </div>
         );
     }

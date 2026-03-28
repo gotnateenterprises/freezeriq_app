@@ -2,10 +2,11 @@
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, CheckCircle, Loader2, ChevronRight, ArrowLeft, ShoppingBag, CreditCard, User, Heart } from 'lucide-react';
+import { X, CheckCircle, Loader2, ChevronRight, ArrowLeft, ShoppingBag, CreditCard, User, Heart, MapPin } from 'lucide-react';
 import { useCart, CartItem } from '@/context/CartContext';
 import { toast } from 'sonner';
 import CheckoutUpsell from './CheckoutUpsell';
+import SquarePaymentForm from './SquarePaymentForm';
 import Image from 'next/image';
 
 interface CheckoutModalProps {
@@ -28,6 +29,7 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
     const [step, setStep] = useState<CheckoutStep>('details');
     const [loading, setLoading] = useState(false);
     const [paymentData, setPaymentData] = useState<any>(null);
+    const [squareConfig, setSquareConfig] = useState<any>(null);
     const [formData, setFormData] = useState({
         name: '',
         email: '',
@@ -39,12 +41,60 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
         notes: '',
         participantCode: ''
     });
+    const [fulfillmentType, setFulfillmentType] = useState<'pickup' | 'delivery'>('pickup');
+    const [deliveryValidation, setDeliveryValidation] = useState<{
+        status: 'idle' | 'loading' | 'ok' | 'error';
+        zoneName?: string;
+        fee?: number;
+        error?: string;
+    }>({ status: 'idle' });
+
+    const validateDelivery = async () => {
+        if (!formData.address || !formData.city || !formData.state || !formData.zip) {
+            toast.error('Please fill in all address fields.');
+            return;
+        }
+        setDeliveryValidation({ status: 'loading' });
+        try {
+            const res = await fetch('/api/checkout/validate-delivery', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    slug,
+                    address: formData.address,
+                    city: formData.city,
+                    state: formData.state,
+                    zip: formData.zip
+                })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.deliverable) {
+                setDeliveryValidation({
+                    status: 'error',
+                    error: data.error || data.reason || 'This address is outside our delivery area.'
+                });
+            } else {
+                setDeliveryValidation({
+                    status: 'ok',
+                    zoneName: data.zoneName,
+                    fee: Number(data.fee)
+                });
+            }
+        } catch {
+            setDeliveryValidation({ status: 'error', error: 'Could not validate address. Please try again.' });
+        }
+    };
 
     const { addToCart } = useCart();
 
     if (!isOpen) return null;
 
     const handleSubmit = async () => {
+        // If a Square session already exists, reuse it — don't create another pending order
+        if (squareConfig) {
+            setStep('confirm');
+            return;
+        }
         setLoading(true);
         try {
             // Fundraiser campaign orders: coordinators collect payments externally
@@ -71,9 +121,9 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
                 return;
             }
 
-            // Regular storefront orders: attempt Stripe Checkout first.
-            // /api/checkout/session creates the DB order + returns a Stripe URL.
-            const stripeRes = await fetch('/api/checkout/session', {
+            // Regular storefront orders: create checkout session.
+            // The response will indicate redirect (Stripe) or embedded (Square).
+            const checkoutRes = await fetch('/api/checkout/session', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -82,15 +132,39 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
                     customerName: formData.name,
                     customerEmail: formData.email,
                     customerPhone: formData.phone,
-                    customerNotes: formData.notes
+                    customerNotes: formData.notes,
+                    fulfillmentType: fulfillmentType,
+                    address: formData.address,
+                    city: formData.city,
+                    state: formData.state,
+                    zip: formData.zip
                 })
             });
 
-            const stripeData = await stripeRes.json();
+            const checkoutData = await checkoutRes.json();
 
-            if (stripeRes.ok && stripeData.url) {
-                // Redirect to Stripe Checkout — payment collected on tenant's connected account
-                window.location.href = stripeData.url;
+            if (!checkoutRes.ok) {
+                throw new Error(checkoutData.error || 'Checkout failed. Please try again.');
+            }
+
+            if (checkoutData.type === 'redirect' && checkoutData.url) {
+                // Stripe: redirect to hosted checkout
+                window.location.href = checkoutData.url;
+                return;
+            }
+
+            if (checkoutData.type === 'embedded' && checkoutData.squareConfig) {
+                // Square: show embedded payment form inline
+                setSquareConfig({
+                    appId: checkoutData.squareConfig.applicationId,
+                    locationId: checkoutData.squareConfig.locationId,
+                    orderId: checkoutData.orderId,
+                    amountCents: checkoutData.amountCents,
+                    successUrl: checkoutData.successUrl,
+                    customerEmail: formData.email,
+                });
+                setStep('confirm');
+                setLoading(false);
                 return;
             }
 
@@ -223,6 +297,30 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
                 </div>
             </div>
 
+            {/* Fulfillment Selector */}
+            {!campaignId && (storefrontConfig?.is_delivery_enabled !== false || storefrontConfig?.is_pickup_enabled !== false) && (
+                <div className="flex p-1 bg-slate-100 rounded-2xl">
+                    {storefrontConfig?.is_pickup_enabled !== false && (
+                        <button
+                            onClick={() => setFulfillmentType('pickup')}
+                            className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all ${fulfillmentType === 'pickup' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+                        >
+                            <ShoppingBag size={18} />
+                            Pickup
+                        </button>
+                    )}
+                    {storefrontConfig?.is_delivery_enabled !== false && (
+                        <button
+                            onClick={() => setFulfillmentType('delivery')}
+                            className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all ${fulfillmentType === 'delivery' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+                        >
+                            <ChevronRight size={18} className="rotate-90" />
+                            Delivery
+                        </button>
+                    )}
+                </div>
+            )}
+
             <div className="space-y-5">
                 <div className="relative">
                     <input
@@ -244,31 +342,67 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
                     />
                 </div>
 
-                <div className="space-y-4 pt-2">
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-2">Delivery Address</p>
-                    <input
-                        required placeholder="Street Address"
-                        className="w-full px-6 py-4 rounded-2xl bg-slate-50 border-none outline-none focus:ring-2 focus:ring-slate-200 transition-all font-bold text-lg text-slate-900 placeholder:text-slate-300 placeholder:font-medium"
-                        value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })}
-                    />
-                    <div className="grid grid-cols-6 gap-4">
+                {fulfillmentType === 'delivery' && (
+                    <div className="space-y-4 pt-2 animate-in fade-in slide-in-from-top-2">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-2">Delivery Address</p>
                         <input
-                            required placeholder="City"
-                            className="col-span-3 px-6 py-4 rounded-2xl bg-slate-50 border-none outline-none focus:ring-2 focus:ring-slate-200 transition-all font-bold text-lg text-slate-900 placeholder:text-slate-300 placeholder:font-medium"
-                            value={formData.city} onChange={e => setFormData({ ...formData, city: e.target.value })}
+                            required placeholder="Street Address"
+                            className="w-full px-6 py-4 rounded-2xl bg-slate-50 border-none outline-none focus:ring-2 focus:ring-slate-200 transition-all font-bold text-lg text-slate-900 placeholder:text-slate-300 placeholder:font-medium"
+                            value={formData.address} onChange={e => { setFormData({ ...formData, address: e.target.value }); setDeliveryValidation({ status: 'idle' }); }}
                         />
-                        <input
-                            required placeholder="State"
-                            className="col-span-1 px-4 py-4 rounded-2xl bg-slate-50 border-none outline-none focus:ring-2 focus:ring-slate-200 transition-all font-bold text-lg text-slate-900 placeholder:text-slate-300 placeholder:font-medium text-center uppercase"
-                            value={formData.state} onChange={e => setFormData({ ...formData, state: e.target.value })}
-                        />
-                        <input
-                            required placeholder="Zip"
-                            className="col-span-2 px-6 py-4 rounded-2xl bg-slate-50 border-none outline-none focus:ring-2 focus:ring-slate-200 transition-all font-bold text-lg text-slate-900 placeholder:text-slate-300 placeholder:font-medium"
-                            value={formData.zip} onChange={e => setFormData({ ...formData, zip: e.target.value })}
-                        />
+                        <div className="grid grid-cols-6 gap-4">
+                            <input
+                                required placeholder="City"
+                                className="col-span-3 px-6 py-4 rounded-2xl bg-slate-50 border-none outline-none focus:ring-2 focus:ring-slate-200 transition-all font-bold text-lg text-slate-900 placeholder:text-slate-300 placeholder:font-medium"
+                                value={formData.city} onChange={e => { setFormData({ ...formData, city: e.target.value }); setDeliveryValidation({ status: 'idle' }); }}
+                            />
+                            <input
+                                required placeholder="State"
+                                className="col-span-1 px-4 py-4 rounded-2xl bg-slate-50 border-none outline-none focus:ring-2 focus:ring-slate-200 transition-all font-bold text-lg text-slate-900 placeholder:text-slate-300 placeholder:font-medium text-center uppercase"
+                                value={formData.state} onChange={e => { setFormData({ ...formData, state: e.target.value }); setDeliveryValidation({ status: 'idle' }); }}
+                            />
+                            <input
+                                required placeholder="Zip"
+                                className="col-span-2 px-6 py-4 rounded-2xl bg-slate-50 border-none outline-none focus:ring-2 focus:ring-slate-200 transition-all font-bold text-lg text-slate-900 placeholder:text-slate-300 placeholder:font-medium"
+                                value={formData.zip} onChange={e => { setFormData({ ...formData, zip: e.target.value }); setDeliveryValidation({ status: 'idle' }); }}
+                            />
+                        </div>
+
+                        {/* Delivery zone validation */}
+                        {storefrontConfig?.delivery_zones?.length > 0 && (
+                            <div className="space-y-2">
+                                <button
+                                    type="button"
+                                    onClick={validateDelivery}
+                                    disabled={deliveryValidation.status === 'loading' || !formData.address || !formData.city || !formData.state || !formData.zip}
+                                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-50 text-blue-700 font-bold text-sm hover:bg-blue-100 transition-colors disabled:opacity-50"
+                                >
+                                    {deliveryValidation.status === 'loading' ? (
+                                        <><Loader2 size={16} className="animate-spin" /> Checking...</>
+                                    ) : (
+                                        <><MapPin size={16} /> Check Delivery Availability</>
+                                    )}
+                                </button>
+
+                                {deliveryValidation.status === 'ok' && (
+                                    <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-700 text-sm font-medium">
+                                        <CheckCircle size={16} />
+                                        <span>
+                                            <strong>{deliveryValidation.zoneName}</strong> — Delivery fee: <strong>${deliveryValidation.fee?.toFixed(2)}</strong>
+                                        </span>
+                                    </div>
+                                )}
+
+                                {deliveryValidation.status === 'error' && (
+                                    <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-red-700 text-sm font-medium">
+                                        <X size={16} />
+                                        <span>{deliveryValidation.error}</span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
-                </div>
+                )}
 
                 {campaignId && campaignParticipantLabel && (
                     <div className="p-6 bg-indigo-50/50 rounded-3xl border border-indigo-50">
@@ -290,12 +424,18 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
 
             <div className="pt-6">
                 <button
-                    disabled={!formData.name || !formData.email || !formData.phone}
+                    disabled={
+                        !formData.name || !formData.email || !formData.phone ||
+                        (fulfillmentType === 'delivery' && storefrontConfig?.delivery_zones?.length > 0 && deliveryValidation.status !== 'ok')
+                    }
                     onClick={() => setStep('confirm')}
                     className="w-full py-5 rounded-[2rem] bg-indigo-600 text-white font-bold text-lg hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-200 disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-3 group"
                 >
                     Review Order <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 </button>
+                {fulfillmentType === 'delivery' && storefrontConfig?.delivery_zones?.length > 0 && deliveryValidation.status !== 'ok' && (
+                    <p className="text-center text-xs text-amber-500 mt-2 font-medium">Please check delivery availability before continuing.</p>
+                )}
             </div>
         </motion.div>
     );
@@ -315,48 +455,96 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
                 </button>
             </div>
 
-            <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-6">
-                <div className="flex justify-between items-center text-slate-500 font-medium">
-                    <span>{items.length} Bundle(s)</span>
-                    <span>${cartTotal.toFixed(2)}</span>
-                </div>
-                <div className="h-px bg-slate-200" />
-                <div>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Shipping To</p>
-                    <p className="text-lg font-bold text-slate-800">{formData.name}</p>
-                    {formData.address && (
-                        <p className="text-slate-600 font-medium">
-                            {formData.address}<br />
-                            {formData.city && formData.state && formData.zip && `${formData.city}, ${formData.state} ${formData.zip}`}
-                        </p>
+            <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4">
+                <div className="space-y-2">
+                    <div className="flex justify-between items-center text-slate-500 font-medium text-sm">
+                        <span>Subtotal ({items.length} items)</span>
+                        <span>${cartTotal.toFixed(2)}</span>
+                    </div>
+                    {storefrontConfig?.tax_percent > 0 && (
+                        <div className="flex justify-between items-center text-slate-500 font-medium text-sm">
+                            <span>Tax ({Number(storefrontConfig.tax_percent).toFixed(2)}%)</span>
+                            <span>${(cartTotal * Number(storefrontConfig.tax_percent) / 100).toFixed(2)}</span>
+                        </div>
                     )}
-                    <p className="text-slate-500 mt-2">{formData.email}</p>
+                    {fulfillmentType === 'delivery' && (() => {
+                        const fee = deliveryValidation.status === 'ok' ? deliveryValidation.fee! : Number(storefrontConfig?.delivery_fee || 0);
+                        const label = deliveryValidation.status === 'ok' && deliveryValidation.zoneName
+                            ? `Delivery (${deliveryValidation.zoneName})`
+                            : 'Delivery Fee';
+                        return fee > 0 ? (
+                            <div className="flex justify-between items-center text-slate-500 font-medium text-sm">
+                                <span>{label}</span>
+                                <span>${fee.toFixed(2)}</span>
+                            </div>
+                        ) : null;
+                    })()}
                 </div>
-                {/* Discount code hint — actual entry is on the Stripe checkout page */}
-                {!campaignId && (
-                    <p className="text-xs text-indigo-500 font-medium pt-2">Have a discount code? You can enter it on the payment page.</p>
-                )}
-
-                <div className="pt-4">
-                    <h2 className="text-5xl font-serif text-slate-900">${cartTotal.toFixed(2)}</h2>
-                    <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2">Total Due Today</p>
+                
+                <div className="h-px bg-slate-200 my-4" />
+                
+                <div className="flex justify-between items-start">
+                    <div>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">
+                            {fulfillmentType === 'delivery' ? 'Shipping To' : 'Pickup For'}
+                        </p>
+                        <p className="text-lg font-bold text-slate-800">{formData.name}</p>
+                        {fulfillmentType === 'delivery' && formData.address && (
+                            <p className="text-slate-600 font-medium text-sm leading-relaxed">
+                                {formData.address}<br />
+                                {formData.city}, {formData.state} {formData.zip}
+                            </p>
+                        )}
+                        {fulfillmentType === 'pickup' && (
+                            <p className="text-slate-500 font-medium text-sm">In-store Pickup</p>
+                        )}
+                    </div>
+                    <div className="text-right">
+                        <h2 className="text-4xl font-serif text-slate-900">
+                            ${(
+                                cartTotal + 
+                                (cartTotal * Number(storefrontConfig?.tax_percent || 0) / 100) + 
+                                (fulfillmentType === 'delivery'
+                                    ? (deliveryValidation.status === 'ok' ? deliveryValidation.fee! : Number(storefrontConfig?.delivery_fee || 0))
+                                    : 0)
+                            ).toFixed(2)}
+                        </h2>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Total Due</p>
+                    </div>
                 </div>
             </div>
 
-            <div className="pt-6 space-y-4">
-                <button
-                    disabled={loading}
-                    onClick={handleSubmit}
-                    className="w-full py-5 rounded-[2rem] bg-indigo-600 text-white font-bold text-lg hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-3 group disabled:opacity-70"
-                >
-                    {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <>Complete My Order <Heart className="w-5 h-5 fill-white" /></>}
-                </button>
-                <p className="text-center text-xs text-slate-400 px-8 leading-relaxed">
-                    {campaignId
-                        ? 'By confirming, you agree to receive order updates. No payment is required until pickup/delivery is confirmed.'
-                        : 'By confirming, you agree to receive order updates. Payment is due today. Delivery or pickup will be scheduled afterward.'}
-                </p>
-            </div>
+            {/* Square embedded payment form */}
+            {squareConfig ? (
+                <div className="pt-6">
+                    <SquarePaymentForm
+                        appId={squareConfig.appId}
+                        locationId={squareConfig.locationId}
+                        orderId={squareConfig.orderId}
+                        amountCents={squareConfig.amountCents}
+                        businessId={businessId}
+                        customerEmail={squareConfig.customerEmail}
+                        successUrl={squareConfig.successUrl}
+                        onSuccess={onSuccess}
+                        onError={(err) => toast.error(err)}
+                    />
+                </div>
+            ) : (
+                <div className="pt-6 space-y-4">
+                    <button
+                        disabled={loading}
+                        onClick={handleSubmit}
+                        className="w-full py-5 rounded-[2rem] bg-indigo-600 text-white font-bold text-lg hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-3 group disabled:opacity-70"
+                    >
+                        {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <>Complete My Order <Heart className="w-5 h-5 fill-white" /></>}
+                    </button>
+                    <p className="text-center text-xs text-slate-400 px-8 leading-relaxed">
+                        {campaignId
+                            ? 'By confirming, you agree to receive order updates. No payment is required until pickup/delivery is confirmed.'
+                            : 'By confirming, you agree to receive order updates. Payment is due today. Delivery or pickup will be scheduled afterward.'}
+                    </p>
+                </div>
+            )}
         </motion.div>
     );
 

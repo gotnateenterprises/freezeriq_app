@@ -7,14 +7,54 @@ export async function GET(req: Request) {
     try {
         const url = new URL(req.url);
         const sessionId = url.searchParams.get('session_id');
+        const squareOrderId = url.searchParams.get('order_id');
+        const businessId = url.searchParams.get('business_id');
 
+        // ── Square verification path ────────────────────────────────────────
+        // The square/pay route already promoted the order to production_ready
+        // synchronously. The webhook provides backup. This route only READS
+        // DB state — it never calls the Square API or mutates the order.
+        if (squareOrderId && businessId) {
+            const order = await prisma.order.findUnique({
+                where: { id: squareOrderId },
+                select: { id: true, status: true, business_id: true },
+            });
+
+            if (!order) {
+                return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+            }
+
+            if (order.business_id !== businessId) {
+                return NextResponse.json({ error: 'Order does not belong to this business' }, { status: 403 });
+            }
+
+            // production_ready: square/pay already promoted it — fully confirmed
+            // pending: payment completed but promotion is in-flight or
+            //          webhook hasn't fired yet — safe to show the page,
+            //          but the UI should display a "confirming" state, not
+            //          a final green checkmark
+            if (order.status === 'production_ready') {
+                return NextResponse.json({ success: true, confirmed: true, orderId: order.id });
+            }
+
+            if (order.status === 'pending') {
+                return NextResponse.json({ success: true, confirmed: false, orderId: order.id });
+            }
+
+            // Any other status (cancelled, etc.) — don't show false success
+            return NextResponse.json(
+                { error: 'Order is not in a confirmed state' },
+                { status: 400 }
+            );
+        }
+
+        // ── Stripe verification path (existing — unchanged) ─────────────────
         if (!sessionId) {
-            return new NextResponse('Missing session_id', { status: 400 });
+            return new NextResponse('Missing session_id or order_id', { status: 400 });
         }
 
         // Resolve connected account BEFORE retrieving the session
         // (the session was created on the connected account, not on the platform)
-        const businessId = url.searchParams.get('business_id');
         let connectedAccountId: string | undefined;
 
         if (businessId) {
@@ -84,13 +124,16 @@ export async function GET(req: Request) {
             where: { id: orderId },
             data: {
                 status: 'production_ready',
+                processor_payment_id: session.payment_intent
+                    ? String(session.payment_intent)
+                    : undefined,
             }
         });
 
         return NextResponse.json({ success: true, orderId: order.id });
 
     } catch (error: any) {
-        console.error('[STRIPE_CHECKOUT_SUCCESS_CALLBACK]', error);
+        console.error('[CHECKOUT_SUCCESS_CALLBACK]', error);
         return new NextResponse('Something went wrong. Please try again.', { status: 500 });
     }
 }

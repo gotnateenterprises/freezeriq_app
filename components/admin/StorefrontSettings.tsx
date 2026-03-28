@@ -2,7 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Save, Loader2, Tag, Percent, ExternalLink, Plus, Trash, MessageSquare } from 'lucide-react';
+import { Save, Loader2, Tag, Percent, ExternalLink, Plus, Trash, MessageSquare, ShoppingBag, MapPin } from 'lucide-react';
+
+interface DeliveryZone {
+    id?: string;
+    name: string;
+    max_radius_miles: number;
+    fee: number;
+}
 
 interface Bundle {
     id: string;
@@ -27,7 +34,13 @@ export default function StorefrontSettings() {
         manual_upsell_name: '',
         manual_upsell_price: '',
         business_slug: '',
-        testimonials: [] as { quote: string, author: string }[]
+        testimonials: [] as { quote: string, author: string }[],
+        tax_percent: 0,
+        delivery_fee: 0,
+        is_delivery_enabled: true,
+        is_pickup_enabled: true,
+        origin_address: '',
+        delivery_zones: [] as DeliveryZone[]
     });
     const [bundles, setBundles] = useState<Bundle[]>([]);
     const [loading, setLoading] = useState(true);
@@ -46,7 +59,14 @@ export default function StorefrontSettings() {
                     if (data) setConfig({
                         ...data,
                         upsell_type: data.upsell_type || 'bundle',
-                        testimonials: data.testimonials || []
+                        testimonials: data.testimonials || [],
+                        origin_address: data.origin_address || '',
+                        delivery_zones: (data.delivery_zones || []).map((z: any) => ({
+                            id: z.id,
+                            name: z.name,
+                            max_radius_miles: Number(z.max_radius_miles),
+                            fee: Number(z.fee),
+                        }))
                     });
                 }
 
@@ -473,6 +493,227 @@ export default function StorefrontSettings() {
                         </>
                     )}
                 </div>
+            </div>
+
+            {/* Fulfillment & Taxes Section */}
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-6">
+                <div>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <div className="w-1.5 h-6 bg-blue-600 rounded-full" />
+                        Fulfillment & Taxes
+                    </h3>
+                    <p className="text-sm text-slate-500 mt-1">Configure your storefront tax rates, delivery zones, and fulfillment options.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-4">
+                        <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Fulfillment Methods</h4>
+                        <div className="space-y-3">
+                            <label className="flex items-center justify-between p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 cursor-pointer hover:border-indigo-300 transition-colors">
+                                <div className="flex items-center gap-3">
+                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${config.is_pickup_enabled ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400'}`}>
+                                        <ShoppingBag size={20} />
+                                    </div>
+                                    <div>
+                                        <p className="font-bold text-slate-900 dark:text-white">Enable Pickup</p>
+                                        <p className="text-xs text-slate-500">Allow customers to pick up orders.</p>
+                                    </div>
+                                </div>
+                                <input 
+                                    type="checkbox" 
+                                    checked={config.is_pickup_enabled}
+                                    onChange={e => setConfig({ ...config, is_pickup_enabled: e.target.checked })}
+                                    className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                />
+                            </label>
+
+                            <label className="flex items-center justify-between p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 cursor-pointer hover:border-indigo-300 transition-colors">
+                                <div className="flex items-center gap-3">
+                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${config.is_delivery_enabled ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-400'}`}>
+                                        <ExternalLink size={20} />
+                                    </div>
+                                    <div>
+                                        <p className="font-bold text-slate-900 dark:text-white">Enable Delivery</p>
+                                        <p className="text-xs text-slate-500">Allow orders to be delivered.</p>
+                                    </div>
+                                </div>
+                                <input 
+                                    type="checkbox" 
+                                    checked={config.is_delivery_enabled}
+                                    onChange={e => setConfig({ ...config, is_delivery_enabled: e.target.checked })}
+                                    className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                />
+                            </label>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Fees & Rates</h4>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Sales Tax (%)</label>
+                                <div className="relative">
+                                    <Percent className="absolute left-3 top-3 text-slate-400" size={18} />
+                                    <input
+                                        type="number"
+                                        value={config.tax_percent}
+                                        onChange={e => setConfig({ ...config, tax_percent: Number(e.target.value) })}
+                                        min="0"
+                                        max="100"
+                                        step="0.001"
+                                        className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    />
+                                </div>
+                                <p className="text-[10px] text-slate-400 mt-1">Applied to subtotal before delivery fees.</p>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">
+                                    {config.delivery_zones.length > 0 ? 'Default Delivery Fee ($)' : 'Delivery Fee ($)'}
+                                </label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-2 text-slate-400 font-bold">$</span>
+                                    <input
+                                        type="number"
+                                        value={config.delivery_fee}
+                                        onChange={e => setConfig({ ...config, delivery_fee: Number(e.target.value) })}
+                                        min="0"
+                                        max="500"
+                                        step="0.01"
+                                        disabled={!config.is_delivery_enabled}
+                                        className="w-full pl-8 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none disabled:opacity-50"
+                                    />
+                                </div>
+                                <p className="text-[10px] text-slate-400 mt-1">
+                                    {config.delivery_zones.length > 0
+                                        ? 'Flat fallback fee used when no delivery zones match.'
+                                        : 'Flat fee applied to all delivery orders.'}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Delivery Zones Section */}
+                {config.is_delivery_enabled && (
+                    <div className="border-t border-slate-200 dark:border-slate-700 pt-6 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                                    <MapPin size={16} />
+                                    Delivery Zones
+                                </h4>
+                                <p className="text-xs text-slate-500 mt-1">Define distance-based delivery zones with different fees. Orders outside all zones will be blocked.</p>
+                            </div>
+                        </div>
+
+                        {/* Origin Address */}
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">
+                                Business Address (Delivery Origin)
+                            </label>
+                            <input
+                                type="text"
+                                value={config.origin_address}
+                                onChange={e => setConfig({ ...config, origin_address: e.target.value })}
+                                placeholder="123 Main St, City, State ZIP"
+                                className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">This address is geocoded on save to calculate distances to customers. Required for zone-based pricing.</p>
+                        </div>
+
+                        {/* Zones List */}
+                        <div className="space-y-3">
+                            {config.delivery_zones.map((zone, idx) => (
+                                <div key={idx} className="flex items-center gap-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                                    <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center text-sm font-bold shrink-0">
+                                        {idx + 1}
+                                    </div>
+                                    <div className="flex-1 grid grid-cols-3 gap-3">
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-slate-500 mb-0.5">Zone Name</label>
+                                            <input
+                                                type="text"
+                                                value={zone.name}
+                                                onChange={e => {
+                                                    const updated = [...config.delivery_zones];
+                                                    updated[idx] = { ...zone, name: e.target.value };
+                                                    setConfig({ ...config, delivery_zones: updated });
+                                                }}
+                                                placeholder="Local"
+                                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-slate-500 mb-0.5">Max Radius (mi)</label>
+                                            <input
+                                                type="number"
+                                                value={zone.max_radius_miles}
+                                                onChange={e => {
+                                                    const updated = [...config.delivery_zones];
+                                                    updated[idx] = { ...zone, max_radius_miles: Number(e.target.value) };
+                                                    setConfig({ ...config, delivery_zones: updated });
+                                                }}
+                                                min="0"
+                                                step="0.5"
+                                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-slate-500 mb-0.5">Fee ($)</label>
+                                            <input
+                                                type="number"
+                                                value={zone.fee}
+                                                onChange={e => {
+                                                    const updated = [...config.delivery_zones];
+                                                    updated[idx] = { ...zone, fee: Number(e.target.value) };
+                                                    setConfig({ ...config, delivery_zones: updated });
+                                                }}
+                                                min="0"
+                                                step="0.01"
+                                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                            />
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            const updated = config.delivery_zones.filter((_, i) => i !== idx);
+                                            setConfig({ ...config, delivery_zones: updated });
+                                        }}
+                                        className="shrink-0 w-8 h-8 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/40 flex items-center justify-center transition-colors"
+                                    >
+                                        <Trash size={14} />
+                                    </button>
+                                </div>
+                            ))}
+
+                            <button
+                                onClick={() => {
+                                    const lastZone = config.delivery_zones[config.delivery_zones.length - 1];
+                                    const nextRadius = lastZone ? lastZone.max_radius_miles + 5 : 5;
+                                    setConfig({
+                                        ...config,
+                                        delivery_zones: [...config.delivery_zones, {
+                                            name: `Zone ${config.delivery_zones.length + 1}`,
+                                            max_radius_miles: nextRadius,
+                                            fee: 0,
+                                        }]
+                                    });
+                                }}
+                                className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-blue-400 hover:text-blue-600 transition-colors text-sm font-bold w-full justify-center"
+                            >
+                                <Plus size={16} />
+                                Add Delivery Zone
+                            </button>
+
+                            {config.delivery_zones.length === 0 && (
+                                <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-4 py-2 rounded-xl">
+                                    No zones configured — the default delivery fee above will be used for all delivery orders.
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

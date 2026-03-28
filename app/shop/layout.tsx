@@ -1,4 +1,5 @@
 import { CartProvider } from '@/context/CartContext';
+import { Toaster } from 'sonner';
 
 export default function ShopLayout({
     children,
@@ -8,6 +9,7 @@ export default function ShopLayout({
     return (
         <CartProvider>
             {children}
+            <Toaster position="top-center" toastOptions={{ duration: 5000 }} />
         </CartProvider>
     );
 }

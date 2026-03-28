@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
     try {
+        const { auth } = await import('@/auth');
+        const session = await auth();
+        if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
         const { origin, orders } = await req.json();
         const apiKey = process.env.GOOGLE_MAPS_API_KEY;
 
