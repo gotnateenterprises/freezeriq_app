@@ -95,7 +95,9 @@ export default function StorefrontSettings() {
             if (res.ok) {
                 toast.success("Storefront settings saved");
             } else {
-                toast.error("Failed to save");
+                const data = await res.json().catch(() => ({}));
+                toast.error(`Failed to save: ${data?.error || res.statusText}`);
+                console.error('Save failed:', data);
             }
         } catch (e) {
             toast.error("An error occurred");
