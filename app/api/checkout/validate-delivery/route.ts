@@ -39,14 +39,22 @@ export async function POST(req: Request) {
         }
 
         // Load storefront config with delivery zones
-        const config = await prisma.storefrontConfig.findUnique({
+        const config: any = await prisma.storefrontConfig.findUnique({
             where: { business_id: business.id },
-            include: {
-                delivery_zones: {
-                    orderBy: { sort_order: 'asc' },
-                },
-            },
         });
+
+        // Fetch delivery zones separately via raw SQL
+        if (config?.id) {
+            const zones: any[] = await prisma.$queryRaw`
+                SELECT id, name, max_radius_miles, fee, sort_order
+                FROM delivery_zones
+                WHERE storefront_config_id = ${config.id}
+                ORDER BY sort_order ASC
+            `;
+            config.delivery_zones = zones;
+        } else if (config) {
+            config.delivery_zones = [];
+        }
 
         if (!config || !config.is_delivery_enabled) {
             return NextResponse.json(
