@@ -39,9 +39,16 @@ export async function getSquarePaymentClient(businessId: string): Promise<Square
     }
 
     const authClient = new SquareClient({ environment: SQUARE_ENV });
+    const appId = process.env.SQUARE_APP_ID || process.env.SQUARE_APPLICATION_ID;
+    const appSecret = process.env.SQUARE_APP_SECRET || process.env.SQUARE_APPLICATION_SECRET;
+    
+    if (!appId || !appSecret) {
+      throw new Error('Square application configuration (appId / appSecret) is missing.');
+    }
+
     const response = await authClient.oAuth.obtainToken({
-      clientId: process.env.SQUARE_APP_ID!,
-      clientSecret: process.env.SQUARE_APP_SECRET!,
+      clientId: appId,
+      clientSecret: appSecret,
       grantType: 'refresh_token',
       refreshToken: tokens.refresh_token,
     });
@@ -97,12 +104,15 @@ export class SquarePaymentProvider implements PaymentProvider {
     const client = await getSquarePaymentClient(req.businessId);
     const locationId = await getPrimaryLocationId(client);
 
-    const applicationId = process.env.SQUARE_APP_ID!;
+    const applicationId = process.env.SQUARE_APP_ID || process.env.SQUARE_APPLICATION_ID;
+    if (!applicationId) {
+      throw new Error('SQUARE_APP_ID or SQUARE_APPLICATION_ID environment variable is missing.');
+    }
 
     return {
       type: 'embedded',
       squareConfig: {
-        applicationId,
+        appId: applicationId,
         locationId,
       },
     };

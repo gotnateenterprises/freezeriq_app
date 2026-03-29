@@ -158,7 +158,7 @@ export default function CheckoutModal({ isOpen, onClose, primaryColor, businessI
             if (checkoutData.type === 'embedded' && checkoutData.squareConfig) {
                 // Square: show embedded payment form inline
                 setSquareConfig({
-                    appId: checkoutData.squareConfig.applicationId,
+                    appId: checkoutData.squareConfig.appId,
                     locationId: checkoutData.squareConfig.locationId,
                     orderId: checkoutData.orderId,
                     amountCents: checkoutData.amountCents,

@@ -56,6 +56,11 @@ export default function SquarePaymentForm({
       return;
     }
 
+    if (!appId) {
+      console.error('[SQUARE_PAYMENT_FORM] appId is missing');
+      return;
+    }
+
     const script = document.createElement('script');
     script.src = appId.startsWith('sandbox')
       ? 'https://sandbox.web.squarecdn.com/v1/square.js'
@@ -80,6 +85,10 @@ export default function SquarePaymentForm({
     let cancelled = false;
 
     const initCard = async () => {
+      if (!appId || !locationId) {
+        console.error('[SQUARE_CARD_INIT] appId/locationId is missing');
+        return;
+      }
       try {
         const payments = window.Square.payments(appId, locationId);
         const card = await payments.card();
@@ -172,7 +181,14 @@ export default function SquarePaymentForm({
         style={{ opacity: cardReady ? 1 : 0.3, transition: 'opacity 0.3s' }}
       />
 
-      {!cardReady && (
+      {(!appId || !locationId) && (
+        <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl text-rose-600 text-sm flex items-center gap-3">
+          <ShieldCheck className="w-5 h-5 shrink-0" />
+          <p>Payment configuration is incomplete. Please contact the kitchen.</p>
+        </div>
+      )}
+
+      {!cardReady && appId && locationId && (
         <div className="flex items-center justify-center gap-2 py-4 text-slate-400">
           <Loader2 className="w-4 h-4 animate-spin" />
           <span className="text-sm">Loading payment form...</span>

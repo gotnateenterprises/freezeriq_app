@@ -40,7 +40,7 @@ export interface CheckoutResult {
   redirectUrl?: string;
   /** Square: config for Web Payments SDK */
   squareConfig?: {
-    applicationId: string;
+    appId: string;
     locationId: string;
   };
 }
