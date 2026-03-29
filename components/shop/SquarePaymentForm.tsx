@@ -52,6 +52,7 @@ export default function SquarePaymentForm({
   // Load Square Web Payments SDK script
   useEffect(() => {
     if (window.Square) {
+      console.log('[SQUARE_PAYMENT_FORM] Square already in window');
       setSdkLoaded(true);
       return;
     }
@@ -62,15 +63,22 @@ export default function SquarePaymentForm({
     }
 
     const script = document.createElement('script');
-    script.src = appId.startsWith('sandbox')
+    const isSandbox = appId?.startsWith('sandbox');
+    script.src = isSandbox
       ? 'https://sandbox.web.squarecdn.com/v1/square.js'
       : 'https://web.squarecdn.com/v1/square.js';
     script.async = true;
-    script.onload = () => setSdkLoaded(true);
-    script.onerror = () => {
+    script.onload = () => {
+      console.log('[SQUARE_PAYMENT_FORM] SDK loaded successfully');
+      setSdkLoaded(true);
+    };
+    script.onerror = (e) => {
+      console.error('[SQUARE_PAYMENT_FORM] Script load error:', e);
       toast.error('Failed to load payment SDK');
       onError?.('Failed to load Square SDK');
     };
+    
+    console.log(`[SQUARE_PAYMENT_FORM] Loading script: ${script.src}`);
     document.body.appendChild(script);
 
     return () => {
@@ -84,25 +92,44 @@ export default function SquarePaymentForm({
 
     let cancelled = false;
 
-    const initCard = async () => {
+     const initCard = async () => {
       if (!appId || !locationId) {
-        console.error('[SQUARE_CARD_INIT] appId/locationId is missing');
+        console.warn('[SQUARE_CARD_INIT] appId/locationId is missing, waiting...');
         return;
       }
+      
+      console.log(`[SQUARE_CARD_INIT] Initializing with AppID: ${appId.substring(0, 10)}... and LocationID: ${locationId}`);
+      
       try {
+        if (!window.Square) {
+          throw new Error('Square SDK not found in window');
+        }
+        
         const payments = window.Square.payments(appId, locationId);
+        console.log('[SQUARE_CARD_INIT] Payments object created');
+        
         const card = await payments.card();
+        console.log('[SQUARE_CARD_INIT] Card object created');
         
-        if (cancelled) return;
+        if (cancelled) {
+          console.log('[SQUARE_CARD_INIT] Cancelled, destroying card');
+          await card.destroy();
+          return;
+        }
         
+        console.log('[SQUARE_CARD_INIT] Attaching card to DOM...');
         await card.attach(cardContainerRef.current);
+        console.log('[SQUARE_CARD_INIT] Card attached successfully');
+        
         cardRef.current = card;
         setCardReady(true);
       } catch (err: any) {
-        console.error('[SQUARE_CARD_INIT]', err);
+        console.error('[SQUARE_CARD_INIT] Critical error:', err);
         if (!cancelled) {
-          toast.error('Failed to initialize payment form');
-          onError?.('Card initialization failed');
+          // Check for common error messages
+          const msg = err.message || 'Unknown initialization error';
+          toast.error(`Payment initialization failed: ${msg}`);
+          onError?.(`Card initialization failed: ${msg}`);
         }
       }
     };

@@ -106,7 +106,9 @@ export class SquarePaymentProvider implements PaymentProvider {
 
     const applicationId = process.env.SQUARE_APP_ID || process.env.SQUARE_APPLICATION_ID;
     if (!applicationId) {
-      throw new Error('SQUARE_APP_ID or SQUARE_APPLICATION_ID environment variable is missing.');
+      // Log for backend visibility but return clear error
+      console.error('[SQUARE_PROVIDER] SQUARE_APP_ID is missing in environment.');
+      throw new Error('Square payment configuration is incomplete (SQUARE_APP_ID missing). Please check environment variables.');
     }
 
     return {
