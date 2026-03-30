@@ -30,7 +30,7 @@ export async function GET(req: Request) {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const params = new URLSearchParams({
       client_id: process.env.SQUARE_APP_ID!,
-      scope: 'PAYMENTS_WRITE PAYMENTS_READ ORDERS_WRITE ORDERS_READ CUSTOMERS_READ',
+      scope: 'MERCHANT_PROFILE_READ PAYMENTS_WRITE PAYMENTS_READ ORDERS_WRITE ORDERS_READ CUSTOMERS_READ',
       session: 'false',
       state,
       redirect_uri: `${appUrl}/api/auth/square/callback`,
