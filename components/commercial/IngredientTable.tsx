@@ -144,10 +144,11 @@ export default function IngredientTable({
             </div>
 
             <div className="glass-panel rounded-3xl bg-white/80 dark:bg-slate-900/60 border border-white/40 dark:border-slate-700/50 shadow-sm backdrop-blur-xl">
-                <table className="w-full text-left border-collapse">
+                <div className="w-full overflow-x-auto overflow-y-visible rounded-3xl scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-600 scrollbar-track-transparent" style={{ scrollbarGutter: 'stable' }}>
+                <table className="w-full text-left border-collapse min-w-[1200px]">
                     <thead className="bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-20 shadow-md">
                         <tr>
-                            <th className="px-6 py-5 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">Ingredient Name</th>
+                            <th className="px-6 py-5 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700 sticky left-0 z-30 bg-slate-100 dark:bg-slate-900 min-w-[220px] after:content-[''] after:absolute after:top-0 after:right-0 after:bottom-0 after:w-[1px] after:bg-slate-200 dark:after:bg-slate-700">Ingredient Name</th>
                             <th className="px-6 py-5 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">SKU</th>
                             <th className="px-6 py-5 text-right text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">Purchase Cost</th>
                             <th className="px-6 py-5 text-center text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">Pack Size</th>
@@ -182,7 +183,7 @@ export default function IngredientTable({
                                     key={ing.id}
                                     className="hover:bg-indigo-50/50 dark:hover:bg-slate-800/40 transition-colors group"
                                 >
-                                    <td className="px-6 py-4">
+                                    <td className="px-6 py-4 sticky left-0 z-10 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm after:content-[''] after:absolute after:top-0 after:right-0 after:bottom-0 after:w-[1px] after:bg-slate-100 dark:after:bg-slate-800 min-w-[220px]">
                                         <div className="flex items-center gap-2">
                                             <input
                                                 type="text"
@@ -422,6 +423,7 @@ export default function IngredientTable({
                             ))}
                     </tbody>
                 </table>
+                </div>
             </div>
         </>
     );
