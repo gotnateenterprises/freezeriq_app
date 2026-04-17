@@ -48,10 +48,15 @@ export default function FundraiserClient({
     const mainBundle = bundles[0];
 
     // Fundraiser date helpers
+    // Anchor date-only values to noon to prevent timezone drift.
+    // Without this, "2026-04-17T00:00:00.000Z" renders as April 16 in UTC-5 timezones.
     const formatDate = (dateVal: any) => {
         if (!dateVal) return null;
         try {
-            const d = new Date(dateVal);
+            const str = String(dateVal);
+            // Extract YYYY-MM-DD from ISO strings or date-only strings
+            const dateOnly = str.match(/^(\d{4}-\d{2}-\d{2})/)?.[1];
+            const d = dateOnly ? new Date(dateOnly + 'T12:00:00') : new Date(str);
             if (isNaN(d.getTime())) return null;
             return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
         } catch { return null; }
@@ -73,7 +78,9 @@ export default function FundraiserClient({
         const endDate = campaign.end_date;
         if (!endDate) return null;
         try {
-            const end = new Date(endDate);
+            const str = String(endDate);
+            const dateOnly = str.match(/^(\d{4}-\d{2}-\d{2})/)?.[1];
+            const end = dateOnly ? new Date(dateOnly + 'T12:00:00') : new Date(str);
             if (isNaN(end.getTime())) return null;
             const now = new Date();
             const diff = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
