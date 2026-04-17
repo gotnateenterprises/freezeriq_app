@@ -19,7 +19,11 @@ export default function ShopError({
             error.name === 'ChunkLoadError';
             
         if (isChunkLoadError) {
-            window.location.reload();
+            const key = 'shop_chunk_reload_attempted';
+            if (sessionStorage.getItem(key) !== '1') {
+                sessionStorage.setItem(key, '1');
+                window.location.reload();
+            }
         }
     }, [error]);
 
