@@ -11,6 +11,16 @@ export default function ShopError({
 }) {
     useEffect(() => {
         console.error('Shop page error:', error);
+
+        // Auto-recover from chunk load errors caused by Vercel deployments
+        const isChunkLoadError = 
+            error.message?.includes('Failed to load chunk') || 
+            error.message?.includes('Loading chunk') ||
+            error.name === 'ChunkLoadError';
+            
+        if (isChunkLoadError) {
+            window.location.reload();
+        }
     }, [error]);
 
     return (
