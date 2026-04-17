@@ -52,7 +52,7 @@ export default function FundraiserClient({
     const formatDate = (dateVal: any) => {
         if (!dateVal) return null;
         try {
-            const str = String(dateVal);
+            const str = dateVal instanceof Date ? dateVal.toISOString() : String(dateVal);
             // Extract YYYY-MM-DD from ISO strings or date-only strings
             const dateOnly = str.match(/^(\d{4}-\d{2}-\d{2})/)?.[1];
             const d = dateOnly ? new Date(dateOnly + 'T12:00:00') : new Date(str);
@@ -77,7 +77,7 @@ export default function FundraiserClient({
         const endDate = campaign.end_date;
         if (!endDate) return null;
         try {
-            const str = String(endDate);
+            const str = endDate instanceof Date ? endDate.toISOString() : String(endDate);
             const dateOnly = str.match(/^(\d{4}-\d{2}-\d{2})/)?.[1];
             const end = dateOnly ? new Date(dateOnly + 'T12:00:00') : new Date(str);
             if (isNaN(end.getTime())) return null;
