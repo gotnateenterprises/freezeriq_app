@@ -1,8 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from 'react';
-import Link from 'next/link';
-import { Heart, ArrowLeft, Info, ChevronRight, ChevronDown, UtensilsCrossed, Mail, CalendarDays, MapPin, Clock, Timer } from 'lucide-react';
+import { Heart, Info, ChevronRight, ChevronDown, UtensilsCrossed, Mail, CalendarDays, MapPin, Clock, Timer } from 'lucide-react';
 import BundleDetailsModal from '@/components/shop/BundleDetailsModal';
 import { formatBundleCount, type FundraiserProgressResult } from '@/lib/fundraiserMetrics';
 
@@ -128,14 +127,6 @@ export default function FundraiserClient({
 
                 <div className="max-w-6xl mx-auto relative z-10 w-full">
                     <div className="flex flex-col items-center text-center space-y-4 sm:space-y-6">
-                        <Link
-                            href={`/shop/${slug}`}
-                            className="inline-flex items-center gap-2 text-white/90 hover:text-white transition-all font-black uppercase tracking-[0.15em] sm:tracking-[0.2em] text-[9px] sm:text-[10px] bg-black/20 px-4 sm:px-5 py-2 sm:py-2.5 rounded-full backdrop-blur-md shadow-sm border border-white/20 hover:bg-black/30"
-                        >
-                            <ArrowLeft size={12} strokeWidth={3} />
-                            <span className="hidden sm:inline">Back to {business.name} Shop</span>
-                            <span className="sm:hidden">Back to Shop</span>
-                        </Link>
 
                         <div className="space-y-3 sm:space-y-4 max-w-2xl px-1 sm:px-4">
                             <span className="inline-flex items-center gap-2 bg-[#EEDF5D] text-slate-800 px-3 sm:px-4 py-1.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] animate-pulse border-2 border-[#EEDF5D] shadow-lg shadow-[#EEDF5D]/40">
