@@ -40,9 +40,11 @@ export async function GET(
                     }
                 },
                 orders: {
+                    where: { canceled_at: null },
                     orderBy: { created_at: 'desc' },
                     select: {
                         customer_name: true,
+                        total_amount: true,
                         created_at: true,
                         // Bundle-unit progress needs item-level data
                         items: {
@@ -66,7 +68,12 @@ export async function GET(
             customer_name: maskName(order.customer_name),
         }));
 
-        return NextResponse.json({ ...(campaign as any), orders: maskedOrders });
+        // Compute total_sales from active orders (not the stale denormalized field)
+        const computedTotalSales = (campaign as any).orders.reduce(
+            (sum: number, o: any) => sum + Number(o.total_amount || 0), 0
+        );
+
+        return NextResponse.json({ ...(campaign as any), total_sales: computedTotalSales, orders: maskedOrders });
 
     } catch (e: any) {
         console.error("Fetch Public Scoreboard Error:", e);

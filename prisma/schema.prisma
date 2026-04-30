@@ -323,6 +323,8 @@ model Order {
   tax_amount             Decimal             @default(0) @db.Decimal(10, 2)
   delivery_fee           Decimal             @default(0) @db.Decimal(10, 2)
   delivery_zone_name     String?             // Zone name for reporting (e.g. "Local", "Extended")
+  canceled_at            DateTime?           // Soft-delete: set when coordinator cancels an order
+  canceled_by            String?             // Actor who canceled (e.g. "coordinator")
   items             OrderItem[]
   business          Business?           @relation(fields: [business_id], references: [id])
   campaign          FundraiserCampaign? @relation(fields: [campaign_id], references: [id])

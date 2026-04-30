@@ -39,7 +39,9 @@ import {
     Eye,
     Globe,
     ExternalLink,
-    Activity
+    Activity,
+    Trash2,
+    RotateCcw
 } from 'lucide-react';
 import type { CoordinatorActionSummary } from '@/app/api/coordinator-actions/[token]/summary/route';
 import { format } from 'date-fns';
@@ -64,6 +66,11 @@ export default function CoordinatorPortal() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showOrderModal, setShowOrderModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
+    const [cancelOrderId, setCancelOrderId] = useState<string | null>(null);
+    const [isCanceling, setIsCanceling] = useState(false);
+    const [restoreOrderId, setRestoreOrderId] = useState<string | null>(null);
+    const [isRestoring, setIsRestoring] = useState(false);
+    const [showCanceled, setShowCanceled] = useState(false);
     const [copied, setCopied] = useState(false);
     const [copiedFb, setCopiedFb] = useState(false);
     const [copiedText, setCopiedText] = useState(false);
@@ -148,6 +155,56 @@ export default function CoordinatorPortal() {
     useEffect(() => {
         fetchCampaign();
     }, [token]);
+
+    // ── Cancel Order Handler ──
+    const handleCancelOrder = async () => {
+        if (!cancelOrderId) return;
+        setIsCanceling(true);
+        try {
+            const res = await fetch(`/api/coordinator/${token}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ orderId: cancelOrderId })
+            });
+            if (!res.ok) {
+                const data = await res.json();
+                toast.error(data.error || 'Failed to cancel order');
+                return;
+            }
+            toast.success('Order canceled successfully');
+            setCancelOrderId(null);
+            fetchCampaign();
+        } catch {
+            toast.error('Network error. Please try again.');
+        } finally {
+            setIsCanceling(false);
+        }
+    };
+
+    // ── Restore Order Handler ──
+    const handleRestoreOrder = async () => {
+        if (!restoreOrderId) return;
+        setIsRestoring(true);
+        try {
+            const res = await fetch(`/api/coordinator/${token}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'restore', orderId: restoreOrderId })
+            });
+            if (!res.ok) {
+                const data = await res.json();
+                toast.error(data.error || 'Failed to restore order');
+                return;
+            }
+            toast.success('Order restored successfully');
+            setRestoreOrderId(null);
+            fetchCampaign();
+        } catch {
+            toast.error('Network error. Please try again.');
+        } finally {
+            setIsRestoring(false);
+        }
+    };
 
     const fetchCampaign = async () => {
         if (!token) return;
@@ -1220,9 +1277,20 @@ export default function CoordinatorPortal() {
                                             </p>
                                         </div>
                                     </div>
-                                    <div className="text-right">
-                                        <p className="font-black text-lg text-slate-900">${order.total_amount}</p>
-                                        <span className="text-[10px] font-black uppercase text-slate-300 tracking-tighter">{order.source}</span>
+                                    <div className="flex items-center gap-3">
+                                        <div className="text-right">
+                                            <p className="font-black text-lg text-slate-900">${order.total_amount}</p>
+                                            <span className="text-[10px] font-black uppercase text-slate-300 tracking-tighter">{order.source}</span>
+                                        </div>
+                                        {order.source === 'fundraiser' && (
+                                            <button
+                                                onClick={() => setCancelOrderId(order.id)}
+                                                className="p-2 rounded-xl text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                                title="Cancel this order"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                                 {order.items && order.items.length > 0 && (
@@ -1240,9 +1308,123 @@ export default function CoordinatorPortal() {
                         ))
                     )}
                 </div>
+
+                {/* Recently Canceled Orders */}
+                {(campaign.canceledOrders || []).length > 0 && (
+                    <div className="pb-20">
+                        <button
+                            onClick={() => setShowCanceled(!showCanceled)}
+                            className="flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors px-2 mb-3"
+                        >
+                            <RotateCcw size={14} />
+                            Recently Canceled ({(campaign.canceledOrders || []).length})
+                            <span className="text-xs">{showCanceled ? '▲' : '▼'}</span>
+                        </button>
+                        {showCanceled && (
+                            <div className="space-y-3">
+                                {(campaign.canceledOrders || []).map((order: any) => (
+                                    <div key={order.id} className="bg-slate-50 p-4 rounded-2xl border border-dashed border-slate-200 opacity-70 group">
+                                        <div className="flex justify-between items-center">
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 font-black">
+                                                    {order.customer_name?.[0] || 'O'}
+                                                </div>
+                                                <div>
+                                                    <p className="font-bold text-slate-500 line-through">{order.customer_name || 'Anonymous'}</p>
+                                                    <p className="text-xs font-bold text-slate-400">
+                                                        Canceled {order.canceled_at ? format(new Date(order.canceled_at), 'MMM d, h:mm a') : ''}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <div className="text-right">
+                                                    <p className="font-bold text-slate-400 line-through">${order.total_amount}</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => setRestoreOrderId(order.id)}
+                                                    className="p-2 rounded-xl text-slate-300 hover:text-emerald-600 hover:bg-emerald-50 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                                    title="Restore this order"
+                                                >
+                                                    <RotateCcw size={16} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
             </main>
 
             {/* Offline Order Modal */}
+
+            {/* Cancel Order Confirmation Modal */}
+            {cancelOrderId && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in zoom-in-95 duration-200 space-y-4">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center">
+                                <Trash2 size={20} className="text-red-600" />
+                            </div>
+                            <h3 className="text-lg font-black text-slate-900">Cancel Order?</h3>
+                        </div>
+                        <p className="text-sm text-slate-500 font-medium leading-relaxed">
+                            This will remove the order from your campaign totals, bundle counts, and delivery sheets. The order will not be permanently deleted.
+                        </p>
+                        <div className="flex gap-3 pt-2">
+                            <button
+                                onClick={() => setCancelOrderId(null)}
+                                disabled={isCanceling}
+                                className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-700 font-bold text-sm hover:bg-slate-50 transition-all"
+                            >
+                                Keep Order
+                            </button>
+                            <button
+                                onClick={handleCancelOrder}
+                                disabled={isCanceling}
+                                className="flex-1 py-3 rounded-xl bg-red-600 text-white font-bold text-sm hover:bg-red-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                            >
+                                {isCanceling ? <Loader2 className="animate-spin" size={16} /> : <Trash2 size={16} />}
+                                {isCanceling ? 'Canceling...' : 'Cancel Order'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Restore Order Confirmation Modal */}
+            {restoreOrderId && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in zoom-in-95 duration-200 space-y-4">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+                                <RotateCcw size={20} className="text-emerald-600" />
+                            </div>
+                            <h3 className="text-lg font-black text-slate-900">Restore Order?</h3>
+                        </div>
+                        <p className="text-sm text-slate-500 font-medium leading-relaxed">
+                            This will add the order back into your campaign totals, bundle counts, and delivery sheets.
+                        </p>
+                        <div className="flex gap-3 pt-2">
+                            <button
+                                onClick={() => setRestoreOrderId(null)}
+                                disabled={isRestoring}
+                                className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-700 font-bold text-sm hover:bg-slate-50 transition-all"
+                            >
+                                Never Mind
+                            </button>
+                            <button
+                                onClick={handleRestoreOrder}
+                                disabled={isRestoring}
+                                className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold text-sm hover:bg-emerald-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                            >
+                                {isRestoring ? <Loader2 className="animate-spin" size={16} /> : <RotateCcw size={16} />}
+                                {isRestoring ? 'Restoring...' : 'Restore Order'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             {showOrderModal && (
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-300 overflow-y-auto">
                     <div className="bg-white w-full max-w-lg rounded-t-2xl sm:rounded-2xl p-6 mt-10 shadow-2xl relative animate-in slide-in-from-bottom-10 duration-300">

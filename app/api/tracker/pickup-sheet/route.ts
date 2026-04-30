@@ -68,7 +68,7 @@ export async function GET(req: Request) {
 
         // 3. Fetch all orders for this campaign with items
         const orders = await prisma.order.findMany({
-            where: { campaign_id: campaign.id },
+            where: { campaign_id: campaign.id, canceled_at: null },
             include: {
                 items: {
                     include: {
