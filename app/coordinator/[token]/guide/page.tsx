@@ -14,49 +14,17 @@ import {
     Star,
     Rocket,
     Users,
-    Target,
-    Facebook
+    Target
 } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import CopyButton from '@/components/coordinator/CopyButton';
 
 export default function SuccessGuide() {
     const params = useParams();
     const token = params.token as string;
     const [campaign, setCampaign] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(true);
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [generatedContent, setGeneratedContent] = useState('');
-    const [generatingChannel, setGeneratingChannel] = useState('');
-    const [aiRemaining, setAiRemaining] = useState<number | null>(null);
-
-
-    const handleGenerate = async (channel: string) => {
-        setIsGenerating(true);
-        setGeneratingChannel(channel);
-        setGeneratedContent('');
-        try {
-            const res = await fetch(`/api/coordinator/${token}/generate`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ channel })
-            });
-            const data = await res.json();
-            if (!res.ok) {
-                toast.error(data.error || 'Generation failed');
-                return;
-            }
-            setGeneratedContent(data.content);
-            setAiRemaining(data.remaining);
-            toast.success(`${channel.charAt(0).toUpperCase() + channel.slice(1)} content generated!`);
-        } catch {
-            toast.error('Network error. Please try again.');
-        } finally {
-            setIsGenerating(false);
-        }
-    };
 
     useEffect(() => {
         if (!token) return;

@@ -685,7 +685,7 @@ export default function CoordinatorPortal() {
             </div>
 
             {/* Gamification: Confetti on Goal Met */}
-            {progress >= 100 && (
+            {progress >= 100 && campaignPhase !== 'complete' && (
                 <Confetti
                     width={width}
                     height={height}
@@ -804,7 +804,7 @@ export default function CoordinatorPortal() {
 
                 {/* Scoreboard Card */}
                 {/* ── SECTION: Start Here ── */}
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">📍 Start Here</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">{campaignPhase === 'complete' ? '📊 Final Scoreboard' : '📍 Start Here'}</p>
 
                 <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-md shadow-indigo-500/5 border border-slate-100 relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-50 rounded-full -translate-y-10 translate-x-10 opacity-40" />
@@ -1131,13 +1131,13 @@ export default function CoordinatorPortal() {
                     )}
                 </div>
 
-                {/* 📋 Copy Scripts & Downloads */}
+                {/* 📋 Copy Scripts */}
                 <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
                     {/* Section Header */}
                     <div>
                         <h2 className="text-lg font-black flex items-center gap-2">
                             <Copy size={20} className="text-slate-600" />
-                            📋 Copy Scripts & Downloads
+                            📋 Copy Scripts
                         </h2>
                     </div>
 
@@ -1174,11 +1174,20 @@ export default function CoordinatorPortal() {
                             💡 Each message includes your bundles, link, and deadline — ready to paste.
                         </p>
                     </div>
+                </div>
+                </>
+                )}
+                {/* ── END: Share & Promote phase gate ── */}
 
-                    {/* Divider */}
-                    <div className="border-t border-slate-100" />
+                {/* ── Downloads — always visible (even after campaign ends) ── */}
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
+                    <div>
+                        <h2 className="text-lg font-black flex items-center gap-2">
+                            <Download size={20} className="text-slate-600" />
+                            📥 Downloads
+                        </h2>
+                    </div>
 
-                    {/* ── Secondary Actions: Downloads ── */}
                     <div className="space-y-2">
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                             <Download size={12} />
@@ -1246,7 +1255,6 @@ export default function CoordinatorPortal() {
                         </button>
                     </div>
 
-
                     {/* ── Full Packet (tertiary) ── */}
                     {(() => {
                         const packetAsset = campaignAssets.find(a => a.key === 'packet');
@@ -1266,9 +1274,6 @@ export default function CoordinatorPortal() {
                         );
                     })()}
                 </div>
-                </>
-                )}
-                {/* ── END: Share & Promote phase gate ── */}
 
                 {/* ── Engagement Insight ── */}
                 <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
