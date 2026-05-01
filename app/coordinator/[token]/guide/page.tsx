@@ -221,99 +221,21 @@ export default function SuccessGuide() {
                     </div>
                 </div>
 
-                {/* Social Media Strategy */}
-                <div className="bg-indigo-600 rounded-[2.5rem] p-10 text-white space-y-8">
-                    <div className="space-y-2">
-                        <h3 className="text-3xl font-black tracking-tight">Social Media Strategy</h3>
-                        <p className="text-indigo-100 font-medium opacity-80 italic">AI-powered custom content for every channel!</p>
+                {/* Social Media Strategy — links to dashboard */}
+                <div className="bg-indigo-600 rounded-[2.5rem] p-10 text-white text-center space-y-4">
+                    <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center mx-auto">
+                        <Rocket size={28} />
                     </div>
-
-                    {/* AI Generator Section */}
-                    <div className="space-y-6">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-indigo-400 rounded-xl flex items-center justify-center text-white shadow-lg">
-                                    <Rocket size={20} />
-                                </div>
-                                <div>
-                                    <h4 className="text-xl font-black tracking-tight">AI Content Generator</h4>
-                                    <p className="text-indigo-200 text-xs font-bold uppercase tracking-widest">Powered by Google Gemini</p>
-                                </div>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-xs font-black text-indigo-200 uppercase tracking-widest">
-                                    {aiRemaining !== null ? `${aiRemaining} of 40 remaining` : ''}
-                                </p>
-                            </div>
-                        </div>
-
-                        <p className="text-sm text-indigo-100 leading-relaxed font-medium">
-                            Generate custom marketing copy for any channel — instantly! Your fundraiser details are automatically included.
-                        </p>
-
-                        <div className="grid grid-cols-2 gap-3">
-                            {[
-                                { channel: 'facebook', label: '📘 Facebook' },
-                                { channel: 'text', label: '💬 Text / SMS' },
-                                { channel: 'email', label: '📧 Email' },
-                                { channel: 'instagram', label: '📸 Instagram' }
-                            ].map(({ channel, label }) => (
-                                <button
-                                    key={channel}
-                                    onClick={() => handleGenerate(channel)}
-                                    disabled={isGenerating || aiRemaining === 0}
-                                    className={`p-4 rounded-2xl border text-left transition-all ${
-                                        aiRemaining === 0
-                                            ? 'bg-white/5 border-white/10 opacity-50 cursor-not-allowed'
-                                            : 'bg-white/5 border-white/10 hover:bg-white/15 hover:border-indigo-300/50 cursor-pointer active:scale-95'
-                                    }`}
-                                >
-                                    <p className="text-sm font-black">{label}</p>
-                                    <p className="text-[10px] text-indigo-200 mt-1">
-                                        {isGenerating && generatingChannel === channel ? 'Generating...' : 'Click to generate'}
-                                    </p>
-                                </button>
-                            ))}
-                        </div>
-
-                        {aiRemaining === 0 && (
-                            <p className="text-center text-xs font-bold text-indigo-200 bg-white/5 rounded-xl p-3">
-                                ✅ You&apos;ve used all 40 AI generations! Use the templates above or copy and edit previous results.
-                            </p>
-                        )}
-
-                        {isGenerating && (
-                            <div className="flex items-center justify-center gap-3 py-6">
-                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                <p className="text-sm font-bold text-indigo-100 animate-pulse">Creating your {generatingChannel} content...</p>
-                            </div>
-                        )}
-
-                        {generatedContent && !isGenerating && (
-                            <div className="bg-indigo-900/40 rounded-3xl p-6 border border-indigo-400/30 space-y-4">
-                                <div className="flex items-center justify-between">
-                                    <p className="text-xs font-black text-indigo-300 uppercase tracking-widest">Generated Content</p>
-                                    <CopyButton text={generatedContent} label="Content Copied!" />
-                                </div>
-                                <textarea
-                                    value={generatedContent}
-                                    onChange={(e) => setGeneratedContent(e.target.value)}
-                                    rows={5}
-                                    className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm text-white font-medium resize-y focus:outline-none focus:ring-2 focus:ring-indigo-400/50"
-                                />
-                                <div className="flex gap-3">
-                                    {generatingChannel === 'facebook' && (
-                                        <button
-                                            onClick={() => window.open('https://www.facebook.com/', '_blank')}
-                                            className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 px-4 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all active:scale-95"
-                                        >
-                                            <Facebook size={16} /> Open Facebook
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                    <h3 className="text-2xl font-black tracking-tight">Ready to promote?</h3>
+                    <p className="text-indigo-100 font-medium">
+                        Use the AI Content Generator, share tools, and copy scripts on your dashboard.
+                    </p>
+                    <Link
+                        href={`/coordinator/${token}`}
+                        className="inline-flex items-center gap-2 bg-white text-indigo-600 px-6 py-3 rounded-xl font-black text-sm transition-all hover:scale-105 active:scale-95"
+                    >
+                        Go to Dashboard <ArrowRight size={16} />
+                    </Link>
                 </div>
 
                 {/* FAQ / Support */}

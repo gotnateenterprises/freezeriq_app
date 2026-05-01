@@ -625,16 +625,37 @@ export default function CoordinatorPortal() {
     const totalBundlesSold = metrics.totalBundlesSold;
     const bundleGoal = metrics.bundleGoal;
 
-    // Days remaining
+    // Days remaining (negative = campaign ended)
     const daysRemaining = campaign.end_date
-        ? Math.max(0, Math.ceil((new Date(campaign.end_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+        ? Math.ceil((new Date(campaign.end_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
         : null;
 
-    // Dynamic coaching tip
+    // Campaign phase — drives conditional rendering across the panel
+    type CampaignPhase = 'setup' | 'launch' | 'push' | 'lastDay' | 'complete';
+    const campaignPhase: CampaignPhase = (() => {
+        if (daysRemaining !== null && daysRemaining < 0) return 'complete';
+        if (daysRemaining === 0) return 'lastDay';
+        if (daysRemaining !== null && daysRemaining <= 7) return 'push';
+        if ((campaign.orders || []).length === 0) return 'setup';
+        return 'launch';
+    })();
+
+    // Daily pace: bundles needed per day to hit goal
+    const bundlesPerDay = (daysRemaining !== null && daysRemaining > 0 && totalBundlesSold < bundleGoal)
+        ? ((bundleGoal - totalBundlesSold) / daysRemaining)
+        : null;
+
+    // Dynamic coaching tip — now time-aware
     const getCoachingTip = () => {
+        if (campaignPhase === 'complete') {
+            return progress >= 100
+                ? { emoji: '🏆', text: `You crushed it! ${formatBundleCount(totalBundlesSold)} bundles sold.` }
+                : { emoji: '🎉', text: `Great effort! You sold ${formatBundleCount(totalBundlesSold)} of ${bundleGoal} bundles.` };
+        }
         if (totalBundlesSold === 0) return { emoji: '💡', text: 'Share your link with 5 people to get your first order.' };
-        if (totalBundlesSold < 0.5 * bundleGoal) return { emoji: '🔥', text: "You're gaining momentum! Share again today to keep it going." };
+        if (bundlesPerDay !== null && bundlesPerDay > 5) return { emoji: '🔥', text: `You need ~${Math.ceil(bundlesPerDay)} bundles/day. Send a group text NOW!` };
         if (totalBundlesSold >= 0.75 * bundleGoal) return { emoji: '🎉', text: 'Almost there! One more push can hit your goal!' };
+        if (bundlesPerDay !== null) return { emoji: '📈', text: `~${Math.ceil(bundlesPerDay)} bundles/day will hit your goal. Share again today!` };
         return { emoji: '📈', text: 'Great progress — keep sharing to grow your sales!' };
     };
     const coachingTip = getCoachingTip();
@@ -653,6 +674,13 @@ export default function CoordinatorPortal() {
                         </div>
                         <span className="font-black tracking-tight text-lg">Coordinator Portal</span>
                     </div>
+                    <button
+                        onClick={() => setShowSettingsModal(true)}
+                        className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-all"
+                        title="Payment Settings"
+                    >
+                        <Settings size={20} />
+                    </button>
                 </div>
             </div>
 
@@ -681,18 +709,77 @@ export default function CoordinatorPortal() {
                     </div>
                 )}
 
+                {/* Campaign Phase Banner */}
+                {campaignPhase === 'complete' && (
+                    <div className="bg-emerald-600 text-white rounded-2xl p-4 text-center">
+                        <p className="text-sm font-black uppercase tracking-widest">🎉 Campaign Complete</p>
+                        <p className="text-xs font-medium text-emerald-100 mt-1">
+                            Your fundraiser ended {Math.abs(daysRemaining!)} day{Math.abs(daysRemaining!) !== 1 ? 's' : ''} ago
+                        </p>
+                    </div>
+                )}
+                {campaignPhase === 'lastDay' && (
+                    <div className="bg-amber-500 text-white rounded-2xl p-4 text-center animate-pulse">
+                        <p className="text-sm font-black uppercase tracking-widest">⏰ LAST DAY</p>
+                        <p className="text-xs font-medium text-amber-100 mt-1">Make it count — share one more time!</p>
+                    </div>
+                )}
+                {campaignPhase === 'push' && (
+                    <div className="bg-orange-50 border border-orange-200 rounded-2xl p-3 text-center">
+                        <p className="text-sm font-bold text-orange-700">⏳ {daysRemaining} day{daysRemaining !== 1 ? 's' : ''} left — final push!</p>
+                    </div>
+                )}
+
                 {/* Personalized Header */}
                 <div className="mb-1">
                     <p className="text-sm text-slate-500 font-medium mb-0.5">
                         Hey {campaign?.customer?.contact_name?.split(" ")[0] || "there"} 👋
                     </p>
                     <h1 className="text-xl md:text-2xl font-bold text-slate-900 leading-tight">
-                        Here&apos;s your Coordinator Panel
+                        {campaignPhase === 'complete' ? 'Your Fundraiser Results' : 'Here\'s your Coordinator Panel'}
                     </h1>
                 </div>
 
-                {/* ── Step 1 Onboarding / Success — directly under heading ── */}
-                {(campaign.orders || []).length === 0 ? (
+                {/* ── Step 1 Onboarding / Success / Complete — directly under heading ── */}
+                {campaignPhase === 'complete' ? (
+                    <div className="bg-white rounded-2xl p-6 border border-emerald-200 shadow-md space-y-4">
+                        <div className="text-center space-y-2">
+                            <p className="text-3xl">{progress >= 100 ? '🏆' : '🎉'}</p>
+                            <h2 className="text-xl font-black text-slate-900">
+                                {progress >= 100 ? 'Goal Crushed!' : 'Great Fundraiser!'}
+                            </h2>
+                            <p className="text-sm text-slate-500">
+                                {campaign.name} — Final Results
+                            </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-indigo-50 rounded-xl p-3 text-center">
+                                <p className="text-2xl font-black text-indigo-600">{formatBundleCount(totalBundlesSold)}</p>
+                                <p className="text-[10px] font-bold text-indigo-400 uppercase">Bundles Sold</p>
+                            </div>
+                            <div className="bg-emerald-50 rounded-xl p-3 text-center">
+                                <p className="text-2xl font-black text-emerald-600">${metrics.totalSales.toFixed(0)}</p>
+                                <p className="text-[10px] font-bold text-emerald-400 uppercase">Total Raised</p>
+                            </div>
+                            <div className="bg-purple-50 rounded-xl p-3 text-center">
+                                <p className="text-2xl font-black text-purple-600">${metrics.estimatedEarnings.toFixed(0)}</p>
+                                <p className="text-[10px] font-bold text-purple-400 uppercase">Est. Earnings</p>
+                            </div>
+                            <div className="bg-amber-50 rounded-xl p-3 text-center">
+                                <p className="text-2xl font-black text-amber-600">{(campaign.orders || []).length}</p>
+                                <p className="text-[10px] font-bold text-amber-400 uppercase">Supporters</p>
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={handleDownloadTracker}
+                            className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all"
+                        >
+                            📥 Download Final Report
+                        </button>
+                    </div>
+                ) : (campaign.orders || []).length === 0 ? (
                     <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
                         <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Getting Started</p>
                         <h3 className="text-lg font-bold text-slate-900 mt-1">🚀 Step 1: Log Your First Order</h3>
@@ -749,6 +836,13 @@ export default function CoordinatorPortal() {
                             {progress.toFixed(0)}%
                         </p>
 
+                        {/* Daily Pace Indicator */}
+                        {bundlesPerDay !== null && (
+                            <p className="text-right text-[10px] font-bold text-slate-400 mt-0.5">
+                                📊 ~{Math.ceil(bundlesPerDay)} bundles/day to hit your goal
+                            </p>
+                        )}
+
                         {/* Estimated Earnings */}
                         {metrics.estimatedEarnings > 0 && (
                             <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-1.5">
@@ -800,23 +894,27 @@ export default function CoordinatorPortal() {
                             <div className="mt-2 flex items-center gap-1.5 text-xs font-bold text-slate-400">
                                 <Clock size={14} />
                                 <span>
-                                    {daysRemaining === 0
-                                        ? '⏰ Last day — make it count!'
-                                        : `⏳ ${daysRemaining} day${daysRemaining !== 1 ? 's' : ''} left — now is the time to push!`}
+                                    {daysRemaining < 0
+                                        ? `✅ Campaign ended ${Math.abs(daysRemaining)} day${Math.abs(daysRemaining) !== 1 ? 's' : ''} ago`
+                                        : daysRemaining === 0
+                                            ? '⏰ Last day — make it count!'
+                                            : `⏳ ${daysRemaining} day${daysRemaining !== 1 ? 's' : ''} left — now is the time to push!`}
                                 </span>
                             </div>
                         )}
                     </div>
                 </div>
 
-                {/* ── Add New Order — prominent CTA ── */}
-                <button
-                    onClick={() => setShowOrderModal(true)}
-                    className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2.5 transition-all active:scale-[0.97] shadow-lg shadow-purple-500/25"
-                >
-                    <Plus size={22} strokeWidth={3} />
-                    Add New Order
-                </button>
+                {/* ── Add New Order — prominent CTA (hidden when campaign complete) ── */}
+                {campaignPhase !== 'complete' && (
+                    <button
+                        onClick={() => setShowOrderModal(true)}
+                        className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2.5 transition-all active:scale-[0.97] shadow-lg shadow-purple-500/25"
+                    >
+                        <Plus size={22} strokeWidth={3} />
+                        Add New Order
+                    </button>
+                )}
 
                 {/* Leaderboard - Only show if name collection is enabled */}
                 {campaign.participant_label && (
@@ -828,7 +926,29 @@ export default function CoordinatorPortal() {
 
                 {/* Step 1 card relocated above Live Progress — see new location above */}
 
-                {/* ── SECTION: Share & Promote ── */}
+                {/* ── Re-engage CTA: Run Another Fundraiser (complete phase only) ── */}
+                {campaignPhase === 'complete' && (
+                    <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-6 text-center space-y-3">
+                        <p className="text-2xl">🔄</p>
+                        <h3 className="text-lg font-black text-slate-900">Want to do this again?</h3>
+                        <p className="text-sm text-slate-500">
+                            {progress >= 100
+                                ? `You sold ${formatBundleCount(totalBundlesSold)} bundles — imagine what round 2 could look like!`
+                                : `You were only ${formatBundleCount(bundleGoal - totalBundlesSold)} bundles away. Crush it next time!`
+                            }
+                        </p>
+                        <a
+                            href={`mailto:Laurie@MyFreezerChef.com?subject=We want to run another fundraiser!&body=Hi Laurie, we just finished our ${encodeURIComponent(campaign.name || '')} fundraiser and would love to run another one!`}
+                            className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-6 py-3 rounded-xl font-bold text-sm transition-all active:scale-95"
+                        >
+                            📧 Contact Us to Schedule
+                        </a>
+                    </div>
+                )}
+
+                {/* ── SECTION: Share & Promote (hidden when campaign complete) ── */}
+                {campaignPhase !== 'complete' && (
+                <>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">📣 Share & Promote</p>
 
                 <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
@@ -1146,6 +1266,9 @@ export default function CoordinatorPortal() {
                         );
                     })()}
                 </div>
+                </>
+                )}
+                {/* ── END: Share & Promote phase gate ── */}
 
                 {/* ── Engagement Insight ── */}
                 <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
@@ -1187,13 +1310,7 @@ export default function CoordinatorPortal() {
                     )}
                 </div>
 
-                <button
-                    onClick={() => setShowSettingsModal(true)}
-                    className="w-full bg-white hover:bg-slate-50 text-slate-900 p-4 rounded-2xl font-bold border border-slate-200 shadow-sm flex items-center justify-center gap-2 transition-all active:scale-95"
-                >
-                    <Settings size={20} />
-                    <span>Payment Settings</span>
-                </button>
+                {/* Settings button moved to nav bar gear icon */}
 
                 {/* ── SECTION: Info & Details ── */}
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">📄 Info & Details</p>
@@ -1280,7 +1397,6 @@ export default function CoordinatorPortal() {
                                     <div className="flex items-center gap-3">
                                         <div className="text-right">
                                             <p className="font-black text-lg text-slate-900">${order.total_amount}</p>
-                                            <span className="text-[10px] font-black uppercase text-slate-300 tracking-tighter">{order.source}</span>
                                         </div>
                                         {order.source === 'fundraiser' && (
                                             <button
