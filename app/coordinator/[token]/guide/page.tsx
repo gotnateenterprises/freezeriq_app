@@ -196,7 +196,7 @@ export default function SuccessGuide() {
                     </div>
                     <h3 className="text-2xl font-black tracking-tight">Ready to promote?</h3>
                     <p className="text-indigo-100 font-medium">
-                        Use the AI Content Generator, share tools, and copy scripts on your dashboard.
+                        Use the share tools and copy scripts on your dashboard to spread the word.
                     </p>
                     <Link
                         href={`/coordinator/${token}`}

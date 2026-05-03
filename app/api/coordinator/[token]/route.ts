@@ -247,7 +247,7 @@ export async function POST(
                 source: 'fundraiser',
                 customer_name: customerName,
                 participant_name: participantName,
-                status: 'pending',
+                status: 'fundraiser_hold',
                 total_amount: serverTotal,
                 delivery_address: deliveryAddress,
                 business_id: businessId,

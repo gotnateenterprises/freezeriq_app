@@ -37,8 +37,6 @@ import {
     Clock,
     Rocket,
     Eye,
-    Globe,
-    ExternalLink,
     Activity,
     Trash2,
     RotateCcw
@@ -49,8 +47,7 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 
 import { useParams } from 'next/navigation';
-import UpgradeRequired from '@/components/UpgradeRequired';
-import MarketingAssetGenerator from '@/components/marketing/MarketingAssetGenerator';
+
 import CopyButton from '@/components/coordinator/CopyButton';
 
 import Leaderboard from '@/components/coordinator/Leaderboard';
@@ -150,7 +147,7 @@ export default function CoordinatorPortal() {
         deliveryAddress: ''
     });
 
-    const [hasAccess, setHasAccess] = useState(true);
+
 
     useEffect(() => {
         fetchCampaign();
@@ -597,16 +594,7 @@ export default function CoordinatorPortal() {
         );
     }
 
-    if (!hasAccess) {
-        return (
-            <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
-                <UpgradeRequired
-                    feature="Coordinator Portal"
-                    description="Provide your organization leads with a private dashboard to track their sales, goals, and team performance."
-                />
-            </div>
-        );
-    }
+
 
     if (!campaign) {
         return (
@@ -1246,11 +1234,13 @@ export default function CoordinatorPortal() {
                             className="w-full mt-2 p-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2.5 transition-all border bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 active:scale-95"
                             title="Download a delivery-day pickup sheet with all orders"
                         >
-                            <span className="relative flex h-2.5 w-2.5">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-                            </span>
-                            📦 Print LIVE Pickup Sheet — Delivery Day
+                            {campaignPhase !== 'complete' && (
+                                <span className="relative flex h-2.5 w-2.5">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                                </span>
+                            )}
+                            📦 {campaignPhase === 'complete' ? 'Print Final Pickup Sheet' : 'Print LIVE Pickup Sheet — Delivery Day'}
                             <Download size={14} className="ml-auto flex-shrink-0" />
                         </button>
                     </div>

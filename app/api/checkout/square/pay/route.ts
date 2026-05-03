@@ -17,32 +17,35 @@ import crypto from 'crypto';
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { paymentToken, orderId, amountCents, businessId, customerEmail } = body;
+    const { paymentToken, orderId, amountCents, customerEmail } = body;
 
-    // Validate required fields
-    if (!paymentToken || !orderId || !amountCents || !businessId) {
+    // Validate required fields (businessId is derived from the order, never from client)
+    if (!paymentToken || !orderId || !amountCents) {
       return NextResponse.json(
-        { error: 'Missing required fields: paymentToken, orderId, amountCents, businessId' },
+        { error: 'Missing required fields: paymentToken, orderId, amountCents' },
         { status: 400 }
       );
+    }
+
+    // Verify the order exists and is pending
+    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) {
+      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    }
+    if (order.status !== 'pending') {
+      return NextResponse.json({ error: 'Order is not in pending state' }, { status: 400 });
+    }
+
+    // Derive businessId from the order (server-trusted, never from client)
+    const businessId = order.business_id;
+    if (!businessId) {
+      return NextResponse.json({ error: 'Order has no associated business' }, { status: 400 });
     }
 
     // Verify business exists
     const business = await prisma.business.findUnique({ where: { id: businessId } });
     if (!business) {
       return NextResponse.json({ error: 'Business not found' }, { status: 404 });
-    }
-
-    // Verify the order exists, belongs to this business, and is pending
-    const order = await prisma.order.findUnique({ where: { id: orderId } });
-    if (!order) {
-      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
-    }
-    if (order.business_id !== businessId) {
-      return NextResponse.json({ error: 'Order does not belong to this business' }, { status: 403 });
-    }
-    if (order.status !== 'pending') {
-      return NextResponse.json({ error: 'Order is not in pending state' }, { status: 400 });
     }
 
     // Server-side price validation: verify amount matches order total
@@ -113,15 +116,47 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    console.error('[SQUARE_PAY] Full error:', JSON.stringify(error, null, 2));
-    const detail = error?.body?.errors?.[0]?.detail
-      || error?.errors?.[0]?.detail
-      || error?.message
-      || 'Payment processing failed. Please try again.';
-    console.error('[SQUARE_PAY] Detail:', detail);
+    // 1. Detailed error logging for diagnostics
+    console.error('[SQUARE_PAY] Full Error Object:', JSON.stringify(error, (key, value) => 
+      typeof value === 'bigint' ? value.toString() : value, 2));
+
+    // 2. Identify the specific error type
+    const statusCode = error?.statusCode || error?.status || 500;
+    const errors = error?.errors || error?.body?.errors;
+    const firstError = errors?.[0];
+    
+    // 3. Handle 401 Unauthorized specifically
+    if (statusCode === 401 || firstError?.code === 'UNAUTHORIZED') {
+      console.error('[SQUARE_PAY] Unauthorized error. Tenant Square token is invalid or expired.');
+      return NextResponse.json(
+        { 
+          error: 'SQUARE_RECONNECT_REQUIRED', 
+          detail: 'Your Square connection has expired or is invalid. Please reconnect your Square account in Settings to resume payments.',
+          code: 'UNAUTHORIZED'
+        },
+        { status: 401 }
+      );
+    }
+
+    // 4. Handle Environment Mismatch (from getSquarePaymentClient)
+    if (error?.message?.includes('Environment Mismatch')) {
+      return NextResponse.json(
+        { 
+          error: 'SQUARE_ENVIRONMENT_MISMATCH', 
+          detail: error.message,
+          code: 'ENV_MISMATCH'
+        },
+        { status: 401 }
+      );
+    }
+
+    // 5. Default Error Handling
+    const detail = firstError?.detail || error?.message || 'Payment processing failed. Please try again.';
+    console.error('[SQUARE_PAY] Processing error detail:', detail);
+
     return NextResponse.json(
       { error: detail },
-      { status: 500 }
+      { status: statusCode >= 400 && statusCode < 600 ? statusCode : 500 }
     );
   }
 }

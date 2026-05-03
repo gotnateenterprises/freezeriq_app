@@ -51,7 +51,8 @@ export async function POST(req: Request) {
             },
             metadata: {
                 businessId: businessId,
-                plan: plan
+                plan: plan,
+                type: 'platform_subscription'
             }
         });
 

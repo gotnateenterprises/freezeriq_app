@@ -32,13 +32,36 @@ export async function getSquarePaymentClient(businessId: string): Promise<Square
     throw new Error('Square payment integration not connected.');
   }
 
+  const isProduction = process.env.SQUARE_ENVIRONMENT === 'production';
+  const tokenPrefix = tokens.access_token.substring(0, 8);
+  
+  console.log(`[SQUARE_CLIENT] Initializing for business ${businessId}`);
+  console.log(`[SQUARE_CLIENT] Environment: ${process.env.SQUARE_ENVIRONMENT}`);
+  console.log(`[SQUARE_CLIENT] Token Prefix: ${tokenPrefix}...`);
+
+  // Detect environment mismatch
+  // Sandbox tokens usually start with 'EAAA' (legacy) or 'sandbox-'
+  const isSandboxToken = tokens.access_token.startsWith('EAAA') || tokens.access_token.startsWith('sandbox-');
+  
+  if (isProduction && isSandboxToken) {
+    console.error(`[SQUARE_CLIENT] Environment Mismatch: Using Sandbox token in Production for business ${businessId}`);
+    throw new Error('Environment Mismatch: Attempting to use a Sandbox token in Production. Please reconnect Square in Settings.');
+  }
+  if (!isProduction && !isSandboxToken) {
+    console.error(`[SQUARE_CLIENT] Environment Mismatch: Using Production token in Sandbox for business ${businessId}`);
+    throw new Error('Environment Mismatch: Attempting to use a Production token in Sandbox. Please reconnect Square in Settings.');
+  }
+
   // Proactive refresh if within 5 days of expiry
   if (tokens.expires_at && new Date() > new Date(tokens.expires_at.getTime() - 5 * 24 * 60 * 60 * 1000)) {
+    console.log(`[SQUARE_CLIENT] Token for business ${businessId} is near expiry. Attempting proactive refresh...`);
+    
     if (!tokens.refresh_token) {
       throw new Error('Square token expired and no refresh token available. Please reconnect.');
     }
 
     const authClient = new SquareClient({ environment: SQUARE_ENV });
+    // Use consistent env var naming
     const appId = process.env.SQUARE_APP_ID || process.env.SQUARE_APPLICATION_ID;
     const appSecret = process.env.SQUARE_APP_SECRET || process.env.SQUARE_APPLICATION_SECRET;
     
@@ -46,24 +69,35 @@ export async function getSquarePaymentClient(businessId: string): Promise<Square
       throw new Error('Square application configuration (appId / appSecret) is missing.');
     }
 
-    const response = await authClient.oAuth.obtainToken({
-      clientId: appId,
-      clientSecret: appSecret,
-      grantType: 'refresh_token',
-      refreshToken: tokens.refresh_token,
-    });
+    try {
+      const response = await authClient.oAuth.obtainToken({
+        clientId: appId,
+        clientSecret: appSecret,
+        grantType: 'refresh_token',
+        refreshToken: tokens.refresh_token,
+      });
 
-    if (!response.accessToken) {
-      throw new Error('Failed to refresh Square payment token.');
+      if (!response.accessToken) {
+        throw new Error('Failed to refresh Square payment token - no access token returned.');
+      }
+
+      await tokenManager.saveTokens(
+        response.accessToken,
+        response.refreshToken,
+        response.expiresAt ? new Date(response.expiresAt) : undefined
+      );
+
+      console.log(`[SQUARE_CLIENT] Token refreshed successfully for business ${businessId}`);
+
+      return new SquareClient({ environment: SQUARE_ENV, token: response.accessToken });
+    } catch (e: any) {
+      console.error(`[SQUARE_CLIENT] Refresh failed for business ${businessId}:`, e);
+      // If it's a 401 during refresh, it means the refresh token is also invalid
+      if (e.statusCode === 401) {
+        throw new Error('Square connection has been revoked or expired. Please reconnect in settings.');
+      }
+      throw e;
     }
-
-    await tokenManager.saveTokens(
-      response.accessToken,
-      response.refreshToken,
-      response.expiresAt ? new Date(response.expiresAt) : undefined
-    );
-
-    return new SquareClient({ environment: SQUARE_ENV, token: response.accessToken });
   }
 
   return new SquareClient({ environment: SQUARE_ENV, token: tokens.access_token });
