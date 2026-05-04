@@ -38,6 +38,8 @@ interface Fundraiser {
     business_slug: string;
     is_placeholder?: boolean;
     portal_token?: string;
+    held_order_count?: number;
+    held_order_total?: number;
 }
 
 export default function FundraisersPage() {
@@ -88,6 +90,8 @@ export default function FundraisersPage() {
 
     const activeCount = fundraisers.filter(f => f.status === 'Active').length;
     const pendingCount = fundraisers.filter(f => f.status === 'Lead').length;
+    const totalHeldOrders = fundraisers.reduce((sum, f) => sum + (f.held_order_count || 0), 0);
+    const totalHeldValue = fundraisers.reduce((sum, f) => sum + (f.held_order_total || 0), 0);
 
     if (status === 'loading') return <div className="p-8 text-center text-slate-400">Loading Session...</div>;
 
@@ -138,11 +142,14 @@ export default function FundraisersPage() {
                     <p className="text-3xl font-black text-amber-600">{pendingCount}</p>
                 </div>
                 <div className="glass-panel p-6 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm">
-                    <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mb-4">
-                        <Calendar size={24} />
+                    <div className="w-12 h-12 bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-2xl flex items-center justify-center mb-4">
+                        <Receipt size={24} />
                     </div>
-                    <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-1">This Month</p>
-                    <p className="text-3xl font-black text-emerald-600">{fundraisers.length}</p>
+                    <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-1">Held Orders</p>
+                    <p className="text-3xl font-black text-violet-600">{totalHeldOrders}</p>
+                    {totalHeldValue > 0 && (
+                        <p className="text-xs font-bold text-slate-400 mt-1">${totalHeldValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} awaiting settlement</p>
+                    )}
                 </div>
             </div>
 
@@ -177,22 +184,23 @@ export default function FundraisersPage() {
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-700">
-                                <th className="px-5 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[28%]">Campaign</th>
-                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[20%]">Coordinator</th>
-                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[12%]">Status</th>
+                                <th className="px-5 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[25%]">Campaign</th>
+                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[17%]">Coordinator</th>
+                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[10%]">Status</th>
                                 <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[12%]">Dates</th>
-                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest text-right w-[18%]">Progress</th>
+                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest text-center w-[12%]">Held Orders</th>
+                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest text-right w-[14%]">Progress</th>
                                 <th className="px-2 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[10%]"></th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50">
                             {isLoading ? (
                                 <tr>
-                                    <td colSpan={6} className="px-5 py-20 text-center text-slate-400 animate-pulse font-bold">Loading Campaigns...</td>
+                                    <td colSpan={7} className="px-5 py-20 text-center text-slate-400 animate-pulse font-bold">Loading Campaigns...</td>
                                 </tr>
                             ) : filtered.length === 0 ? (
                                 <tr>
-                                    <td colSpan={6} className="px-5 py-20 text-center text-slate-400 italic">No campaigns found.</td>
+                                    <td colSpan={7} className="px-5 py-20 text-center text-slate-400 italic">No campaigns found.</td>
                                 </tr>
                             ) : filtered.map(item => (
                                 <tr key={item.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
@@ -235,6 +243,20 @@ export default function FundraisersPage() {
                                                 <p className="text-[10px] font-black text-slate-300 uppercase whitespace-nowrap">to {format(new Date(item.end_date), 'MMM d, yyyy')}</p>
                                             )}
                                         </div>
+                                    </td>
+                                    <td className="px-4 py-4 text-center">
+                                        {(item.held_order_count || 0) > 0 ? (
+                                            <div className="flex flex-col items-center gap-0.5">
+                                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-400 text-xs font-black">
+                                                    {item.held_order_count} held
+                                                </span>
+                                                <span className="text-[10px] font-bold text-slate-400 font-mono">
+                                                    ${(item.held_order_total || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </span>
+                                            </div>
+                                        ) : (
+                                            <span className="text-xs font-medium text-slate-300 dark:text-slate-600">—</span>
+                                        )}
                                     </td>
                                     <td className="px-4 py-4">
                                         <div className="flex flex-col items-end gap-1">

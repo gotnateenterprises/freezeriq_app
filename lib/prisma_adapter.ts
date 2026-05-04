@@ -192,6 +192,9 @@ export class PrismaAdapter implements DBAdapter {
         const orders = await prisma.order.findMany({
             where: {
                 business_id: this.businessId,
+                // Exclude fundraiser orders held for settlement — they belong in
+                // the Fundraiser Dashboard, not the main Orders tab.
+                status: { not: 'fundraiser_hold' as any },
                 // Exclude abandoned storefront checkout attempts (Stripe pre-payment
                 // placeholders that were never paid). Manual/Square/QB pending orders
                 // are intentionally preserved for the offline "Mark Paid" workflow.

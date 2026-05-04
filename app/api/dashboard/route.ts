@@ -72,8 +72,9 @@ export async function GET() {
         const ordersThisWeek = await prisma.order.findMany({
             where: {
                 created_at: { gte: sevenDaysAgo },
-                business_id: businessId
-                // We fetch all non-deleted orders and filter in code to be consistent
+                business_id: businessId,
+                // Exclude fundraiser orders held for settlement
+                status: { not: 'fundraiser_hold' as any }
             },
             select: {
                 created_at: true,
@@ -97,7 +98,8 @@ export async function GET() {
         const ordersLastWeek = await prisma.order.findMany({
             where: {
                 created_at: { gte: fourteenDaysAgo, lt: sevenDaysAgo },
-                business_id: businessId
+                business_id: businessId,
+                status: { not: 'fundraiser_hold' as any }
             },
             select: {
                 total_amount: true,
@@ -124,7 +126,7 @@ export async function GET() {
         const ordersThisMonth = await prisma.order.findMany({
             where: {
                 created_at: { gte: startOfMonth },
-                status: { not: 'pending' },
+                status: { notIn: ['pending', 'fundraiser_hold'] as any },
                 business_id: businessId
             },
             select: { total_amount: true }
@@ -133,7 +135,7 @@ export async function GET() {
         const ordersLastMonth = await prisma.order.findMany({
             where: {
                 created_at: { gte: startOfLastMonth, lte: endOfLastMonth },
-                status: { not: 'pending' },
+                status: { notIn: ['pending', 'fundraiser_hold'] as any },
                 business_id: businessId
             },
             select: { total_amount: true }
@@ -198,7 +200,7 @@ export async function GET() {
         // 3. Recent Activity (Orders + Social)
         const recentOrders = await prisma.order.findMany({
             where: {
-                status: { not: 'delivered' as any },
+                status: { notIn: ['delivered', 'fundraiser_hold'] as any },
                 business_id: businessId,
                 NOT: { source: 'storefront', status: 'pending' }
             },

@@ -119,7 +119,12 @@ export async function GET(req: Request) {
                     is_group_enabled: true,
                     customer_id: true,
                     created_at: true,
-                    portal_token: true
+                    portal_token: true,
+                    // Include held fundraiser orders for settlement visibility
+                    orders: {
+                        where: { status: 'fundraiser_hold' as any, canceled_at: null },
+                        select: { total_amount: true }
+                    }
                 } as any // Use 'as any' for select to avoid TS errors on potential missing fields
             });
 
@@ -157,7 +162,10 @@ export async function GET(req: Request) {
                             participant_label: (fc as any).participant_label || 'Seller',
                             group_label: (fc as any).group_label,
                             is_group_enabled: (fc as any).is_group_enabled,
-                            portal_token: (fc as any).portal_token
+                            portal_token: (fc as any).portal_token,
+                            // Settlement visibility — held order counts
+                            held_order_count: ((fc as any).orders || []).length,
+                            held_order_total: ((fc as any).orders || []).reduce((sum: number, o: any) => sum + Number(o.total_amount || 0), 0)
                         });
                     }
                 } else {
