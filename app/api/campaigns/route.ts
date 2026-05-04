@@ -120,10 +120,11 @@ export async function GET(req: Request) {
                     customer_id: true,
                     created_at: true,
                     portal_token: true,
-                    // Include held fundraiser orders for settlement visibility
+                    // Include ALL coordinator-entered orders for settlement visibility
+                    // (covers both new fundraiser_hold AND historical pending/completed)
                     orders: {
-                        where: { status: 'fundraiser_hold' as any, canceled_at: null },
-                        select: { total_amount: true }
+                        where: { source: 'fundraiser' as any, canceled_at: null },
+                        select: { total_amount: true, status: true }
                     }
                 } as any // Use 'as any' for select to avoid TS errors on potential missing fields
             });

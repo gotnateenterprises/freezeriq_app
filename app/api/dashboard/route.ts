@@ -73,8 +73,9 @@ export async function GET() {
             where: {
                 created_at: { gte: sevenDaysAgo },
                 business_id: businessId,
-                // Exclude fundraiser orders held for settlement
-                status: { not: 'fundraiser_hold' as any }
+                // Exclude all fundraiser coordinator orders (held + historical)
+                status: { not: 'fundraiser_hold' as any },
+                source: { not: 'fundraiser' as any }
             },
             select: {
                 created_at: true,
@@ -99,7 +100,8 @@ export async function GET() {
             where: {
                 created_at: { gte: fourteenDaysAgo, lt: sevenDaysAgo },
                 business_id: businessId,
-                status: { not: 'fundraiser_hold' as any }
+                status: { not: 'fundraiser_hold' as any },
+                source: { not: 'fundraiser' as any }
             },
             select: {
                 total_amount: true,
@@ -127,6 +129,7 @@ export async function GET() {
             where: {
                 created_at: { gte: startOfMonth },
                 status: { notIn: ['pending', 'fundraiser_hold'] as any },
+                source: { not: 'fundraiser' as any },
                 business_id: businessId
             },
             select: { total_amount: true }
@@ -136,6 +139,7 @@ export async function GET() {
             where: {
                 created_at: { gte: startOfLastMonth, lte: endOfLastMonth },
                 status: { notIn: ['pending', 'fundraiser_hold'] as any },
+                source: { not: 'fundraiser' as any },
                 business_id: businessId
             },
             select: { total_amount: true }
@@ -201,6 +205,7 @@ export async function GET() {
         const recentOrders = await prisma.order.findMany({
             where: {
                 status: { notIn: ['delivered', 'fundraiser_hold'] as any },
+                source: { not: 'fundraiser' as any },
                 business_id: businessId,
                 NOT: { source: 'storefront', status: 'pending' }
             },
