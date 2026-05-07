@@ -20,6 +20,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
+import { buildBundlePriceMap } from '@/lib/pricing';
 
 export async function GET(
     req: Request,
@@ -203,33 +204,35 @@ export async function POST(
             .map((item: any) => item.bundleId || item.id)
             .filter(Boolean);
 
+        // Price validation uses centralized buildBundlePriceMap() (LAW 1)
+        const bundlePriceMap = await buildBundlePriceMap(businessId, bundleIds);
+
+        // Name lookup for display/error messages only (not security-critical)
         const dbBundles = bundleIds.length > 0
             ? await prisma.bundle.findMany({
                 where: { id: { in: bundleIds }, business_id: businessId },
-                select: { id: true, price: true, name: true }
+                select: { id: true, name: true }
             })
             : [];
-
-        const bundlePriceMap = new Map(
-            dbBundles.map((b: any) => [b.id, { price: Number(b.price), name: b.name }])
-        );
+        const bundleNameMap = new Map(dbBundles.map((b: any) => [b.id, b.name as string]));
 
         // Resolve each item's price from DB — reject if any bundle is missing
         let resolvedItems: any[];
         try {
             resolvedItems = items.map((item: any) => {
                 const bundleId = item.bundleId || item.id;
-                const dbInfo = bundlePriceMap.get(bundleId);
-                if (!dbInfo) {
+                const price = bundlePriceMap.get(bundleId);
+                const name = bundleNameMap.get(bundleId);
+                if (price === undefined) {
                     throw new Error(`Bundle not found for this business`);
                 }
-                if (!dbInfo.price || dbInfo.price <= 0) {
-                    throw new Error(`Bundle "${dbInfo.name}" has no valid price`);
+                if (!price || price <= 0) {
+                    throw new Error(`Bundle "${name || bundleId}" has no valid price`);
                 }
                 return {
                     ...item,
-                    serverPrice: dbInfo.price,
-                    serverName: dbInfo.name,
+                    serverPrice: price,
+                    serverName: name || null,
                     bundleId,
                 };
             });

@@ -5,6 +5,7 @@ import { getCustomerSession } from '@/lib/customerAuth';
 import { getPaymentProvider } from '@/lib/payments';
 import { geocodeAddress, resolveDeliveryZone } from '@/lib/delivery/zones';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
+import { buildBundlePriceMap } from '@/lib/pricing';
 
 export async function POST(req: Request) {
     try {
@@ -130,23 +131,29 @@ export async function POST(req: Request) {
         }
 
         // 3. Server-side price validation — never trust client-sent prices
+        //    Price lookup uses centralized buildBundlePriceMap() (LAW 1)
         const bundleIds = items
             .filter((item: any) => item.bundleId && item.bundleId !== 'manual_upsell')
             .map((item: any) => item.bundleId);
+
+        const bundlePriceMap = await buildBundlePriceMap(business.id, bundleIds);
+
+        // Name/image lookup for Stripe line item display (not security-critical)
         const dbBundles = bundleIds.length > 0
             ? await prisma.bundle.findMany({
                 where: { id: { in: bundleIds }, business_id: business.id },
-                select: { id: true, price: true, name: true, image_url: true }
+                select: { id: true, name: true, image_url: true }
             })
             : [];
-        const bundlePriceMap = new Map(dbBundles.map((b: any) => [b.id, { price: Number(b.price), name: b.name, image_url: b.image_url }]));
+        const bundleDisplayMap = new Map(dbBundles.map((b: any) => [b.id, { name: b.name, image_url: b.image_url }]));
 
         // Build line items with DB-validated prices
         const validatedLineItems = items.map((item: any) => {
-            const dbInfo = bundlePriceMap.get(item.bundleId);
-            const unitPrice = dbInfo ? dbInfo.price : Number(item.price);
-            const productName = dbInfo ? dbInfo.name : item.name;
-            const productImage = dbInfo ? dbInfo.image_url : item.image_url;
+            const price = bundlePriceMap.get(item.bundleId);
+            const display = bundleDisplayMap.get(item.bundleId);
+            const unitPrice = price !== undefined ? price : Number(item.price);
+            const productName = display ? display.name : item.name;
+            const productImage = display ? display.image_url : item.image_url;
             return {
                 name: productName,
                 unitAmountCents: Math.round(unitPrice * 100),
@@ -195,12 +202,13 @@ export async function POST(req: Request) {
                 delivery_date: deliveryDate ? new Date(deliveryDate) : null,
                 items: {
                     create: items.map((item: any) => {
-                        const dbInfo = bundlePriceMap.get(item.bundleId);
-                        const unitPrice = dbInfo ? dbInfo.price : Number(item.price);
+                        const price = bundlePriceMap.get(item.bundleId);
+                        const display = bundleDisplayMap.get(item.bundleId);
+                        const unitPrice = price !== undefined ? price : Number(item.price);
                         return {
                             bundle_id: item.bundleId === 'manual_upsell' ? null : item.bundleId,
                             quantity: item.quantity,
-                            item_name: dbInfo ? dbInfo.name : item.name,
+                            item_name: display ? display.name : item.name,
                             unit_price: unitPrice,
                             variant_size: resolveVariantSize(item.serving_tier)
                         };

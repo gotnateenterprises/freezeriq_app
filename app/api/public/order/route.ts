@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { resolveVariantSize } from '@/lib/serving_multipliers';
+import { resolveVariantSize, getServingMultiplier } from '@/lib/serving_multipliers';
+import { buildBundlePriceMap } from '@/lib/pricing';
 
 export async function POST(req: Request) {
     try {
@@ -36,18 +37,12 @@ export async function POST(req: Request) {
         const businessId = business.id;
 
         // 1.5 SERVER-SIDE PRICE VALIDATION — never trust client prices
+        //     Uses centralized buildBundlePriceMap() from lib/pricing.ts (LAW 1)
         const bundleIds = items
             .filter((item: any) => item.bundleId && item.bundleId !== 'manual_upsell')
             .map((item: any) => item.bundleId);
 
-        const dbBundles = bundleIds.length > 0
-            ? await prisma.bundle.findMany({
-                where: { id: { in: bundleIds }, business_id: businessId },
-                select: { id: true, price: true }
-            })
-            : [];
-
-        const bundlePriceMap = new Map(dbBundles.map((b: any) => [b.id, Number(b.price)]));
+        const bundlePriceMap = await buildBundlePriceMap(businessId, bundleIds);
 
         let manualUpsellPrice: number | null = null;
         const hasManualUpsell = items.some((item: any) => item.bundleId === 'manual_upsell');
@@ -206,14 +201,21 @@ export async function POST(req: Request) {
             }
         });
 
-        // 4. Update Stock (Simple subtraction for Bundles only)
+        // 4. Update Stock (family-equivalent units)
+        //    stock_on_hand represents family-size-equivalent bundle units.
+        //    serves_5 = 1.0, serves_2 = 0.5 per unit.
+        //    Decrement = quantity × servingMultiplier
         for (const item of items) {
             if (item.bundleId && item.bundleId !== 'manual_upsell') {
+                const variantSize = resolveVariantSize(item.serving_tier);
+                const multiplier = getServingMultiplier(variantSize); // throws if undefined (LAW 8)
+                const decrementAmount = item.quantity * multiplier;
+
                 await prisma.bundle.update({
                     where: { id: item.bundleId },
                     data: {
                         stock_on_hand: {
-                            decrement: item.quantity
+                            decrement: decrementAmount
                         }
                     } as any // Cast to any to avoid partial type mismatch on Decimal decrement
                 });
