@@ -58,8 +58,37 @@ const WEIGHT_HIERARCHY = [
 ];
 
 const DENSITY_TABLE: Record<string, number> = {
-    'sugar': 200, 'brown sugar': 220, 'flour': 120, 'salt': 273, 'rice': 185, 'oats': 90, 'butter': 227, 'honey': 340, 'oil': 218,
-    'garlic': 224, 'minced garlic': 224
+    // Baking & Pantry
+    'sugar': 200, 'brown sugar': 220, 'powdered sugar': 120, 'flour': 120,
+    'salt': 273, 'rice': 185, 'oats': 90, 'breadcrumb': 108, 'cornstarch': 128,
+    // Fats & Oils
+    'butter': 227, 'oil': 218, 'olive oil': 216, 'coconut oil': 218,
+    // Liquids & Sauces
+    'honey': 340, 'maple syrup': 322, 'milk': 245, 'cream': 238,
+    'sour cream': 230, 'yogurt': 245, 'broth': 240, 'stock': 240,
+    'sauce': 245, 'salsa': 240, 'enchilada': 245, 'picante': 240,
+    'dressing': 240, 'ranch': 240,
+    // Cheese & Dairy
+    'cream cheese': 232, 'ricotta': 246, 'cheese': 113,
+    'parmesan': 100, 'mozzarella': 113, 'cheddar': 113,
+    // Proteins
+    'chicken': 140, 'ground beef': 225, 'beef': 225, 'pork': 225,
+    'sausage': 225, 'turkey': 140, 'bacon': 150,
+    // Vegetables & Produce
+    'cauliflower': 107, 'broccoli': 91, 'carrot': 128, 'onion': 160,
+    'pepper': 150, 'tomato': 180, 'potato': 150, 'corn': 154,
+    'pea': 145, 'bean': 180, 'black bean': 172, 'spinach': 30,
+    'celery': 101, 'mushroom': 70, 'zucchini': 124, 'squash': 116,
+    'cabbage': 89, 'lettuce': 55, 'cucumber': 119, 'garlic': 224,
+    'minced garlic': 224, 'green pepper': 150, 'banana pepper': 150,
+    // Pasta & Grains
+    'pasta': 105, 'noodle': 105, 'macaroni': 105,
+    // Eggs
+    'egg': 243, 'liquid egg': 243,
+    // Nuts & Seeds
+    'almond': 143, 'walnut': 120, 'pecan': 109,
+    // Canned goods (drained weight approximations)
+    'hash brown': 210, 'tater tot': 200, 'cranberry': 250,
 };
 
 export function optimizeUnit(qty: number, unit: string, ingredientName?: string): { qty: number, unit: string, original: string } {
@@ -192,7 +221,33 @@ export function convertUnit(qty: number, from: string, to: string, ingredientNam
         return qty;
     }
 
-    // 5. Impossible Conversion — LAW 8: FAIL LOUDLY, never return silent garbage
+    // 5. Volume ↔ Weight fallback (no density entry found).
+    //    Use water density (236g/cup) as a reasonable approximation.
+    //    This prevents crashes for ingredients not yet in DENSITY_TABLE.
+    const DEFAULT_GRAMS_PER_CUP = 236; // water density — safe fallback
+    if ((TO_TSP[fromL] && TO_GRAMS[toL]) || (TO_GRAMS[fromL] && TO_TSP[toL])) {
+        console.warn(
+            `[UNIT CONVERSION APPROX] Converting ${qty} "${from}" → "${to}"` +
+            `${ingredientName ? ` for ingredient "${ingredientName}"` : ''} ` +
+            `using water density fallback (${DEFAULT_GRAMS_PER_CUP}g/cup). ` +
+            `Add this ingredient to DENSITY_TABLE for accurate conversion.`
+        );
+        if (TO_TSP[fromL] && TO_GRAMS[toL]) {
+            // Volume → Weight
+            const tsp = qty * TO_TSP[fromL];
+            const cups = tsp / 48;
+            const grams = cups * DEFAULT_GRAMS_PER_CUP;
+            return grams / TO_GRAMS[toL];
+        } else {
+            // Weight → Volume
+            const grams = qty * TO_GRAMS[fromL];
+            const cups = grams / DEFAULT_GRAMS_PER_CUP;
+            const tsp = cups * 48;
+            return tsp / TO_TSP[toL];
+        }
+    }
+
+    // 6. Impossible Conversion — LAW 8: FAIL LOUDLY, never return silent garbage
     throw new Error(
         `[UNIT CONVERSION FAILURE] Cannot convert ${qty} "${from}" → "${to}"` +
         `${ingredientName ? ` for ingredient "${ingredientName}"` : ''}. ` +
