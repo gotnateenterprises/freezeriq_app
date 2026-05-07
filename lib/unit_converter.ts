@@ -178,7 +178,21 @@ export function convertUnit(qty: number, from: string, to: string, ingredientNam
         }
     }
 
-    // 4. Impossible Conversion — LAW 8: FAIL LOUDLY, never return silent garbage
+    // 4. Count/discrete units — cannot convert to/from weight or volume.
+    //    This is NOT drift — "each" is a fundamentally different measurement
+    //    family. Log a warning but return the original quantity.
+    const COUNT_UNITS = new Set(['each', 'piece', 'pieces', 'whole', 'unit', 'units', 'count', 'ea', 'pc', 'pcs', 'slice', 'slices']);
+    if (COUNT_UNITS.has(fromL) || COUNT_UNITS.has(toL)) {
+        console.warn(
+            `[UNIT CONVERSION WARNING] Cannot convert ${qty} "${from}" → "${to}"` +
+            `${ingredientName ? ` for ingredient "${ingredientName}"` : ''}. ` +
+            `Count units ("each", "piece", etc.) are not convertible to weight/volume. ` +
+            `Returning original quantity. Review recipe data if aggregation looks wrong.`
+        );
+        return qty;
+    }
+
+    // 5. Impossible Conversion — LAW 8: FAIL LOUDLY, never return silent garbage
     throw new Error(
         `[UNIT CONVERSION FAILURE] Cannot convert ${qty} "${from}" → "${to}"` +
         `${ingredientName ? ` for ingredient "${ingredientName}"` : ''}. ` +
