@@ -178,9 +178,13 @@ export function convertUnit(qty: number, from: string, to: string, ingredientNam
         }
     }
 
-    // 4. Impossible Conversion
-    console.warn(`Conversion failed: ${qty} ${from} -> ${to} (${ingredientName || 'unknown'})`);
-    return qty;
+    // 4. Impossible Conversion — LAW 8: FAIL LOUDLY, never return silent garbage
+    throw new Error(
+        `[UNIT CONVERSION FAILURE] Cannot convert ${qty} "${from}" → "${to}"` +
+        `${ingredientName ? ` for ingredient "${ingredientName}"` : ''}. ` +
+        `No conversion path found (incompatible unit families without density bridge). ` +
+        `This MUST be fixed in the recipe data.`
+    );
 }
 
 /**

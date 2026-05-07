@@ -23,8 +23,12 @@ export class InventoryEngine {
             { bundle_id: bundleId, quantity: 1, variant_size: variant }
         ]);
 
-        const requiredNames = Object.keys(run.rawIngredients);
-        if (requiredNames.length === 0) return { maxPossible: 0, limitingIngredient: "No Ingredients" };
+        // Step 2 compatibility: rawIngredients keys are now stable IDs (UUIDs), not names.
+        // Extract display names from values for the Prisma query.
+        const ingredientEntries = Object.entries(run.rawIngredients) as [string, any][];
+        if (ingredientEntries.length === 0) return { maxPossible: 0, limitingIngredient: "No Ingredients" };
+
+        const requiredNames = ingredientEntries.map(([_, val]) => val.displayName || '').filter(Boolean);
 
         // 2. Batch Fetch all required ingredients
         const ingredients = await prisma.ingredient.findMany({
@@ -39,16 +43,17 @@ export class InventoryEngine {
         let limiter = null;
 
         // 3. Compare requirements vs batch-fetched stock
-        for (const [name, req] of Object.entries(run.rawIngredients)) {
-            const stock = stockMap.get(name.toLowerCase()) || 0;
-            const required = req.qty;
+        for (const [_id, req] of ingredientEntries) {
+            const displayName = (req as any).displayName || '';
+            const stock = stockMap.get(displayName.toLowerCase()) || 0;
+            const required = (req as any).qty;
 
             if (required <= 0) continue;
 
             const possible = Math.floor(stock / required);
             if (possible < minRatio) {
                 minRatio = possible;
-                limiter = name;
+                limiter = displayName;
             }
         }
 
