@@ -19,6 +19,7 @@
  */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { resolveVariantSize } from '@/lib/serving_multipliers';
 
 export async function GET(
     req: Request,
@@ -258,7 +259,7 @@ export async function POST(
                     create: resolvedItems.map((item: any) => ({
                         bundle_id: item.bundleId,
                         quantity: item.quantity,
-                        variant_size: (item.serving_tier === 'family' || !item.serving_tier) ? 'serves_5' : 'serves_2',
+                        variant_size: resolveVariantSize(item.serving_tier),
                         item_name: item.serverName || item.name || null,
                         unit_price: item.serverPrice
                     }))

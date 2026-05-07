@@ -4,6 +4,7 @@ import { stripe } from '@/lib/stripe';
 import { getCustomerSession } from '@/lib/customerAuth';
 import { getPaymentProvider } from '@/lib/payments';
 import { geocodeAddress, resolveDeliveryZone } from '@/lib/delivery/zones';
+import { resolveVariantSize } from '@/lib/serving_multipliers';
 
 export async function POST(req: Request) {
     try {
@@ -168,15 +169,8 @@ export async function POST(req: Request) {
         const totalAmountCents = Math.round(finalTotal * 100);
 
         // 5. Generate Database Order First (Pending Payment)
-        const mapServingTier = (tier: string) => {
-            switch (tier) {
-                case 'single': return 'serves_1';
-                case 'couple': return 'serves_2';
-                case 'family': return 'serves_5';
-                case 'party': return 'serves_10';
-                default: return 'serves_5';
-            }
-        };
+        // Serving tier mapping uses centralized resolveVariantSize()
+        // from lib/serving_multipliers.ts (SINGLE SOURCE OF TRUTH)
 
         const externalId = Math.random().toString(36).substring(2, 9).toUpperCase();
 
@@ -208,7 +202,7 @@ export async function POST(req: Request) {
                             quantity: item.quantity,
                             item_name: dbInfo ? dbInfo.name : item.name,
                             unit_price: unitPrice,
-                            variant_size: mapServingTier(item.serving_tier)
+                            variant_size: resolveVariantSize(item.serving_tier)
                         };
                     })
                 }

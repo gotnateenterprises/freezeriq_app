@@ -14,6 +14,8 @@ export async function GET() {
             where: {
                 business_id: businessId,
                 status: { in: [OrderStatus.pending, OrderStatus.production_ready] },
+                // Exclude fundraiser coordinator orders — they belong in Fundraiser Dashboard
+                source: { not: 'fundraiser' as any },
                 NOT: { source: 'storefront', status: OrderStatus.pending }
             },
             include: {
@@ -35,7 +37,8 @@ export async function GET() {
         const productionOrders = await prisma.order.findMany({
             where: {
                 business_id: businessId,
-                status: { in: ['APPROVED', 'IN_PRODUCTION'] as any }
+                status: { in: ['APPROVED', 'IN_PRODUCTION'] as any },
+                source: { not: 'fundraiser' as any }
             },
             include: {
                 items: {
@@ -64,7 +67,8 @@ export async function GET() {
         const completedOrders = await prisma.order.findMany({
             where: {
                 business_id: businessId,
-                status: { in: [OrderStatus.completed, OrderStatus.COMPLETED] }
+                status: { in: [OrderStatus.completed, OrderStatus.COMPLETED] },
+                source: { not: 'fundraiser' as any }
             },
             include: {
                 customer: {
