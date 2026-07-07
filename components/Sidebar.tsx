@@ -16,7 +16,7 @@ import {
     ChevronRight,
     LogOut,
     Tag,
-    Truck,
+    MapPin,
     ShieldCheck,
     Globe,
     Package,
@@ -26,42 +26,95 @@ import {
     Palette,
     FileText,
     Sparkles,
-    ExternalLink
+    ExternalLink,
+    Warehouse,
+    ScanLine,
+    Mail,
+    GraduationCap,
+    Truck,
 } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 import TenantSwitcher from './admin/TenantSwitcher';
 
-const navItems = [
-    { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-    { name: 'Orders', href: '/orders', icon: Truck },
-    { name: 'Production', href: '/production', icon: ChefHat },
-    { name: 'Delivery', href: '/delivery', icon: Truck },
-    { type: 'divider' },
-    { name: 'Recipes', href: '/recipes', icon: BookOpen },
-    { name: 'Bundles', href: '/bundles', icon: Package },
-    { name: 'Inventory', href: '/commercial', icon: Package },
-    { type: 'divider' },
-    { name: 'Customer CRM', href: '/customers', icon: Users, requiredPlan: 'ENTERPRISE' },
-    { name: 'Fundraiser CRM', href: '/fundraisers', icon: Megaphone, requiredPlan: 'ENTERPRISE' },
-    { name: 'Marketing', href: '/campaigns', icon: Sparkles, requiredPlan: 'ENTERPRISE' },
-    { name: 'Invoices', href: '/invoices', icon: FileText, requiredPlan: 'ENTERPRISE' },
-    { name: 'Calendar', href: '/calendar', icon: Calendar },
-    { type: 'divider' },
-    { name: 'Labels', href: '/labels', icon: Printer },
+// ─── Nav section type definitions ────────────────────────────────────────────
 
-    { name: 'Suppliers', href: '/suppliers', icon: Truck },
-    { name: 'Team', href: '/settings/team', icon: Users },
-    { name: 'Training', href: '/training', icon: BookOpen },
+type NavItem = {
+    name: string;
+    href: string;
+    icon: any;
+    is_super_admin?: boolean;
+    requiredPlan?: string;
+    requiredRole?: string;
+};
 
-    // Admin Section
-    { name: 'System Settings', href: '/settings', icon: Settings, requiredRole: 'ADMIN' },
-    { name: 'Storefront', href: '/settings/storefront', icon: Palette, requiredRole: 'ADMIN' },
+type NavSection = {
+    type: 'section';
+    label: string;
+    items: NavItem[];
+};
 
-    // Platform Admin Group
-    { type: 'divider' },
-    { name: 'Platform Admin', href: '/admin/tenants', icon: ShieldCheck, is_super_admin: true },
-    { name: 'Global Suppliers', href: '/admin/suppliers', icon: Globe, is_super_admin: true },
-    { name: 'Training Resources', href: '/admin/training', icon: BookOpen, is_super_admin: true },
+// ─── Nav structure: grouped sections ─────────────────────────────────────────
+
+const navSections: NavSection[] = [
+    {
+        type: 'section',
+        label: 'Operations',
+        items: [
+            { name: 'Dashboard',   href: '/',           icon: LayoutDashboard },
+            { name: 'Orders',      href: '/orders',      icon: Truck },
+            { name: 'Calendar',    href: '/calendar',    icon: Calendar },
+            { name: 'Production',  href: '/production',  icon: ChefHat },
+            { name: 'Delivery',    href: '/delivery',    icon: MapPin },
+            { name: 'Labels',      href: '/labels',      icon: Printer },
+        ],
+    },
+    {
+        type: 'section',
+        label: 'Catalog',
+        items: [
+            { name: 'Recipes',    href: '/recipes',    icon: BookOpen },
+            { name: 'Bundles',    href: '/bundles',    icon: Package },
+            { name: 'Inventory',  href: '/commercial', icon: Warehouse },
+            { name: 'Suppliers',  href: '/suppliers',  icon: Truck },
+        ],
+    },
+    {
+        type: 'section',
+        label: 'Sales & CRM',
+        items: [
+            { name: 'Customer CRM',   href: '/customers',  icon: Users,     requiredPlan: 'ENTERPRISE' },
+            { name: 'Fundraiser CRM', href: '/fundraisers', icon: Megaphone, requiredPlan: 'ENTERPRISE' },
+            { name: 'Marketing',      href: '/campaigns',  icon: Sparkles,  requiredPlan: 'ENTERPRISE' },
+            { name: 'Invoices',       href: '/invoices',   icon: FileText,  requiredPlan: 'ENTERPRISE' },
+        ],
+    },
+    {
+        type: 'section',
+        label: 'Tools',
+        items: [
+            { name: 'Scanner',   href: '/scanner',  icon: ScanLine },
+            { name: 'Inbox',     href: '/inbox',    icon: Mail },
+            { name: 'Training',  href: '/training', icon: GraduationCap },
+        ],
+    },
+    {
+        type: 'section',
+        label: 'Business',
+        items: [
+            { name: 'System Settings', href: '/settings',            icon: Settings, requiredRole: 'ADMIN' },
+            { name: 'Storefront',      href: '/settings/storefront', icon: Palette,  requiredRole: 'ADMIN' },
+            { name: 'Team',            href: '/settings/team',       icon: Users },
+        ],
+    },
+    {
+        type: 'section',
+        label: 'Super Admin',
+        items: [
+            { name: 'Platform Admin',      href: '/admin/tenants',   icon: ShieldCheck, is_super_admin: true },
+            { name: 'Global Suppliers',    href: '/admin/suppliers', icon: Globe,       is_super_admin: true },
+            { name: 'Training Resources',  href: '/admin/training',  icon: BookOpen,    is_super_admin: true },
+        ],
+    },
 ];
 
 export default function Sidebar() {
@@ -190,6 +243,30 @@ export default function Sidebar() {
         return name;
     };
 
+    // ─── Per-item gating helper ───────────────────────────────────────────────
+
+    const isSuperAdmin = (session?.user as any)?.isSuperAdmin;
+    const userPlan = (session?.user as any)?.plan;
+    const userRole = (session?.user as any)?.role;
+    const planHierarchy: Record<string, number> = { 'BASE': 0, 'PRO': 1, 'ENTERPRISE': 2, 'ULTIMATE': 3, 'FREE': 4 };
+
+    const isItemVisible = (item: NavItem): boolean => {
+        // Super Admin gating
+        if (item.is_super_admin && !isSuperAdmin) return false;
+
+        // Role gating
+        if (item.requiredRole && userRole !== item.requiredRole) return false;
+
+        // Plan gating — SuperAdmin bypass or FREE plan (Enterprise trial/comp)
+        if (item.requiredPlan) {
+            const userPlanLevel = planHierarchy[userPlan] || 0;
+            const requiredLevel = planHierarchy[item.requiredPlan] || 0;
+            if (userPlanLevel < requiredLevel && !isSuperAdmin && userPlan !== 'FREE') return false;
+        }
+
+        return true;
+    };
+
     return (
         <aside className="w-[280px] h-screen fixed left-0 top-0 glass-sidebar z-50 flex flex-col transition-all duration-300 print:hidden dark:bg-slate-900/80 dark:border-slate-800">
             <div className="p-8 pb-4">
@@ -248,69 +325,57 @@ export default function Sidebar() {
 
             <TenantSwitcher />
 
-            <nav className="flex-1 px-4 flex flex-col gap-3 mt-6 overflow-y-auto no-scrollbar">
-                {navItems.map((item, index) => {
-                    const navItem = item as { name: string; href: string; icon: any; is_super_admin?: boolean; requiredPlan?: string; requiredRole?: string };
+            <nav className="flex-1 px-4 flex flex-col gap-1 mt-2 overflow-y-auto no-scrollbar">
+                {navSections.map((section, sectionIndex) => {
+                    // Filter to only visible items in this section
+                    const visibleItems = section.items.filter(isItemVisible);
 
-                    // Super Admin Gating
-                    if (navItem.is_super_admin && !(session?.user as any)?.isSuperAdmin) {
-                        return null;
-                    }
-
-                    // Role Gating
-                    if (navItem.requiredRole && (session?.user as any)?.role !== navItem.requiredRole) {
-                        return null;
-                    }
-
-                    // Plan Gating - Allow SuperAdmin bypass OR Free plan (which serves as Enterprise Trial/Comp)
-                    const isSuperAdmin = (session?.user as any)?.isSuperAdmin;
-                    const userPlan = (session?.user as any)?.plan;
-
-                    if (navItem.requiredPlan) {
-                        const planHierarchy: Record<string, number> = { 'BASE': 0, 'PRO': 1, 'ENTERPRISE': 2, 'ULTIMATE': 3, 'FREE': 4 };
-                        const userPlanLevel = planHierarchy[userPlan] || 0;
-                        const requiredLevel = planHierarchy[navItem.requiredPlan] || 0;
-
-                        if (userPlanLevel < requiredLevel && !isSuperAdmin && userPlan !== 'FREE') {
-                            return null;
-                        }
-                    }
-
-                    if ('type' in item && item.type === 'divider') {
-                        return (
-                            <div key={`divider-${index}`} className="my-3 px-4">
-                                <div className="h-0.5 bg-slate-200 dark:bg-slate-700 w-full opacity-100" />
-                            </div>
-                        );
-                    }
-
-                    const Icon = navItem.icon;
-                    const href = navItem.href;
-                    const isActive = pathname === href || (navItem.name === 'Recipes' && pathname.startsWith('/recipes'));
+                    // Don't render a section at all if none of its items are visible
+                    if (visibleItems.length === 0) return null;
 
                     return (
-                        <Fragment key={navItem.href}>
-                            <Link
-                                href={href}
-                                className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group font-medium text-sm ${isActive
-                                    ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-lg shadow-indigo-500/20'
-                                    : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-indigo-600 dark:hover:text-indigo-400'
-                                    }`}
-                            >
-                                <Icon size={20} strokeWidth={isActive ? 2.5 : 2} className={`transition-colors ${isActive ? 'text-white' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-500 dark:group-hover:text-indigo-400'}`} />
-                                <span className="tracking-wide">{navItem.name}</span>
-                            </Link>
-                            {navItem.name === 'Recipes' && resumeRecipeId && (
-                                <Link
-                                    key="resume-recipe"
-                                    href={`/recipes/${resumeRecipeId}`}
-                                    className={`flex items-center gap-3 px-4 py-2 ml-4 mt-1 rounded-xl transition-all duration-200 group font-medium text-xs text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-50 dark:hover:bg-slate-800/50`}
-                                >
-                                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                                    <span className="tracking-wide">Resume Recipe</span>
-                                </Link>
-                            )}
-                        </Fragment>
+                        <div key={section.label} className={sectionIndex > 0 ? 'mt-4' : 'mt-2'}>
+                            {/* Section header label */}
+                            <div className="px-4 mb-1">
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                                    {section.label}
+                                </span>
+                            </div>
+
+                            {/* Section items */}
+                            <div className="flex flex-col gap-0.5">
+                                {visibleItems.map((item) => {
+                                    const Icon = item.icon;
+                                    const href = item.href;
+                                    const isActive = pathname === href || (item.name === 'Recipes' && pathname.startsWith('/recipes'));
+
+                                    return (
+                                        <Fragment key={href}>
+                                            <Link
+                                                href={href}
+                                                className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group font-medium text-sm ${isActive
+                                                    ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-lg shadow-indigo-500/20'
+                                                    : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-indigo-600 dark:hover:text-indigo-400'
+                                                    }`}
+                                            >
+                                                <Icon size={20} strokeWidth={isActive ? 2.5 : 2} className={`transition-colors ${isActive ? 'text-white' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-500 dark:group-hover:text-indigo-400'}`} />
+                                                <span className="tracking-wide">{item.name}</span>
+                                            </Link>
+                                            {item.name === 'Recipes' && resumeRecipeId && (
+                                                <Link
+                                                    key="resume-recipe"
+                                                    href={`/recipes/${resumeRecipeId}`}
+                                                    className={`flex items-center gap-3 px-4 py-2 ml-4 mt-1 rounded-xl transition-all duration-200 group font-medium text-xs text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-50 dark:hover:bg-slate-800/50`}
+                                                >
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                                                    <span className="tracking-wide">Resume Recipe</span>
+                                                </Link>
+                                            )}
+                                        </Fragment>
+                                    );
+                                })}
+                            </div>
+                        </div>
                     );
                 })}
             </nav>

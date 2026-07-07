@@ -234,8 +234,20 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
         );
     }
 
-    const { business, bundles, fundraisers } = data;
+    const { business } = data;
     const { branding, storefrontConfig } = business;
+
+    // ── Defensive array normalization ─────────────────────────────────────────
+    // The API normalizes these at the source, but we add client-side guards too
+    // so a stale deployment or unexpected API shape never crashes the storefront.
+    const bundles: Bundle[] = Array.isArray(data.bundles) ? data.bundles : [];
+    const fundraisers: Fundraiser[] = Array.isArray(data.fundraisers) ? data.fundraisers : [];
+    if (storefrontConfig) {
+        if (!Array.isArray(storefrontConfig.testimonials)) {
+            storefrontConfig.testimonials = [];
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Filter bundles
     const regularBundles = bundles.filter(b => !b.is_surplus);

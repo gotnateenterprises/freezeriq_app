@@ -97,7 +97,7 @@ export async function POST(req: Request) {
         }
 
         // Resolve zone
-        const zones = config.delivery_zones.map(z => ({
+        const zones = config.delivery_zones.map((z: { id: string; name: string; max_radius_miles: number; fee: number; sort_order: number }) => ({
             id: z.id,
             name: z.name,
             max_radius_miles: Number(z.max_radius_miles),

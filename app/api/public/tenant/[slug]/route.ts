@@ -2,6 +2,28 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 
+/**
+ * Safely coerce a JSONB field from $queryRaw into a plain JS array.
+ * Postgres + Prisma can return JSONB columns as:
+ *   - a pre-parsed JS array   → return as-is
+ *   - a JSON string           → parse it; return the array or []
+ *   - null / undefined        → return []
+ *   - any other value         → return []
+ * This helper never throws.
+ */
+function toArray(value: unknown): unknown[] {
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            if (Array.isArray(parsed)) return parsed;
+        } catch {
+            // Not valid JSON — fall through to []
+        }
+    }
+    return [];
+}
+
 export async function GET(
     request: Request,
     { params }: { params: Promise<{ slug: string }> }
@@ -180,7 +202,15 @@ export async function GET(
 
         const storefrontConfig = storefrontConfigs[0] || null;
 
-        // 6b. Fetch delivery zones for this storefront config
+        // 6b. Normalize JSONB array fields in storefrontConfig.
+        // $queryRaw can return JSONB columns as strings, pre-parsed objects, or null
+        // depending on the Postgres driver version. toArray() handles all cases safely.
+        if (storefrontConfig) {
+            storefrontConfig.testimonials = toArray(storefrontConfig.testimonials);
+            storefrontConfig.trust_badges = toArray(storefrontConfig.trust_badges);
+        }
+
+        // 6c. Fetch delivery zones for this storefront config
         if (storefrontConfig?.id) {
             const zones: any[] = await prisma.$queryRaw`
                 SELECT id, name, max_radius_miles, fee
@@ -192,25 +222,32 @@ export async function GET(
             delete storefrontConfig.id; // Don't expose internal ID to client
         }
 
+        // Ensure bundlesWithRecipes is always an array before mapping
+        const safeBundlesRaw: any[] = Array.isArray(bundlesWithRecipes) ? bundlesWithRecipes : [];
+
+        // Ensure fundraisers is always an array before mapping
+        const safeFundraisersRaw: any[] = Array.isArray(fundraisers) ? fundraisers : [];
+
         return NextResponse.json({
             business: {
                 id: business.id,
                 name: business.name,
                 slug: business.slug,
                 branding,
-                storefrontConfig // Add to response
+                storefrontConfig
             },
-            bundles: bundlesWithRecipes.map((b: any) => {
+            bundles: safeBundlesRaw.map((b: any) => {
                 const tierLower = (b.serving_tier || '').toLowerCase();
                 const isServes2 = tierLower.includes('couple') || tierLower.includes('serves 2') || tierLower === 'couple';
                 const price = b.price ? Number(b.price) : (isServes2 ? 60.00 : 125.00);
 
+                const safeContents: any[] = Array.isArray(b.contents) ? b.contents : [];
                 return {
                     ...b,
                     price,
                     order_cutoff_date: bundleCutoffs[b.id] || null,
                     stock_on_hand: Number(b.stock_on_hand),
-                    contents: b.contents.map((c: any) => ({
+                    contents: safeContents.map((c: any) => ({
                         ...c,
                         recipe: {
                             ...c.recipe,
@@ -219,7 +256,7 @@ export async function GET(
                     }))
                 };
             }),
-            fundraisers: fundraisers.map(f => ({
+            fundraisers: safeFundraisersRaw.map(f => ({
                 ...f,
                 customer: { name: f.customer_name }
             }))

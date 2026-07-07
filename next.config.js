@@ -35,10 +35,6 @@ const nextConfig = {
                     {
                         key: 'Referrer-Policy',
                         value: 'strict-origin-when-cross-origin',
-                    },
-                    {
-                        key: 'test-header',
-                        value: 'security-applied',
                     }
                 ],
             },

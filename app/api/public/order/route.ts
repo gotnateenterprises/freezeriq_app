@@ -246,6 +246,6 @@ export async function POST(req: Request) {
 
     } catch (e: any) {
         console.error("Failed to place storefront order:", e);
-        return NextResponse.json({ error: e.message || "Internal Server Error" }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to place order' }, { status: 500 });
     }
 }

@@ -13,7 +13,7 @@ interface TestimonialWallProps {
 }
 
 export default function TestimonialWall({ testimonials }: TestimonialWallProps) {
-    if (!testimonials || testimonials.length === 0) return null;
+    if (!Array.isArray(testimonials) || testimonials.length === 0) return null;
 
     return (
         <section className="py-12 md:py-24 relative overflow-hidden">

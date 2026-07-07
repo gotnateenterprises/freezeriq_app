@@ -90,7 +90,9 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
             data: {
                 stripe_subscription_id: subscriptionId,
                 subscription_status: subscription.status as SubscriptionStatus,
-                current_period_end: new Date(subscription.current_period_end * 1000),
+                current_period_end: subscription.items.data[0]?.current_period_end
+                    ? new Date(subscription.items.data[0].current_period_end * 1000)
+                    : null,
                 plan: plan || undefined,
             }
         });
@@ -122,7 +124,9 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
         where: { id: businessId },
         data: {
             subscription_status: subscription.status as SubscriptionStatus,
-            current_period_end: new Date(subscription.current_period_end * 1000),
+            current_period_end: subscription.items.data[0]?.current_period_end
+                ? new Date(subscription.items.data[0].current_period_end * 1000)
+                : null,
             plan: plan || undefined,
         }
     });

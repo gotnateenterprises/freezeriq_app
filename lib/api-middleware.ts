@@ -18,7 +18,7 @@ export function withErrorHandler(handler: RouteHandler): RouteHandler {
 
             console.error('[API Error]', error);
             return NextResponse.json(
-                { error: error?.message || 'Internal Server Error' },
+                { error: 'Internal Server Error' },
                 { status: 500 }
             );
         }

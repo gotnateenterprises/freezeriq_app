@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
+import { buildBundlePriceMap } from '@/lib/pricing';
 
 
 export async function GET(req: NextRequest) {
@@ -143,20 +144,17 @@ export async function POST(req: NextRequest) {
         let totalAmount = 0;
 
         const bundleIds = items.map((i: any) => i.bundle_id);
-        const bundles = await prisma.bundle.findMany({
-            where: { id: { in: bundleIds } }
-        });
+        const bundlePriceMap = await buildBundlePriceMap(session.user.businessId, bundleIds);
 
-        const bundleMap = new Map(bundles.map(b => [b.id, b]));
+        // Validate all bundle IDs upfront — tenant-scoped (buildBundlePriceMap filters by businessId)
+        const invalidBundle = items.find((item: any) => !bundlePriceMap.has(item.bundle_id));
+        if (invalidBundle) {
+            return NextResponse.json({ error: 'Invalid bundle' }, { status: 400 });
+        }
 
         const orderItemsData = items.map((item: any) => {
-            const bundle = bundleMap.get(item.bundle_id);
-            if (!bundle) {
-                throw new Error(`Invalid bundle ID: ${item.bundle_id}`);
-            }
-            if (bundle && bundle.price) {
-                totalAmount += Number(bundle.price) * item.quantity;
-            }
+            const price = bundlePriceMap.get(item.bundle_id) as number;
+            totalAmount += price * item.quantity;
             return {
                 bundle_id: item.bundle_id,
                 quantity: parseInt(item.quantity),
@@ -211,9 +209,7 @@ export async function POST(req: NextRequest) {
 
     } catch (e: any) {
         console.error('Failed to create manual order:', e);
-        return NextResponse.json({
-            error: e.message || 'Internal Server Error'
-        }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
     }
 }
 
@@ -260,9 +256,7 @@ export async function DELETE(req: NextRequest) {
 
     } catch (e: any) {
         console.error('Failed to delete order:', e);
-        return NextResponse.json({
-            error: e.message || 'Internal Server Error'
-        }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to delete order' }, { status: 500 });
     }
 }
 

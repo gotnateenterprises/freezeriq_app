@@ -89,7 +89,7 @@ export async function POST(req: Request) {
                     );
                 }
 
-                const zoneInputs = zones.map(z => ({
+                const zoneInputs = zones.map((z: { id: string; name: string; max_radius_miles: number; fee: number; sort_order: number }) => ({
                     id: z.id,
                     name: z.name,
                     max_radius_miles: Number(z.max_radius_miles),
@@ -353,8 +353,7 @@ export async function POST(req: Request) {
 
     } catch (error: any) {
         console.error('[CHECKOUT]', error);
-        const message = `Checkout error: ${error.message || error}`;
-        return NextResponse.json({ error: message }, { status: 500 });
+        return NextResponse.json({ error: 'Checkout failed. Please try again.' }, { status: 500 });
     }
 }
 
