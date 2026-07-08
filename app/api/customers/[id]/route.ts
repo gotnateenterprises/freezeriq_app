@@ -118,10 +118,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
                 }
             });
 
-            // If not found, try lax match (name only) and update business_id if it's null or different
+            // If not found, try lax match (name only) scoped to this tenant only.
+            // Do NOT return customers from other tenants - return null to simulate 404.
             if (!promotedOrg) {
                 const bestMatch = await prisma.customer.findFirst({
-                    where: { name: encodedName },
+                    where: { name: encodedName, business_id: session.user.businessId },
                     include: {
                         campaigns: { orderBy: { created_at: 'desc' }, take: 5 },
                         orders: { orderBy: { created_at: 'desc' }, include: { items: { include: { bundle: true } } } }
@@ -129,18 +130,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
                 });
 
                 if (bestMatch) {
-                    // Do NOT claim automatically. Just return the match if found.
-                    // Ideally we should filter this out or return 404 if it belongs to another business, 
-                    // but for now let's just STOP the stealing.
-                    if (bestMatch.business_id !== session.user.businessId) {
-                        console.warn(`[GET Customer] Found match ${bestMatch.id} but belongs to business ${bestMatch.business_id}. NOT CLAIMING.`);
-                        // Option: Return null to simulate 404? 
-                        // For now, let's allow viewing (maybe?) but definitely not claiming.
-                        promotedOrg = bestMatch;
-                    } else {
-                        promotedOrg = bestMatch;
-                    }
+                    promotedOrg = bestMatch;
                 }
+                // If no match within this tenant, promotedOrg remains null → falls through to 404
             }
 
             if (promotedOrg) {
@@ -188,7 +180,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         }
 
         const orders = await prisma.order.findMany({
-            where: { customer_name: encodedName },
+            where: { customer_name: encodedName, business_id: session.user.businessId },
             orderBy: { created_at: 'desc' },
             include: {
                 items: {
@@ -348,7 +340,13 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
             });
 
         } else {
-            // Standard Update for existing Org
+            // Standard Update for existing Org — verify ownership first
+            const existingCustomer = await prisma.customer.findUnique({ where: { id }, select: { business_id: true } });
+            if (!existingCustomer) return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+            if (existingCustomer.business_id !== session.user.businessId) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+            }
+
             const customerTypeMap: Record<string, 'direct_customer' | 'organization' | 'fundraiser_org'> = {
                 'Customer': 'direct_customer',
                 'Individual': 'direct_customer',

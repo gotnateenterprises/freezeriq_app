@@ -19,12 +19,16 @@ export { STATUS_FLOW, STATUS_LABELS, STATUS_COLORS };
  */
 export async function progressStatus(
     customerId: string,
-    trigger?: string
+    trigger?: string,
+    businessId?: string
 ): Promise<{ success: boolean; newStatus: CustomerStatus | null; message: string }> {
     try {
         // Get current customer status
+        const whereClause: any = { id: customerId };
+        if (businessId) whereClause.business_id = businessId;
+
         const customer = await prisma.customer.findUnique({
-            where: { id: customerId },
+            where: whereClause,
             select: { status: true },
         });
 
@@ -71,9 +75,20 @@ export async function progressStatus(
  */
 export async function setStatus(
     customerId: string,
-    newStatus: CustomerStatus
+    newStatus: CustomerStatus,
+    businessId?: string
 ): Promise<{ success: boolean; message: string }> {
     try {
+        // Verify ownership if businessId provided
+        if (businessId) {
+            const customer = await prisma.customer.findUnique({
+                where: { id: customerId },
+                select: { business_id: true },
+            });
+            if (!customer) return { success: false, message: 'Customer not found' };
+            if (customer.business_id !== businessId) return { success: false, message: 'Forbidden' };
+        }
+
         const updateData: any = { status: newStatus };
 
         // If moving to COMPLETE, archive the customer
@@ -128,8 +143,18 @@ export function isValidTransition(from: CustomerStatus, to: CustomerStatus): boo
 /**
  * Archive a customer
  */
-export async function archiveCustomer(customerId: string): Promise<{ success: boolean; message: string }> {
+export async function archiveCustomer(customerId: string, businessId?: string): Promise<{ success: boolean; message: string }> {
     try {
+        // Verify ownership if businessId provided
+        if (businessId) {
+            const customer = await prisma.customer.findUnique({
+                where: { id: customerId },
+                select: { business_id: true },
+            });
+            if (!customer) return { success: false, message: 'Customer not found' };
+            if (customer.business_id !== businessId) return { success: false, message: 'Forbidden' };
+        }
+
         await prisma.customer.update({
             where: { id: customerId },
             data: {
@@ -149,8 +174,18 @@ export async function archiveCustomer(customerId: string): Promise<{ success: bo
 /**
  * Unarchive a customer (for starting a new fundraiser)
  */
-export async function unarchiveCustomer(customerId: string): Promise<{ success: boolean; message: string }> {
+export async function unarchiveCustomer(customerId: string, businessId?: string): Promise<{ success: boolean; message: string }> {
     try {
+        // Verify ownership if businessId provided
+        if (businessId) {
+            const customer = await prisma.customer.findUnique({
+                where: { id: customerId },
+                select: { business_id: true },
+            });
+            if (!customer) return { success: false, message: 'Customer not found' };
+            if (customer.business_id !== businessId) return { success: false, message: 'Forbidden' };
+        }
+
         await prisma.customer.update({
             where: { id: customerId },
             data: {

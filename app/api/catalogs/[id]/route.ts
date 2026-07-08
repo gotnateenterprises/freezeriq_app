@@ -20,6 +20,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         });
 
         if (!catalog) return NextResponse.json({ error: "Catalog not found" }, { status: 404 });
+        if (catalog.business_id !== session.user.businessId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
         return NextResponse.json(catalog);
     } catch (e: any) {
@@ -34,8 +35,35 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         const session = await auth();
         if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+        // Ownership check before mutation
+        const existing = await prisma.catalog.findUnique({ where: { id }, select: { business_id: true } });
+        if (!existing) return NextResponse.json({ error: "Catalog not found" }, { status: 404 });
+        if (existing.business_id !== session.user.businessId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
         const body = await req.json();
         const { name, start_date, end_date, is_active, bundles_to_add, bundles_to_remove } = body;
+
+        // Verify bundles_to_add belong to this tenant before associating
+        if (bundles_to_add && Array.isArray(bundles_to_add) && bundles_to_add.length > 0) {
+            const ownedBundles = await prisma.bundle.findMany({
+                where: { id: { in: bundles_to_add }, business_id: session.user.businessId },
+                select: { id: true }
+            });
+            if (ownedBundles.length !== bundles_to_add.length) {
+                return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+            }
+        }
+
+        // Verify bundles_to_remove belong to this tenant before modifying
+        if (bundles_to_remove && Array.isArray(bundles_to_remove) && bundles_to_remove.length > 0) {
+            const ownedBundles = await prisma.bundle.findMany({
+                where: { id: { in: bundles_to_remove }, business_id: session.user.businessId },
+                select: { id: true }
+            });
+            if (ownedBundles.length !== bundles_to_remove.length) {
+                return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+            }
+        }
 
         // 1. Update Catalog Details
         const updateData: any = {};
@@ -53,7 +81,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         // Add Bundles (Set catalog_id = id)
         if (bundles_to_add && Array.isArray(bundles_to_add) && bundles_to_add.length > 0) {
             await prisma.bundle.updateMany({
-                where: { id: { in: bundles_to_add } },
+                where: { id: { in: bundles_to_add }, business_id: session.user.businessId },
                 data: { catalog_id: id }
             });
         }
@@ -61,7 +89,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         // Remove Bundles (Set catalog_id = null)
         if (bundles_to_remove && Array.isArray(bundles_to_remove) && bundles_to_remove.length > 0) {
             await prisma.bundle.updateMany({
-                where: { id: { in: bundles_to_remove } },
+                where: { id: { in: bundles_to_remove }, business_id: session.user.businessId },
                 data: { catalog_id: null }
             });
         }
@@ -79,9 +107,14 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
         const session = await auth();
         if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-        // Unassign bundles first (Optional: or cascade delete? Usually safe to just unassign)
+        // Ownership check before deletion
+        const existing = await prisma.catalog.findUnique({ where: { id }, select: { business_id: true } });
+        if (!existing) return NextResponse.json({ error: "Catalog not found" }, { status: 404 });
+        if (existing.business_id !== session.user.businessId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+        // Unassign bundles first (only tenant's own bundles)
         await prisma.bundle.updateMany({
-            where: { catalog_id: id },
+            where: { catalog_id: id, business_id: session.user.businessId },
             data: { catalog_id: null }
         });
 

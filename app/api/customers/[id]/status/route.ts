@@ -61,26 +61,33 @@ export async function PATCH(
             }
 
             targetId = customer.id;
+        } else {
+            // UUID case: verify customer belongs to this tenant before any mutation
+            const existing = await prisma.customer.findUnique({ where: { id }, select: { business_id: true } });
+            if (!existing) return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+            if (existing.business_id !== session.user.businessId) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+            }
         }
 
         // Perform Action on Resolved ID
         if (action === 'set' && status) {
-            const result = await setStatus(targetId, status as CustomerStatus);
+            const result = await setStatus(targetId, status as CustomerStatus, session.user.businessId);
             return NextResponse.json(result);
         }
 
         if (action === 'progress') {
-            const result = await progressStatus(targetId, 'manual');
+            const result = await progressStatus(targetId, 'manual', session.user.businessId);
             return NextResponse.json(result);
         }
 
         if (action === 'archive') {
-            const result = await archiveCustomer(targetId);
+            const result = await archiveCustomer(targetId, session.user.businessId);
             return NextResponse.json(result);
         }
 
         if (action === 'unarchive') {
-            const result = await unarchiveCustomer(targetId);
+            const result = await unarchiveCustomer(targetId, session.user.businessId);
             return NextResponse.json(result);
         }
 

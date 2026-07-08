@@ -98,27 +98,39 @@ export async function POST(req: Request) {
             return att;
         });
 
+        // Preflight: verify customerId ownership before touching Resend or status workflow
+        let verifiedCustomer: { status: string } | null = null;
+        if (customerId) {
+            const { prisma } = await import('@/lib/db');
+            const customer = await prisma.customer.findUnique({
+                where: { id: customerId },
+                select: { business_id: true, status: true }
+            });
+            if (!customer) {
+                return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+            }
+            if (customer.business_id !== session.user.businessId) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+            }
+            verifiedCustomer = customer;
+        }
+
         // Use Resend ONLY if API key is present AND Safety Mode is OFF (EMAIL_LIVE=true)
         const isLive = process.env.RESEND_API_KEY && process.env.EMAIL_LIVE === 'true';
 
         if (!isLive) {
             console.log(`[SAFETY MODE / MOCK EMAIL] To: ${to}, Bcc: ${bcc?.length || 0}, Attachments: ${processedAttachments?.length || 0}`);
             // Still update status so the workflow appears to progress in the UI
-            if (customerId && context) {
+            if (customerId && context && verifiedCustomer) {
                 try {
                     const { progressStatus } = await import('@/lib/statusWorkflow');
-                    const { prisma } = await import('@/lib/db');
-                    const customer = await prisma.customer.findUnique({ where: { id: customerId }, select: { status: true } });
-
-                    if (customer) {
-                        const status = customer.status;
-                        if (context === 'intro' && status === 'LEAD') {
-                            await progressStatus(customerId, 'email_intro');
-                        } else if (context === 'info' && status === 'SEND_INFO') {
-                            await progressStatus(customerId, 'email_info');
-                        } else if (context === 'marketing' && status === 'FLYERS') {
-                            await progressStatus(customerId, 'email_marketing');
-                        }
+                    const status = verifiedCustomer.status;
+                    if (context === 'intro' && status === 'LEAD') {
+                        await progressStatus(customerId, 'email_intro', session.user.businessId);
+                    } else if (context === 'info' && status === 'SEND_INFO') {
+                        await progressStatus(customerId, 'email_info', session.user.businessId);
+                    } else if (context === 'marketing' && status === 'FLYERS') {
+                        await progressStatus(customerId, 'email_marketing', session.user.businessId);
                     }
                 } catch (err) {
                     console.error("Error updating status in mock mode:", err);
@@ -147,21 +159,16 @@ export async function POST(req: Request) {
         }
 
         // Update status after successful send
-        if (customerId && context) {
+        if (customerId && context && verifiedCustomer) {
             try {
                 const { progressStatus } = await import('@/lib/statusWorkflow');
-                const { prisma } = await import('@/lib/db');
-                const customer = await prisma.customer.findUnique({ where: { id: customerId }, select: { status: true } });
-
-                if (customer) {
-                    const status = customer.status;
-                    if (context === 'intro' && status === 'LEAD') {
-                        await progressStatus(customerId, 'email_intro');
-                    } else if (context === 'info' && status === 'SEND_INFO') {
-                        await progressStatus(customerId, 'email_info');
-                    } else if (context === 'marketing' && status === 'FLYERS') {
-                        await progressStatus(customerId, 'email_marketing');
-                    }
+                const status = verifiedCustomer.status;
+                if (context === 'intro' && status === 'LEAD') {
+                    await progressStatus(customerId, 'email_intro', session.user.businessId);
+                } else if (context === 'info' && status === 'SEND_INFO') {
+                    await progressStatus(customerId, 'email_info', session.user.businessId);
+                } else if (context === 'marketing' && status === 'FLYERS') {
+                    await progressStatus(customerId, 'email_marketing', session.user.businessId);
                 }
             } catch (err) {
                 console.error("Error updating status:", err);

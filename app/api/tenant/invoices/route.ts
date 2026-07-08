@@ -54,6 +54,13 @@ export async function POST(request: Request) {
             fundraiser_profit_amount
         } = body;
 
+        // Verify customer belongs to this tenant before connecting
+        if (customer_id) {
+            const customer = await prisma.customer.findUnique({ where: { id: customer_id }, select: { business_id: true } });
+            if (!customer) return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+            if (customer.business_id !== businessId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
         const result = await prisma.$transaction(async (tx) => {
             // @ts-ignore - New bundle_id field
             const invoice = await tx.invoice.create({
@@ -176,6 +183,13 @@ export async function PUT(request: Request) {
 
         if (!id) {
             return NextResponse.json({ error: 'Invoice ID is required' }, { status: 400 });
+        }
+
+        // Verify customer belongs to this tenant before connecting
+        if (customer_id) {
+            const customer = await prisma.customer.findUnique({ where: { id: customer_id }, select: { business_id: true } });
+            if (!customer) return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+            if (customer.business_id !== businessId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
         const result = await prisma.$transaction(async (tx) => {
