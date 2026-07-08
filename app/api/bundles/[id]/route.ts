@@ -1,8 +1,12 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { auth } from '@/auth';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+    const session = await auth();
+    if (!session?.user?.businessId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
     const { id } = await params;
     try {
         const bundle = await prisma.bundle.findUnique({
@@ -23,6 +27,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
             return NextResponse.json({ error: 'Bundle not found' }, { status: 404 });
         }
 
+        if (bundle.business_id !== session.user.businessId) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
         return NextResponse.json(bundle);
     } catch (e: any) {
         return NextResponse.json({ error: e.message }, { status: 500 });
@@ -30,9 +38,35 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
+    const session = await auth();
+    if (!session?.user?.businessId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
     const { id } = await params;
     try {
+        // Ownership check before mutation
+        const existing = await prisma.bundle.findUnique({ where: { id }, select: { business_id: true } });
+        if (!existing) return NextResponse.json({ error: 'Bundle not found' }, { status: 404 });
+        if (existing.business_id !== session.user.businessId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
         const data = await req.json();
+
+        // Pre-check: verify all submitted recipe_ids belong to this tenant
+        if (data.contents && data.contents.length > 0) {
+            const submittedRecipeIds: string[] = [...new Set(
+                data.contents.map((item: any) => item.recipe_id).filter(Boolean)
+            )] as string[];
+
+            if (submittedRecipeIds.length > 0) {
+                const ownedRecipes = await prisma.recipe.findMany({
+                    where: { id: { in: submittedRecipeIds }, business_id: session.user.businessId },
+                    select: { id: true }
+                });
+
+                if (ownedRecipes.length !== submittedRecipeIds.length) {
+                    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+                }
+            }
+        }
 
         // Transaction to update bundle and syncing contents
         const result = await prisma.$transaction(async (tx) => {
@@ -82,8 +116,15 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+    const session = await auth();
+    if (!session?.user?.businessId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
     const { id } = await params;
     try {
+        const existing = await prisma.bundle.findUnique({ where: { id }, select: { business_id: true } });
+        if (!existing) return NextResponse.json({ error: 'Bundle not found' }, { status: 404 });
+        if (existing.business_id !== session.user.businessId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
         await prisma.bundleContent.deleteMany({ where: { bundle_id: id } }); // Clean up children first
         await prisma.bundle.delete({ where: { id } });
 

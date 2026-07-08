@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { auth } from '@/auth';
 
 /**
  * PUT /api/categories/[id]/parent
@@ -7,6 +8,9 @@ import { prisma } from '@/lib/db';
  * Body: { parentId: string | null }
  */
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
+    const session = await auth();
+    if (!session?.user?.businessId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
     try {
         const { id: categoryId } = await params;
         const { parentId } = await req.json();
@@ -14,8 +18,18 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
         console.log('Category ID:', categoryId);
         console.log('Parent ID:', parentId);
 
+        // Ownership check
+        const category = await prisma.category.findUnique({ where: { id: categoryId }, select: { business_id: true } });
+        if (!category) return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+        if (category.business_id !== session.user.businessId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
         // Prevent circular references
         if (parentId) {
+            // Verify the target parent category belongs to this tenant
+            const parentCategory = await prisma.category.findUnique({ where: { id: parentId }, select: { business_id: true } });
+            if (!parentCategory) return NextResponse.json({ error: 'Parent category not found' }, { status: 404 });
+            if (parentCategory.business_id !== session.user.businessId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
             const isDescendant = await checkIfDescendant(categoryId, parentId);
             if (isDescendant) {
                 return NextResponse.json(

@@ -1,11 +1,15 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { auth } from '@/auth';
 
 export async function DELETE(
     request: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    const session = await auth();
+    if (!session?.user?.businessId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
     const { id } = await params;
     try {
         // Validation: Ensure category is empty
@@ -19,6 +23,10 @@ export async function DELETE(
 
         if (!category) {
             return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+        }
+
+        if (category.business_id !== session.user.businessId) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
         const hasChildren = category.children.length > 0;

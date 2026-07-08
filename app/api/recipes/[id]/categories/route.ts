@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { auth } from '@/auth';
 
 /**
  * PUT /api/recipes/[id]/categories
@@ -7,6 +8,9 @@ import { prisma } from '@/lib/db';
  * Body: { categoryIds: string[] }
  */
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
+    const session = await auth();
+    if (!session?.user?.businessId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
     try {
         const { id: recipeId } = await params;
         const { categoryIds } = await req.json();
@@ -15,17 +19,23 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
         console.log('Recipe ID:', recipeId);
         console.log('Category IDs:', categoryIds);
 
-        // Validate that all category IDs exist to avoid Prisma P2025 errors
+        // Ownership check
+        const recipe = await prisma.recipe.findUnique({ where: { id: recipeId }, select: { business_id: true } });
+        if (!recipe) return NextResponse.json({ error: 'Recipe not found' }, { status: 404 });
+        if (recipe.business_id !== session.user.businessId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+        // Validate that all category IDs exist and belong to this tenant
         const validCategories = await prisma.category.findMany({
-            where: { id: { in: categoryIds } },
+            where: { id: { in: categoryIds }, business_id: session.user.businessId },
             select: { id: true, name: true }
         });
         const validIds = validCategories.map(c => c.id);
 
         console.log('[API] Valid Categories:', validCategories.map(c => c.name));
 
-        if (validIds.length !== categoryIds.length) {
-            console.warn(`[API] Some category IDs were invalid and filtered out:`, categoryIds.filter((id: string) => !validIds.includes(id)));
+        if (categoryIds.length > 0 && validIds.length !== categoryIds.length) {
+            console.warn(`[API] Some category IDs were invalid or cross-tenant:`, categoryIds.filter((id: string) => !validIds.includes(id)));
+            return NextResponse.json({ error: 'One or more category IDs are invalid or do not belong to your account' }, { status: 403 });
         }
 
         // Disconnect all existing categories and connect new ones

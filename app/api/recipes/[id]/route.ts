@@ -10,6 +10,9 @@ export async function GET(
     request: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    const session = await auth();
+    if (!session?.user?.businessId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
     const { id } = await params;
     const recipe = await prisma.recipe.findUnique({
         where: { id },
@@ -25,6 +28,10 @@ export async function GET(
 
     if (!recipe) {
         return NextResponse.json({ error: 'Recipe not found' }, { status: 404 });
+    }
+
+    if (recipe.business_id !== session.user.businessId) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     // Transform to App Type (Partial, mostly for validation or specialized clients)
@@ -181,8 +188,16 @@ export async function DELETE(
     request: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    const session = await auth();
+    if (!session?.user?.businessId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
     const { id } = await params;
     try {
+        // Ownership check
+        const existing = await prisma.recipe.findUnique({ where: { id }, select: { business_id: true } });
+        if (!existing) return NextResponse.json({ error: 'Recipe not found' }, { status: 404 });
+        if (existing.business_id !== session.user.businessId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
         await prisma.$transaction([
             // 1. Delete items where this recipe is the PARENT (it owns these links)
             prisma.recipeItem.deleteMany({
