@@ -6,9 +6,12 @@
  * because the current OrderStatus enum is split-brain and does not yet contain
  * `in_production` or `ready_to_ship` as canonical lowercase values.
  *
- * Phase 5B — Additive only. No routes or components wired here yet.
- * Phase 5C will run the SQL migration to align the Prisma enum.
- * Phase 5D/5E will wire these constants into routes and readers.
+ * Phase 5B — Added canonical constants, normalizeOrderStatus, helpers.
+ * Phase 5D — Added CANONICAL_TO_DB_ORDER_STATUS and toDbSafeOrderStatus() for
+ *             safe DB writes during the transitional period before migration.
+ * Phase 5E/5F — Will wire readers, then run the SQL migration to align the
+ *               Prisma enum, at which point toDbSafeOrderStatus() can be
+ *               simplified or removed.
  *
  * Canonical lifecycle (Phase 5A approved):
  *   fundraiser_hold → pending → production_ready → in_production
@@ -203,10 +206,62 @@ export const ORDER_STATUS_COMPAT = {
   ] as const,
 } as const;
 
-// ─── 9. Transition Map ────────────────────────────────────────────────────────
+// ─── 9. Temporary DB-Safe Write Mapper ───────────────────────────────────────
+//
+// Maps every CanonicalOrderStatus to the value that is currently safe to write
+// to the database. This is TEMPORARY — it exists only because the Prisma
+// OrderStatus enum has not yet been migrated to match the canonical set.
+//
+// Important invariants:
+//   - `in_production` → 'IN_PRODUCTION': lowercase form is not in the DB enum yet.
+//   - `ready_to_ship` → 'completed': neither ready_to_ship nor READY_TO_SHIP is
+//     in the DB enum. 'completed' is the nearest safe prior step.
+//     (InProductionArea.tsx currently writes the ghost value READY_TO_SHIP;
+//      after this mapper is wired in Phase 5D it will write 'completed' instead.)
+//
+// This map must remain schema-neutral — do NOT import Prisma enum types here.
+// Update this map (or remove it) when the Phase 5E SQL migration runs and adds
+// `in_production` and `ready_to_ship` to the Prisma enum.
+
+export const CANONICAL_TO_DB_ORDER_STATUS: Record<CanonicalOrderStatus, string> = {
+  fundraiser_hold:  'fundraiser_hold',
+  pending:          'pending',
+  production_ready: 'production_ready',
+  in_production:    'IN_PRODUCTION',   // lowercase not yet in DB enum — use uppercase form
+  completed:        'completed',
+  ready_to_ship:    'completed',       // neither form is in DB enum — fallback to completed
+  delivered:        'delivered',
+};
+
+/**
+ * Convert any status input (canonical, legacy uppercase, or unknown) to the
+ * value that is currently safe to write to the database.
+ *
+ * Steps:
+ *   1. Normalizes the input to a CanonicalOrderStatus via normalizeOrderStatus().
+ *   2. Maps the canonical value to its current DB-safe form via CANONICAL_TO_DB_ORDER_STATUS.
+ *   3. Returns null if the input is unrecognized — callers should return 400.
+ *
+ * Never throws.
+ *
+ * TEMPORARY: Remove or simplify after the Phase 5E SQL migration adds
+ * `in_production` and `ready_to_ship` to the Prisma enum.
+ *
+ * Schema-neutral: does NOT import Prisma enum types.
+ */
+export function toDbSafeOrderStatus(
+  input: string | null | undefined,
+): string | null {
+  const canonical = normalizeOrderStatus(input);
+  if (canonical == null) return null;
+  return CANONICAL_TO_DB_ORDER_STATUS[canonical];
+}
+
+// ─── 10. Transition Map ───────────────────────────────────────────────────────
 //
 // Documents intended valid forward transitions in the order lifecycle.
-// Not enforced by any route yet — enforcement comes in Phase 5D.
+// Not enforced by any route in Phase 5D — value validation only.
+// Transition enforcement is deferred to Phase 5E after the enum migration.
 //
 // Notes:
 //   - fundraiser_hold can advance to pending (coordinator approves)
@@ -229,7 +284,7 @@ export const ORDER_STATUS_TRANSITIONS: Record<
   delivered:        [],
 } as const;
 
-// ─── 10. canTransitionOrderStatus ─────────────────────────────────────────────
+// ─── 11. canTransitionOrderStatus ────────────────────────────────────────────
 
 /**
  * Returns true if transitioning from `from` to `to` is a valid forward move

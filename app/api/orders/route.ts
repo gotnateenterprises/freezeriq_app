@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { buildBundlePriceMap } from '@/lib/pricing';
+import { toDbSafeOrderStatus } from '@/lib/orderStatus';
 
 
 export async function GET(req: NextRequest) {
@@ -269,6 +270,18 @@ export async function PATCH(req: NextRequest) {
             return NextResponse.json({ error: 'Missing ID or status' }, { status: 400 });
         }
 
+        // Phase 5D: validate and normalize status to a DB-safe value.
+        // Accepts both canonical lowercase values and legacy uppercase forms.
+        // Returns null for any unrecognized input.
+        const dbSafeStatus = toDbSafeOrderStatus(status);
+        if (dbSafeStatus === null) {
+            return NextResponse.json({ error: 'Invalid order status' }, { status: 400 });
+        }
+        // Temporary observability: log when normalization changes the input value
+        if (status !== dbSafeStatus) {
+            console.log(`[ORDER_STATUS] PATCH normalized "${status}" -> "${dbSafeStatus}"`);
+        }
+
         const session = await auth();
         if (!session?.user?.businessId) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -293,16 +306,18 @@ export async function PATCH(req: NextRequest) {
         }
 
         const result = await prisma.$transaction(async (tx) => {
-            // Update the order status
+            // Update the order status using the DB-safe normalized value
             const updatedOrder = await tx.order.update({
                 where: { id: existingOrder.id },
-                data: { status }
+                data: { status: dbSafeStatus as any }
             });
 
             // SYNC LINKED INVOICE
-            // If marking as paid (production_ready), also mark the linked invoice as PAID
+            // If marking as paid (production_ready), also mark the linked invoice as PAID.
+            // Check uses dbSafeStatus so that inputs like 'APPROVED' also trigger this
+            // side effect correctly after normalization.
             // @ts-ignore
-            if (status === 'production_ready' && existingOrder.invoice_id) {
+            if (dbSafeStatus === 'production_ready' && existingOrder.invoice_id) {
                 // @ts-ignore
                 await tx.invoice.update({
                     // @ts-ignore

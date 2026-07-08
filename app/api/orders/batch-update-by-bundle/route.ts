@@ -1,6 +1,38 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
+import { toDbSafeOrderStatus } from '@/lib/orderStatus';
+
+/**
+ * Returns all DB-safe status values to use in the WHERE clause for currentStatus.
+ * Covers both lowercase (new) and legacy uppercase enum values stored in the DB.
+ * Fallback: if input is invalid/missing, returns ['APPROVED'] to preserve the
+ * original PrepList behavior (initial batch step sent 'APPROVED').
+ */
+function getDbSafeCurrentStatusCandidates(input: string | null | undefined): string[] {
+    const normalized = toDbSafeOrderStatus(input);
+
+    if (normalized === null) {
+        return ['APPROVED'];
+    }
+
+    switch (normalized) {
+        case 'pending':
+            return ['pending', 'PENDING'];
+        case 'production_ready':
+            return ['production_ready', 'APPROVED'];
+        case 'IN_PRODUCTION':
+            return ['IN_PRODUCTION'];
+        case 'completed':
+            return ['completed', 'COMPLETED'];
+        case 'delivered':
+            return ['delivered', 'DELIVERED'];
+        case 'fundraiser_hold':
+            return ['fundraiser_hold'];
+        default:
+            return [normalized];
+    }
+}
 
 export async function POST(req: Request) {
     try {
@@ -13,15 +45,29 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
         }
 
-        // Find orders that contain this bundle and have the current status (or APPROVED if not specified)
-        // Note: Using findMany first to identify orders might be safer if the relationship is complex,
-        // but updateMany on OrderItems is slightly tricky because we want to update the ORDER status, not the ITEM.
+        // Phase 5D: validate and normalize newStatus to a DB-safe value.
+        // Hard reject: if newStatus is unrecognized, return 400.
+        const dbSafeNewStatus = toDbSafeOrderStatus(newStatus);
+        if (dbSafeNewStatus === null) {
+            return NextResponse.json({ error: 'Invalid order status' }, { status: 400 });
+        }
+        // Temporary observability: log when normalization changes the input value
+        if (newStatus !== dbSafeNewStatus) {
+            console.log(`[ORDER_STATUS] batch-update-by-bundle newStatus normalized "${newStatus}" -> "${dbSafeNewStatus}"`);
+        }
 
-        // Approach: Find all orders that have an item with this bundleId AND are in currentStatus
+        // Phase 5D: build WHERE candidates for currentStatus.
+        // Returns all legacy DB variants so rows stored under old uppercase values are still matched.
+        const dbSafeCurrentStatusCandidates = getDbSafeCurrentStatusCandidates(currentStatus);
+        if (currentStatus && !dbSafeCurrentStatusCandidates.includes(currentStatus)) {
+            console.log(`[ORDER_STATUS] batch-update-by-bundle currentStatus "${currentStatus}" -> candidates [${dbSafeCurrentStatusCandidates.join(', ')}]`);
+        }
+
+        // Find all orders that have an item with this bundleId AND are in currentStatus (or a legacy equivalent)
         const ordersToUpdate = await prisma.order.findMany({
             where: {
                 business_id: session.user.businessId,
-                status: currentStatus || 'APPROVED',
+                status: { in: dbSafeCurrentStatusCandidates as any },
                 items: {
                     some: {
                         bundle_id: bundleId
@@ -46,11 +92,13 @@ export async function POST(req: Request) {
                 where: {
                     id: { in: orderIds }
                 },
-                data: { status: newStatus }
+                data: { status: dbSafeNewStatus as any }
             });
 
-            // If we are marking as completed, also move customers to DELIVERY status
-            if (newStatus === 'completed' && customerIds.length > 0) {
+            // If we are marking as completed, also move customers to DELIVERY status.
+            // Check uses dbSafeNewStatus so inputs like 'COMPLETED' also trigger this
+            // side effect correctly after normalization.
+            if (dbSafeNewStatus === 'completed' && customerIds.length > 0) {
                 await tx.customer.updateMany({
                     where: {
                         id: { in: customerIds },
