@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { KitchenEngine } from '@/lib/kitchen_engine';
 import { PrismaAdapter } from '@/lib/prisma_adapter';
 import { auth } from '@/auth';
+import { resolveVariantSize } from '@/lib/serving_multipliers';
 
 export async function POST(request: Request) {
     try {
@@ -30,17 +31,19 @@ export async function POST(request: Request) {
             orders = await db.getProductionOrders();
         } else if (Array.isArray(requestBody.orders)) {
             // Multi-Bundle Mode
+            // Resolve variant_size from item input; default to family (serves_5) if not supplied.
             orders = requestBody.orders.map((o: any) => ({
                 bundle_id: o.bundle_id,
                 quantity: Number(o.quantity),
-                variant_size: 'serves_2' // Default, or pass from UI if we add scaling selector later
+                variant_size: resolveVariantSize(o.variant_size ?? o.serving_tier ?? 'family')
             }));
         } else {
             // Legacy Single Mode (Simulator)
+            // Resolve variant_size from request body; default to family (serves_5) if not supplied.
             orders = [{
                 bundle_id: requestBody.bundle_id,
                 quantity: Number(requestBody.quantity),
-                variant_size: 'serves_2'
+                variant_size: resolveVariantSize(requestBody.variant_size ?? requestBody.serving_tier ?? 'family')
             }];
         }
 
