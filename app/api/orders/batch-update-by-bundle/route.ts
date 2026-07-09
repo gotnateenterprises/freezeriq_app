@@ -1,37 +1,30 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
-import { toDbSafeOrderStatus } from '@/lib/orderStatus';
+import { toDbSafeOrderStatus, toDbOrderStatusReadCandidates } from '@/lib/orderStatus';
 
 /**
  * Returns all DB-safe status values to use in the WHERE clause for currentStatus.
- * Covers both lowercase (new) and legacy uppercase enum values stored in the DB.
- * Fallback: if input is invalid/missing, returns ['APPROVED'] to preserve the
- * original PrepList behavior (initial batch step sent 'APPROVED').
+ * Covers both canonical and legacy uppercase values stored in the DB via
+ * toDbOrderStatusReadCandidates, which owns the full mapping table.
+ *
+ * Fallback: if input is invalid/missing, returns candidates for 'production_ready'
+ * (includes both 'production_ready' and 'APPROVED') to preserve the original
+ * PrepList behavior where the initial batch step may not send a currentStatus.
+ *
+ * Phase 5H-0: Replaced the manual switch statement (which had a dead
+ * 'IN_PRODUCTION' case after Phase 5G-2) with a delegate to the helper.
  */
 function getDbSafeCurrentStatusCandidates(input: string | null | undefined): string[] {
-    const normalized = toDbSafeOrderStatus(input);
+    const candidates = toDbOrderStatusReadCandidates(input);
 
-    if (normalized === null) {
-        return ['APPROVED'];
+    if (candidates.length === 0) {
+        // Unrecognized or missing status — default to production_ready bucket.
+        // This covers both 'production_ready' rows and legacy 'APPROVED' rows.
+        return toDbOrderStatusReadCandidates('production_ready');
     }
 
-    switch (normalized) {
-        case 'pending':
-            return ['pending', 'PENDING'];
-        case 'production_ready':
-            return ['production_ready', 'APPROVED'];
-        case 'IN_PRODUCTION':
-            return ['IN_PRODUCTION'];
-        case 'completed':
-            return ['completed', 'COMPLETED'];
-        case 'delivered':
-            return ['delivered', 'DELIVERED'];
-        case 'fundraiser_hold':
-            return ['fundraiser_hold'];
-        default:
-            return [normalized];
-    }
+    return candidates;
 }
 
 export async function POST(req: Request) {

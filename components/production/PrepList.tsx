@@ -13,8 +13,10 @@ interface PrepItem {
     sku: string;
     total_quantity: number;
     order_count: number;
-    // Phase 5F: accept both canonical and legacy status values during transition
-    status: 'production_ready' | 'APPROVED' | 'in_production' | 'IN_PRODUCTION' | string;
+    // Phase 5H-0: canonical status values expected from API. Legacy APPROVED and
+    // IN_PRODUCTION handling is kept in the bucket normalization below in case
+    // cached API responses still carry legacy values during the transition period.
+    status: 'production_ready' | 'in_production' | string;
     recipes: { id: string, name: string, quantity: number }[];
 }
 

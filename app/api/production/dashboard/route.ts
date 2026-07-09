@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
-// Phase 5F: use schema-neutral compat arrays instead of Prisma OrderStatus enum,
-// which is still split-brain and missing canonical lowercase values.
-import { ORDER_STATUS_COMPAT, toDbOrderStatusReadCandidates } from '@/lib/orderStatus';
+// Phase 5H-0: ORDER_STATUS_COMPAT removed; all queries now use toDbOrderStatusReadCandidates.
+import { toDbOrderStatusReadCandidates } from '@/lib/orderStatus';
 
 export async function GET() {
     try {
@@ -15,8 +14,12 @@ export async function GET() {
         const pendingOrders = await prisma.order.findMany({
             where: {
                 business_id: businessId,
-                // Phase 5F: include both canonical and legacy pending/production_ready values
-                status: { in: ['pending', 'PENDING', 'production_ready', 'APPROVED'] as any },
+                // Phase 5H-0: use helper so legacy PENDING/APPROVED rows are still
+                // matched alongside canonical pending/production_ready rows.
+                status: { in: [
+                    ...toDbOrderStatusReadCandidates('pending'),
+                    ...toDbOrderStatusReadCandidates('production_ready'),
+                ] as any },
                 // Exclude fundraiser coordinator orders — they belong in Fundraiser Dashboard
                 source: { not: 'fundraiser' as any },
                 NOT: { source: 'storefront', status: 'pending' }
@@ -40,7 +43,7 @@ export async function GET() {
         // Phase 5F: derive DB candidates via toDbOrderStatusReadCandidates so the
         // helper owns the mapping and no un-migrated enum values reach Prisma.
         //   production_ready → ['production_ready', 'APPROVED']
-        //   in_production    → ['IN_PRODUCTION']   (lowercase not in enum yet)
+        //   in_production    → ['in_production', 'IN_PRODUCTION']  (Phase 5G-1: both forms exist)
         const prepListStatuses = [
             ...toDbOrderStatusReadCandidates('production_ready'),
             ...toDbOrderStatusReadCandidates('in_production'),
@@ -73,14 +76,21 @@ export async function GET() {
             }
         });
 
-        // 3. Fetch COMPLETED orders (Delivery Queue)
-        // Phase 5F: include both canonical and legacy completed values.
-        // Note: ready_to_ship is also temporarily stored as 'completed' until
-        // the Phase 5F enum migration adds the real ready_to_ship value.
+        // 3. Fetch COMPLETED / READY-TO-SHIP orders (Delivery Queue)
+        // Phase 5H-0: include both completed and ready_to_ship candidates.
+        //   completed     → ['completed', 'COMPLETED']
+        //   ready_to_ship → ['ready_to_ship', 'completed']  (old rows stored as 'completed')
+        // Deduplicated: final set covers completed, COMPLETED, and ready_to_ship.
+        const deliveryQueueStatuses = [
+            ...new Set([
+                ...toDbOrderStatusReadCandidates('completed'),
+                ...toDbOrderStatusReadCandidates('ready_to_ship'),
+            ])
+        ];
         const completedOrders = await prisma.order.findMany({
             where: {
                 business_id: businessId,
-                status: { in: [...ORDER_STATUS_COMPAT.completedLike] as any },
+                status: { in: deliveryQueueStatuses as any },
                 source: { not: 'fundraiser' as any }
             },
             include: {
