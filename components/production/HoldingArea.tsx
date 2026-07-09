@@ -70,7 +70,12 @@ export default function HoldingArea({ orders, onRefresh }: HoldingAreaProps) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     orderIds: Array.from(selected),
-                    status: action === 'APPROVE' ? 'APPROVED' : 'ARCHIVED'
+                    // Phase 5F: send canonical production_ready; writer maps to DB-safe value.
+                    // TODO (follow-up blocker): ARCHIVE action sends 'ARCHIVED' which is not in the
+                    // OrderStatus enum and has no dedicated archive endpoint. The bulk-status writer
+                    // will return 400 for 'ARCHIVED'. Do not invent behavior here — this needs a
+                    // separate /api/orders/archive endpoint (set canceled_at, not a status change).
+                    status: action === 'APPROVE' ? 'production_ready' : 'ARCHIVED'
                 })
             });
 

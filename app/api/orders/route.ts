@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { buildBundlePriceMap } from '@/lib/pricing';
-import { toDbSafeOrderStatus } from '@/lib/orderStatus';
+import { toDbSafeOrderStatus, toDbOrderStatusReadCandidates } from '@/lib/orderStatus';
 
 
 export async function GET(req: NextRequest) {
@@ -16,13 +16,15 @@ export async function GET(req: NextRequest) {
             whereClause.campaign_id = campaignId;
         }
         if (status) {
-            // Handle multiple statuses like ?status=pending,production_ready
-            const statuses = status.split(',');
-            if (statuses.length > 1) {
-                whereClause.status = { in: statuses };
-            } else {
-                whereClause.status = status;
+            // Phase 5F: expand each requested status through the read-candidates helper
+            // so ghost values (READY_TO_SHIP) and canonical values both map to the
+            // correct DB values for the current split-brain enum state.
+            const statuses = status.split(',').map(s => s.trim()).filter(Boolean);
+            const dbCandidates = [...new Set(statuses.flatMap(s => toDbOrderStatusReadCandidates(s)))];
+            if (dbCandidates.length === 0) {
+                return NextResponse.json({ error: 'Invalid order status filter' }, { status: 400 });
             }
+            whereClause.status = { in: dbCandidates };
         }
 
         // Week filter: only return orders within a 7-day window (or null delivery_date)

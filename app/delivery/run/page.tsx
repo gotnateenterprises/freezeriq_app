@@ -42,7 +42,9 @@ export default function MobileDeliveryRunPage() {
     const fetchOrders = async () => {
         try {
             setLoading(true);
-            const res = await fetch(`/api/orders?status=production_ready,READY_TO_SHIP${weekParam}`);
+            // Phase 5F: use canonical 'ready_to_ship' so the GET route maps it to 'completed'
+            // via toDbOrderStatusReadCandidates (temporary until enum migration adds ready_to_ship).
+            const res = await fetch(`/api/orders?status=production_ready,ready_to_ship${weekParam}`);
             if (!res.ok) throw new Error("Failed to load delivery queue");
             const data = await res.json();
 

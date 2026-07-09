@@ -40,7 +40,7 @@ export default function InProductionArea({ orders, onRefresh }: InProductionArea
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     orderIds: ids,
-                    status: 'READY_TO_SHIP'
+                    status: 'ready_to_ship' // Phase 5F: canonical value; writer maps to 'completed' until enum migration
                 })
             });
 

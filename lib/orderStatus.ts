@@ -9,9 +9,9 @@
  * Phase 5B — Added canonical constants, normalizeOrderStatus, helpers.
  * Phase 5D — Added CANONICAL_TO_DB_ORDER_STATUS and toDbSafeOrderStatus() for
  *             safe DB writes during the transitional period before migration.
- * Phase 5E/5F — Will wire readers, then run the SQL migration to align the
- *               Prisma enum, at which point toDbSafeOrderStatus() can be
- *               simplified or removed.
+ * Phase 5F — Added toDbOrderStatusReadCandidates() so GET routes and UI
+ *             components can query both canonical and legacy DB values without
+ *             passing raw ghost strings (READY_TO_SHIP, APPROVED, etc.) to Prisma.
  *
  * Canonical lifecycle (Phase 5A approved):
  *   fundraiser_hold → pending → production_ready → in_production
@@ -257,7 +257,62 @@ export function toDbSafeOrderStatus(
   return CANONICAL_TO_DB_ORDER_STATUS[canonical];
 }
 
-// ─── 10. Transition Map ───────────────────────────────────────────────────────
+// ─── 10. Temporary DB-Safe Read Candidates ───────────────────────────────────
+//
+// Returns all DB status values that a WHERE clause should match for a given
+// canonical status during the transitional period (before enum migration and
+// row backfill). Covers both canonical lowercase and legacy uppercase forms.
+//
+// TEMPORARY: Simplify to single-value arrays after Phase 5H backfill removes
+// legacy uppercase rows from the DB.
+//
+// Schema-neutral: does NOT import Prisma enum types.
+//
+// Usage in Prisma query (single canonical):
+//   status: { in: toDbOrderStatusReadCandidates('production_ready') as any }
+//
+// Usage when aggregating multiple canonicals (e.g. prep list query):
+//   const candidates = ['production_ready', 'in_production']
+//     .flatMap(toDbOrderStatusReadCandidates);
+//   status: { in: [...new Set(candidates)] as any }
+
+const CANONICAL_TO_DB_READ_CANDIDATES: Record<CanonicalOrderStatus, string[]> = {
+  fundraiser_hold:  ['fundraiser_hold'],
+  pending:          ['pending', 'PENDING'],
+  production_ready: ['production_ready', 'APPROVED'],
+  in_production:    ['IN_PRODUCTION'],
+  // ready_to_ship is temporarily stored as 'completed' until the enum migration
+  // adds a real ready_to_ship value. Reads for ready_to_ship match 'completed'.
+  ready_to_ship:    ['completed'],
+  completed:        ['completed', 'COMPLETED'],
+  delivered:        ['delivered', 'DELIVERED'],
+};
+
+/**
+ * Return all DB status values that should be included in a Prisma `{ in: [...] }`
+ * WHERE clause when filtering for a given canonical order status.
+ *
+ * Steps:
+ *   1. Normalizes the input to a CanonicalOrderStatus via normalizeOrderStatus().
+ *   2. Returns the matching DB candidates (canonical + legacy forms) for that status.
+ *   3. Returns [] if the input is unrecognized — callers should treat this as invalid.
+ *
+ * Never throws.
+ *
+ * TEMPORARY: Remove per-status legacy aliases after Phase 5H backfill aligns all
+ * rows to canonical lowercase values.
+ *
+ * Schema-neutral: does NOT import Prisma enum types.
+ */
+export function toDbOrderStatusReadCandidates(
+  input: string | null | undefined,
+): string[] {
+  const canonical = normalizeOrderStatus(input);
+  if (canonical == null) return [];
+  return CANONICAL_TO_DB_READ_CANDIDATES[canonical];
+}
+
+// ─── 11. Transition Map ───────────────────────────────────────────────────────
 //
 // Documents intended valid forward transitions in the order lifecycle.
 // Not enforced by any route in Phase 5D — value validation only.
@@ -284,7 +339,7 @@ export const ORDER_STATUS_TRANSITIONS: Record<
   delivered:        [],
 } as const;
 
-// ─── 11. canTransitionOrderStatus ────────────────────────────────────────────
+// ─── 12. canTransitionOrderStatus ────────────────────────────────────────────
 
 /**
  * Returns true if transitioning from `from` to `to` is a valid forward move

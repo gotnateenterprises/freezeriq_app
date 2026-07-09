@@ -41,7 +41,7 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     orderIds: ids,
-                    status: 'DELIVERED'
+                    status: 'delivered' // Phase 5F: canonical value; writer normalizes as needed
                 })
             });
 

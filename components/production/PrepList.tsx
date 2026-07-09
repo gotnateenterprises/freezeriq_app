@@ -13,7 +13,8 @@ interface PrepItem {
     sku: string;
     total_quantity: number;
     order_count: number;
-    status: 'APPROVED' | 'IN_PRODUCTION';
+    // Phase 5F: accept both canonical and legacy status values during transition
+    status: 'production_ready' | 'APPROVED' | 'in_production' | 'IN_PRODUCTION' | string;
     recipes: { id: string, name: string, quantity: number }[];
 }
 
@@ -27,16 +28,23 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
     const { data: session } = useSession() as { data: any };
     const [isPrinting, setIsPrinting] = useState(false);
 
-    // Group items by status
+    // Phase 5F: normalize grouping key so both canonical and legacy status values
+    // land in the same bucket. production_ready and APPROVED are both "ready to prep";
+    // in_production and IN_PRODUCTION are both "being cooked".
     const groups = items.reduce((acc, item) => {
-        const s = item.status || 'APPROVED';
-        if (!acc[s]) acc[s] = [];
-        acc[s].push(item);
+        const raw = item.status || 'production_ready';
+        // Normalize to a stable bucket key
+        const bucket =
+            raw === 'production_ready' || raw === 'APPROVED' ? 'ready'
+            : raw === 'in_production'  || raw === 'IN_PRODUCTION' ? 'inprod'
+            : 'ready'; // unknown statuses go to the prep bucket
+        if (!acc[bucket]) acc[bucket] = [];
+        acc[bucket].push(item);
         return acc;
     }, {} as Record<string, PrepItem[]>);
 
-    const approvedItems = groups['APPROVED'] || [];
-    const productionItems = groups['IN_PRODUCTION'] || [];
+    const approvedItems  = groups['ready']  || [];
+    const productionItems = groups['inprod'] || [];
 
     const handlePrint = async () => {
         setIsPrinting(true);
@@ -74,7 +82,7 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
     };
 
     const handleUpdateStatus = async (bundleId: string, currentStatus: string, newStatus: string) => {
-        const action = newStatus === 'IN_PRODUCTION' ? 'Start Production' : 'Complete Production';
+        const action = newStatus === 'in_production' ? 'Start Production' : 'Complete Production';
         if (!confirm(`${action} for this bundle?`)) return;
 
         try {
@@ -160,7 +168,7 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
                                         <span className="text-lg font-bold text-slate-400 mb-1">units</span>
                                     </div>
                                     <button
-                                        onClick={() => handleUpdateStatus(item.bundle_id, 'APPROVED' as any, 'IN_PRODUCTION' as any)}
+                                        onClick={() => handleUpdateStatus(item.bundle_id, item.status, 'in_production')}
                                         className="w-full flex items-center justify-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-emerald-500 hover:text-white dark:hover:bg-emerald-600 text-slate-600 dark:text-slate-300 py-3 rounded-xl font-bold transition-all print:hidden group-hover:bg-emerald-50 dark:group-hover:bg-emerald-900/20 group-hover:text-emerald-600 dark:group-hover:text-emerald-400"
                                     >
                                         <ArrowRight size={18} />
@@ -211,7 +219,7 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
                                         </button>
                                     </div>
                                     <button
-                                        onClick={() => handleUpdateStatus(item.bundle_id, 'IN_PRODUCTION' as any, 'completed')}
+                                        onClick={() => handleUpdateStatus(item.bundle_id, item.status, 'ready_to_ship')}
                                         className="w-full flex items-center justify-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700 py-3 rounded-xl font-bold transition-all shadow-lg shadow-emerald-200 dark:shadow-none"
                                     >
                                         <CheckCircle2 size={18} />
