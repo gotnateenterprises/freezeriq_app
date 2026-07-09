@@ -53,100 +53,82 @@ export async function GET(
 
         console.log(`[Storefront API] Found business: ${business.name} (${business.id})`);
 
-        // 2. Fetch Bundles using Prisma (avoiding image_url for now to prevent crash if not generated)
+        // 2. Fetch Bundles with full recipe metadata, categories, and ingredient items via Prisma.
+        // Phase 6E-1: replaced all $queryRawUnsafe blocks — order_cutoff_date, image_url,
+        // description, cook_time, container_type, base_yield_qty/unit, categories, and
+        // child ingredient items are now fetched inline through standard Prisma includes/selects.
         const bundlesWithRecipes = await prisma.bundle.findMany({
             where: {
                 business_id: business.id,
                 show_on_storefront: true
-            } as any,
+            },
             include: {
                 contents: {
                     include: {
                         recipe: {
-                            select: { id: true, name: true, sku: true }
+                            select: {
+                                id: true,
+                                name: true,
+                                sku: true,
+                                image_url: true,
+                                description: true,
+                                cook_time: true,
+                                container_type: true,
+                                base_yield_qty: true,
+                                base_yield_unit: true,
+                                categories: {
+                                    select: { name: true }
+                                },
+                                child_items: {
+                                    where: { child_ingredient_id: { not: null } },
+                                    include: {
+                                        child_ingredient: {
+                                            select: { name: true }
+                                        }
+                                    },
+                                    orderBy: { id: 'asc' }
+                                }
+                            }
                         }
                     },
                     orderBy: { position: 'asc' }
                 }
-            } as any
+            }
         });
 
-        // 3. Manually fetch recipe images using Parameterized Raw SQL (Safe)
-        // We use Raw SQL because Prisma Client is stale and missing 'image_url' field
-        const recipeIds = Array.from(new Set((bundlesWithRecipes as any[]).flatMap(b => b.contents.map((c: any) => c.recipe?.id)).filter(Boolean)));
-        let recipeMetadata: Record<string, any> = {};
+        // 3. Build recipeMetadata and bundleCutoffs maps from Prisma results — no raw SQL needed.
+        const bundleCutoffs: Record<string, string | null> = {};
+        const recipeMetadata: Record<string, any> = {};
 
-        // ALSO fetch bundle order_cutoff_date manually since Prisma client might omit it while locked
-        const bundleIds = bundlesWithRecipes.map((b: any) => b.id);
-        const bundlePlaceholders = bundleIds.map((_, i) => `$${i + 1}`).join(',');
-        let bundleCutoffs: Record<string, string | null> = {};
+        for (const bundle of bundlesWithRecipes) {
+            // order_cutoff_date is now a standard Prisma field
+            bundleCutoffs[bundle.id] = bundle.order_cutoff_date
+                ? bundle.order_cutoff_date.toISOString().split('T')[0]
+                : null;
 
-        if (bundleIds.length > 0) {
-            const rawBundles: any[] = await prisma.$queryRawUnsafe(
-                `SELECT id, order_cutoff_date FROM bundles WHERE id IN (${bundlePlaceholders})`,
-                ...bundleIds
-            );
-            rawBundles.forEach(rb => {
-                bundleCutoffs[rb.id] = rb.order_cutoff_date || null;
-            });
-        }
-        if (recipeIds.length > 0) {
-            // SAFE: IDs are passed as parameters, placeholders are indices
-            const placeholders = recipeIds.map((_, i) => `$${i + 1}`).join(',');
-            const recipesRaw: any[] = await prisma.$queryRawUnsafe(
-                `SELECT id, image_url, base_yield_qty, base_yield_unit, cook_time, container_type, description FROM recipes WHERE id IN (${placeholders})`,
-                ...recipeIds
-            );
+            for (const content of bundle.contents) {
+                const r = content.recipe;
+                if (!r || recipeMetadata[r.id]) continue; // skip nulls and duplicates
 
-            // Fetch categories for each recipe
-            const recipeCategories: any[] = await prisma.$queryRawUnsafe(
-                `SELECT rto."A" as category_id, rto."B" as recipe_id, c.name as category_name
-                 FROM "_CategoryToRecipe" rto
-                 JOIN categories c ON rto."A" = c.id
-                 WHERE rto."B" IN (${placeholders})`,
-                ...recipeIds
-            );
-
-            const recipeCategoriesMap: Record<string, string[]> = {};
-            recipeCategories.forEach(rc => {
-                if (!recipeCategoriesMap[rc.recipe_id]) recipeCategoriesMap[rc.recipe_id] = [];
-                recipeCategoriesMap[rc.recipe_id].push(rc.category_name);
-            });
-
-            // Fetch recipe items (ingredients) for these recipes
-            console.log(`[Storefront API] Fetching recipe items for ${recipeIds.length} recipes`);
-            const recipeItems: any[] = await prisma.$queryRawUnsafe(
-                `SELECT ri.parent_recipe_id as recipe_id, ri.quantity, ri.unit, i.name as ingredient_name 
-                 FROM recipe_items ri
-                 JOIN ingredients i ON ri.child_ingredient_id = i.id
-                 WHERE ri.parent_recipe_id IN (${placeholders})`,
-                ...recipeIds
-            );
-
-            const recipeItemsMap: Record<string, any[]> = {};
-            recipeItems.forEach(item => {
-                if (!recipeItemsMap[item.recipe_id]) recipeItemsMap[item.recipe_id] = [];
-                recipeItemsMap[item.recipe_id].push({
-                    name: item.ingredient_name,
-                    quantity: Number(item.quantity),
-                    unit: item.unit
-                });
-            });
-
-            recipesRaw.forEach(img => {
-                recipeMetadata[img.id] = {
-                    image_url: img.image_url,
-                    description: img.description,
-                    yield_qty: Number(img.base_yield_qty),
-                    yield_unit: img.base_yield_unit,
-                    cook_time: img.cook_time,
-                    container_type: img.container_type,
-                    categories: recipeCategoriesMap[img.id] || [],
-                    items: recipeItemsMap[img.id] || []
+                recipeMetadata[r.id] = {
+                    image_url: r.image_url,
+                    description: r.description,
+                    yield_qty: Number(r.base_yield_qty),
+                    yield_unit: r.base_yield_unit,
+                    cook_time: r.cook_time,
+                    container_type: r.container_type,
+                    categories: r.categories.map((c: { name: string }) => c.name),
+                    items: r.child_items
+                        .filter((item: any) => item.child_ingredient)
+                        .map((item: any) => ({
+                            name: item.child_ingredient.name,
+                            quantity: Number(item.quantity),
+                            unit: item.unit
+                        }))
                 };
-            });
-            console.log(`[Storefront API] Metadata ready for ${Object.keys(recipeMetadata).length} recipes`);
+            }
         }
+        console.log(`[Storefront API] Metadata ready for ${Object.keys(recipeMetadata).length} recipes`);
 
         // 4. Fetch Active Fundraisers
         console.log(`[Storefront API] Fetching active fundraisers for business ${business.id}`);
