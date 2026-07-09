@@ -52,19 +52,15 @@ export class PrismaAdapter implements DBAdapter {
                 purchase_quantity: Number(item.child_ingredient?.purchase_quantity) || undefined,
                 portal_type: item.child_ingredient?.supplier?.portal_type || undefined,
                 search_url_pattern: item.child_ingredient?.supplier?.search_url_pattern || undefined,
-                is_sub_recipe: (item as any).is_sub_recipe || false,
-                section_name: (item as any).section_name || undefined,
-                section_batch: Number((item as any).section_batch) || 1
+                is_sub_recipe: item.is_sub_recipe || false,
+                section_name: item.section_name || undefined,
+                section_batch: Number(item.section_batch) || 1
             })),
             label_text: recipe.label_text || undefined,
             macros: recipe.macros || undefined,
-            // @ts-ignore
             image_url: recipe.image_url || undefined,
-            // @ts-ignore
             description: recipe.description || undefined,
-            // @ts-ignore
             allergens: recipe.allergens || undefined,
-            // @ts-ignore
             cook_time: recipe.cook_time || undefined
         }));
     }
@@ -73,6 +69,7 @@ export class PrismaAdapter implements DBAdapter {
         const recipe = await prisma.recipe.findFirst({
             where: { id, business_id: this.businessId },
             include: {
+                categories: true,
                 child_items: {
                     include: {
                         child_recipe: true,
@@ -94,6 +91,7 @@ export class PrismaAdapter implements DBAdapter {
             base_yield_unit: recipe.base_yield_unit,
             container_type: recipe.container_type as 'tray' | 'bag',
             category_id: recipe.category_id || undefined,
+            categories: recipe.categories.map(c => ({ id: c.id, name: c.name })),
             items: recipe.child_items.map(item => ({
                 id: item.id,
                 parent_recipe_id: item.parent_recipe_id,
@@ -113,19 +111,15 @@ export class PrismaAdapter implements DBAdapter {
                 purchase_quantity: Number(item.child_ingredient?.purchase_quantity) || undefined,
                 portal_type: item.child_ingredient?.supplier?.portal_type || undefined,
                 search_url_pattern: item.child_ingredient?.supplier?.search_url_pattern || undefined,
-                is_sub_recipe: (item as any).is_sub_recipe || false,
-                section_name: (item as any).section_name || undefined,
-                section_batch: Number((item as any).section_batch) || 1
+                is_sub_recipe: item.is_sub_recipe || false,
+                section_name: item.section_name || undefined,
+                section_batch: Number(item.section_batch) || 1
             })),
             label_text: recipe.label_text || undefined,
             macros: recipe.macros || undefined,
-            // @ts-ignore
             image_url: recipe.image_url || undefined,
-            // @ts-ignore
             description: recipe.description || undefined,
-            // @ts-ignore
             allergens: recipe.allergens || undefined,
-            // @ts-ignore
             cook_time: recipe.cook_time || undefined
         };
     }

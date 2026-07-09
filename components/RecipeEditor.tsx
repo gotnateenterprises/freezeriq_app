@@ -265,9 +265,19 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
     const { register, control, handleSubmit, watch, setValue, reset } = formValues;
 
     const draftKey = `recipe_draft_${initialData?.id || 'new'}`;
+    const isNewRecipe = !initialData?.id;
 
-    // 1. Load Draft on Mount
+    // 1. Load Draft on Mount — only for NEW recipes
+    // For existing recipes, server data is authoritative. Stale localStorage
+    // drafts would silently overwrite fresh DB state, causing "save didn't work" confusion.
     useEffect(() => {
+        if (!isNewRecipe) {
+            // Existing recipe: clear any stale draft so auto-save starts fresh from server data
+            localStorage.removeItem(draftKey);
+            localStorage.setItem('active_recipe_id', initialData?.id || 'new');
+            return;
+        }
+
         const saved = localStorage.getItem(draftKey);
         if (saved) {
             try {
@@ -310,7 +320,7 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
 
         // Track this as the active recipe for sidebar stickiness
         localStorage.setItem('active_recipe_id', initialData?.id || 'new');
-    }, [draftKey, reset, initialData?.id]);
+    }, [draftKey, reset, initialData?.id, isNewRecipe]);
 
     // 2. Auto-Save Draft
     const watchedAll = watch();

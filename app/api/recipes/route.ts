@@ -34,20 +34,12 @@ export async function POST(req: NextRequest) {
                 instructions: instructions || null,
                 label_text: label_text || null,
                 macros: data.macros || null,
+                image_url: image_url || null,
+                description: description || null,
+                cook_time: cook_time || null,
                 business_id: session.user.businessId
-            } as any
+            }
         });
-
-        // HOTFIX: Update specific fields via Raw SQL immediately after creation
-        console.log(`[Recipe API] Updating metadata for new recipe ${recipe.id}: cook_time="${cook_time}"`);
-        await prisma.$executeRawUnsafe(
-            `UPDATE recipes SET description = $1, allergens = $2, image_url = $3, cook_time = $4 WHERE id = $5`,
-            description || null,
-            allergens || null,
-            image_url || null,
-            cook_time || null,
-            recipe.id
-        );
 
         // 2. Process Items
         if (items && Array.isArray(items) && items.length > 0) {
@@ -78,7 +70,7 @@ export async function POST(req: NextRequest) {
                 if (!item.name) continue;
                 const trimmedName = item.name.trim();
                 const nameKey = trimmedName.toLowerCase();
-                const isSub = String(item.is_sub_recipe) === 'true';
+                const isSub = item.is_sub_recipe === true || item.is_sub_recipe === 'true';
 
                 let childRecipeId = null;
                 let childIngredientId = null;
@@ -98,7 +90,7 @@ export async function POST(req: NextRequest) {
                                 cost_per_unit: 0,
                                 business_id: session.user.businessId,
                                 needs_review: true // Mark for review since it's auto-created
-                            } as any
+                            }
                         });
                         ingMap.set(nameKey, ing);
                     }

@@ -58,7 +58,7 @@ export async function PUT(
         // Interactive Transaction to ensure atomicity
         console.log(`[Recipe API] Updating recipe ${id} with data:`, JSON.stringify({ ...body, items: undefined }));
         const updatedId = await prisma.$transaction(async (tx) => {
-            // 1. Update Base Info (scalars)
+            // 1. Update Base Info (scalars + metadata)
             const updated = await tx.recipe.update({
                 where: { id },
                 data: {
@@ -74,27 +74,12 @@ export async function PUT(
                     allergens: allergens || null,
                     instructions: instructions || null,
                     label_text: label_text || null,
-                    macros: macros || null
-                }
+                    macros: macros || null,
+                    image_url: image_url !== undefined ? (image_url || null) : undefined,
+                    description: description !== undefined ? (description || null) : undefined,
+                    cook_time: cook_time !== undefined ? (cook_time || null) : undefined
+                } as any
             });
-
-            // HOTFIX: Update specific fields via Raw SQL to bypass Prisma Client sync issues
-            if (image_url !== undefined) {
-                console.log(`[Recipe API] Updating image_url for ${id}`);
-                await tx.$executeRawUnsafe(`UPDATE recipes SET image_url = $1 WHERE id = $2`, image_url || null, id);
-            }
-            if (description !== undefined) {
-                console.log(`[Recipe API] Updating description for ${id}`);
-                await tx.$executeRawUnsafe(`UPDATE recipes SET description = $1 WHERE id = $2`, description || null, id);
-            }
-            if (allergens !== undefined) {
-                console.log(`[Recipe API] Updating allergens for ${id}`);
-                await tx.$executeRawUnsafe(`UPDATE recipes SET allergens = $1 WHERE id = $2`, allergens || null, id);
-            }
-            if (cook_time !== undefined) {
-                console.log(`[Recipe API] Updating cook_time for ${id}: "${cook_time}"`);
-                await tx.$executeRawUnsafe(`UPDATE recipes SET cook_time = $1 WHERE id = $2`, cook_time || null, id);
-            }
 
             // 2. Update Items (Full Replacement Strategy)
             if (items !== undefined) {
@@ -124,7 +109,7 @@ export async function PUT(
                     for (const item of items) {
                         if (!item.name) continue;
                         const nameKey = item.name.toLowerCase();
-                        const isSub = String(item.is_sub_recipe) === 'true';
+                        const isSub = item.is_sub_recipe === true || item.is_sub_recipe === 'true';
 
                         let childRecipeId = null;
                         let childIngredientId = null;

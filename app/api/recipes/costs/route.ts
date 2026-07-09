@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { calculateRecipeCost } from '@/lib/cost_engine';
+import { auth } from '@/auth';
+
+export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/recipes/costs
@@ -9,7 +12,13 @@ import { calculateRecipeCost } from '@/lib/cost_engine';
  */
 export async function GET() {
     try {
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const recipes = await prisma.recipe.findMany({
+            where: { business_id: session.user.businessId },
             select: { id: true, name: true }
         });
 
