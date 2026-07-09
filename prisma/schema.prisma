@@ -745,7 +745,9 @@ enum OrderStatus {
   fundraiser_hold  @map("fundraiser_hold")
   pending          @map("pending")
   production_ready @map("production_ready")
+  in_production    @map("in_production")
   completed        @map("completed")
+  ready_to_ship    @map("ready_to_ship")
   delivered        @map("delivered")
   PENDING
   APPROVED
