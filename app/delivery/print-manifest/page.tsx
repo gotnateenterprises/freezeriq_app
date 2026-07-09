@@ -44,7 +44,7 @@ export default function PrintManifestPage() {
             try {
                 // Fetch Orders AND Stats in parallel
                 const [ordersRes, statsRes, bizRes] = await Promise.all([
-                    fetch(`/api/orders?status=pending,production_ready,completed,COMPLETED,APPROVED,IN_PRODUCTION${weekParam}`),
+                    fetch(`/api/orders?status=pending,production_ready,in_production,ready_to_ship,completed${weekParam}`),
                     fetch(`/api/delivery/stats${weekParamFirst}`),
                     fetch('/api/business')
                 ]);

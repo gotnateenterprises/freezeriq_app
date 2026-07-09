@@ -1,6 +1,7 @@
 import { DBAdapter } from './kitchen_engine';
 import { prisma } from './db';
 import { Recipe, Uuid, Bundle } from '../types';
+import { toDbOrderStatusReadCandidates } from './orderStatus';
 
 export class PrismaAdapter implements DBAdapter {
     private businessId: string;
@@ -236,10 +237,17 @@ export class PrismaAdapter implements DBAdapter {
     }
 
     async getProductionOrders() {
+        // Phase 5G-2: use read-candidate helper so legacy IN_PRODUCTION and APPROVED
+        // rows are still visible alongside new canonical in_production and production_ready.
+        const productionStatuses = [
+            ...toDbOrderStatusReadCandidates('pending'),
+            ...toDbOrderStatusReadCandidates('production_ready'),
+            ...toDbOrderStatusReadCandidates('in_production'),
+        ];
         const orders = await prisma.order.findMany({
             where: {
                 OR: [
-                    { status: { in: ['pending', 'production_ready', 'APPROVED', 'IN_PRODUCTION'] as any } },
+                    { status: { in: [...new Set(productionStatuses)] as any } },
                     { customer: { status: 'PRODUCTION' } }
                 ],
                 business_id: this.businessId,

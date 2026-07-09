@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from '@/lib/db';
+import { toDbOrderStatusReadCandidates } from '@/lib/orderStatus';
 
 export async function GET(req: NextRequest) {
     try {
@@ -10,8 +11,22 @@ export async function GET(req: NextRequest) {
         const { searchParams } = new URL(req.url);
         const deliveryWeekStart = searchParams.get('delivery_week_start');
 
+        // Phase 5G-2: derive DB candidates from canonical status names so the
+        // helper owns legacy ↔ canonical mapping. Covers orders at every active
+        // lifecycle stage up to and including ready_to_ship ("awaiting delivery").
+        // Note: ready_to_ship candidates include 'completed' temporarily to catch
+        // old rows stored that way before Phase 5G-1.
+        const activeStatuses = [
+            ...toDbOrderStatusReadCandidates('pending'),
+            ...toDbOrderStatusReadCandidates('production_ready'),
+            ...toDbOrderStatusReadCandidates('in_production'),
+            ...toDbOrderStatusReadCandidates('ready_to_ship'),
+            ...toDbOrderStatusReadCandidates('completed'),
+        ];
+        const deliveredCandidates = toDbOrderStatusReadCandidates('completed');
+
         const whereClause: any = {
-            status: { in: ['pending', 'production_ready', 'completed', 'COMPLETED', 'APPROVED', 'IN_PRODUCTION'] },
+            status: { in: [...new Set(activeStatuses)] as any },
             business_id: session.user.businessId
         };
 
@@ -22,7 +37,7 @@ export async function GET(req: NextRequest) {
             whereClause.OR = [
                 { delivery_date: { gte: weekStart, lt: weekEnd } },
                 { delivery_date: null },
-                { status: { in: ['completed', 'COMPLETED'] } }
+                { status: { in: deliveredCandidates as any } }
             ];
         }
 

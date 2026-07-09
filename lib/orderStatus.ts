@@ -6,12 +6,20 @@
  * because the current OrderStatus enum is split-brain and does not yet contain
  * `in_production` or `ready_to_ship` as canonical lowercase values.
  *
+ * Phase 5G-1 added in_production and ready_to_ship to the Prisma enum.
+ * This file remains schema-neutral — it does not import Prisma enum types.
+ *
  * Phase 5B — Added canonical constants, normalizeOrderStatus, helpers.
  * Phase 5D — Added CANONICAL_TO_DB_ORDER_STATUS and toDbSafeOrderStatus() for
  *             safe DB writes during the transitional period before migration.
  * Phase 5F — Added toDbOrderStatusReadCandidates() so GET routes and UI
  *             components can query both canonical and legacy DB values without
  *             passing raw ghost strings (READY_TO_SHIP, APPROVED, etc.) to Prisma.
+ * Phase 5G — Prisma enum now includes in_production and ready_to_ship.
+ *             Updated write mapper to use canonical values directly.
+ *             Updated read candidates to include both new canonical and legacy
+ *             uppercase rows that still exist in the DB.
+ *             ORDER_STATUS_COMPAT deprecated — use toDbOrderStatusReadCandidates.
  *
  * Canonical lifecycle (Phase 5A approved):
  *   fundraiser_hold → pending → production_ready → in_production
@@ -159,77 +167,72 @@ export function getOrderStatusRank(
   return STATUS_RANK[canonical];
 }
 
-// ─── 8. Compatibility Query Groups ───────────────────────────────────────────
-//
-// Pre-built arrays of values to pass directly into Prisma `{ in: [...] }` clauses
-// during the transitional period where the DB may contain both old and new values.
-//
-// Phase 5E will replace these with clean single-value canonical queries after
-// the Phase 5C SQL migration has run and the schema has been unified.
-//
-// Usage example (do NOT use these in routes until Phase 5E is approved):
-//   status: { in: ORDER_STATUS_COMPAT.productionQueue as any }
-
+/**
+ * @deprecated Phase 5G-2: Use toDbOrderStatusReadCandidates(canonicalStatus) instead.
+ *
+ * These pre-built arrays contain unsafe ghost values (in_production, READY_TO_SHIP)
+ * that are no longer needed now that the Prisma enum includes the real canonical
+ * values. This constant will be removed in Phase 5I after legacy rows are backfilled.
+ *
+ * The only current usage is ORDER_STATUS_COMPAT.completedLike in
+ * app/api/production/dashboard/route.ts, which was already migrated to
+ * toDbOrderStatusReadCandidates('completed') in Phase 5F. This export is kept
+ * for import compatibility but should not be referenced in new code.
+ */
 export const ORDER_STATUS_COMPAT = {
-  /** Orders visible in the kitchen holding area / production dashboard holding panel */
+  /** @deprecated Use toDbOrderStatusReadCandidates('pending', 'production_ready', 'in_production') */
   productionQueue: [
     'pending',
     'production_ready',
     'APPROVED',
+    'in_production',
     'IN_PRODUCTION',
-    'in_production',        // canonical (present after Phase 5C)
   ] as const,
 
-  /** Orders that should appear in delivery hub, manifest, and packing slips */
+  /** @deprecated Use toDbOrderStatusReadCandidates for each canonical status */
   activeForDelivery: [
     'pending',
     'production_ready',
+    'in_production',
     'APPROVED',
     'IN_PRODUCTION',
-    'in_production',        // canonical
     'completed',
     'COMPLETED',
     'ready_to_ship',
-    'READY_TO_SHIP',
   ] as const,
 
-  /** Both historical and canonical "cooking done" values */
+  /** @deprecated Use toDbOrderStatusReadCandidates('completed') */
   completedLike: [
     'completed',
     'COMPLETED',
   ] as const,
 
-  /** Both historical and canonical "delivered to customer" values */
+  /** @deprecated Use toDbOrderStatusReadCandidates('delivered') */
   deliveredLike: [
     'delivered',
     'DELIVERED',
   ] as const,
 } as const;
 
-// ─── 9. Temporary DB-Safe Write Mapper ───────────────────────────────────────
+// ─── 9. DB-Safe Write Mapper ─────────────────────────────────────────────────
 //
 // Maps every CanonicalOrderStatus to the value that is currently safe to write
-// to the database. This is TEMPORARY — it exists only because the Prisma
-// OrderStatus enum has not yet been migrated to match the canonical set.
+// to the database.
 //
-// Important invariants:
-//   - `in_production` → 'IN_PRODUCTION': lowercase form is not in the DB enum yet.
-//   - `ready_to_ship` → 'completed': neither ready_to_ship nor READY_TO_SHIP is
-//     in the DB enum. 'completed' is the nearest safe prior step.
-//     (InProductionArea.tsx currently writes the ghost value READY_TO_SHIP;
-//      after this mapper is wired in Phase 5D it will write 'completed' instead.)
+// Phase 5G-1 added in_production and ready_to_ship to the Prisma enum, so
+// writes can now use canonical lowercase values directly for both.
 //
-// This map must remain schema-neutral — do NOT import Prisma enum types here.
-// Update this map (or remove it) when the Phase 5E SQL migration runs and adds
-// `in_production` and `ready_to_ship` to the Prisma enum.
+// This map remains schema-neutral — do NOT import Prisma enum types here.
+// Simplify further (or remove) in Phase 5I after legacy values are removed
+// from the enum.
 
 export const CANONICAL_TO_DB_ORDER_STATUS: Record<CanonicalOrderStatus, string> = {
   fundraiser_hold:  'fundraiser_hold',
   pending:          'pending',
   production_ready: 'production_ready',
-  in_production:    'IN_PRODUCTION',   // lowercase not yet in DB enum — use uppercase form
+  in_production:    'in_production',    // Phase 5G-1: now a real enum value
   completed:        'completed',
-  ready_to_ship:    'completed',       // neither form is in DB enum — fallback to completed
+  ready_to_ship:    'ready_to_ship',    // Phase 5G-1: now a real enum value
   delivered:        'delivered',
 };
 
@@ -257,16 +260,7 @@ export function toDbSafeOrderStatus(
   return CANONICAL_TO_DB_ORDER_STATUS[canonical];
 }
 
-// ─── 10. Temporary DB-Safe Read Candidates ───────────────────────────────────
-//
-// Returns all DB status values that a WHERE clause should match for a given
-// canonical status during the transitional period (before enum migration and
-// row backfill). Covers both canonical lowercase and legacy uppercase forms.
-//
-// TEMPORARY: Simplify to single-value arrays after Phase 5H backfill removes
-// legacy uppercase rows from the DB.
-//
-// Schema-neutral: does NOT import Prisma enum types.
+// ─── 10. DB-Safe Read Candidates ─────────────────────────────────────────────
 //
 // Usage in Prisma query (single canonical):
 //   status: { in: toDbOrderStatusReadCandidates('production_ready') as any }
@@ -280,10 +274,14 @@ const CANONICAL_TO_DB_READ_CANDIDATES: Record<CanonicalOrderStatus, string[]> = 
   fundraiser_hold:  ['fundraiser_hold'],
   pending:          ['pending', 'PENDING'],
   production_ready: ['production_ready', 'APPROVED'],
-  in_production:    ['IN_PRODUCTION'],
-  // ready_to_ship is temporarily stored as 'completed' until the enum migration
-  // adds a real ready_to_ship value. Reads for ready_to_ship match 'completed'.
-  ready_to_ship:    ['completed'],
+  // Phase 5G-1: in_production is now a real enum value.
+  // Keep IN_PRODUCTION in read candidates until Phase 5H backfill converts legacy rows.
+  in_production:    ['in_production', 'IN_PRODUCTION'],
+  // Phase 5G-1: ready_to_ship is now a real enum value.
+  // Keep 'completed' in read candidates because old rows that were semantically
+  // "ready to ship" were temporarily stored as 'completed' (Phase 5D/5F workaround).
+  // Remove 'completed' from this list after Phase 5H backfill.
+  ready_to_ship:    ['ready_to_ship', 'completed'],
   completed:        ['completed', 'COMPLETED'],
   delivered:        ['delivered', 'DELIVERED'],
 };

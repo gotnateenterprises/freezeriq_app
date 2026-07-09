@@ -36,7 +36,9 @@ export async function GET(req: NextRequest) {
             whereClause.OR = [
                 { delivery_date: { gte: weekStart, lt: weekEnd } },
                 { delivery_date: null },
-                { status: { in: ['completed', 'COMPLETED'] } }
+                // Phase 5G-2: also pin 'completed' and 'ready_to_ship' rows regardless
+                // of delivery_date (they may have no date set but still need to appear)
+                { status: { in: toDbOrderStatusReadCandidates('completed') as any } }
             ];
         }
 
