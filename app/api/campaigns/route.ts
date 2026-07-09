@@ -17,6 +17,10 @@ export async function POST(req: Request) {
         const session = await auth();
         if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+        if (!session.user.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const body = await req.json();
         const {
             customerId,
@@ -33,8 +37,21 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Customer ID and Name are required" }, { status: 400 });
         }
 
-        // Verify customer exists and belongs to user's business (if applicable)
-        // For Super Admin/FreezerIQ, we assume access to all, but good practice to check business_id if we were stricter.
+        // Verify customer belongs to this tenant before creating any campaign or minting
+        // a portal_token. Using findFirst with both id AND business_id in the WHERE clause
+        // prevents cross-tenant access and avoids leaking whether a foreign customer exists.
+        // Returns 404 (not 403) so the response is indistinguishable from "not found".
+        const customer = await prisma.customer.findFirst({
+            where: {
+                id: customerId,
+                business_id: session.user.businessId,
+            },
+            select: { id: true },
+        });
+
+        if (!customer) {
+            return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+        }
 
         const campaign = await prisma.fundraiserCampaign.create({
             data: {
