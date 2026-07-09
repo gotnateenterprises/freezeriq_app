@@ -1,26 +1,41 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { auth } from '@/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
     try {
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+        const businessId = session.user.businessId;
+
         const timestamp = new Date().toISOString().split('T')[0];
 
         const [recipes, categories, ingredients, packaging_items, suppliers] = await Promise.all([
             prisma.recipe.findMany({
+                where: { business_id: businessId },
                 include: {
                     categories: true, // Modern M-N
                     child_items: true // Instructions/Ingredients
                 }
             }),
             prisma.category.findMany({
+                where: { business_id: businessId },
                 include: { recipes: { select: { id: true } } }
             }),
-            prisma.ingredient.findMany(),
-            prisma.packagingItem.findMany(),
-            prisma.supplier.findMany()
+            prisma.ingredient.findMany({
+                where: { business_id: businessId }
+            }),
+            prisma.packagingItem.findMany({
+                where: { business_id: businessId }
+            }),
+            prisma.supplier.findMany({
+                where: { business_id: businessId }
+            })
         ]);
 
         const backupData = {

@@ -530,6 +530,7 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
             const data = await res.json();
             if (data.macros) {
                 setValue('macros', data.macros, { shouldDirty: true });
+                let finalMacrosValue = data.macros;
                 if (data.fullNutrition) {
                     setFullNutritionData(data.fullNutrition);
                     // If we get full data, we automatically switch to full mode to show it off
@@ -537,10 +538,11 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
                     // Store the full JSON in the macros field for persistence
                     const macrosJson = JSON.stringify({ summary: data.macros, fullData: data.fullNutrition });
                     setValue('macros', macrosJson, { shouldDirty: true });
+                    finalMacrosValue = macrosJson;
                 }
 
-                // Trigger draft save immediately with latest values
-                const currentData = { ...formValues.getValues(), macros: data.macros, selectedCategoryTags };
+                // Trigger draft save immediately with the FINAL macros value (not stale summary)
+                const currentData = { ...formValues.getValues(), macros: finalMacrosValue, selectedCategoryTags };
                 localStorage.setItem(draftKey, JSON.stringify(currentData));
             } else if (data.error) {
                 alert(`${data.error}${data.details ? `\n\nDetails: ${data.details}` : ''}`);
