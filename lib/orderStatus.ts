@@ -19,7 +19,10 @@
  *             Updated write mapper to use canonical values directly.
  *             Updated read candidates to include both new canonical and legacy
  *             uppercase rows that still exist in the DB.
- *             ORDER_STATUS_COMPAT deprecated — use toDbOrderStatusReadCandidates.
+ * Phase 5H — Legacy uppercase rows backfilled. ORDER_STATUS_COMPAT removed
+ *             (zero external importers after Phase 5H-0).
+ * Phase 5I — Removed ORDER_STATUS_COMPAT dead code. Fixed ghost 'delivery'
+ *             status in client-side filters.
  *
  * Canonical lifecycle (Phase 5A approved):
  *   fundraiser_hold → pending → production_ready → in_production
@@ -167,52 +170,6 @@ export function getOrderStatusRank(
   return STATUS_RANK[canonical];
 }
 
-/**
- * @deprecated Phase 5G-2: Use toDbOrderStatusReadCandidates(canonicalStatus) instead.
- *
- * These pre-built arrays contain unsafe ghost values (in_production, READY_TO_SHIP)
- * that are no longer needed now that the Prisma enum includes the real canonical
- * values. This constant will be removed in Phase 5I after legacy rows are backfilled.
- *
- * The only current usage is ORDER_STATUS_COMPAT.completedLike in
- * app/api/production/dashboard/route.ts, which was already migrated to
- * toDbOrderStatusReadCandidates('completed') in Phase 5F. This export is kept
- * for import compatibility but should not be referenced in new code.
- */
-export const ORDER_STATUS_COMPAT = {
-  /** @deprecated Use toDbOrderStatusReadCandidates('pending', 'production_ready', 'in_production') */
-  productionQueue: [
-    'pending',
-    'production_ready',
-    'APPROVED',
-    'in_production',
-    'IN_PRODUCTION',
-  ] as const,
-
-  /** @deprecated Use toDbOrderStatusReadCandidates for each canonical status */
-  activeForDelivery: [
-    'pending',
-    'production_ready',
-    'in_production',
-    'APPROVED',
-    'IN_PRODUCTION',
-    'completed',
-    'COMPLETED',
-    'ready_to_ship',
-  ] as const,
-
-  /** @deprecated Use toDbOrderStatusReadCandidates('completed') */
-  completedLike: [
-    'completed',
-    'COMPLETED',
-  ] as const,
-
-  /** @deprecated Use toDbOrderStatusReadCandidates('delivered') */
-  deliveredLike: [
-    'delivered',
-    'DELIVERED',
-  ] as const,
-} as const;
 
 // ─── 9. DB-Safe Write Mapper ─────────────────────────────────────────────────
 //

@@ -218,7 +218,9 @@ function CustomersContent() {
 
     // Filter Logic
     const hasInProgressOrders = (customer: Customer) => {
-        const statuses = ['pending', 'production_ready', 'delivery', 'delivered'];
+        // Phase 5I: replaced ghost 'delivery' (was never a valid OrderStatus) with
+        // the full canonical lifecycle. 'delivered' preserved from original array.
+        const statuses = ['pending', 'production_ready', 'in_production', 'ready_to_ship', 'completed', 'delivered'];
         return (customer.orders || []).some((o: any) =>
             statuses.includes((o.status || '').toLowerCase())
         );

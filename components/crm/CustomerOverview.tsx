@@ -239,7 +239,9 @@ export default function CustomerOverview({ customer, onUpdateCustomer, onEditPro
     const inProgressStats = (() => {
         const orders = customer.orders || [];
         const filtered = orders.filter((o: any) =>
-            ['pending', 'production_ready', 'delivery'].includes((o.status || '').toLowerCase())
+            // Phase 5I: replaced ghost 'delivery' (was never a valid OrderStatus) with
+            // the full canonical set of active lifecycle statuses.
+            ['pending', 'production_ready', 'in_production', 'ready_to_ship', 'completed'].includes((o.status || '').toLowerCase())
         );
         const totalAmount = filtered.reduce((sum: number, o: any) => {
             const amount = parseFloat((o.total || '0').replace(/[^0-9.-]+/g, ""));
