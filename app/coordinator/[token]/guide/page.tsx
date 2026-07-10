@@ -45,7 +45,7 @@ export default function SuccessGuide() {
                 return res.json();
             })
             .then(data => {
-                if (!data || data.error) {
+                if (!data || data.error || !data.id) {
                     setLoadError(true);
                 } else {
                     setCampaign(data);
