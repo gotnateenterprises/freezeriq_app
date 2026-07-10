@@ -54,6 +54,7 @@ function isCampaignClosed(f: Fundraiser): boolean {
     return Boolean(f.closed_at) ||
         f.status === 'Closed' ||
         f.status === 'Settled' ||
+        f.status === 'Completed' ||
         f.status === 'Archived';
 }
 
@@ -160,7 +161,10 @@ export default function FundraisersPage() {
     const filtered = fundraisers.filter(f => {
         const matchesSearch = f.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             f.customer.name.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchesFilter = filterStatus === 'all' || f.status.toLowerCase() === filterStatus.toLowerCase();
+        const matchesFilter =
+            filterStatus === 'all' ? true :
+            filterStatus === 'closed' ? isCampaignClosed(f) :
+            f.status.toLowerCase() === filterStatus.toLowerCase();
         return matchesSearch && matchesFilter;
     });
 
@@ -243,7 +247,7 @@ export default function FundraisersPage() {
                     />
                 </div>
                 <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-2xl">
-                    {['all', 'active', 'lead', 'completed'].map(status => (
+                    {['all', 'active', 'lead', 'closed'].map(status => (
                         <button
                             key={status}
                             onClick={() => setFilterStatus(status)}
@@ -363,7 +367,8 @@ export default function FundraisersPage() {
                                     </td>
                                     <td className="px-2 py-4 text-right">
                                         <div className="flex items-center justify-end gap-0.5">
-                                            {!item.is_placeholder && (
+                                            {/* FIX-4: Only show public page link when slug exists and row is real */}
+                                            {!item.is_placeholder && item.business_slug && (
                                                 <Link
                                                     href={`/shop/${item.business_slug}/fundraiser/${item.id}`}
                                                     target="_blank"
@@ -383,13 +388,16 @@ export default function FundraisersPage() {
                                                     <Users size={15} />
                                                 </Link>
                                             )}
-                                            <Link
-                                                href={`/customers/${item.customer_id}?tab=fundraisers&action=invoice&campaignId=${item.id}`}
-                                                className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-emerald-600 transition-all"
-                                                title="Create Invoice"
-                                            >
-                                                <Receipt size={15} />
-                                            </Link>
+                                            {/* FIX-4: Only show invoice icon for real (non-placeholder) rows */}
+                                            {!item.is_placeholder && (
+                                                <Link
+                                                    href={`/customers/${item.customer_id}?tab=fundraisers&action=invoice&campaignId=${item.id}`}
+                                                    className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-emerald-600 transition-all"
+                                                    title="Create Invoice"
+                                                >
+                                                    <Receipt size={15} />
+                                                </Link>
+                                            )}
                                             {/* Phase 7E-3: Close Campaign button — only for non-closed campaigns */}
                                             {!item.is_placeholder && !isCampaignClosed(item) && (
                                                 <button

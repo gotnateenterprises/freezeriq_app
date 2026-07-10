@@ -12,12 +12,16 @@ import { STATUS_LABELS, STATUS_COLORS, type CustomerStatus } from '@/lib/statusC
 import { buildFundraiserUrls } from '@/lib/fundraiserUrls';
 
 // Template Generator (Matches API for default preview)
-const generateIntroTemplate = (name: string, orgName?: string) => ({
-    subject: `Delicious, stress-free fundraising for ${orgName || 'your group'}`,
-    html: `
+const generateIntroTemplate = (name: string, orgName?: string, branding?: any) => {
+    const sigName = branding?.business_name || 'Your Fundraiser Team';
+    const sigEmail = branding?.contact_email || '';
+    const sigSite = branding?.slug ? `${typeof window !== 'undefined' ? window.location.origin : ''}/shop/${branding.slug}` : '';
+    return {
+        subject: `Delicious, stress-free fundraising for ${orgName || 'your group'}`,
+        html: `
 <p>Hi ${name || 'there'}!</p>
-<p>I’d love to help <strong>${orgName || 'your organization'}</strong> raise funds in a way that truly supports your families—by solving dinner time!</p>
-<p>With a Freezer Chef fundraiser, you aren't just raising money; you're giving families the gift of a wholesome, homemade dinner without the prep work.</p>
+<p>I'd love to help <strong>${orgName || 'your organization'}</strong> raise funds in a way that truly supports your families—by solving dinner time!</p>
+<p>With a ${sigName} fundraiser, you aren't just raising money; you're giving families the gift of a wholesome, homemade dinner without the prep work.</p>
 
 <h3>Why moms and groups love this:</h3>
 <ul>
@@ -26,7 +30,7 @@ const generateIntroTemplate = (name: string, orgName?: string) => ({
     <li><strong>Meaningful Profit:</strong> Your group keeps <strong>20%</strong> of every sale to support your goals.</li>
 </ul>
 
-<h3>It’s super simple:</h3>
+<h3>It's super simple:</h3>
 <ol>
     <li><strong>Pick a Date:</strong> choose a Tuesday, Wednesday, or Thursday for delivery.</li>
     <li><strong>Share the Love:</strong> We provide beautiful flyers and forms plus your own online order page and a personal Coordinator Dashboard to track everything in real time.</li>
@@ -34,22 +38,25 @@ const generateIntroTemplate = (name: string, orgName?: string) => ({
 </ol>
 
 <p><strong>Ready to simplify dinner for your community?</strong><br>
-I’d love to get a tentative date on the calendar for you or just chat about how we can make this your easiest fundraiser yet.</p>
+I'd love to get a tentative date on the calendar for you or just chat about how we can make this your easiest fundraiser yet.</p>
 
 <p>Just reply to let me know which month you're thinking of!</p>
 
 <p>Warmly,</p>
-<p><strong>Laurie</strong><br>
-<a href="mailto:Laurie@MyFreezerChef.com">Laurie@MyFreezerChef.com</a><br>
-<a href="https://MyFreezerChef.com">MyFreezerChef.com</a></p>
+<p><strong>${sigName}</strong><br>
+${sigEmail ? `<a href="mailto:${sigEmail}">${sigEmail}</a><br>` : ''}
+${sigSite ? `<a href="${sigSite}">${sigSite}</a>` : ''}</p>
 `
-});
+    };
+};
 
-const generateInfoTemplate = (name: string, bundles: any[]) => ({
-    subject: `Getting started with your Freezer Chef Fundraiser!`,
-    html: `
+const generateInfoTemplate = (name: string, bundles: any[], branding?: any) => {
+    const sigName = branding?.business_name || 'Your Fundraiser Team';
+    return {
+        subject: `Getting started with your ${sigName} Fundraiser!`,
+        html: `
 <p>Hi ${name || 'there'}!</p>
-<p>Thanks for your interest in a Freezer Chef fundraiser! We are so excited to help you raise money and feed your community.</p>
+<p>Thanks for your interest in a ${sigName} fundraiser! We are so excited to help you raise money and feed your community.</p>
 
 <h3>Here is how it works (The Easy 1-2-3):</h3>
 <ol>
@@ -60,7 +67,7 @@ const generateInfoTemplate = (name: string, bundles: any[]) => ({
 
 <p>Please complete the short form below with all of the information we need to get you set up in our system and your custom marketing materials ready to go!</p>
 
-<p>Warmly,<br>Laurie</p>
+<p>Warmly,<br>${sigName}</p>
 
 <hr style="border: 1px dashed #ccc; margin: 20px 0;">
 
@@ -82,9 +89,10 @@ ${bundles.length > 0 ? `
 </ul>
 ` : '<p><em>(No bundles found for this season)</em></p>'}
 `
-});
+    };
+};
 
-const generateMarketingTemplate = (name: string, info: any, campaign?: any) => {
+const generateMarketingTemplate = (name: string, info: any, campaign?: any, branding?: any) => {
     const origin = typeof window !== 'undefined'
         ? window.location.origin
         : (process.env.NEXTAUTH_URL || 'http://localhost:3000');
@@ -92,6 +100,7 @@ const generateMarketingTemplate = (name: string, info: any, campaign?: any) => {
         portalToken: campaign?.portal_token,
         publicToken: campaign?.public_token,
     });
+    const sigName = branding?.business_name || 'Your Fundraiser Team';
 
     return {
         subject: `Your Fundraiser Marketing Materials are Ready!`,
@@ -99,7 +108,7 @@ const generateMarketingTemplate = (name: string, info: any, campaign?: any) => {
 <p>Hi ${name || 'there'}!</p>
 <p>Great news! Your fundraiser is all set up and ready to go.</p>
 
-<div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 20px 0;">
+${(portalUrl || guideUrl || scoreboardUrl) ? `<div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 20px 0;">
     <h3 style="margin-top: 0; color: #4f46e5;">🚀 Your Coordinator Toolkit</h3>
     <p>We've created a private dashboard for you to track orders and a public scoreboard for your supporters:</p>
     <ul style="padding-left: 20px;">
@@ -107,7 +116,7 @@ const generateMarketingTemplate = (name: string, info: any, campaign?: any) => {
         ${guideUrl ? `<li><strong>Success Guide:</strong> <a href="${guideUrl}">How to Smash Your Goal</a><br><em>(Tips for social media, payments, and promotion)</em></li>` : ''}
         ${scoreboardUrl ? `<li><strong>Public Scoreboard:</strong> <a href="${scoreboardUrl}">${scoreboardUrl}</a><br><em>(Share this with your parents and community!)</em></li>` : ''}
     </ul>
-</div>
+</div>` : ''}
 
 <p>Attached to this email, you'll find your <strong>Offline Marketing Packet</strong>, including:</p>
 <ul>
@@ -128,14 +137,19 @@ Open your <strong>Success Guide</strong> above to see our recommended social med
 
 <p>Happy Fundraising!</p>
 
-<p>Warmly,<br>Laurie</p>
+<p>Warmly,<br>${sigName}</p>
 `
     };
 };
 
-const generateSeasonalMenuTemplate = (name: string) => ({
-    subject: `Fresh from the Kitchen: Our New Seasonal Menu is Here! 🥘`,
-    html: `
+const generateSeasonalMenuTemplate = (name: string, branding?: any) => {
+    const sigName = branding?.business_name || 'Your Fundraiser Team';
+    const slug = branding?.slug;
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const menuUrl = slug ? `${origin}/shop/${slug}` : null;
+    return {
+        subject: `Fresh from the Kitchen: Our New Seasonal Menu is Here! 🥘`,
+        html: `
 <p>Hi ${name || 'there'}!</p>
 <p>The seasons are changing, and so is our menu! We've been busy in the kitchen preparing some incredible new dishes that we know your family will love.</p>
 
@@ -150,15 +164,18 @@ const generateSeasonalMenuTemplate = (name: string) => ({
 
 <p>Skip the meal prep tonight and let us handle the cooking. Our meals are prepared with love, frozen fresh, and ready when you are.</p>
 
-<p><a href="https://freezeriq.com/menu" style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Browse the New Menu</a></p>
+${menuUrl ? `<p><a href="${menuUrl}" style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Browse the New Menu</a></p>` : ''}
 
-<p>Warmly,<br>Laurie</p>
+<p>Warmly,<br>${sigName}</p>
 `
-});
+    };
+};
 
-const generateWeMissYouTemplate = (name: string) => ({
-    subject: `We miss you! Here's a little something for your next dinner... 🎁`,
-    html: `
+const generateWeMissYouTemplate = (name: string, branding?: any) => {
+    const sigName = branding?.business_name || 'Your Fundraiser Team';
+    return {
+        subject: `We miss you! Here's a little something for your next dinner... 🎁`,
+        html: `
 <p>Hi ${name || 'there'}!</p>
 <p>It's been a while since we've seen you at the kitchen! We know life gets busy, and we'd love to help make your weeknights a little easier again.</p>
 
@@ -173,9 +190,10 @@ const generateWeMissYouTemplate = (name: string) => ({
 
 <p>Happy Eating!</p>
 
-<p>Warmly,<br>Laurie</p>
+<p>Warmly,<br>${sigName}</p>
 `
-});
+    };
+};
 
 interface CustomerOverviewProps {
     customer: any;
@@ -337,15 +355,15 @@ export default function CustomerOverview({ customer, onUpdateCustomer, onEditPro
 
         let template;
         if (type === 'intro') {
-            template = generateIntroTemplate(firstName, orgName);
+            template = generateIntroTemplate(firstName, orgName, branding);
         } else if (type === 'marketing') {
-            template = generateMarketingTemplate(firstName, customer.fundraiser_info || {}, activeCampaign);
+            template = generateMarketingTemplate(firstName, customer.fundraiser_info || {}, activeCampaign, branding);
         } else if (type === 'custom') {
             template = { subject: '', html: '' };
         } else if (type === 'seasonal') {
-            template = generateSeasonalMenuTemplate(firstName);
+            template = generateSeasonalMenuTemplate(firstName, branding);
         } else if (type === 'promotion') {
-            template = generateWeMissYouTemplate(firstName);
+            template = generateWeMissYouTemplate(firstName, branding);
         } else {
             template = { subject: '', html: '' };
         }
@@ -772,7 +790,7 @@ export default function CustomerOverview({ customer, onUpdateCustomer, onEditPro
 
                                         // Auto-open Marketing Email
                                         const firstName = customer.contact_name ? customer.contact_name.split(' ')[0] : '';
-                                        const template = generateMarketingTemplate(firstName, data, activeCampaign);
+                                        const template = generateMarketingTemplate(firstName, data, activeCampaign, branding);
                                         setActiveEmailContext('marketing');
                                         setEmailDraft({ subject: template.subject, html: template.html });
                                         setEmailAttachments(atts);
