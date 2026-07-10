@@ -1,15 +1,18 @@
 
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Plus, Search, BookOpen, Clock, Users, ArrowRight, Upload, Folder, ChevronRight, ArrowLeft, FolderPlus, X, Trash, FileText, Download, DollarSign, GripVertical } from 'lucide-react';
+import { Plus, Search, X, Trash, FileText, Folder, GripVertical, DollarSign, Clock, Users, ArrowRight, Upload, Download, FolderPlus, List, LayoutGrid, MoreHorizontal } from 'lucide-react';
 import RecipeImporter from './RecipeImporter';
 import { Recipe, Category } from '@/types';
-import { DndContext, DragOverlay, DragEndEvent, DragStartEvent, PointerSensor, useSensor, useSensors, pointerWithin, rectIntersection, closestCenter } from '@dnd-kit/core';
+import { DndContext, DragOverlay, DragEndEvent, DragStartEvent, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
 import { DroppableFolder, DraggableRecipe, DraggableFolderItem } from './DraggableComponents';
 import { ClientOnly } from './ClientOnly';
+import { CategoryTree } from './recipes/CategoryTree';
+import { RecipeList } from './recipes/RecipeList';
+import { RecipeQuickView } from './recipes/RecipeQuickView';
 
 // Helper to find category path
 function getPath(categories: Category[], targetId: string): Category[] {
@@ -23,20 +26,24 @@ function getPath(categories: Category[], targetId: string): Category[] {
     return [];
 }
 
-// Helper to calculate recipe cost
-function calculateRecipeCost(recipe: Recipe): number {
-    // If server provided a pre-calculated recursive cost, use it!
-    if ((recipe as any).calculated_cost !== undefined) {
-        return (recipe as any).calculated_cost;
+// All descendant ids of a category, for tree filtering ("Entrées" includes "Chicken"/"Beef")
+function collectCategoryIds(categories: Category[], targetId: string): string[] {
+    const found = getPath(categories, targetId).pop();
+    if (!found) return [targetId];
+    const walk = (c: Category): string[] => [c.id, ...(c.children ?? []).flatMap(walk)];
+    return walk(found);
+}
+
+// Recursive category search for DragOverlay (searches all nested categories)
+function findCategoryById(categories: Category[], id: string): Category | null {
+    for (const cat of categories) {
+        if (cat.id === id) return cat;
+        if (cat.children) {
+            const found = findCategoryById(cat.children, id);
+            if (found) return found;
+        }
     }
-
-    if (!(recipe as any).child_items) return 0;
-
-    return (recipe as any).child_items.reduce((sum: number, item: any) => {
-        const cost = item.child_ingredient?.cost_per_unit || 0;
-        const quantity = item.quantity || 0;
-        return sum + (cost * quantity);
-    }, 0);
+    return null;
 }
 
 interface ScoredRecipe extends Recipe {
@@ -53,6 +60,32 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
     const [newFolderName, setNewFolderName] = useState('');
     const [activeId, setActiveId] = useState<string | null>(null);
     const [isDragging, setIsDragging] = useState(false);
+    const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
+    const [view, setView] = useState<'list' | 'cards'>('list');
+    const [showOverflow, setShowOverflow] = useState(false);
+    const overflowRef = useRef<HTMLDivElement>(null);
+
+    // Persist view preference in localStorage
+    useEffect(() => {
+        const saved = localStorage.getItem('recipeView');
+        if (saved === 'cards' || saved === 'list') setView(saved);
+    }, []);
+    useEffect(() => {
+        localStorage.setItem('recipeView', view);
+    }, [view]);
+
+    // Close overflow menu on outside click
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (overflowRef.current && !overflowRef.current.contains(e.target as Node)) {
+                setShowOverflow(false);
+            }
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, []);
+
+    const selectedRecipe = recipes.find(r => r.id === selectedRecipeId) ?? null;
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -61,6 +94,8 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
             },
         })
     );
+
+    // ── HANDLERS (byte-identical to original) ──────────────────────────────────
 
     const handleCreateFolder = async () => {
         if (!newFolderName.trim()) return;
@@ -240,9 +275,7 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
         }
     };
 
-    // Filter Logic
-    // If Searching -> Show ALL matching recipes (flatten folders)
-    // If Browsing -> Show Folders + Recipes in current view
+    // ── SEARCH SCORING BLOCK (unchanged) ───────────────────────────────────────
 
     const isSearching = searchTerm.trim().length > 0;
 
@@ -345,10 +378,23 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
         }
     }
 
-    const breadcrumbs = currentCategoryId ? getPath(categories, currentCategoryId) : [];
+    // ── VISIBLE RECIPES (new: applies tree filter for list/card views) ──────────
 
-    // Find active item for drag overlay
-    const activeItem = activeId ? (recipes.find(r => r.id === activeId) || displayFolders.find(f => f.id === activeId)) : null;
+    let visibleRecipes: ScoredRecipe[];
+    if (isSearching) {
+        visibleRecipes = [...displayRecipes]; // already scored and sorted
+    } else {
+        visibleRecipes = ([...recipes].sort((a, b) => a.name.localeCompare(b.name)) as ScoredRecipe[]);
+    }
+    if (currentCategoryId === 'uncategorized') {
+        visibleRecipes = visibleRecipes.filter(r => !r.categories || r.categories.length === 0);
+    } else if (currentCategoryId) {
+        const ids = new Set(collectCategoryIds(categories, currentCategoryId));
+        visibleRecipes = visibleRecipes.filter(r => (r.categories ?? []).some(c => ids.has(c.id)));
+    }
+
+    // Find active item for drag overlay (search all categories, not just displayed ones)
+    const activeItem = activeId ? (recipes.find(r => r.id === activeId) || findCategoryById(categories, activeId)) : null;
 
     return (
         <>
@@ -359,238 +405,242 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
                     onDragEnd={handleDragEnd}
                     collisionDetection={closestCenter}
                 >
-                    <div className="space-y-8">
-                        {/* Header */}
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-                            <div>
-                                <h2 className="text-4xl font-black text-indigo-900 dark:text-white text-adaptive tracking-tight">Recipe Manager</h2>
-                                <p className="text-slate-500 dark:text-slate-400 text-adaptive-subtle mt-2 text-lg">
-                                    Manage culinary standards and yields.
-                                </p>
-                                <div className="mt-3">
-                                    <span className="bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 px-3 py-1 rounded-full text-base font-bold">
-                                        Total Recipes: {recipes.length}
-                                    </span>
-                                </div>
+                    <div className="space-y-4">
+                        {/* ── Toolbar ── */}
+                        <div className="flex flex-wrap items-center gap-3">
+                            <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">Recipes</h2>
+                            <div className="relative flex-1 min-w-[180px] max-w-sm">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                                <input
+                                    placeholder="Search recipes…"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="w-full pl-9 pr-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-200 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500/40 transition"
+                                />
                             </div>
-                            <div className="flex items-center gap-4 w-full md:w-auto">
-                                <div className="relative group flex-1 md:w-80">
-                                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 group-focus-within:text-indigo-500 transition-colors" size={20} strokeWidth={2.5} />
-                                    <input
-                                        placeholder="Search recipes..."
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="w-full pl-12 pr-6 py-4 bg-white dark:bg-slate-800 bg-adaptive border-none rounded-2xl outline-none font-bold text-slate-700 dark:text-gray-100 text-adaptive placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-indigo-500/50 shadow-sm transition-all"
-                                    />
-                                </div>
+                            {/* List / Cards toggle */}
+                            <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
                                 <button
-                                    onClick={() => window.location.href = '/api/recipes/backup'}
-                                    className="bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 px-6 py-4 rounded-2xl font-bold flex items-center gap-2 shadow-sm hover:scale-105 transition-all active:scale-95"
+                                    onClick={() => setView('list')}
+                                    className={`px-3 py-2 text-sm font-bold transition ${view === 'list' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500 hover:text-indigo-600'}`}
+                                    title="List view"
                                 >
-                                    <Download size={20} strokeWidth={2.5} />
-                                    <span className="hidden sm:inline">Backup</span>
+                                    <List size={16} />
                                 </button>
                                 <button
-                                    onClick={() => setShowImporter(true)}
-                                    className="bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 px-6 py-4 rounded-2xl font-bold flex items-center gap-2 shadow-sm hover:scale-105 transition-all active:scale-95"
+                                    onClick={() => { setView('cards'); setSelectedRecipeId(null); }}
+                                    className={`px-3 py-2 text-sm font-bold transition ${view === 'cards' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500 hover:text-indigo-600'}`}
+                                    title="Card view"
                                 >
-                                    <Upload size={20} strokeWidth={2.5} />
-                                    <span className="hidden sm:inline">Import</span>
+                                    <LayoutGrid size={16} />
                                 </button>
+                            </div>
+                            <Link
+                                href="/recipes/new"
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-1.5 shadow-sm transition"
+                            >
+                                <Plus size={16} strokeWidth={3} />
+                                <span className="hidden sm:inline">New Recipe</span>
+                            </Link>
+                            {/* ⋯ overflow menu: Import CSV, Download Backup, New Folder */}
+                            <div className="relative" ref={overflowRef}>
                                 <button
-                                    onClick={() => setIsCreatingFolder(true)}
-                                    className="bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 px-6 py-4 rounded-2xl font-bold flex items-center gap-2 shadow-sm hover:scale-105 transition-all active:scale-95"
+                                    onClick={() => setShowOverflow(!showOverflow)}
+                                    className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-500 hover:text-indigo-600 transition"
+                                    title="More actions"
                                 >
-                                    <FolderPlus size={20} strokeWidth={2.5} />
-                                    <span className="hidden sm:inline">New Folder</span>
+                                    <MoreHorizontal size={16} />
                                 </button>
-                                <Link
-                                    href="/recipes/new"
-                                    className="bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-600 text-white px-6 py-4 rounded-2xl font-bold flex items-center gap-2 shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/40 hover:scale-105 transition-all active:scale-95"
-                                >
-                                    <Plus size={20} strokeWidth={3} />
-                                    <span className="hidden sm:inline">New Recipe</span>
-                                </Link>
+                                {showOverflow && (
+                                    <div className="absolute right-0 mt-1 w-48 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl z-50 py-1 animate-in fade-in zoom-in-95 duration-150">
+                                        <button
+                                            onClick={() => { setShowImporter(true); setShowOverflow(false); }}
+                                            className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+                                        >
+                                            <Upload size={14} /> Import CSV
+                                        </button>
+                                        <button
+                                            onClick={() => { window.location.href = '/api/recipes/backup'; setShowOverflow(false); }}
+                                            className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+                                        >
+                                            <Download size={14} /> Download Backup
+                                        </button>
+                                        <button
+                                            onClick={() => { setIsCreatingFolder(true); setShowOverflow(false); }}
+                                            className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+                                        >
+                                            <FolderPlus size={14} /> New Folder
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
                         {showImporter && <RecipeImporter onClose={() => setShowImporter(false)} />}
 
-                        {/* Breadcrumbs */}
-                        {!isSearching && (
-                            <div className="flex items-center gap-2 text-sm font-bold text-slate-500 dark:text-slate-400 overflow-x-auto pb-2">
+                        {/* ── Mobile category chips (< lg) ── */}
+                        <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
+                            <button
+                                onClick={() => setCurrentCategoryId(null)}
+                                className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold transition ${!currentCategoryId ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'}`}
+                            >
+                                All
+                            </button>
+                            {categories.filter(c => !c.parent_id).map(cat => (
                                 <button
-                                    onClick={() => setCurrentCategoryId(null)}
-                                    className={`hover:text-indigo-600 dark:hover:text-white transition-colors flex items-center gap-1 ${!currentCategoryId ? 'text-indigo-600 dark:text-white' : ''}`}
+                                    key={cat.id}
+                                    onClick={() => setCurrentCategoryId(cat.id)}
+                                    className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold transition ${currentCategoryId === cat.id ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'}`}
                                 >
-                                    {!!currentCategoryId && <ArrowLeft size={14} />}
-                                    Home
+                                    {cat.name}
                                 </button>
-                                {breadcrumbs.map((crumb, i) => (
-                                    <div key={crumb.id} className="flex items-center gap-2 whitespace-nowrap">
-                                        <ChevronRight size={14} />
-                                        <button
-                                            onClick={() => setCurrentCategoryId(crumb.id)}
-                                            className={`hover:text-indigo-600 dark:hover:text-white transition-colors ${i === breadcrumbs.length - 1 ? 'text-indigo-600 dark:text-white' : ''}`}
-                                        >
-                                            {crumb.name}
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-
-
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                            {/* Folders */}
-                            {!isSearching && displayFolders.map(folder => (
-                                <DroppableFolder key={folder.id} id={`folder-drop-${folder.id}`}>
-                                    <DraggableFolderItem id={folder.id}>
-                                        {({ attributes, listeners }) => (
-                                            <div
-                                                role="button"
-                                                tabIndex={0}
-                                                onClick={() => setCurrentCategoryId(folder.id)}
-                                                onKeyDown={(e) => e.key === 'Enter' && setCurrentCategoryId(folder.id)}
-                                                className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 p-6 rounded-3xl hover:scale-[1.02] hover:shadow-lg transition-all duration-300 group flex items-center gap-4 text-left cursor-pointer"
-                                            >
-                                                <div {...attributes} {...listeners} className="p-2 text-slate-400 group-hover:text-indigo-600 transition-colors cursor-move">
-                                                    <GripVertical size={20} />
-                                                </div>
-                                                <div className="p-4 bg-white dark:bg-indigo-900/50 rounded-2xl shadow-sm group-hover:bg-indigo-600 group-hover:text-white transition-colors text-indigo-500">
-                                                    <Folder size={32} strokeWidth={2} />
-                                                </div>
-                                                <div>
-                                                    <h3 className="text-xl font-black text-indigo-900 dark:text-indigo-100 group-hover:text-indigo-700 dark:group-hover:text-white transition-colors">
-                                                        {folder.name}
-                                                    </h3>
-                                                    <p className="text-sm text-indigo-400 dark:text-indigo-300 font-bold group-hover:text-indigo-500 dark:group-hover:text-indigo-200">
-                                                        {folder.children && folder.children.length > 0
-                                                            ? `${folder.children.length} Sub-folders`
-                                                            : `${(folder as any)._count?.recipes || 0} Recipes`
-                                                        }
-                                                    </p>
-                                                </div>
-                                                <div className="ml-auto flex items-center gap-2">
-                                                    <button
-                                                        onClick={(e) => handleDeleteFolder(e, folder.id)}
-                                                        className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                                                        title="Delete Folder"
-                                                    >
-                                                        <Trash size={18} />
-                                                    </button>
-                                                    <ChevronRight size={24} strokeWidth={3} className="text-indigo-400" />
-                                                </div>
-                                            </div>
-                                        )}
-                                    </DraggableFolderItem>
-                                </DroppableFolder>
                             ))}
-
-
-
-                            {/* Recipes */}
-                            {displayRecipes.map((recipe) => (
-                                <DraggableRecipe key={recipe.id} id={recipe.id}>
-                                    {({ attributes, listeners }) => (
-                                        <Link
-                                            href={`/recipes/${recipe.id}`}
-                                            className="glass-panel p-6 rounded-3xl hover:scale-[1.02] hover:shadow-xl transition-all duration-300 group border border-white/40 dark:border-slate-700/50 flex flex-col relative overflow-hidden bg-white dark:bg-slate-800/40 bg-adaptive"
-                                        >
-                                            <div {...attributes} {...listeners} className="absolute top-2 left-2 p-2 text-slate-300 group-hover:text-indigo-500 transition-colors z-30 cursor-move">
-                                                <GripVertical size={20} />
-                                            </div>
-                                            <button
-                                                onClick={(e) => handleDeleteRecipe(e, recipe.id, recipe.name)}
-                                                className="absolute top-2 right-2 p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-full transition-all z-30 opacity-0 group-hover:opacity-100"
-                                                title="Delete Recipe"
-                                            >
-                                                <Trash size={18} />
-                                            </button>
-                                            {/* Photo Placeholder/Preview */}
-                                            <div className="h-40 -mx-6 -mt-6 mb-4 relative overflow-hidden bg-slate-100 dark:bg-slate-700">
-                                                {recipe.image_url ? (
-                                                    <img
-                                                        src={recipe.image_url}
-                                                        alt={recipe.name}
-                                                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                                                    />
-                                                ) : (
-                                                    <div className="w-full h-full flex items-center justify-center opacity-20">
-                                                        <FileText size={48} className="text-indigo-900 dark:text-indigo-400" />
-                                                    </div>
-                                                )}
-                                                <div className="absolute inset-0 bg-linear-to-t from-black/40 to-transparent" />
-                                            </div>
-
-                                            <div className="flex justify-between items-start mb-4 relative z-10">
-                                                <span className={`inline-flex px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${recipe.type === 'prep'
-                                                    ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
-                                                    : 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400'
-                                                    }`}>
-                                                    {recipe.type === 'prep' ? 'Prep Profile' : 'Menu Item'}
-                                                </span>
-                                                <span className="inline-flex px-3 py-1 rounded-full text-xs font-black bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400">
-                                                    ${calculateRecipeCost(recipe).toFixed(2)}
-                                                </span>
-                                            </div>
-
-                                            <h3 className="text-2xl font-black text-indigo-600 dark:text-indigo-300 text-adaptive mb-2 line-clamp-2 relative z-10 group-hover:text-indigo-700 dark:group-hover:text-white transition-colors">
-                                                {recipe.name}
-                                            </h3>
-
-                                            {/* Search Match Highlight */}
-                                            {(recipe as ScoredRecipe).matchReason && (
-                                                <div className="mb-3 px-3 py-1 bg-indigo-50 dark:bg-indigo-900/40 rounded-lg inline-block w-full">
-                                                    <p className="text-xs font-bold text-indigo-500 dark:text-indigo-300 truncate">
-                                                        {(recipe as ScoredRecipe).matchReason}
-                                                    </p>
-                                                </div>
-                                            )}
-
-                                            <div className="mt-auto space-y-4 relative z-10">
-                                                <div className="flex items-center gap-6 text-sm font-bold text-slate-500 dark:text-slate-400 text-adaptive-subtle">
-                                                    <div className="flex items-center gap-2">
-                                                        <Users size={16} className="text-slate-400 dark:text-slate-600" />
-                                                        <span>{Number(recipe.base_yield_qty)} {recipe.base_yield_unit}</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <Clock size={16} className="text-slate-400 dark:text-slate-600" />
-                                                        <span>Ingredients</span>
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-center gap-2 text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                                                    <DollarSign size={16} className="text-emerald-500 dark:text-emerald-500" />
-                                                    <span>
-                                                        ${(calculateRecipeCost(recipe) / Number(recipe.base_yield_qty)).toFixed(2)} / {recipe.base_yield_unit}
-                                                    </span>
-                                                </div>
-
-                                                <div className="w-full h-px bg-slate-100 dark:bg-slate-700/50" />
-
-                                                <div className="flex items-center text-indigo-600 dark:text-indigo-400 font-bold text-sm group-hover:translate-x-2 transition-transform">
-                                                    View Details <ArrowRight size={16} className="ml-1" strokeWidth={3} />
-                                                </div>
-                                            </div>
-                                        </Link>
-                                    )}
-                                </DraggableRecipe>
-                            ))}
+                            <button
+                                onClick={() => setCurrentCategoryId('uncategorized')}
+                                className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold transition ${currentCategoryId === 'uncategorized' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'}`}
+                            >
+                                Uncategorized
+                            </button>
                         </div>
 
-                        {!isSearching && displayFolders.length === 0 && displayRecipes.length === 0 && (
-                            <div className="text-center py-20 bg-slate-50 dark:bg-slate-900/50 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-700">
-                                <p className="text-slate-400 dark:text-slate-600 text-lg font-bold">This folder is empty.</p>
+                        {/* ── Three-pane layout ── */}
+                        <div className={`grid gap-4 ${view === 'list' ? 'lg:grid-cols-[220px_1fr_380px]' : 'lg:grid-cols-[220px_1fr]'}`}>
+                            {/* Left: Category tree (desktop only) */}
+                            <div className="hidden lg:block">
+                                <CategoryTree
+                                    categories={categories}
+                                    activeId={currentCategoryId}
+                                    totalCount={recipes.length}
+                                    uncategorizedCount={recipes.filter(r => !r.categories?.length).length}
+                                    onSelect={setCurrentCategoryId}
+                                    onNewFolder={() => setIsCreatingFolder(true)}
+                                />
                             </div>
-                        )}
-                        {isSearching && displayRecipes.length === 0 && (
-                            <div className="text-center py-20">
-                                <p className="text-slate-400 dark:text-slate-600 text-lg font-bold">No recipes found matching "{searchTerm}"</p>
-                            </div>
-                        )}
+
+                            {/* Middle: List or Cards */}
+                            {view === 'list' ? (
+                                <RecipeList
+                                    recipes={visibleRecipes}
+                                    selectedId={selectedRecipeId}
+                                    onSelect={setSelectedRecipeId}
+                                />
+                            ) : (
+                                <div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-4">
+                                        {visibleRecipes.map((recipe) => (
+                                            <DraggableRecipe key={recipe.id} id={recipe.id}>
+                                                {({ attributes, listeners }) => (
+                                                    <Link
+                                                        href={`/recipes/${recipe.id}`}
+                                                        className="glass-panel p-6 rounded-3xl hover:scale-[1.02] hover:shadow-xl transition-all duration-300 group border border-white/40 dark:border-slate-700/50 flex flex-col relative overflow-hidden bg-white dark:bg-slate-800/40 bg-adaptive"
+                                                    >
+                                                        <div {...attributes} {...listeners} className="absolute top-2 left-2 p-2 text-slate-300 group-hover:text-indigo-500 transition-colors z-30 cursor-move">
+                                                            <GripVertical size={20} />
+                                                        </div>
+                                                        <button
+                                                            onClick={(e) => handleDeleteRecipe(e, recipe.id, recipe.name)}
+                                                            className="absolute top-2 right-2 p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-full transition-all z-30 opacity-0 group-hover:opacity-100"
+                                                            title="Delete Recipe"
+                                                        >
+                                                            <Trash size={18} />
+                                                        </button>
+                                                        {/* Photo Placeholder/Preview */}
+                                                        <div className="h-40 -mx-6 -mt-6 mb-4 relative overflow-hidden bg-slate-100 dark:bg-slate-700">
+                                                            {recipe.image_url ? (
+                                                                <img
+                                                                    src={recipe.image_url}
+                                                                    alt={recipe.name}
+                                                                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                                                                />
+                                                            ) : (
+                                                                <div className="w-full h-full flex items-center justify-center opacity-20">
+                                                                    <FileText size={48} className="text-indigo-900 dark:text-indigo-400" />
+                                                                </div>
+                                                            )}
+                                                            <div className="absolute inset-0 bg-linear-to-t from-black/40 to-transparent" />
+                                                        </div>
+
+                                                        <div className="flex justify-between items-start mb-4 relative z-10">
+                                                            <span className={`inline-flex px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${recipe.type === 'prep'
+                                                                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                                                                : 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400'
+                                                                }`}>
+                                                                {recipe.type === 'prep' ? 'Prep Profile' : 'Menu Item'}
+                                                            </span>
+                                                            {(recipe as any).calculated_cost != null && (
+                                                                <span className="inline-flex px-3 py-1 rounded-full text-xs font-black bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400">
+                                                                    ${Number((recipe as any).calculated_cost).toFixed(2)}
+                                                                </span>
+                                                            )}
+                                                        </div>
+
+                                                        <h3 className="text-2xl font-black text-indigo-600 dark:text-indigo-300 text-adaptive mb-2 line-clamp-2 relative z-10 group-hover:text-indigo-700 dark:group-hover:text-white transition-colors">
+                                                            {recipe.name}
+                                                        </h3>
+
+                                                        {/* Search Match Highlight */}
+                                                        {(recipe as ScoredRecipe).matchReason && (
+                                                            <div className="mb-3 px-3 py-1 bg-indigo-50 dark:bg-indigo-900/40 rounded-lg inline-block w-full">
+                                                                <p className="text-xs font-bold text-indigo-500 dark:text-indigo-300 truncate">
+                                                                    {(recipe as ScoredRecipe).matchReason}
+                                                                </p>
+                                                            </div>
+                                                        )}
+
+                                                        <div className="mt-auto space-y-4 relative z-10">
+                                                            <div className="flex items-center gap-6 text-sm font-bold text-slate-500 dark:text-slate-400 text-adaptive-subtle">
+                                                                <div className="flex items-center gap-2">
+                                                                    <Users size={16} className="text-slate-400 dark:text-slate-600" />
+                                                                    <span>{Number(recipe.base_yield_qty)} {recipe.base_yield_unit}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <Clock size={16} className="text-slate-400 dark:text-slate-600" />
+                                                                    <span>Ingredients</span>
+                                                                </div>
+                                                            </div>
+                                                            {(recipe as any).calculated_cost != null && Number(recipe.base_yield_qty) > 0 && (
+                                                                <div className="flex items-center gap-2 text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                                                                    <DollarSign size={16} className="text-emerald-500 dark:text-emerald-500" />
+                                                                    <span>
+                                                                        ${(Number((recipe as any).calculated_cost) / Number(recipe.base_yield_qty)).toFixed(2)} / {recipe.base_yield_unit}
+                                                                    </span>
+                                                                </div>
+                                                            )}
+
+                                                            <div className="w-full h-px bg-slate-100 dark:bg-slate-700/50" />
+
+                                                            <div className="flex items-center text-indigo-600 dark:text-indigo-400 font-bold text-sm group-hover:translate-x-2 transition-transform">
+                                                                View Details <ArrowRight size={16} className="ml-1" strokeWidth={3} />
+                                                            </div>
+                                                        </div>
+                                                    </Link>
+                                                )}
+                                            </DraggableRecipe>
+                                        ))}
+                                    </div>
+                                    {visibleRecipes.length === 0 && (
+                                        <div className="text-center py-20 bg-slate-50 dark:bg-slate-900/50 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-700">
+                                            <p className="text-slate-400 dark:text-slate-600 text-lg font-bold">
+                                                {isSearching ? `No recipes found matching "${searchTerm}"` : 'No recipes in this category.'}
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Right: Quick view panel (list view + desktop only) */}
+                            {view === 'list' && (
+                                <div className="hidden lg:block">
+                                    <RecipeQuickView
+                                        recipe={selectedRecipe}
+                                        onClose={() => setSelectedRecipeId(null)}
+                                    />
+                                </div>
+                            )}
+                        </div>
                     </div>
 
+                    {/* DragOverlay — unchanged */}
                     <DragOverlay dropAnimation={null}>
                         {activeId ? (
                             <div className="opacity-80 scale-105 shadow-2xl pointer-events-none">
@@ -618,10 +668,27 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
                             </div>
                         ) : null}
                     </DragOverlay>
+
+                    {/* Fixed Uncategorize Drop Zone */}
+                    {isDragging && (
+                        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 w-full max-w-md px-4 animate-in slide-in-from-bottom-10 fade-in duration-300">
+                            <DroppableFolder id="root-uncategorized">
+                                <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl border-4 border-dashed border-rose-500/50 p-8 rounded-[2.5rem] flex items-center justify-center gap-6 text-center shadow-2xl hover:border-rose-500 hover:scale-105 transition-all">
+                                    <div className="p-4 bg-rose-50 dark:bg-rose-900/30 rounded-2xl text-rose-500 shadow-sm">
+                                        <X size={40} strokeWidth={3} />
+                                    </div>
+                                    <div className="text-left">
+                                        <h3 className="text-2xl font-black text-slate-900 dark:text-white leading-tight">Drop to Uncategorize</h3>
+                                        <p className="text-slate-500 dark:text-slate-400 font-bold">Move back to Main List</p>
+                                    </div>
+                                </div>
+                            </DroppableFolder>
+                        </div>
+                    )}
                 </DndContext>
             </ClientOnly>
 
-            {/* New Folder Modal */}
+            {/* New Folder Modal — unchanged */}
             {isCreatingFolder && (
                 <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
                     <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md p-6 animate-in fade-in zoom-in duration-200">
@@ -663,20 +730,13 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
                 </div>
             )}
 
-            {/* Fixed Uncategorize Drop Zone */}
-            {isDragging && (
-                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 w-full max-w-md px-4 animate-in slide-in-from-bottom-10 fade-in duration-300">
-                    <DroppableFolder id="root-uncategorized">
-                        <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl border-4 border-dashed border-rose-500/50 p-8 rounded-[2.5rem] flex items-center justify-center gap-6 text-center shadow-2xl hover:border-rose-500 hover:scale-105 transition-all">
-                            <div className="p-4 bg-rose-50 dark:bg-rose-900/30 rounded-2xl text-rose-500 shadow-sm">
-                                <X size={40} strokeWidth={3} />
-                            </div>
-                            <div className="text-left">
-                                <h3 className="text-2xl font-black text-slate-900 dark:text-white leading-tight">Drop to Uncategorize</h3>
-                                <p className="text-slate-500 dark:text-slate-400 font-bold">Move back to Main List</p>
-                            </div>
-                        </div>
-                    </DroppableFolder>
+            {/* Mobile slide-over for quick view (list view only) */}
+            {view === 'list' && selectedRecipeId && selectedRecipe && (
+                <div className="fixed inset-0 z-40 lg:hidden">
+                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSelectedRecipeId(null)} />
+                    <div className="absolute inset-y-0 right-0 w-full max-w-md shadow-2xl overflow-y-auto bg-white dark:bg-slate-900 animate-in slide-in-from-right duration-200">
+                        <RecipeQuickView recipe={selectedRecipe} onClose={() => setSelectedRecipeId(null)} />
+                    </div>
                 </div>
             )}
         </>
