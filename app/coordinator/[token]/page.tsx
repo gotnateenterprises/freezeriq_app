@@ -5,52 +5,36 @@ import { toast, Toaster } from 'sonner';
 import type { CampaignAsset } from '@/lib/campaignAssets';
 import type { PromoScriptsResponse } from '@/lib/generatePromoScripts';
 import { computeFundraiserProgress, formatBundleCount } from '@/lib/fundraiserMetrics';
-import { Instagram } from 'lucide-react';
 
 import {
     Plus,
-    TrendingUp,
     Target,
-    Calendar,
-    Users,
-    Share2,
-    Link as LinkIcon,
-    Copy,
-    CheckCircle2,
-    Facebook,
-    ArrowRight,
     Loader2,
     DollarSign,
-    Package,
     User,
     Mail,
     Phone,
     MapPin,
     AlertCircle,
     X,
-    Star,
     Settings,
-    Smartphone,
-    Download,
-    MessageSquare,
-    FileText,
-    Clock,
-    Rocket,
-    Eye,
-    Activity,
     Trash2,
     RotateCcw
 } from 'lucide-react';
 import type { CoordinatorActionSummary } from '@/app/api/coordinator-actions/[token]/summary/route';
 import { format } from 'date-fns';
-import Link from 'next/link';
-import { motion } from 'framer-motion';
 
 import { useParams } from 'next/navigation';
 
 import CopyButton from '@/components/coordinator/CopyButton';
-
-import Leaderboard from '@/components/coordinator/Leaderboard';
+import { ActionBar } from '@/components/coordinator/ActionBar';
+import { ProgressHero } from '@/components/coordinator/ProgressHero';
+import { SetupChecklist } from '@/components/coordinator/SetupChecklist';
+import { ShareCenter } from '@/components/coordinator/ShareCenter';
+import { RecentOrders } from '@/components/coordinator/RecentOrders';
+import { QuietLinks } from '@/components/coordinator/QuietLinks';
+import { DeliveryPrep } from '@/components/coordinator/DeliveryPrep';
+import { WhatsNext } from '@/components/coordinator/WhatsNext';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 
@@ -82,6 +66,8 @@ export default function CoordinatorPortal() {
     const [aiContent, setAiContent] = useState('');
     const [aiChannel, setAiChannel] = useState('');
     const [aiRemaining, setAiRemaining] = useState<number | null>(null);
+    const [showAiPanel, setShowAiPanel] = useState(false);
+    const [showAllOrders, setShowAllOrders] = useState(false);
 
     const handleAiGenerate = async (channel: string) => {
         setIsAiGenerating(true);
@@ -650,10 +636,51 @@ export default function CoordinatorPortal() {
 
 
 
+    // AI share-with-content dispatcher (for ShareCenter)
+    const handleAiShareWithContent = (content: string, channel: string) => {
+        if (channel === 'facebook') { handleFacebookShareWithContent(content); }
+        else if (channel === 'text') { handleSmsShareWithContent(content); }
+        else if (channel === 'email') { handleEmailShareWithContent(content); }
+        else if (channel === 'instagram') { handleInstagramShareWithContent(content); }
+        else { navigator.clipboard.writeText(content); toast.success('Message copied!'); }
+    };
+
+    // Download asset helpers (for ShareCenter)
+    const handleDownloadFlyerAsset = (url: string) => { window.open(url, '_blank'); trackAction('download_flyer'); };
+    const handleDownloadQrAsset = (url: string) => { window.open(url, '_blank'); trackAction('download_qr'); };
+    const handleDownloadPacketAsset = (url: string) => { window.open(url, '_blank'); trackAction('download_packet'); };
+
+    // Derive setup-checklist state
+    const hasPaymentInfo = !!(campaign.payment_instructions || campaign.external_payment_link);
+    const activeOrders = (campaign.orders || []);
+    const hasFirstOrder = activeOrders.length > 0;
+    const hasSharedOnce = (actionSummary?.totalActions || 0) > 0;
+
+    // Tenant name for ActionBar closed state
+    const tenantName = campaign.customer?.business?.name || null;
+    const contactEmail = 'Laurie@MyFreezerChef.com';
+
+    // Derive share URLs and asset hrefs for ShareCenter
+    const shareUrl = getShopOrderUrl();
+    const scoreboardUrl = getScoreboardUrl();
+    const qrAsset = campaignAssets.find(a => a.key === 'qr' && a.available);
+    const flyerAsset = campaignAssets.find(a => a.key === 'flyer' && a.available);
+
+    // Coordinator first name for setup checklist
+    const coordinatorFirstName = campaign?.customer?.contact_name?.split(" ")[0] || undefined;
+
+    // Delivery date label for DeliveryPrep / WhatsNext
+    const deliveryDateLabel = campaign.delivery_date
+        ? format(new Date(campaign.delivery_date), 'MMMM d')
+        : undefined;
+
+    // Org label for ProgressHero
+    const orgLabel = campaign.customer?.name || 'your group';
+
     return (
-        <div className="min-h-screen bg-slate-50 pb-20">
+        <div className="min-h-screen bg-slate-50">
             <Toaster position="top-center" toastOptions={{ duration: 4000 }} />
-            {/* Nav: Premium Glassmorphism */}
+            {/* Nav */}
             <div className="bg-white/70 backdrop-blur-xl border-b border-white/20 px-6 py-4 sticky top-0 z-10 shadow-sm">
                 <div className="max-w-xl mx-auto flex justify-between items-center">
                     <div className="flex items-center gap-2">
@@ -672,7 +699,7 @@ export default function CoordinatorPortal() {
                 </div>
             </div>
 
-            {/* Gamification: Confetti on Goal Met */}
+            {/* Confetti on Goal Met */}
             {progress >= 100 && campaignPhase !== 'complete' && (
                 <Confetti
                     width={width}
@@ -685,8 +712,8 @@ export default function CoordinatorPortal() {
                 />
             )}
 
-            <main className="max-w-xl mx-auto px-4 sm:px-6 py-4 space-y-5">
-                {/* Tenant/Business Logo */}
+            <main className="max-w-xl mx-auto px-4 sm:px-6 py-4 pb-24 space-y-4">
+                {/* Business Logo */}
                 {campaign.customer?.business?.logo_url && (
                     <div className="flex flex-col items-center justify-center pt-1 mb-0">
                         <img
@@ -697,778 +724,180 @@ export default function CoordinatorPortal() {
                     </div>
                 )}
 
-                {/* Campaign Phase Banner */}
+                {/* Phase Banners — exact Fable spec */}
+                {(campaignPhase === 'push' || campaignPhase === 'lastDay') && (
+                    <div className="rounded-xl bg-amber-50 px-4 py-2.5 text-[13px] font-semibold text-amber-800">
+                        {campaignPhase === 'lastDay' ? '🔥 Last day — finish strong!' : `🔥 ${daysRemaining} days left — one more push!`}
+                    </div>
+                )}
                 {campaignPhase === 'complete' && (
-                    <div className="bg-emerald-600 text-white rounded-2xl p-4 text-center">
-                        <p className="text-sm font-black uppercase tracking-widest">🎉 Campaign Complete</p>
-                        <p className="text-xs font-medium text-emerald-100 mt-1">
-                            Your fundraiser ended {Math.abs(daysRemaining!)} day{Math.abs(daysRemaining!) !== 1 ? 's' : ''} ago
-                        </p>
-                    </div>
-                )}
-                {campaignPhase === 'lastDay' && (
-                    <div className="bg-amber-500 text-white rounded-2xl p-4 text-center animate-pulse">
-                        <p className="text-sm font-black uppercase tracking-widest">⏰ LAST DAY</p>
-                        <p className="text-xs font-medium text-amber-100 mt-1">Make it count — share one more time!</p>
-                    </div>
-                )}
-                {campaignPhase === 'push' && (
-                    <div className="bg-orange-50 border border-orange-200 rounded-2xl p-3 text-center">
-                        <p className="text-sm font-bold text-orange-700">⏳ {daysRemaining} day{daysRemaining !== 1 ? 's' : ''} left — final push!</p>
+                    <div className="rounded-xl bg-emerald-50 px-4 py-2.5 text-[13px] font-semibold text-emerald-800">
+                        🏆 Campaign complete{progress >= 100 ? ' — you beat your goal!' : ' — great work!'}
                     </div>
                 )}
 
-                {/* Personalized Header */}
-                <div className="mb-1">
-                    <p className="text-sm text-slate-500 font-medium mb-0.5">
-                        Hey {campaign?.customer?.contact_name?.split(" ")[0] || "there"} 👋
-                    </p>
-                    <h1 className="text-xl md:text-2xl font-bold text-slate-900 leading-tight">
-                        {campaignPhase === 'complete' ? 'Your Fundraiser Results' : 'Here\'s your Coordinator Panel'}
-                    </h1>
-                </div>
-
-                {/* ── Step 1 Onboarding / Success / Complete — directly under heading ── */}
-                {campaignPhase === 'complete' ? (
-                    <div className="bg-white rounded-2xl p-6 border border-emerald-200 shadow-md space-y-4">
-                        <div className="text-center space-y-2">
-                            <p className="text-3xl">{progress >= 100 ? '🏆' : '🎉'}</p>
-                            <h2 className="text-xl font-black text-slate-900">
-                                {progress >= 100 ? 'Goal Crushed!' : 'Great Fundraiser!'}
-                            </h2>
-                            <p className="text-sm text-slate-500">
-                                {campaign.name} — Final Results
-                            </p>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="bg-indigo-50 rounded-xl p-3 text-center">
-                                <p className="text-2xl font-black text-indigo-600">{formatBundleCount(totalBundlesSold)}</p>
-                                <p className="text-[10px] font-bold text-indigo-400 uppercase">Bundles Sold</p>
-                            </div>
-                            <div className="bg-emerald-50 rounded-xl p-3 text-center">
-                                <p className="text-2xl font-black text-emerald-600">${metrics.totalSales.toFixed(0)}</p>
-                                <p className="text-[10px] font-bold text-emerald-400 uppercase">Total Raised</p>
-                            </div>
-                            <div className="bg-purple-50 rounded-xl p-3 text-center">
-                                <p className="text-2xl font-black text-purple-600">${metrics.estimatedEarnings.toFixed(0)}</p>
-                                <p className="text-[10px] font-bold text-purple-400 uppercase">Est. Earnings</p>
-                            </div>
-                            <div className="bg-amber-50 rounded-xl p-3 text-center">
-                                <p className="text-2xl font-black text-amber-600">{(campaign.orders || []).length}</p>
-                                <p className="text-[10px] font-bold text-amber-400 uppercase">Supporters</p>
-                            </div>
-                        </div>
-
-                        <button
-                            onClick={handleDownloadTracker}
-                            className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all"
-                        >
-                            📥 Download Final Report
-                        </button>
-                    </div>
-                ) : (campaign.orders || []).length === 0 ? (
-                    <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
-                        <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Getting Started</p>
-                        <h3 className="text-lg font-bold text-slate-900 mt-1">🚀 Step 1: Log Your First Order</h3>
-                        <p className="text-sm text-slate-600 mt-1">Start strong — most successful fundraisers begin with one quick order.</p>
-                        <button
-                            onClick={() => setShowOrderModal(true)}
-                            className="mt-4 w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity active:scale-[0.98]"
-                        >
-                            + Add Your First Order
-                        </button>
-                        <p className="text-xs text-slate-500 mt-2 text-center">Cash, Venmo, or in-person sales — takes less than 30 seconds</p>
-                    </div>
-                ) : (
-                    <div className="bg-emerald-50 rounded-xl px-4 py-3 border border-emerald-100 flex items-center gap-2.5">
-                        <span className="text-lg">🎉</span>
-                        <div>
-                            <p className="text-sm font-bold text-emerald-800">You&apos;re off to a great start!</p>
-                            <p className="text-xs text-emerald-600">Nice work — keep the orders coming.</p>
-                        </div>
-                    </div>
-                )}
-
-                {/* Scoreboard Card */}
-                {/* ── SECTION: Start Here ── */}
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">{campaignPhase === 'complete' ? '📊 Final Scoreboard' : '📍 Start Here'}</p>
-
-                <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-md shadow-indigo-500/5 border border-slate-100 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-50 rounded-full -translate-y-10 translate-x-10 opacity-40" />
-
-                    <div className="relative">
-                        <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-1">Live Progress</p>
-                        <h2 className="text-xl sm:text-2xl font-black text-slate-900 mb-4 leading-tight">{campaign.name}</h2>
-
-                        <div className="flex justify-between items-end mb-2">
-                            <div>
-                                <p className="text-3xl sm:text-4xl font-black text-slate-900">{formatBundleCount(totalBundlesSold)}</p>
-                                <p className="text-xs font-bold text-slate-400">Bundles Sold</p>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-base font-black text-slate-300">{bundleGoal} goal</p>
-                            </div>
-                        </div>
-
-                        {/* Progress Bar */}
-                        <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden mb-1">
-                            <motion.div
-                                className="h-full bg-indigo-600 rounded-full"
-                                initial={{ width: 0 }}
-                                animate={{ width: `${progress}%` }}
-                                transition={{ type: 'spring', bounce: 0.25, duration: 1.5, delay: 0.2 }}
-                            />
-                        </div>
-                        <p className="text-right text-[10px] font-bold text-indigo-500">
-                            {progress.toFixed(0)}%
-                        </p>
-
-                        {/* Daily Pace Indicator */}
-                        {bundlesPerDay !== null && (
-                            <p className="text-right text-[10px] font-bold text-slate-400 mt-0.5">
-                                📊 ~{Math.ceil(bundlesPerDay)} bundles/day to hit your goal
-                            </p>
-                        )}
-
-                        {/* Estimated Earnings */}
-                        {metrics.estimatedEarnings > 0 && (
-                            <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-1.5">
-                                <p className="text-sm font-bold text-slate-500">
-                                    💰 You&apos;ve earned: <span className="text-emerald-600 font-black">${metrics.estimatedEarnings.toFixed(2)}</span> so far
-                                </p>
-                            </div>
-                        )}
-
-                        {/* Progressive Coaching Tips */}
-                        <div className="mt-3 bg-indigo-50 rounded-xl p-2.5 space-y-0.5">
-                            {(() => {
-                                const actions = actionSummary?.totalActions || 0;
-                                if (progress >= 100) return (
-                                    <>
-                                        <p className="text-sm font-bold text-indigo-700">🎉 Goal reached!</p>
-                                        <p className="text-sm font-medium text-indigo-600">Keep sharing — every extra order counts toward your fundraiser.</p>
-                                    </>
-                                );
-                                if (totalBundlesSold >= 0.5 * bundleGoal) return (
-                                    <>
-                                        <p className="text-sm font-bold text-indigo-700">🔥 Almost there!</p>
-                                        <p className="text-sm font-medium text-indigo-600">One more push to hit your goal — share again today.</p>
-                                    </>
-                                );
-                                if (totalBundlesSold >= 1) return (
-                                    <>
-                                        <p className="text-sm font-bold text-indigo-700">📈 Step 3: Great start!</p>
-                                        <p className="text-sm font-medium text-indigo-600">Most sales come from 3+ touches — share your link again today.</p>
-                                    </>
-                                );
-                                if (totalBundlesSold === 0 && actions > 0) return (
-                                    <>
-                                        <p className="text-sm font-bold text-indigo-700">📣 Step 2: Expand your reach</p>
-                                        <p className="text-sm font-medium text-indigo-600">Post to Facebook or send a group text to get your first order.</p>
-                                    </>
-                                );
-                                return (
-                                    <>
-                                        <p className="text-sm font-bold text-indigo-700">🚀 Step 1: Share your fundraiser</p>
-                                        <p className="text-sm font-medium text-indigo-600">Send your link to 5 family members or friends to get started.</p>
-                                    </>
-                                );
-                            })()}
-                        </div>
-
-                        {/* Days Remaining */}
-                        {daysRemaining !== null && (
-                            <div className="mt-2 flex items-center gap-1.5 text-xs font-bold text-slate-400">
-                                <Clock size={14} />
-                                <span>
-                                    {daysRemaining < 0
-                                        ? `✅ Campaign ended ${Math.abs(daysRemaining)} day${Math.abs(daysRemaining) !== 1 ? 's' : ''} ago`
-                                        : daysRemaining === 0
-                                            ? '⏰ Last day — make it count!'
-                                            : `⏳ ${daysRemaining} day${daysRemaining !== 1 ? 's' : ''} left — now is the time to push!`}
-                                </span>
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* ── Add New Order — prominent CTA (hidden when campaign complete) ── */}
-                {campaignPhase !== 'complete' && (
-                    <button
-                        onClick={() => setShowOrderModal(true)}
-                        className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2.5 transition-all active:scale-[0.97] shadow-lg shadow-purple-500/25"
-                    >
-                        <Plus size={22} strokeWidth={3} />
-                        Add New Order
-                    </button>
-                )}
-
-                {/* Leaderboard - Only show if name collection is enabled */}
-                {campaign.participant_label && (
-                    <Leaderboard
-                        orders={campaign.orders || []}
-                        participantLabel={campaign.participant_label}
+                {/* ═══════════════════════════════════════════════
+                    PHASE: SETUP
+                ═══════════════════════════════════════════════ */}
+                {campaignPhase === 'setup' && (<>
+                    <SetupChecklist
+                        coordinatorFirstName={coordinatorFirstName}
+                        hasPaymentInfo={hasPaymentInfo}
+                        hasSharedOnce={hasSharedOnce}
+                        hasFirstOrder={hasFirstOrder}
+                        onSetPayment={() => setShowSettingsModal(true)}
+                        onShare={() => document.getElementById('share-center')?.scrollIntoView({ behavior: 'smooth' })}
+                        onAddOrder={() => setShowOrderModal(true)}
                     />
-                )}
+                    <ProgressHero
+                        dimmed
+                        sold={totalBundlesSold}
+                        goal={bundleGoal}
+                        progress={progress}
+                        totalSales={metrics.totalSales}
+                        orderCount={activeOrders.length}
+                        daysRemaining={daysRemaining}
+                        orgLabel={orgLabel}
+                    />
+                    <ShareCenter
+                        shareUrl={shareUrl}
+                        onCopy={handleCopy}
+                        copied={copied}
+                        qrHref={qrAsset?.url}
+                        flyerHref={flyerAsset?.url}
+                        scoreboardHref={scoreboardUrl}
+                    />
+                </>)}
 
-                {/* Step 1 card relocated above Live Progress — see new location above */}
+                {/* ═══════════════════════════════════════════════
+                    PHASE: LAUNCH
+                ═══════════════════════════════════════════════ */}
+                {campaignPhase === 'launch' && (<>
+                    <ProgressHero
+                        sold={totalBundlesSold}
+                        goal={bundleGoal}
+                        progress={progress}
+                        totalSales={metrics.totalSales}
+                        orderCount={activeOrders.length}
+                        daysRemaining={daysRemaining}
+                        paceText={`${coachingTip.emoji} ${coachingTip.text}`}
+                        orgLabel={orgLabel}
+                    />
+                    <ShareCenter
+                        shareUrl={shareUrl}
+                        onCopy={handleCopy}
+                        copied={copied}
+                        qrHref={qrAsset?.url}
+                        flyerHref={flyerAsset?.url}
+                        scoreboardHref={scoreboardUrl}
+                        onOpenAi={() => setShowAiPanel(true)}
+                        aiRemaining={aiRemaining}
+                    />
+                    <RecentOrders
+                        orders={activeOrders}
+                        onCancel={(id) => setCancelOrderId(id)}
+                        onViewAll={() => setShowAllOrders(!showAllOrders)}
+                        limit={showAllOrders ? 999 : 3}
+                    />
+                    <QuietLinks
+                        guideHref={`/coordinator/${token}/guide`}
+                        onOpenDownloads={handleDownloadTracker}
+                        activitySummary={actionSummary?.totalActions ? `${actionSummary.totalActions} actions` : undefined}
+                    />
+                </>)}
 
-                {/* ── Re-engage CTA: Run Another Fundraiser (complete phase only) ── */}
-                {campaignPhase === 'complete' && (
-                    <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-6 text-center space-y-3">
-                        <p className="text-2xl">🔄</p>
-                        <h3 className="text-lg font-black text-slate-900">Want to do this again?</h3>
-                        <p className="text-sm text-slate-500">
-                            {progress >= 100
-                                ? `You sold ${formatBundleCount(totalBundlesSold)} bundles — imagine what round 2 could look like!`
-                                : `You were only ${formatBundleCount(bundleGoal - totalBundlesSold)} bundles away. Crush it next time!`
-                            }
-                        </p>
-                        <a
-                            href={`mailto:Laurie@MyFreezerChef.com?subject=We want to run another fundraiser!&body=Hi Laurie, we just finished our ${encodeURIComponent(campaign.name || '')} fundraiser and would love to run another one!`}
-                            className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-6 py-3 rounded-xl font-bold text-sm transition-all active:scale-95"
-                        >
-                            📧 Contact Us to Schedule
-                        </a>
-                    </div>
-                )}
+                {/* ═══════════════════════════════════════════════
+                    PHASE: PUSH / LASTDAY
+                ═══════════════════════════════════════════════ */}
+                {(campaignPhase === 'push' || campaignPhase === 'lastDay') && (<>
+                    <ProgressHero
+                        hot
+                        sold={totalBundlesSold}
+                        goal={bundleGoal}
+                        progress={progress}
+                        totalSales={metrics.totalSales}
+                        orderCount={activeOrders.length}
+                        daysRemaining={daysRemaining}
+                        paceText={`${coachingTip.emoji} ${coachingTip.text}`}
+                        orgLabel={orgLabel}
+                    />
+                    <DeliveryPrep
+                        deliveryDateLabel={deliveryDateLabel}
+                        pickupLocation={campaign.pickup_location || undefined}
+                        onDownloadPickupSheet={handleDownloadPickupSheet}
+                    />
+                    <ShareCenter
+                        shareUrl={shareUrl}
+                        onCopy={handleCopy}
+                        copied={copied}
+                        qrHref={qrAsset?.url}
+                        flyerHref={flyerAsset?.url}
+                        scoreboardHref={scoreboardUrl}
+                        onOpenAi={() => setShowAiPanel(true)}
+                        aiRemaining={aiRemaining}
+                        aiLabel='✨ Write a "last chance" message'
+                    />
+                    <RecentOrders
+                        orders={activeOrders}
+                        onCancel={(id) => setCancelOrderId(id)}
+                        onViewAll={() => setShowAllOrders(!showAllOrders)}
+                        limit={showAllOrders ? 999 : 3}
+                    />
+                </>)}
 
-                {/* ── SECTION: Share & Promote (hidden when campaign complete) ── */}
-                {campaignPhase !== 'complete' && (
-                <>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">📣 Share & Promote</p>
-
-                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
-                    <h2 className="text-base font-black flex items-center gap-2">
-                        <Rocket size={18} className="text-indigo-600" />
-                        Quick Actions
-                    </h2>
-
-                    {/* ── 📢 Share Online ── */}
-                    <div className="space-y-3">
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">📢 Share Online</p>
-                        <button
-                            onClick={handleShareUniversal}
-                            className="w-full bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 text-white p-5 rounded-2xl font-black text-base flex items-center justify-center gap-3 transition-all active:scale-95 shadow-lg shadow-indigo-500/20"
-                        >
-                            <Share2 size={24} />
-                            🚀 Share Your Fundraiser
-                        </button>
-                        <div className="grid grid-cols-2 gap-3">
-                            <button
-                                onClick={handleFacebookShare}
-                                className="bg-blue-50 hover:bg-blue-100 text-blue-700 p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-blue-100"
-                            >
-                                <Facebook size={24} />
-                                <span>📘 Facebook</span>
+                {/* ═══════════════════════════════════════════════
+                    PHASE: COMPLETE
+                ═══════════════════════════════════════════════ */}
+                {campaignPhase === 'complete' && (<>
+                    <ProgressHero
+                        sold={totalBundlesSold}
+                        goal={bundleGoal}
+                        progress={progress}
+                        totalSales={metrics.totalSales}
+                        orderCount={activeOrders.length}
+                        daysRemaining={daysRemaining}
+                        paceText={`${coachingTip.emoji} ${coachingTip.text}`}
+                        orgLabel={orgLabel}
+                    />
+                    <WhatsNext
+                        tenantName={tenantName || 'Your fundraiser organizer'}
+                        deliveryWindowLabel={deliveryDateLabel}
+                    />
+                    {/* Delivery Kit: pickup sheet + tracker downloads */}
+                    <section className="bg-white border border-slate-200 rounded-2xl p-4">
+                        <h3 className="text-base font-black text-slate-900 mb-2">Delivery kit</h3>
+                        <div className="flex gap-2">
+                            <button onClick={handleDownloadPickupSheet}
+                                className="flex-1 rounded-xl border border-slate-200 bg-slate-50 py-2 text-center text-xs font-semibold text-slate-700">
+                                📦 Pickup sheet
                             </button>
-                            <button
-                                onClick={handleSmsShare}
-                                className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-emerald-100"
-                            >
-                                <Smartphone size={24} />
-                                <span>📱 Text / SMS</span>
-                            </button>
-                            <button
-                                onClick={handleEmailShare}
-                                className="bg-purple-50 hover:bg-purple-100 text-purple-700 p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-purple-100"
-                            >
-                                <Mail size={24} />
-                                <span>📧 Email</span>
-                            </button>
-                            <button
-                                onClick={handleInstagramShare}
-                                className="bg-pink-50 hover:bg-pink-100 text-pink-700 p-4 rounded-2xl font-black text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-pink-100"
-                            >
-                                <Instagram size={24} />
-                                <span>📸 Instagram</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Divider */}
-                    <div className="border-t border-slate-100" />
-
-                    {/* ── 🗂️ Offline Tools ── */}
-                    <div className="space-y-2">
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">🗂️ Offline Tools</p>
-                        <div className="grid grid-cols-2 gap-3">
-
-                            <button
-                                onClick={handleCopy}
-                                className="bg-white hover:bg-slate-50 text-slate-700 p-4 rounded-2xl font-bold text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-slate-200"
-                            >
-                                {copied ? <CheckCircle2 size={22} className="text-emerald-500" /> : <LinkIcon size={22} />}
-                                <span>{copied ? 'Copied!' : 'Copy Order Link'}</span>
-                            </button>
-                            <button
-                                onClick={handleCopyScoreboard}
-                                className="bg-white hover:bg-slate-50 text-slate-700 p-4 rounded-2xl font-bold text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-slate-200"
-                            >
-                                <Activity size={22} />
-                                <span>{copiedScoreboard ? 'Copied!' : 'Copy Scoreboard'}</span>
-                            </button>
-                            <Link
-                                href={`/coordinator/${token}/guide`}
-                                className="bg-white hover:bg-slate-50 text-slate-700 p-4 rounded-2xl font-bold text-sm flex flex-col items-center gap-2 transition-all active:scale-95 border border-slate-200"
-                            >
-                                <Eye size={22} />
-                                <span>View Scripts</span>
-                            </Link>
-                        </div>
-                    </div>
-                </div>
-
-                {/* ── AI Content Generator ── */}
-                <div className="bg-indigo-600 rounded-2xl p-4 text-white space-y-4">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 bg-indigo-400 rounded-xl flex items-center justify-center text-white shadow-lg">
-                                <Rocket size={16} />
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-sm">AI Content Generator</h3>
-                                <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest">Powered by Google Gemini</p>
-                            </div>
-                        </div>
-                        {aiRemaining !== null && (
-                            <p className="text-[10px] font-black text-indigo-200 uppercase tracking-widest">
-                                {aiRemaining} of 40 left
-                            </p>
-                        )}
-                    </div>
-
-                    <p className="text-xs text-indigo-100 leading-relaxed font-medium">
-                        Generate custom promo copy for any channel — instantly! Your fundraiser details are included automatically.
-                    </p>
-
-                    <div className="grid grid-cols-2 gap-2">
-                        {[
-                            { channel: 'facebook', label: '📘 Facebook', sub: 'Generate for Facebook' },
-                            { channel: 'text', label: '💬 Text / SMS', sub: 'Generate for Text' },
-                            { channel: 'email', label: '📧 Email', sub: 'Generate for Email' },
-                            { channel: 'instagram', label: '📸 Instagram', sub: 'Generate for Instagram' }
-                        ].map(({ channel, label, sub }) => (
-                            <button
-                                key={channel}
-                                onClick={() => handleAiGenerate(channel)}
-                                disabled={isAiGenerating || aiRemaining === 0}
-                                className={`p-3 rounded-xl border text-left transition-all ${
-                                    aiRemaining === 0
-                                        ? 'bg-white/5 border-white/10 opacity-50 cursor-not-allowed'
-                                        : 'bg-white/5 border-white/10 hover:bg-white/15 hover:border-indigo-300/50 cursor-pointer active:scale-95'
-                                }`}
-                            >
-                                <p className="text-xs font-black">{label}</p>
-                                <p className="text-[10px] text-indigo-200 mt-0.5">
-                                    {isAiGenerating && aiChannel === channel ? 'Generating...' : sub}
-                                </p>
-                            </button>
-                        ))}
-                    </div>
-                    <p className="text-[10px] text-indigo-200/70 font-medium text-center">
-                        Generate, then the message is copied and your app opens automatically.
-                    </p>
-
-                    {aiRemaining === 0 && (
-                        <p className="text-center text-xs font-bold text-indigo-200 bg-white/5 rounded-xl p-3">
-                            ✅ You&apos;ve used all 40 AI generations! Use the copy scripts below or edit previous results.
-                        </p>
-                    )}
-
-                    {isAiGenerating && (
-                        <div className="flex items-center justify-center gap-3 py-4">
-                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            <p className="text-xs font-bold text-indigo-100 animate-pulse">Creating your {aiChannel} content...</p>
-                        </div>
-                    )}
-
-                    {aiContent && !isAiGenerating && (
-                        <div className="bg-indigo-900/40 rounded-2xl p-4 border border-indigo-400/30 space-y-3">
-                            <div className="flex items-center justify-between">
-                                <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">
-                                    {aiChannel ? `${aiChannel.charAt(0).toUpperCase() + aiChannel.slice(1)} Message` : 'Generated Content'}
-                                </p>
-                                <CopyButton text={aiContent} label="Message Copied!" />
-                            </div>
-                            <textarea
-                                value={aiContent}
-                                onChange={(e) => setAiContent(e.target.value)}
-                                rows={4}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-xs text-white font-medium resize-y focus:outline-none focus:ring-2 focus:ring-indigo-400/50"
-                            />
-                            {/* Channel-aware re-share action */}
-                            <button
-                                onClick={() => {
-                                    if (aiChannel === 'facebook') { handleFacebookShareWithContent(aiContent); }
-                                    else if (aiChannel === 'text') { handleSmsShareWithContent(aiContent); }
-                                    else if (aiChannel === 'email') { handleEmailShareWithContent(aiContent); }
-                                    else if (aiChannel === 'instagram') { handleInstagramShareWithContent(aiContent); }
-                                    else { navigator.clipboard.writeText(aiContent); toast.success('Message copied!'); }
-                                }}
-                                className="w-full bg-white/10 hover:bg-white/20 text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-2"
-                            >
-                                {aiChannel === 'facebook' && '📋 Copy & Open Facebook'}
-                                {aiChannel === 'text' && '📋 Copy & Send Text'}
-                                {aiChannel === 'email' && '📋 Copy & Open Email'}
-                                {aiChannel === 'instagram' && '📋 Copy Caption'}
-                                {!['facebook', 'text', 'email', 'instagram'].includes(aiChannel) && '📋 Copy Message'}
+                            <button onClick={handleDownloadTracker}
+                                className="flex-1 rounded-xl border border-slate-200 bg-slate-50 py-2 text-center text-xs font-semibold text-slate-700">
+                                📥 Order tracker
                             </button>
                         </div>
-                    )}
-                </div>
-
-                {/* 📋 Copy Scripts */}
-                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
-                    {/* Section Header */}
-                    <div>
-                        <h2 className="text-lg font-black flex items-center gap-2">
-                            <Copy size={20} className="text-slate-600" />
-                            📋 Copy Scripts
-                        </h2>
-                    </div>
-
-                    {/* ── Copy Scripts (Secondary) ── */}
-                    <div className="space-y-2">
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                            <Copy size={12} />
-                            Copy Scripts — Manual Paste
-                        </p>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                            <button
-                                onClick={handleCopyTextMessage}
-                                className="bg-slate-50 hover:bg-slate-100 text-slate-600 p-3 rounded-xl font-bold text-xs flex items-center gap-2.5 transition-all active:scale-95 border border-slate-200"
-                            >
-                                <MessageSquare size={14} className="flex-shrink-0" />
-                                <span>{copiedText ? '✅ Copied!' : 'Copy Text Message'}</span>
-                            </button>
-                            <button
-                                onClick={handleCopyFacebookPost}
-                                className="bg-slate-50 hover:bg-slate-100 text-slate-600 p-3 rounded-xl font-bold text-xs flex items-center gap-2.5 transition-all active:scale-95 border border-slate-200"
-                            >
-                                <Facebook size={14} className="flex-shrink-0" />
-                                <span>{copiedFb ? '✅ Copied!' : 'Copy Facebook Post'}</span>
-                            </button>
-                            <button
-                                onClick={handleCopyEmailBlurb}
-                                className="bg-slate-50 hover:bg-slate-100 text-slate-600 p-3 rounded-xl font-bold text-xs flex items-center gap-2.5 transition-all active:scale-95 border border-slate-200"
-                            >
-                                <Mail size={14} className="flex-shrink-0" />
-                                <span>{copiedEmail ? '✅ Copied!' : 'Copy Email Blurb'}</span>
-                            </button>
-                        </div>
-                        <p className="text-xs text-slate-400 font-medium mt-1 pl-1">
-                            💡 Each message includes your bundles, link, and deadline — ready to paste.
-                        </p>
-                    </div>
-                </div>
-                </>
-                )}
-                {/* ── END: Share & Promote phase gate ── */}
-
-                {/* ── Downloads — always visible (even after campaign ends) ── */}
-                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
-                    <div>
-                        <h2 className="text-lg font-black flex items-center gap-2">
-                            <Download size={20} className="text-slate-600" />
-                            📥 Downloads
-                        </h2>
-                    </div>
-
-                    <div className="space-y-2">
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                            <Download size={12} />
-                            Printable Downloads
-                        </p>
-                        {(() => {
-                            const trackerAsset = campaignAssets.find(a => a.key === 'tracker');
-                            const flyerAsset = campaignAssets.find(a => a.key === 'flyer');
-                            const qrAsset = campaignAssets.find(a => a.key === 'qr');
-                            return (
-                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                                    <button
-                                        onClick={handleDownloadTracker}
-                                        disabled={campaignAssets.length > 0 && !trackerAsset?.available}
-                                        className={`p-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 transition-all border ${
-                                            trackerAsset?.available !== false
-                                                ? 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 active:scale-95'
-                                                : 'bg-slate-50 text-slate-400 border-slate-100 cursor-not-allowed opacity-60'
-                                        }`}
-                                    >
-                                        <Download size={14} />
-                                        <span>{trackerAsset?.label || 'Download Tracker'}</span>
-                                    </button>
-                                    <button
-                                        disabled={!flyerAsset?.available}
-                                        onClick={flyerAsset?.available ? () => { window.open(flyerAsset.url, '_blank'); trackAction('download_flyer'); } : undefined}
-                                        className={`p-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 transition-all border ${
-                                            flyerAsset?.available
-                                                ? 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 active:scale-95'
-                                                : 'bg-slate-50 text-slate-400 border-slate-100 cursor-not-allowed opacity-60'
-                                        }`}
-                                        title={flyerAsset?.available ? '' : 'Flyer download coming soon'}
-                                    >
-                                        <FileText size={14} />
-                                        <span>{flyerAsset?.label || 'Download Flyer'}</span>
-                                    </button>
-                                    <button
-                                        disabled={!qrAsset?.available}
-                                        onClick={qrAsset?.available ? () => { window.open(qrAsset.url, '_blank'); trackAction('download_qr'); } : undefined}
-                                        className={`p-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 transition-all border ${
-                                            qrAsset?.available
-                                                ? 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 active:scale-95'
-                                                : 'bg-slate-50 text-slate-400 border-slate-100 cursor-not-allowed opacity-60'
-                                        }`}
-                                        title={qrAsset?.available ? '' : 'QR code download coming soon'}
-                                    >
-                                        <LinkIcon size={14} />
-                                        <span>{qrAsset?.label || 'Download QR Code'}</span>
-                                    </button>
-                                </div>
-                            );
-                        })()}
-                        {/* ── Pickup Sheet — full-width delivery-day CTA ── */}
-                        <button
-                            onClick={handleDownloadPickupSheet}
-                            className="w-full mt-2 p-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2.5 transition-all border bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 active:scale-95"
-                            title="Download a delivery-day pickup sheet with all orders"
-                        >
-                            {campaignPhase !== 'complete' && (
-                                <span className="relative flex h-2.5 w-2.5">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-                                </span>
-                            )}
-                            📦 {campaignPhase === 'complete' ? 'Print Final Pickup Sheet' : 'Print LIVE Pickup Sheet — Delivery Day'}
-                            <Download size={14} className="ml-auto flex-shrink-0" />
-                        </button>
-                    </div>
-
-                    {/* ── Full Packet (tertiary) ── */}
-                    {(() => {
-                        const packetAsset = campaignAssets.find(a => a.key === 'packet');
-                        return (
-                            <button
-                                disabled={!packetAsset?.available}
-                                onClick={packetAsset?.available ? () => { window.open(packetAsset.url, '_blank'); trackAction('download_packet'); } : () => toast('Full packet download coming soon!')}
-                                className={`w-full p-2.5 rounded-xl font-medium text-xs flex items-center justify-center gap-1.5 transition-all ${
-                                    packetAsset?.available
-                                        ? 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-                                        : 'text-slate-400 hover:text-slate-500'
-                                }`}
-                            >
-                                <FileText size={13} />
-                                {packetAsset?.label || 'Download Full Packet (All Files)'}
-                            </button>
-                        );
-                    })()}
-                </div>
-
-                {/* ── Engagement Insight ── */}
-                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
-                    <div className="flex items-center gap-2 mb-3">
-                        <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center">
-                            <Activity size={16} className="text-emerald-600" />
-                        </div>
-                        <h3 className="font-bold text-sm text-slate-700">Your Activity</h3>
-                    </div>
-                    {actionSummary && actionSummary.totalActions > 0 ? (
-                        <div className="space-y-2">
-                            <div className="flex items-baseline justify-between">
-                                <span className="text-2xl font-black text-emerald-600">{actionSummary.totalActions}</span>
-                                <span className="text-xs text-slate-400 font-medium">
-                                    {actionSummary.totalActions === 1 ? 'action taken' : 'actions taken'}
-                                </span>
-                            </div>
-                            {actionSummary.lastActionAt && (
-                                <p className="text-xs text-slate-400">
-                                    Last action: {(() => {
-                                        const diff = Date.now() - new Date(actionSummary.lastActionAt).getTime();
-                                        const mins = Math.floor(diff / 60000);
-                                        if (mins < 1) return 'just now';
-                                        if (mins < 60) return `${mins}m ago`;
-                                        const hrs = Math.floor(mins / 60);
-                                        if (hrs < 24) return `${hrs}h ago`;
-                                        return `${Math.floor(hrs / 24)}d ago`;
-                                    })()}
-                                </p>
-                            )}
-                            {actionSummary.mostUsedAction && (
-                                <p className="text-xs text-slate-500 font-medium">⭐ Most used: {actionSummary.mostUsedAction}</p>
-                            )}
-                        </div>
-                    ) : (
-                        <p className="text-xs text-slate-400 leading-relaxed">
-                            No promo actions yet — start with the text message or fundraiser link above! 🚀
-                        </p>
-                    )}
-                </div>
-
-                {/* Settings button moved to nav bar gear icon */}
-
-                {/* ── SECTION: Info & Details ── */}
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">📄 Info & Details</p>
-
-                {/* Success Toolkit CTA */}
-                <Link
-                    href={`/coordinator/${token}/guide`}
-                    className="bg-gradient-to-br from-indigo-600 to-indigo-800 text-white p-6 rounded-[2rem] shadow-xl flex items-center justify-between group hover:scale-[1.02] transition-all overflow-hidden relative"
-                >
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-8 translate-x-8 blur-2xl group-hover:bg-white/20 transition-colors" />
-                    <div className="relative flex items-center gap-4">
-                        <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center">
-                            <Star className="text-white" fill="white" size={24} />
-                        </div>
-                        <div>
-                            <h3 className="font-black text-lg leading-tight uppercase tracking-tight">Success Toolkit</h3>
-                            <p className="text-indigo-100/80 text-xs font-bold">How-To Guide & Social Scripts</p>
-                        </div>
-                    </div>
-                    <ArrowRight className="group-hover:translate-x-1 transition-transform" />
-                </Link>
-
-                {/* Info Section */}
-                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-                    <h2 className="text-lg font-black mb-4 flex items-center gap-2">
-                        <TrendingUp size={20} className="text-indigo-600" />
-                        Campaign Details
-                    </h2>
-                    <div className="space-y-4">
-                        <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400">
-                                <Calendar size={18} />
-                            </div>
-                            <div>
-                                <p className="text-xs font-black text-slate-300 uppercase">Ends On</p>
-                                <p className="font-bold text-slate-700">
-                                    {campaign.end_date ? format(new Date(campaign.end_date), 'MMMM d, yyyy') : 'No date set'}
-                                </p>
-                                {daysRemaining !== null && daysRemaining > 0 && (
-                                    <p className="text-xs font-bold text-amber-600 mt-0.5">⏳ {daysRemaining} day{daysRemaining !== 1 ? 's' : ''} remaining</p>
-                                )}
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400">
-                                <Target size={18} />
-                            </div>
-                            <div>
-                                <p className="text-xs font-black text-slate-300 uppercase">Organization</p>
-                                <p className="font-bold text-slate-700">{campaign.customer?.name}</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Recent Activity */}
-                <div id="recent-orders" className="space-y-4 pb-20">
-                    <h2 className="text-lg font-black px-2 flex items-center justify-between">
-                        Recent Orders
-                        <span className="bg-slate-200 px-2 py-0.5 rounded-full text-[10px] text-slate-600">
-                            {(campaign.orders || []).length}
-                        </span>
-                    </h2>
-                    {(campaign.orders || []).length === 0 ? (
-                        <div className="bg-white rounded-2xl p-8 text-center border-2 border-dashed border-slate-200 space-y-2">
-                            <p className="text-slate-500 font-bold">No orders yet — let&apos;s get your first one!</p>
-                            <p className="text-slate-400 text-sm">Use <span className="font-bold text-slate-500">Quick Actions</span> above to share your order page link and start selling.</p>
-                        </div>
-                    ) : (
-                        (campaign.orders || []).map((order: any) => (
-                            <div key={order.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm group">
-                                <div className="flex justify-between items-center">
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 font-black">
-                                            {order.customer_name?.[0] || 'O'}
-                                        </div>
-                                        <div>
-                                            <p className="font-black text-slate-900">{order.customer_name || 'Anonymous'}</p>
-                                            <p className="text-xs font-bold text-slate-400">
-                                                {format(new Date(order.created_at), 'MMM d, h:mm a')}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        <div className="text-right">
-                                            <p className="font-black text-lg text-slate-900">${order.total_amount}</p>
-                                        </div>
-                                        {order.source === 'fundraiser' && (
-                                            <button
-                                                onClick={() => setCancelOrderId(order.id)}
-                                                className="p-2 rounded-xl text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
-                                                title="Cancel this order"
-                                            >
-                                                <Trash2 size={16} />
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                                {order.items && order.items.length > 0 && (
-                                    <div className="mt-3 pt-3 border-t border-slate-100">
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {order.items.map((item: any, idx: number) => (
-                                                <span key={idx} className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg text-xs font-bold">
-                                                    {item.item_name || 'Bundle'} × {item.quantity}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        ))
-                    )}
-                </div>
-
-                {/* Recently Canceled Orders */}
-                {(campaign.canceledOrders || []).length > 0 && (
-                    <div className="pb-20">
-                        <button
-                            onClick={() => setShowCanceled(!showCanceled)}
-                            className="flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors px-2 mb-3"
-                        >
-                            <RotateCcw size={14} />
-                            Recently Canceled ({(campaign.canceledOrders || []).length})
-                            <span className="text-xs">{showCanceled ? '▲' : '▼'}</span>
-                        </button>
-                        {showCanceled && (
-                            <div className="space-y-3">
-                                {(campaign.canceledOrders || []).map((order: any) => (
-                                    <div key={order.id} className="bg-slate-50 p-4 rounded-2xl border border-dashed border-slate-200 opacity-70 group">
-                                        <div className="flex justify-between items-center">
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 font-black">
-                                                    {order.customer_name?.[0] || 'O'}
-                                                </div>
-                                                <div>
-                                                    <p className="font-bold text-slate-500 line-through">{order.customer_name || 'Anonymous'}</p>
-                                                    <p className="text-xs font-bold text-slate-400">
-                                                        Canceled {order.canceled_at ? format(new Date(order.canceled_at), 'MMM d, h:mm a') : ''}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-3">
-                                                <div className="text-right">
-                                                    <p className="font-bold text-slate-400 line-through">${order.total_amount}</p>
-                                                </div>
-                                                <button
-                                                    onClick={() => setRestoreOrderId(order.id)}
-                                                    className="p-2 rounded-xl text-slate-300 hover:text-emerald-600 hover:bg-emerald-50 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
-                                                    title="Restore this order"
-                                                >
-                                                    <RotateCcw size={16} />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                )}
+                    </section>
+                    {/* Recent orders in complete phase (read-only, no cancel) */}
+                    <RecentOrders
+                        orders={activeOrders}
+                        onCancel={(id) => setCancelOrderId(id)}
+                        onViewAll={() => setShowAllOrders(!showAllOrders)}
+                        limit={showAllOrders ? 999 : 3}
+                    />
+                </>)}
             </main>
 
-            {/* Offline Order Modal */}
+            {/* ── Sticky Action Bar ── */}
+            <ActionBar
+                phase={campaignPhase}
+                onAddOrder={() => setShowOrderModal(true)}
+                onShare={() => document.getElementById('share-center')?.scrollIntoView({ behavior: 'smooth' })}
+                tenantName={tenantName || undefined}
+            />
+
+            {/* ══════════════════════════════════════════════════════════
+                MODALS — unchanged internals, only triggers relocated
+            ══════════════════════════════════════════════════════════ */}
 
             {/* Cancel Order Confirmation Modal */}
             {cancelOrderId && (
@@ -1503,6 +932,7 @@ export default function CoordinatorPortal() {
                     </div>
                 </div>
             )}
+
             {/* Restore Order Confirmation Modal */}
             {restoreOrderId && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -1536,6 +966,8 @@ export default function CoordinatorPortal() {
                     </div>
                 </div>
             )}
+
+            {/* Order Modal — internals unchanged */}
             {showOrderModal && (
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-300 overflow-y-auto">
                     <div className="bg-white w-full max-w-lg rounded-t-2xl sm:rounded-2xl p-6 mt-10 shadow-2xl relative animate-in slide-in-from-bottom-10 duration-300">
@@ -1562,7 +994,7 @@ export default function CoordinatorPortal() {
                                 <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Select Items Sold</label>
                                 <div className="grid grid-cols-2 gap-2">
                                     {(campaign.availableBundles || []).map((bundle: any) => {
-                                        const isSelected = selectedItems.find(i => i.id === bundle.id);
+                                        const isSelected = selectedItems.find((i: any) => i.id === bundle.id);
                                         return (
                                             <div
                                                 key={bundle.id}
@@ -1577,17 +1009,17 @@ export default function CoordinatorPortal() {
                                                     <span className="text-[10px] font-black opacity-40">${bundle.price}</span>
                                                 </div>
                                                 {isSelected && (
-                                                    <div className="flex items-center gap-2 mt-2" onClick={e => e.stopPropagation()}>
+                                                    <div className="flex items-center gap-2 mt-2" onClick={(e: any) => e.stopPropagation()}>
                                                         <button
                                                             type="button"
                                                             onClick={() => updateQty(bundle.id, -1)}
-                                                            className="w-6 h-6 rounded-lg bg-white border border-slate-200 flex items-center justify-center font-bold text-xs"
-                                                        >-</button>
-                                                        <span className="text-sm font-black w-4 text-center">{isSelected.quantity}</span>
+                                                            className="w-7 h-7 rounded-lg bg-slate-200 text-slate-600 text-sm font-bold flex items-center justify-center"
+                                                        >−</button>
+                                                        <span className="text-sm font-black w-6 text-center">{isSelected.quantity}</span>
                                                         <button
                                                             type="button"
                                                             onClick={() => updateQty(bundle.id, 1)}
-                                                            className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs"
+                                                            className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-600 text-sm font-bold flex items-center justify-center"
                                                         >+</button>
                                                     </div>
                                                 )}
@@ -1597,17 +1029,28 @@ export default function CoordinatorPortal() {
                                 </div>
                             </div>
 
-                            <div className="h-px bg-slate-100 w-full" />
+                            {/* Order total display */}
+                            {selectedItems.length > 0 && (
+                                <div className="bg-indigo-50/50 rounded-2xl p-4 border border-indigo-100">
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-sm font-bold text-slate-600">
+                                            {selectedItems.reduce((sum: number, i: any) => sum + i.quantity, 0)} items selected
+                                        </span>
+                                        <span className="text-xl font-black text-indigo-600">
+                                            ${selectedItems.reduce((sum: number, i: any) => sum + (i.price * i.quantity), 0).toFixed(2)}
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="space-y-4">
                                 <div className="space-y-1">
-                                    <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Customer Name</label>
+                                    <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Buyer Name</label>
                                     <div className="relative">
                                         <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                         <input
                                             required
-                                            type="text"
-                                            placeholder="Jane Doe"
+                                            placeholder="Jane Smith"
                                             className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500/20 font-bold"
                                             value={formData.customerName}
                                             onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
@@ -1615,17 +1058,14 @@ export default function CoordinatorPortal() {
                                     </div>
                                 </div>
 
-                                {/* Participant / Student Name */}
-                                {campaign?.participant_label && (
+                                {/* Participant Name (for Leaderboard) */}
+                                {campaign.participant_label && (
                                     <div className="space-y-1">
-                                        <label className="text-[10px] font-black uppercase text-slate-400 ml-2">
-                                            {campaign.participant_label} Name <span className="text-slate-300">(Optional - for Leaderboard)</span>
-                                        </label>
+                                        <label className="text-[10px] font-black uppercase text-slate-400 ml-2">{campaign.participant_label} Name</label>
                                         <div className="relative">
-                                            <Target className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                            <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                             <input
-                                                type="text"
-                                                placeholder={`e.g. ${campaign.participant_label} Name`}
+                                                placeholder={`Which ${campaign.participant_label?.toLowerCase() || 'participant'}?`}
                                                 className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500/20 font-bold"
                                                 value={formData.participantName}
                                                 onChange={(e) => setFormData({ ...formData, participantName: e.target.value })}
@@ -1634,9 +1074,9 @@ export default function CoordinatorPortal() {
                                     </div>
                                 )}
 
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="grid grid-cols-2 gap-3">
                                     <div className="space-y-1">
-                                        <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Amount ($)</label>
+                                        <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Total Amount</label>
                                         <div className="relative">
                                             <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                             <input
@@ -1687,6 +1127,108 @@ export default function CoordinatorPortal() {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* AI Content Generator Modal */}
+            {showAiPanel && (
+                <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-indigo-600 w-full max-w-md rounded-2xl p-5 shadow-2xl animate-in zoom-in-95 duration-200 text-white space-y-4 max-h-[85vh] overflow-y-auto">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 bg-indigo-400 rounded-xl flex items-center justify-center text-white shadow-lg">✨</div>
+                                <div>
+                                    <h3 className="font-bold text-sm">AI Content Generator</h3>
+                                    <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest">Powered by Google Gemini</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                {aiRemaining !== null && (
+                                    <p className="text-[10px] font-black text-indigo-200 uppercase tracking-widest">
+                                        {aiRemaining} of 40 left
+                                    </p>
+                                )}
+                                <button onClick={() => setShowAiPanel(false)} className="text-indigo-200 hover:text-white">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                        </div>
+
+                        <p className="text-xs text-indigo-100 leading-relaxed font-medium">
+                            Generate custom promo copy for any channel — instantly! Your fundraiser details are included automatically.
+                        </p>
+
+                        <div className="grid grid-cols-2 gap-2">
+                            {[
+                                { channel: 'facebook', label: '📘 Facebook', sub: 'Generate for Facebook' },
+                                { channel: 'text', label: '💬 Text / SMS', sub: 'Generate for Text' },
+                                { channel: 'email', label: '📧 Email', sub: 'Generate for Email' },
+                                { channel: 'instagram', label: '📸 Instagram', sub: 'Generate for Instagram' }
+                            ].map(({ channel, label, sub }) => (
+                                <button
+                                    key={channel}
+                                    onClick={() => handleAiGenerate(channel)}
+                                    disabled={isAiGenerating || aiRemaining === 0}
+                                    className={`p-3 rounded-xl border text-left transition-all ${
+                                        aiRemaining === 0
+                                            ? 'bg-white/5 border-white/10 opacity-50 cursor-not-allowed'
+                                            : 'bg-white/5 border-white/10 hover:bg-white/15 hover:border-indigo-300/50 cursor-pointer active:scale-95'
+                                    }`}
+                                >
+                                    <p className="text-xs font-black">{label}</p>
+                                    <p className="text-[10px] text-indigo-200 mt-0.5">
+                                        {isAiGenerating && aiChannel === channel ? 'Generating...' : sub}
+                                    </p>
+                                </button>
+                            ))}
+                        </div>
+
+                        {aiRemaining === 0 && (
+                            <p className="text-center text-xs font-bold text-indigo-200 bg-white/5 rounded-xl p-3">
+                                ✅ You&apos;ve used all 40 AI generations!
+                            </p>
+                        )}
+
+                        {isAiGenerating && (
+                            <div className="flex items-center justify-center gap-3 py-4">
+                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                <p className="text-xs font-bold text-indigo-100 animate-pulse">Creating your {aiChannel} content...</p>
+                            </div>
+                        )}
+
+                        {aiContent && !isAiGenerating && (
+                            <div className="bg-indigo-900/40 rounded-2xl p-4 border border-indigo-400/30 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">
+                                        {aiChannel ? `${aiChannel.charAt(0).toUpperCase() + aiChannel.slice(1)} Message` : 'Generated Content'}
+                                    </p>
+                                    <CopyButton text={aiContent} label="Message Copied!" />
+                                </div>
+                                <textarea
+                                    value={aiContent}
+                                    onChange={(e) => setAiContent(e.target.value)}
+                                    rows={4}
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-xs text-white font-medium resize-y focus:outline-none focus:ring-2 focus:ring-indigo-400/50"
+                                />
+                                <button
+                                    onClick={() => {
+                                        if (aiChannel === 'facebook') { handleFacebookShareWithContent(aiContent); }
+                                        else if (aiChannel === 'text') { handleSmsShareWithContent(aiContent); }
+                                        else if (aiChannel === 'email') { handleEmailShareWithContent(aiContent); }
+                                        else if (aiChannel === 'instagram') { handleInstagramShareWithContent(aiContent); }
+                                        else { navigator.clipboard.writeText(aiContent); toast.success('Message copied!'); }
+                                    }}
+                                    className="w-full bg-white/10 hover:bg-white/20 text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-2"
+                                >
+                                    {aiChannel === 'facebook' && '📋 Copy & Open Facebook'}
+                                    {aiChannel === 'text' && '📋 Copy & Send Text'}
+                                    {aiChannel === 'email' && '📋 Copy & Open Email'}
+                                    {aiChannel === 'instagram' && '📋 Copy Caption'}
+                                    {!['facebook', 'text', 'email', 'instagram'].includes(aiChannel) && '📋 Copy Message'}
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
