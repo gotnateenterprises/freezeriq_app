@@ -70,7 +70,8 @@ export default function CustomerProfilePage({ params }: { params: Promise<{ id: 
             .then(async res => {
                 const data = await res.json();
                 if (!res.ok) {
-                    setCustomer({ error: data.error || 'Failed to load customer' });
+                    // CRM-1A: preserve HTTP status for error discrimination
+                    setCustomer({ error: data.error || 'Failed to load customer', httpStatus: res.status });
                     setIsLoading(false);
                     return;
                 }
@@ -91,7 +92,7 @@ export default function CustomerProfilePage({ params }: { params: Promise<{ id: 
                 setIsLoading(false);
             })
             .catch(() => {
-                setCustomer({ error: "Failed to load customer" });
+                setCustomer({ error: "Failed to load customer", httpStatus: 500 });
                 setIsLoading(false);
             });
     };
@@ -174,10 +175,21 @@ export default function CustomerProfilePage({ params }: { params: Promise<{ id: 
 
     if (isLoading) return <div className="p-12 text-center text-slate-500">Loading Profile...</div>;
     if (!customer || customer.error) {
+        const status = customer?.httpStatus;
+        const errorTitle =
+            status === 401 ? "Please sign in again to view this profile." :
+            status === 403 ? "You do not have access to this profile." :
+            status === 404 ? "This customer no longer exists." :
+            "Something went wrong loading this profile — try again.";
+        const errorBody =
+            status === 401 ? "Your session may have expired." :
+            status === 403 ? "You may have switched businesses." :
+            status === 404 ? "You may have switched businesses or this customer was removed." :
+            "Our server hit an unexpected error. If this keeps happening, contact support.";
         return (
             <div className="p-12 text-center space-y-4">
-                <div className="text-red-500 font-bold text-xl">{customer?.error || "Customer not found."}</div>
-                <p className="text-slate-500">You may have switched businesses or this customer no longer exists.</p>
+                <div className="text-red-500 font-bold text-xl">{errorTitle}</div>
+                <p className="text-slate-500">{errorBody}</p>
                 <Link href="/customers" className="inline-block px-6 py-2 bg-indigo-600 text-white rounded-xl font-bold">
                     Back to Customers
                 </Link>

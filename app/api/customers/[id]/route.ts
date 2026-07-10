@@ -1,33 +1,78 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { auth } from '@/auth';
 
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * CRM-1A: Defensive per-order serializer.
+ * Returns null + warning string if the order can't be serialized,
+ * so one bad order never 500s the whole customer/fundraiser profile.
+ */
+function serializeOrder(o: any): { order: any; warning?: string } {
+    try {
+        const items = Array.isArray(o.items) ? o.items : [];
+        return {
+            order: {
+                id: o.external_id,
+                date: o.created_at,
+                total: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
+                    .format(Number(o.total_amount) || 0),
+                status: o.status,
+                items: items
+                    .map((i: any) => `${i.quantity ?? 0}x ${i.bundle?.name ?? i.item_name ?? 'Unknown'}`)
+                    .join(', ') || 'No items',
+                orderItems: items.map((i: any) => ({
+                    id: i.id,
+                    name: i.bundle?.name || i.item_name || 'Unknown',
+                    quantity: i.quantity,
+                    price: i.unit_price,
+                    is_subscription: i.is_subscription,
+                    serving_tier: i.variant_size
+                }))
+            }
+        };
+    } catch (err: any) {
+        console.warn('[serializeOrder] Skipping malformed order:', o?.id || o?.external_id, err?.message);
+        return { order: null, warning: `Order ${o?.external_id || o?.id || 'unknown'}: ${err?.message || 'serialization failed'}` };
+    }
+}
+
+/**
+ * CRM-1A: Serialize an array of orders defensively.
+ * Returns { orders, warnings } where warnings is only populated if orders were skipped.
+ */
+function serializeOrders(rawOrders: any[]): { orders: any[]; warnings: string[] } {
+    const orders: any[] = [];
+    const warnings: string[] = [];
+    for (const o of rawOrders) {
+        const result = serializeOrder(o);
+        if (result.order) {
+            orders.push(result.order);
+        }
+        if (result.warning) {
+            warnings.push(result.warning);
+        }
+    }
+    return { orders, warnings };
+}
+
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
-        console.log("[GET /api/customers/[id]] Step 1: Loading auth...");
-        const { auth } = await import('@/auth');
-        console.log("[GET /api/customers/[id]] Step 2: Calling auth()...");
         const session = await auth();
-        console.log("[GET /api/customers/[id]] Step 3: Auth complete. businessId:", session?.user?.businessId);
         if (!session?.user?.businessId) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        console.log("[GET /api/customers/[id]] Step 4: Awaiting params...");
         const { id } = await params;
-        console.log("[GET /api/customers/[id]] Step 5: id =", id);
-
 
         // 1. Try finding Organization (only if ID is UUID)
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
         let org = null;
 
-        console.log("[GET /api/customers/[id]] Step 6: isUuid =", isUuid);
         if (isUuid) {
-            console.log("[GET /api/customers/[id]] Step 7: Running Prisma findUnique...");
             org = await prisma.customer.findUnique({
                 where: { id },
                 include: {
@@ -46,19 +91,19 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
                 }
             });
 
-            console.log("[GET /api/customers/[id]] Step 8: Query returned org =", org ? org.id : null);
-
             // Security Check
             if (org && org.business_id !== session.user.businessId) {
-                console.log("[GET /api/customers/[id]] Step 8b: Cross-tenant mismatch!", org.business_id, "!=", session.user.businessId);
                 return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
             }
         }
 
         if (org) {
-            console.log("[GET /api/customers/[id]] Step 9: Serializing org response...");
             const orgAny = org as any;
-            return NextResponse.json({
+            // CRM-1A: Defensive order serialization
+            const rawOrders = Array.isArray(orgAny.orders) ? orgAny.orders : [];
+            const { orders: serializedOrders, warnings } = serializeOrders(rawOrders);
+
+            const response: any = {
                 id: org.id,
                 name: org.name,
                 contact_name: org.contact_name,
@@ -72,32 +117,23 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
                 delivery_address: orgAny.delivery_address,
                 notes: orgAny.notes || '',
                 inactive_reason: orgAny.inactive_reason,
-                status: (orgAny.status ? orgAny.status.charAt(0).toUpperCase() + orgAny.status.slice(1).toLowerCase().replace('_', ' ') : 'Active'),
+                status: (orgAny.status ? String(orgAny.status).charAt(0).toUpperCase() + String(orgAny.status).slice(1).toLowerCase().replace('_', ' ') : 'Active'),
                 rawStatus: orgAny.status || 'LEAD',
                 archived: orgAny.archived || false,
                 tags: orgAny.tags || [],
                 fundraiser_info: orgAny.fundraiser_info || {},
-                campaigns: orgAny.campaigns || [], // NEW CAMPAIGNS
+                campaigns: orgAny.campaigns || [],
                 source: orgAny.source || 'Manual',
                 total_spend: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
-                    orgAny.orders.reduce((sum: number, o: any) => sum + (Number(o.total_amount) || 0), 0)
+                    rawOrders.reduce((sum: number, o: any) => sum + (Number(o.total_amount) || 0), 0)
                 ),
-                orders: orgAny.orders.map((o: any) => ({
-                    id: o.external_id,
-                    date: o.created_at,
-                    total: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(o.total_amount) || 0),
-                    status: o.status,
-                    items: o.items.map((i: any) => `${i.quantity}x ${i.bundle?.name}`).join(', '),
-                    orderItems: o.items.map((i: any) => ({
-                        id: i.id,
-                        name: i.bundle?.name || i.item_name,
-                        quantity: i.quantity,
-                        price: i.unit_price,
-                        is_subscription: i.is_subscription,
-                        serving_tier: i.variant_size
-                    }))
-                }))
-            });
+                orders: serializedOrders,
+            };
+            // CRM-1A: Only include warnings when orders were skipped
+            if (warnings.length > 0) {
+                response.serialization_warnings = warnings;
+            }
+            return NextResponse.json(response);
         }
 
         // 2. Try finding Individual by Name (Mock ID mechanism) or Promoted Customer
@@ -138,7 +174,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
             if (promotedOrg) {
                 // Reuse the same response logic as UUID match
                 const orgAny = promotedOrg as any;
-                return NextResponse.json({
+                // CRM-1A: Defensive order serialization
+                const rawOrders = Array.isArray(orgAny.orders) ? orgAny.orders : [];
+                const { orders: serializedOrders, warnings } = serializeOrders(rawOrders);
+
+                const response: any = {
                     id: promotedOrg.id,
                     name: promotedOrg.name,
                     type: orgAny.type === 'direct_customer' ? 'Individual' :
@@ -150,32 +190,22 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
                     delivery_address: orgAny.delivery_address,
                     notes: orgAny.notes || '',
                     inactive_reason: orgAny.inactive_reason,
-                    status: (orgAny.status ? orgAny.status.charAt(0).toUpperCase() + orgAny.status.slice(1).toLowerCase().replace('_', ' ') : 'Active'),
+                    status: (orgAny.status ? String(orgAny.status).charAt(0).toUpperCase() + String(orgAny.status).slice(1).toLowerCase().replace('_', ' ') : 'Active'),
                     rawStatus: orgAny.status || 'LEAD',
                     archived: orgAny.archived || false,
                     tags: orgAny.tags || [],
-                    fundraiser_info: orgAny.fundraiser_info || {}, // Return persisted info
+                    fundraiser_info: orgAny.fundraiser_info || {},
                     campaigns: orgAny.campaigns || [],
                     source: orgAny.source || 'Manual',
                     total_spend: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
-                        orgAny.orders.reduce((sum: number, o: any) => sum + (Number(o.total_amount) || 0), 0)
+                        rawOrders.reduce((sum: number, o: any) => sum + (Number(o.total_amount) || 0), 0)
                     ),
-                    orders: orgAny.orders.map((o: any) => ({
-                        id: o.external_id,
-                        date: o.created_at,
-                        total: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(o.total_amount) || 0),
-                        status: o.status,
-                        items: o.items.map((i: any) => `${i.quantity}x ${i.bundle?.name}`).join(', '),
-                        orderItems: o.items.map((i: any) => ({
-                            id: i.id,
-                            name: i.bundle?.name || i.item_name,
-                            quantity: i.quantity,
-                            price: i.unit_price,
-                            is_subscription: i.is_subscription,
-                            serving_tier: i.variant_size
-                        }))
-                    }))
-                });
+                    orders: serializedOrders,
+                };
+                if (warnings.length > 0) {
+                    response.serialization_warnings = warnings;
+                }
+                return NextResponse.json(response);
             }
         }
 
@@ -190,7 +220,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         });
 
         if (orders.length > 0) {
-            return NextResponse.json({
+            // CRM-1A: Defensive order serialization
+            const { orders: serializedOrders, warnings } = serializeOrders(orders);
+
+            const response: any = {
                 id: encodedName,
                 name: encodedName,
                 type: 'Individual',
@@ -199,25 +232,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
                 total_spend: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
                     orders.reduce((sum: number, o: any) => sum + (Number((o as any).total_amount) || 0), 0)
                 ),
-                orders: orders.map(o => {
-                    const oAny = o as any;
-                    return {
-                        id: o.external_id,
-                        date: o.created_at,
-                        total: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(oAny.total_amount) || 0),
-                        status: o.status,
-                        items: oAny.items.map((i: any) => `${i.quantity}x ${i.bundle?.name}`).join(', ') || "No items",
-                        orderItems: oAny.items.map((i: any) => ({
-                            id: i.id,
-                            name: i.bundle?.name || i.item_name,
-                            quantity: i.quantity,
-                            price: i.unit_price,
-                            is_subscription: i.is_subscription,
-                            serving_tier: i.variant_size
-                        }))
-                    };
-                })
-            });
+                orders: serializedOrders,
+            };
+            if (warnings.length > 0) {
+                response.serialization_warnings = warnings;
+            }
+            return NextResponse.json(response);
         }
 
         return NextResponse.json({ error: "Customer not found" }, { status: 404 });
@@ -231,7 +251,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
-        const { auth } = await import('@/auth');
         const session = await auth();
 
         if (!session?.user?.businessId) {
@@ -422,7 +441,6 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
-        const { auth } = await import('@/auth');
         const session = await auth();
         if (!session?.user?.businessId) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
