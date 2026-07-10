@@ -1,8 +1,9 @@
 'use client';
 import Link from 'next/link';
 import React from 'react';
+import { Printer } from 'lucide-react';
 
-export function RecipeQuickView({ recipe, onClose }: { recipe: any | null; onClose: () => void }) {
+export function RecipeQuickView({ recipe, onClose, onPrint }: { recipe: any | null; onClose: () => void; onPrint?: (recipe: any) => void }) {
     if (!recipe) {
         return (
             <aside className="hidden lg:grid place-items-center rounded-xl border border-slate-200 bg-white p-6 text-center dark:border-slate-800 dark:bg-slate-900">
@@ -68,6 +69,16 @@ export function RecipeQuickView({ recipe, onClose }: { recipe: any | null; onClo
                     className="flex-1 rounded-lg bg-indigo-600 py-2.5 text-center text-xs font-extrabold text-white hover:bg-indigo-700 transition">
                     ✏️ Edit recipe
                 </Link>
+                {onPrint && (
+                    <button
+                        onClick={() => onPrint(recipe)}
+                        title="Print recipe"
+                        className="flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-xs font-extrabold text-slate-600 hover:border-indigo-300 hover:text-indigo-600 transition dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:text-indigo-400"
+                    >
+                        <Printer size={14} />
+                        Print
+                    </button>
+                )}
             </div>
         </aside>
     );

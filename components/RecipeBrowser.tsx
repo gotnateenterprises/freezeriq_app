@@ -13,6 +13,7 @@ import { ClientOnly } from './ClientOnly';
 import { CategoryTree } from './recipes/CategoryTree';
 import { RecipeList } from './recipes/RecipeList';
 import { RecipeQuickView } from './recipes/RecipeQuickView';
+import { printRecipe } from './recipes/printRecipe';
 
 // Helper to find category path
 function getPath(categories: Category[], targetId: string): Category[] {
@@ -275,6 +276,9 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
         }
     };
 
+    // ── PRINT HANDLER (UI-only, no API) ───────────────────────────────────────
+    const handlePrintRecipe = (recipe: any) => printRecipe(recipe);
+
     // ── SEARCH SCORING BLOCK (unchanged) ───────────────────────────────────────
 
     const isSearching = searchTerm.trim().length > 0;
@@ -523,6 +527,7 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
                                     recipes={visibleRecipes}
                                     selectedId={selectedRecipeId}
                                     onSelect={setSelectedRecipeId}
+                                    onPrint={handlePrintRecipe}
                                 />
                             ) : (
                                 <div>
@@ -634,6 +639,7 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
                                     <RecipeQuickView
                                         recipe={selectedRecipe}
                                         onClose={() => setSelectedRecipeId(null)}
+                                        onPrint={handlePrintRecipe}
                                     />
                                 </div>
                             )}
