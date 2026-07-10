@@ -52,6 +52,9 @@ function CustomersContent() {
     const [activeType, setActiveType] = useState<'All' | 'Individual' | 'Completed' | 'Archived' | 'Waitlist'>('All');
     const [activeStatus, setActiveStatus] = useState<'All' | 'LEAD' | 'ACTIVE' | 'PRODUCTION' | 'IN_PROGRESS_VIEW'>('All');
 
+    // CRM-3: People / Organizations lens
+    const [lens, setLens] = useState<'people' | 'orgs'>('people');
+
     // New Customer Modal State
     const [isAddingCustomer, setIsAddingCustomer] = useState(false);
     const [formLoading, setFormLoading] = useState(false);
@@ -104,23 +107,35 @@ function CustomersContent() {
     const fetchCustomers = async () => {
         setIsLoading(true);
         try {
-            const res = await fetch('/api/customers', { cache: 'no-store' });
-            if (res.ok) {
-                const data = await res.json();
-                const customersList = data.customers || data;
-                setWeeklyRevenue(data.weeklyRevenue || 0);
-                setInProgressOrders(data.inProgressCount || 0);
+            // CRM-3: Fetch both people (direct_customer) and orgs in parallel so both lens
+            // views have data. The API distinguishes them via the ?type param:
+            //   no param  → direct_customer records mapped to 'Individual' + anonymous orders
+            //   ?type=organization → fundraiser_org/organization records mapped to 'Organization'/'Fundraiser'
+            const [peopleRes, orgsRes] = await Promise.all([
+                fetch('/api/customers', { cache: 'no-store' }),
+                fetch('/api/customers?type=organization', { cache: 'no-store' })
+            ]);
 
-                const enhancedData = customersList.map((c: any) => ({
-                    ...c,
-                    source: c.source || 'Square',
-                    status: (c.status as CustomerStatus) || 'LEAD',
-                    archived: c.archived || false,
-                    email: c.email || '',
-                    tags: c.tags || []
-                }));
-                setCustomers(enhancedData);
-            }
+            const peopleData = peopleRes.ok ? await peopleRes.json() : { customers: [] };
+            const orgsData = orgsRes.ok ? await orgsRes.json() : { customers: [] };
+
+            const peopleList: any[] = peopleData.customers || peopleData || [];
+            const orgsList: any[] = orgsData.customers || orgsData || [];
+
+            // Metrics come from the people (unfiltered) call
+            setWeeklyRevenue(peopleData.weeklyRevenue || 0);
+            setInProgressOrders(peopleData.inProgressCount || 0);
+
+            const enhance = (c: any) => ({
+                ...c,
+                source: c.source || 'Square',
+                status: (c.status as CustomerStatus) || 'LEAD',
+                archived: c.archived || false,
+                email: c.email || '',
+                tags: c.tags || []
+            });
+
+            setCustomers([...peopleList.map(enhance), ...orgsList.map(enhance)]);
         } catch (e) {
             console.error("Failed to fetch customers", e);
         } finally {
@@ -226,7 +241,14 @@ function CustomersContent() {
         );
     };
 
-    const filtered = customers.filter(c => {
+    // CRM-3: Apply lens pre-filter before existing type/status/search filters
+    const lensFiltered = customers.filter(c => {
+        if (lens === 'people') return c.type === 'Individual';
+        // orgs: type === 'Organization' || type === 'Fundraiser'
+        return c.type === 'Organization' || c.type === 'Fundraiser';
+    });
+
+    const filtered = lensFiltered.filter(c => {
         // Handle Type Filters (Tabs)
         if (activeType === 'Archived') {
             if (!c.archived) return false;
@@ -432,6 +454,21 @@ function CustomersContent() {
             </div>
 
             <div className="flex flex-col gap-6">
+                {/* CRM-3: People / Organizations segmented toggle */}
+                <div className="flex w-fit rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
+                    {(['people', 'orgs'] as const).map(t => (
+                        <button key={t} onClick={() => {
+                            setLens(t);
+                            // Reset type filter on lens switch so a stale 'Individual' tab
+                            // does not make the Organizations view appear empty.
+                            setActiveType('All');
+                        }}
+                            className={`rounded-lg px-3.5 py-1.5 text-xs font-extrabold ${lens === t ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-600'}`}>
+                            {t === 'people' ? 'People' : 'Organizations'}
+                        </button>
+                    ))}
+                </div>
+
                 {/* Visual Filter Bar */}
                 <div className="flex flex-col lg:flex-row gap-4">
                     <div className="flex-1 glass-panel p-1 rounded-2xl flex gap-1 bg-white dark:bg-slate-800 border border-slate-200/50 shadow-sm overflow-x-auto no-scrollbar">
@@ -520,7 +557,11 @@ function CustomersContent() {
                                         <tr
                                             key={c.id}
                                             className="group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-all"
-                                            onClick={() => window.location.href = `/customers/${c.id}`}
+                                            onClick={() => {
+                                                // CRM-3: org rows navigate to the CRM-2 organization profile
+                                                const isOrg = c.type === 'Organization' || c.type === 'Fundraiser';
+                                                window.location.href = isOrg ? `/fundraisers/${c.id}` : `/customers/${c.id}`;
+                                            }}
                                         >
                                             <td className="py-6 px-8">
                                                 <div className="flex items-center gap-4">
