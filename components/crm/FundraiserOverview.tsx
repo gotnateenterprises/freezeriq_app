@@ -344,7 +344,7 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
             // Fallback
             // Fix: Do not fallback to customer.name
             const firstName = customer.contact_name ? customer.contact_name.split(' ')[0] : '';
-        const template = generateInfoTemplate(firstName, []);
+        const template = generateInfoTemplate(firstName, [], branding);
             setEmailDraft({ subject: template.subject, html: template.html });
             setIsEmailModalOpen(true);
             return;
@@ -361,7 +361,7 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
         setShowCatalogSelector(false);
         // Fix: Do not fallback to customer.name
         const firstName = customer.contact_name ? customer.contact_name.split(' ')[0] : '';
-        const template = generateInfoTemplate(firstName, catalog.bundles || []);
+        const template = generateInfoTemplate(firstName, catalog.bundles || [], branding);
         setEmailDraft({ subject: template.subject, html: template.html });
         setIsEmailModalOpen(true);
     };
