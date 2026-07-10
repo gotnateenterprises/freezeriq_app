@@ -475,6 +475,13 @@ model FundraiserCampaign {
   start_date            DateTime?  @db.Date
   end_date              DateTime?  @db.Date
   delivery_date         DateTime?  @db.Date
+  // ── Closeout fields (Phase 7E-1) ──────────────────────────────────────────
+  // Set by the admin closeout action. Null = campaign is still active.
+  closed_at             DateTime?
+  closed_by             String?    // User ID of admin who triggered closeout
+  settlement_total      Decimal?   @db.Decimal(10, 2) // Gross total frozen at closeout time
+  settlement_notes      String?    // Optional admin notes for the settlement record
+  // ─────────────────────────────────────────────────────────────────────────
   pickup_location       String?
   checks_payable        String?
   goal_amount           Decimal?   @db.Decimal(10, 2)
