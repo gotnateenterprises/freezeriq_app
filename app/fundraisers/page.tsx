@@ -13,7 +13,11 @@ import {
     Building2,
     Users,
     ExternalLink,
-    Receipt
+    Receipt,
+    Lock,
+    Loader2,
+    CheckCircle2,
+    AlertCircle
 } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -40,6 +44,17 @@ interface Fundraiser {
     portal_token?: string;
     held_order_count?: number;
     held_order_total?: number;
+    // Phase 7E closeout fields (may not be present until prisma generate runs)
+    closed_at?: string | null;
+    settlement_total?: number | null;
+}
+
+/** Returns true when a campaign cannot be closed again. */
+function isCampaignClosed(f: Fundraiser): boolean {
+    return Boolean(f.closed_at) ||
+        f.status === 'Closed' ||
+        f.status === 'Settled' ||
+        f.status === 'Archived';
 }
 
 export default function FundraisersPage() {
@@ -49,6 +64,16 @@ export default function FundraisersPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
     const [filterStatus, setFilterStatus] = useState('all');
+
+    // ── Phase 7E-3: Closeout modal state ──────────────────────────────────
+    const [closeoutTarget, setCloseoutTarget] = useState<Fundraiser | null>(null);
+    const [closeoutLoading, setCloseoutLoading] = useState(false);
+    const [closeoutResult, setCloseoutResult] = useState<{
+        success: boolean;
+        message: string;
+        settlement_total?: number;
+        promoted_order_count?: number;
+    } | null>(null);
 
     const userPlan = (session?.user as any)?.plan;
     const isSuperAdmin = (session?.user as any)?.isSuperAdmin;
@@ -80,6 +105,57 @@ export default function FundraisersPage() {
                 setIsLoading(false);
             });
     }, []);
+
+    // ── Phase 7E-3: Closeout handler ──────────────────────────────────────
+    const handleCloseout = async () => {
+        if (!closeoutTarget) return;
+        setCloseoutLoading(true);
+        setCloseoutResult(null);
+        try {
+            const res = await fetch(`/api/campaigns/${closeoutTarget.id}/closeout`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                setCloseoutResult({
+                    success: false,
+                    message: data.error || 'Failed to close campaign. Please try again.'
+                });
+            } else {
+                // Update local list so the row immediately reflects Closed status
+                setFundraisers(prev => prev.map(f =>
+                    f.id === closeoutTarget.id
+                        ? { ...f, status: 'Closed', closed_at: data.closed_at, settlement_total: data.settlement_total }
+                        : f
+                ));
+                setCloseoutResult({
+                    success: true,
+                    message: 'Campaign closed successfully.',
+                    settlement_total: data.settlement_total,
+                    promoted_order_count: data.promoted_order_count
+                });
+            }
+        } catch (e: any) {
+            setCloseoutResult({
+                success: false,
+                message: e.message || 'Unexpected error. Please try again.'
+            });
+        } finally {
+            setCloseoutLoading(false);
+        }
+    };
+
+    const openCloseoutModal = (f: Fundraiser) => {
+        setCloseoutTarget(f);
+        setCloseoutResult(null);
+    };
+
+    const dismissCloseoutModal = () => {
+        setCloseoutTarget(null);
+        setCloseoutResult(null);
+        setCloseoutLoading(false);
+    };
 
     const filtered = fundraisers.filter(f => {
         const matchesSearch = f.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -227,10 +303,13 @@ export default function FundraisersPage() {
                                         </div>
                                     </td>
                                     <td className="px-4 py-4">
-                                        <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${item.status === 'Active' ? 'bg-emerald-100 text-emerald-700' :
+                                        <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${
+                                            item.status === 'Active' ? 'bg-emerald-100 text-emerald-700' :
                                             item.status === 'Lead' ? 'bg-amber-100 text-amber-700' :
-                                                'bg-slate-100 text-slate-600'
-                                            }`}>
+                                            item.status === 'Closed' ? 'bg-amber-100 text-amber-800' :
+                                            item.status === 'Settled' ? 'bg-violet-100 text-violet-700' :
+                                            'bg-slate-100 text-slate-600'
+                                        }`}>
                                             {item.status}
                                         </span>
                                     </td>
@@ -310,6 +389,16 @@ export default function FundraisersPage() {
                                             >
                                                 <Receipt size={15} />
                                             </Link>
+                                            {/* Phase 7E-3: Close Campaign button — only for non-closed campaigns */}
+                                            {!item.is_placeholder && !isCampaignClosed(item) && (
+                                                <button
+                                                    onClick={() => openCloseoutModal(item)}
+                                                    className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-amber-600 transition-all"
+                                                    title="Close Campaign"
+                                                >
+                                                    <Lock size={15} />
+                                                </button>
+                                            )}
                                             <Link
                                                 href={`/fundraisers/${item.customer_id}`}
                                                 className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-indigo-600 transition-all"
@@ -326,5 +415,108 @@ export default function FundraisersPage() {
                 </div>
             </div>
         </div>
+
+        {/* ── Phase 7E-3: Close Campaign Confirmation Modal ──────────────────── */}
+        {closeoutTarget && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in fade-in zoom-in duration-200">
+
+                    {/* Header */}
+                    <div className="flex items-center gap-3 mb-2">
+                        <div className="w-10 h-10 rounded-2xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+                            <Lock size={20} className="text-amber-600" />
+                        </div>
+                        <h3 className="text-xl font-black text-slate-900 dark:text-white">
+                            Close Campaign
+                        </h3>
+                    </div>
+                    <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-6 pl-[3.25rem]">
+                        {closeoutTarget.name}
+                    </p>
+
+                    {/* Result state — success */}
+                    {closeoutResult?.success && (
+                        <div className="mb-6 p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-2xl space-y-1">
+                            <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-black">
+                                <CheckCircle2 size={18} />
+                                Campaign Closed
+                            </div>
+                            {closeoutResult.promoted_order_count !== undefined && (
+                                <p className="text-sm text-emerald-700 dark:text-emerald-400 font-bold">
+                                    {closeoutResult.promoted_order_count} order{closeoutResult.promoted_order_count !== 1 ? 's' : ''} moved to production.
+                                </p>
+                            )}
+                            {closeoutResult.settlement_total !== undefined && closeoutResult.settlement_total !== null && (
+                                <p className="text-sm text-emerald-700 dark:text-emerald-400 font-bold font-mono">
+                                    Settlement total: ${Number(closeoutResult.settlement_total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </p>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Result state — error */}
+                    {closeoutResult && !closeoutResult.success && (
+                        <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-2xl">
+                            <div className="flex items-center gap-2 text-red-700 dark:text-red-400 font-black">
+                                <AlertCircle size={18} />
+                                Error
+                            </div>
+                            <p className="text-sm text-red-600 dark:text-red-400 font-bold mt-1">
+                                {closeoutResult.message}
+                            </p>
+                        </div>
+                    )}
+
+                    {/* Consequence copy — only shown before success */}
+                    {!closeoutResult?.success && (
+                        <div className="mb-6 space-y-3 text-sm text-slate-600 dark:text-slate-400 font-medium">
+                            <p>Closing this campaign will:</p>
+                            <ul className="space-y-2 pl-4">
+                                <li className="flex items-start gap-2">
+                                    <span className="text-amber-500 font-black mt-0.5">·</span>
+                                    Prevent coordinators from adding, canceling, or restoring orders.
+                                </li>
+                                <li className="flex items-start gap-2">
+                                    <span className="text-amber-500 font-black mt-0.5">·</span>
+                                    Move active fundraiser orders into production readiness.
+                                </li>
+                                <li className="flex items-start gap-2">
+                                    <span className="text-amber-500 font-black mt-0.5">·</span>
+                                    Freeze the settlement total from current non-canceled orders.
+                                </li>
+                            </ul>
+                            <p className="font-bold text-slate-500 dark:text-slate-500">
+                                This does not charge anyone or process any payments.
+                            </p>
+                        </div>
+                    )}
+
+                    {/* Footer buttons */}
+                    <div className="flex gap-3 justify-end">
+                        <button
+                            onClick={dismissCloseoutModal}
+                            disabled={closeoutLoading}
+                            className="px-6 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+                        >
+                            {closeoutResult?.success ? 'Done' : 'Cancel'}
+                        </button>
+                        {!closeoutResult?.success && (
+                            <button
+                                onClick={handleCloseout}
+                                disabled={closeoutLoading}
+                                className="flex items-center gap-2 px-6 py-3 rounded-xl font-black bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/20 transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-60 disabled:scale-100"
+                            >
+                                {closeoutLoading ? (
+                                    <><Loader2 size={16} className="animate-spin" /> Closing...</>
+                                ) : (
+                                    <><Lock size={16} /> Close Campaign</>
+                                )}
+                            </button>
+                        )}
+                    </div>
+                </div>
+            </div>
+        )}
+    </div>
     );
 }
