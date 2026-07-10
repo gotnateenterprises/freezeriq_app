@@ -22,6 +22,16 @@ import { prisma } from '@/lib/db';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
 import { buildBundlePriceMap } from '@/lib/pricing';
 
+/**
+ * Phase 7E-1C: Returns true if the campaign has been server-closed.
+ * Checks both the authoritative closed_at timestamp (set by the closeout
+ * action in 7E-2) and the status string for forward-compatibility.
+ * Used by POST, DELETE, and PATCH to block mutations on closed campaigns.
+ */
+function isCampaignClosed(campaign: any): boolean {
+    return Boolean(campaign.closed_at) || campaign.status === 'Closed';
+}
+
 export async function GET(
     req: Request,
     { params }: { params: Promise<{ token: string }> }
@@ -194,6 +204,15 @@ export async function POST(
             return NextResponse.json({ error: "Portal unavailable" }, { status: 403 });
         }
 
+        // Phase 7E-1C: Block order creation on closed campaigns.
+        // Checked after plan gate and before any item validation or DB writes.
+        if (isCampaignClosed(campaign)) {
+            return NextResponse.json(
+                { error: 'Campaign is closed. Contact the organizer to add a late order.' },
+                { status: 400 }
+            );
+        }
+
         // 2. SERVER-SIDE PRICE VALIDATION — never trust client-sent totalAmount
         //    Mirrors the pattern in /api/public/order/route.ts
         if (!items || items.length === 0) {
@@ -362,11 +381,21 @@ export async function DELETE(
         // 1. Resolve campaign from token
         const campaign = await prisma.fundraiserCampaign.findFirst({
             where: { portal_token: token },
-            select: { id: true }
+            // Phase 7E-1C: also fetch closed_at and status for the closed-campaign gate below
+            select: { id: true, closed_at: true, status: true }
         });
 
         if (!campaign) {
             return NextResponse.json({ error: "Portal not found" }, { status: 404 });
+        }
+
+        // Phase 7E-1C: Block order cancellation on closed campaigns.
+        // Checked before updating canceled_at so no partial write occurs.
+        if (isCampaignClosed(campaign)) {
+            return NextResponse.json(
+                { error: 'Campaign is closed. Order changes are no longer permitted.' },
+                { status: 400 }
+            );
         }
 
         // 2. Atomic cancel: only succeeds if ALL guards pass
@@ -423,11 +452,21 @@ export async function PATCH(
         // 1. Resolve campaign from token
         const campaign = await prisma.fundraiserCampaign.findFirst({
             where: { portal_token: token },
-            select: { id: true }
+            // Phase 7E-1C: also fetch closed_at and status for the closed-campaign gate below
+            select: { id: true, closed_at: true, status: true }
         });
 
         if (!campaign) {
             return NextResponse.json({ error: "Portal not found" }, { status: 404 });
+        }
+
+        // Phase 7E-1C: Block order restoration on closed campaigns.
+        // Checked before restoring canceled_at so no partial write occurs.
+        if (isCampaignClosed(campaign)) {
+            return NextResponse.json(
+                { error: 'Campaign is closed. Order changes are no longer permitted.' },
+                { status: 400 }
+            );
         }
 
         // 2. Atomic restore: only succeeds if order is canceled AND belongs to campaign
