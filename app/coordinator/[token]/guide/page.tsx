@@ -14,7 +14,8 @@ import {
     Star,
     Rocket,
     Users,
-    Target
+    Target,
+    AlertCircle
 } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
@@ -25,36 +26,35 @@ export default function SuccessGuide() {
     const token = params.token as string;
     const [campaign, setCampaign] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [loadError, setLoadError] = useState(false);
 
     useEffect(() => {
         if (!token) return;
 
-        // Gating Check
-        fetch('/api/auth/session')
-            .then(r => r.json())
-            .then(session => {
-                const userPlan = session?.user?.plan;
-                if (userPlan !== 'ENTERPRISE' && userPlan !== 'ULTIMATE' && userPlan !== 'FREE' && !session?.user?.isSuperAdmin) {
+        // Access is validated server-side by the /api/coordinator/[token] route
+        // via portal_token lookup. No client-side plan gating or session check needed —
+        // coordinators are external users who access via private links.
+        fetch(`/api/coordinator/${token}`)
+            .then(res => {
+                if (!res.ok) {
+                    console.error('Guide page: coordinator API returned', res.status);
+                    setLoadError(true);
                     setIsLoading(false);
-                    return;
+                    return null;
                 }
-
-                fetch(`/api/coordinator/${token}`)
-                    .then(res => {
-                        if (!res.ok) {
-                            console.error('Guide page: coordinator API returned', res.status);
-                            setIsLoading(false);
-                            return null;
-                        }
-                        return res.json();
-                    })
-                    .then(data => {
-                        if (data && !data.error) {
-                            setCampaign(data);
-                        }
-                        setIsLoading(false);
-                    })
-                    .catch(() => setIsLoading(false));
+                return res.json();
+            })
+            .then(data => {
+                if (!data || data.error) {
+                    setLoadError(true);
+                } else {
+                    setCampaign(data);
+                }
+                setIsLoading(false);
+            })
+            .catch(() => {
+                setLoadError(true);
+                setIsLoading(false);
             });
     }, [token]);
 
@@ -95,6 +95,20 @@ export default function SuccessGuide() {
     ];
 
     if (isLoading) return <div className="min-h-screen flex items-center justify-center font-black animate-pulse">Loading Your Toolkit...</div>;
+
+    if (loadError || !campaign) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+                <div className="text-center space-y-4 max-w-sm">
+                    <AlertCircle className="mx-auto text-red-500" size={48} />
+                    <h1 className="text-2xl font-black text-slate-900">Guide Not Found</h1>
+                    <p className="text-slate-500 font-medium">
+                        This link may be expired or incorrect. Check with your fundraiser organizer for the correct coordinator link.
+                    </p>
+                </div>
+            </div>
+        );
+    }
 
     const slug = (campaign?.customer as any)?.business?.slug;
     const publicUrl = slug && campaign?.id
