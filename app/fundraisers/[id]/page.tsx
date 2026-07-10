@@ -9,6 +9,9 @@ import DocumentsTab from '@/components/crm/DocumentsTab';
 import FundraisersTab from '@/components/crm/FundraisersTab';
 import FundraiserOverview from '@/components/crm/FundraiserOverview';
 import { STATUS_COLORS, STATUS_LABELS, type CustomerStatus } from '@/lib/statusConstants';
+// CRM-2: Organization profile components
+import { PipelineStepper } from '@/components/crm2/PipelineStepper';
+import { CampaignCard } from '@/components/crm2/CampaignCard';
 
 export default function FundraiserProfilePage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
@@ -196,88 +199,142 @@ export default function FundraiserProfilePage({ params }: { params: Promise<{ id
         );
     }
 
+    // CRM-2: Derive initials for org avatar
+    const initials = (customer.name || '?')
+        .split(' ')
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((w: string) => w[0].toUpperCase())
+        .join('');
+
+    // CRM-2: Determine active stage for stepper
+    // Closed-family statuses all map to 'Closed' in the stepper
+    const stepperStage = (() => {
+        const s = customer.status || '';
+        if (['Closed', 'Settled', 'Completed', 'Archived'].includes(s)) return 'Closed';
+        if (s === 'Production') return 'Production';
+        if (s === 'Active') return 'Active';
+        if (s === 'Onboarding' || s === 'Send Info' || s === 'Flyers') return 'Onboarding';
+        return 'Lead';
+    })();
+
+    const campaigns: any[] = customer.campaigns || [];
+
     return (
-        <div className="max-w-6xl mx-auto space-y-8 pb-32">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-6">
-                    <Link href="/fundraisers" className="p-3 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 rounded-full text-slate-500 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition shadow-sm border border-slate-100 dark:border-slate-600">
-                        <ArrowLeft size={24} />
-                    </Link>
-                    <div>
-                        <h1 className="text-4xl font-black text-slate-900 dark:text-white flex items-center gap-4 tracking-tight">
-                            {customer.name}
-                            <span className="text-sm px-4 py-1.5 rounded-full uppercase font-bold tracking-wide bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-100">
-                                Fundraiser Partner
+        <div className="max-w-6xl mx-auto space-y-5 pb-32">
+
+            {/* ── Back link ── */}
+            <Link href="/fundraisers"
+                className="inline-flex items-center gap-1.5 text-sm font-bold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors">
+                <ArrowLeft size={15} />← All fundraisers
+            </Link>
+
+            {/* ── CRM-2: Org Profile Header ── */}
+            <div className="relative flex items-start gap-4 rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+                {/* Avatar */}
+                <div className="flex h-12 w-12 flex-none items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 font-black text-base dark:bg-indigo-950 dark:text-indigo-300 select-none">
+                    {initials}
+                </div>
+
+                {/* Identity */}
+                <div className="flex-1 min-w-0">
+                    <h1 className="text-xl font-black leading-tight text-slate-900 dark:text-white tracking-tight">
+                        {customer.name || '—'}
+                    </h1>
+                    <p className="mt-0.5 text-[0.72rem] text-slate-500">
+                        Organization · {campaigns.length} campaign{campaigns.length !== 1 ? 's' : ''}
+                    </p>
+                    {/* Contact links */}
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                        {customer.contact_name && (
+                            <span className="flex items-center gap-1 text-[0.72rem] font-bold text-slate-600 dark:text-slate-300">
+                                <User size={11} />  {customer.contact_name}
                             </span>
-                            {customer.status && (
-                                (() => {
-                                    const normalized = customer.status.toUpperCase().replace(/\s+/g, '_') as CustomerStatus;
-                                    const colors = STATUS_COLORS[normalized] || STATUS_COLORS.LEAD;
-                                    const label = STATUS_LABELS[normalized] || customer.status;
-                                    return (
-                                        <span className={`text-sm px-4 py-1.5 rounded-full uppercase font-bold tracking-wide border ${colors.border} ${colors.bg} ${colors.text}`}>
-                                            {label}
-                                        </span>
-                                    );
-                                })()
-                            )}
-                        </h1>
+                        )}
+                        {customer.email && (
+                            <a href={`mailto:${customer.email}`}
+                                className="flex items-center gap-1 text-[0.72rem] font-bold text-indigo-600 hover:underline dark:text-indigo-400">
+                                <Mail size={11} /> {customer.email}
+                            </a>
+                        )}
+                        {customer.phone && (
+                            <a href={`tel:${customer.phone}`}
+                                className="flex items-center gap-1 text-[0.72rem] font-bold text-indigo-600 hover:underline dark:text-indigo-400">
+                                <Phone size={11} /> {customer.phone}
+                            </a>
+                        )}
                     </div>
                 </div>
-                <div className="flex items-center gap-3">
+
+                {/* Actions */}
+                <div className="flex flex-none gap-2">
+                    <button
+                        onClick={() => setIsEditingProfile(true)}
+                        className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[0.78rem] font-bold text-slate-600 hover:bg-slate-100 transition dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">
+                        <Edit2 size={13} /> Edit profile
+                    </button>
                     <button
                         onClick={() => handleUpdateProfile()}
                         disabled={isSaving}
-                        className="flex items-center gap-2 px-6 py-3 bg-white dark:bg-slate-800 text-slate-700 dark:text-white font-bold rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 shadow-sm transition-all"
-                    >
-                        <Save size={18} />
-                        {isSaving ? 'Saving...' : 'Save Changes'}
-                    </button>
-                    <button
-                        onClick={() => setIsEditingProfile(true)}
-                        className="flex items-center gap-2 px-5 py-3 bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-bold rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 shadow-sm transition-all"
-                    >
-                        <Edit2 size={18} />
-                        Edit Profile
+                        className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-[0.78rem] font-bold text-white hover:bg-indigo-700 transition disabled:opacity-50">
+                        <Save size={13} /> {isSaving ? 'Saving…' : 'Save'}
                     </button>
                 </div>
             </div>
 
-            {/* Tabs Navigation */}
+            {/* ── CRM-2: Pipeline Stepper ── */}
+            <PipelineStepper current={stepperStage} />
+
+            {/* ── CRM-2: Campaign history cards ── */}
+            <div className="space-y-1">
+                <h2 className="mb-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Campaign History</h2>
+
+                {campaigns.length === 0 && (
+                    <p className="py-10 text-center text-sm text-slate-400">No campaigns yet.</p>
+                )}
+
+                {campaigns.map((c: any) => (
+                    <CampaignCard
+                        key={c.id}
+                        c={c}
+                        businessSlug={businessSlug || undefined}
+                    />
+                ))}
+            </div>
+
+            {/* ── Tabs Navigation (Overview / Campaigns / Documents) ── */}
             <div className="flex gap-2 border-b border-slate-200 dark:border-slate-700 pb-1">
                 <button
                     onClick={() => setActiveTab('overview')}
-                    className={`px-6 py-3 rounded-t-xl font-bold flex items-center gap-2 transition-all ${activeTab === 'overview'
+                    className={`px-5 py-2.5 rounded-t-xl font-bold flex items-center gap-2 text-sm transition-all ${
+                        activeTab === 'overview'
                         ? 'bg-slate-100 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border-b-2 border-indigo-500'
                         : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-700 dark:hover:text-slate-300'}`}
                 >
-                    <Megaphone size={18} />
-                    Overview
+                    <Megaphone size={16} /> Overview
                 </button>
                 <button
                     onClick={() => setActiveTab('campaigns')}
-                    className={`px-6 py-3 rounded-t-xl font-bold flex items-center gap-2 transition-all ${activeTab === 'campaigns'
+                    className={`px-5 py-2.5 rounded-t-xl font-bold flex items-center gap-2 text-sm transition-all ${
+                        activeTab === 'campaigns'
                         ? 'bg-slate-100 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border-b-2 border-indigo-500'
                         : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-700 dark:hover:text-slate-300'}`}
                 >
-                    <Megaphone size={18} />
-                    Campaigns
+                    <Megaphone size={16} /> Campaigns
                 </button>
                 {hasDocumentsAccess && (
                     <button
                         onClick={() => setActiveTab('documents')}
-                        className={`px-6 py-3 rounded-t-xl font-bold flex items-center gap-2 transition-all ${activeTab === 'documents'
+                        className={`px-5 py-2.5 rounded-t-xl font-bold flex items-center gap-2 text-sm transition-all ${
+                            activeTab === 'documents'
                             ? 'bg-slate-100 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border-b-2 border-indigo-500'
                             : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-700 dark:hover:text-slate-300'}`}
                     >
-                        <FileCheck size={18} />
-                        Documents
+                        <FileCheck size={16} /> Documents
                     </button>
                 )}
             </div>
 
-            {/* TAB CONTENT */}
             {activeTab === 'overview' && (
                 <FundraiserOverview
                     customer={customer}
@@ -293,7 +350,6 @@ export default function FundraiserProfilePage({ params }: { params: Promise<{ id
                     businessSlug={businessSlug}
                 />
             )}
-
             {activeTab === 'documents' && <DocumentsTab customer={customer} />}
 
             {/* Edit Profile Modal */}
