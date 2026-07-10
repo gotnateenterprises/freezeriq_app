@@ -455,9 +455,26 @@ export default function CoordinatorPortal() {
         ? Math.ceil((new Date(campaign.end_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
         : null;
 
+    // ── Phase 7E-4: Server-authoritative closed state ──────────────────────
+    // Derived from the closeout endpoint fields (Phase 7E-2). Takes priority
+    // over all date-based phase logic so a tenant-closed campaign is always
+    // shown as complete regardless of its end_date.
+    const isClosed: boolean =
+        Boolean(campaign.closed_at) ||
+        campaign.status === 'Closed' ||
+        campaign.status === 'Settled';
+
+    // Read-only settlement total (Decimal from DB → number, may be null/0)
+    const settlementTotal: number | null =
+        campaign.settlement_total != null
+            ? Number(campaign.settlement_total)
+            : null;
+
     // Campaign phase — drives conditional rendering across the panel
     type CampaignPhase = 'setup' | 'launch' | 'push' | 'lastDay' | 'complete';
     const campaignPhase: CampaignPhase = (() => {
+        // Server closeout always wins — ignore date math for closed campaigns
+        if (isClosed) return 'complete';
         if (daysRemaining !== null && daysRemaining < 0) return 'complete';
         if (daysRemaining === 0) return 'lastDay';
         if (daysRemaining !== null && daysRemaining <= 7) return 'push';
@@ -568,7 +585,22 @@ export default function CoordinatorPortal() {
                         {campaignPhase === 'lastDay' ? '🔥 Last day — finish strong!' : `🔥 ${daysRemaining} days left — one more push!`}
                     </div>
                 )}
-                {campaignPhase === 'complete' && (
+                {/* Phase 7E-4: Closed-state banner — shown when server has closed the campaign */}
+                {isClosed && (
+                    <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 space-y-0.5">
+                        <p className="text-[13px] font-black text-amber-900">🔒 Campaign Closed</p>
+                        <p className="text-xs text-amber-800 font-medium leading-relaxed">
+                            Orders have been sent to the kitchen. Contact {tenantName || 'the organizer'} for any late changes.
+                            No more order edits can be made from this portal.
+                        </p>
+                        {settlementTotal !== null && settlementTotal > 0 && (
+                            <p className="text-xs font-black text-amber-900 pt-0.5">
+                                Final campaign total: ${settlementTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                        )}
+                    </div>
+                )}
+                {!isClosed && campaignPhase === 'complete' && (
                     <div className="rounded-xl bg-emerald-50 px-4 py-2.5 text-[13px] font-semibold text-emerald-800">
                         🏆 Campaign complete{progress >= 100 ? ' — you beat your goal!' : ' — great work!'}
                     </div>
@@ -700,6 +732,8 @@ export default function CoordinatorPortal() {
                     <WhatsNext
                         tenantName={tenantName || 'Your fundraiser organizer'}
                         deliveryWindowLabel={deliveryDateLabel}
+                        settlementTotal={settlementTotal ?? undefined}
+                        isClosed={isClosed}
                     />
                     {/* Delivery Kit: pickup sheet + tracker downloads */}
                     <section className="bg-white border border-slate-200 rounded-2xl p-4">
@@ -715,20 +749,22 @@ export default function CoordinatorPortal() {
                             </button>
                         </div>
                     </section>
-                    {/* Recent orders in complete phase (read-only, no cancel) */}
+                    {/* Phase 7E-4: read-only orders — cancel hidden when campaign is closed */}
                     <RecentOrders
                         orders={activeOrders}
                         onCancel={(id) => setCancelOrderId(id)}
                         onViewAll={() => setShowAllOrders(!showAllOrders)}
                         limit={showAllOrders ? 999 : 3}
+                        isClosed={isClosed}
                     />
                 </>)}
             </main>
 
             {/* ── Sticky Action Bar ── */}
+            {/* Phase 7E-4: isClosed forces phase=complete so ActionBar shows read-only copy */}
             <ActionBar
                 phase={campaignPhase}
-                onAddOrder={() => setShowOrderModal(true)}
+                onAddOrder={() => { if (!isClosed) setShowOrderModal(true); }}
                 onShare={() => document.getElementById('share-center')?.scrollIntoView({ behavior: 'smooth' })}
                 tenantName={tenantName || undefined}
             />
@@ -737,8 +773,8 @@ export default function CoordinatorPortal() {
                 MODALS — unchanged internals, only triggers relocated
             ══════════════════════════════════════════════════════════ */}
 
-            {/* Cancel Order Confirmation Modal */}
-            {cancelOrderId && (
+            {/* Cancel Order Confirmation Modal — Phase 7E-4: hidden when campaign is closed */}
+            {cancelOrderId && !isClosed && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
                     <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in zoom-in-95 duration-200 space-y-4">
                         <div className="flex items-center gap-3">
@@ -771,8 +807,8 @@ export default function CoordinatorPortal() {
                 </div>
             )}
 
-            {/* Restore Order Confirmation Modal */}
-            {restoreOrderId && (
+            {/* Restore Order Confirmation Modal — Phase 7E-4: hidden when campaign is closed */}
+            {restoreOrderId && !isClosed && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
                     <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in zoom-in-95 duration-200 space-y-4">
                         <div className="flex items-center gap-3">
@@ -805,8 +841,8 @@ export default function CoordinatorPortal() {
                 </div>
             )}
 
-            {/* Order Modal — internals unchanged */}
-            {showOrderModal && (
+            {/* Order Modal — Phase 7E-4: cannot be opened when campaign is closed */}
+            {showOrderModal && !isClosed && (
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-300 overflow-y-auto">
                     <div className="bg-white w-full max-w-lg rounded-t-2xl sm:rounded-2xl p-6 mt-10 shadow-2xl relative animate-in slide-in-from-bottom-10 duration-300">
                         <button

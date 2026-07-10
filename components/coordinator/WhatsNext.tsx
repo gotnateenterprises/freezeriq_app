@@ -1,19 +1,44 @@
 'use client';
 
 export function WhatsNext({
-    tenantName, deliveryWindowLabel,
+    tenantName, deliveryWindowLabel, isClosed = false, settlementTotal,
 }: {
     tenantName: string; deliveryWindowLabel?: string;
+    /** Phase 7E-4: true when the campaign has been server-closed */
+    isClosed?: boolean;
+    /** Phase 7E-4: read-only final total from closeout endpoint (no payment implied) */
+    settlementTotal?: number;
 }) {
     return (
         <section className="bg-white border border-slate-200 rounded-2xl p-4">
             <h3 className="text-base font-black text-slate-900 mb-1">What happens next</h3>
-            <Step n="✓" done title={`${tenantName} confirms your totals`} body="Done — your order is locked in." />
-            {deliveryWindowLabel && (
-                <Step n="2" title={`Food arrives ${deliveryWindowLabel}`} body="You&apos;ll get an email with the exact time." />
+            {isClosed ? (
+                // Phase 7E-4: closed-state copy — warm, clear, no payment language
+                <>
+                    <Step n="✓" done title={`${tenantName} has closed your campaign`}
+                        body="Orders are locked in and sent to the kitchen." />
+                    {settlementTotal !== undefined && settlementTotal > 0 && (
+                        <Step n="✓" done
+                            title={`Final campaign total: $${settlementTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                            body="This reflects all non-canceled orders at the time of closeout." />
+                    )}
+                    {deliveryWindowLabel && (
+                        <Step n="2" title={`Food arrives ${deliveryWindowLabel}`} body="You'll get details from the organizer closer to delivery." />
+                    )}
+                    <Step n={deliveryWindowLabel ? '3' : '2'} title="Hand out orders with your pickup sheet"
+                        body="Every family, every bundle, one checklist." />
+                </>
+            ) : (
+                // Standard open-campaign copy
+                <>
+                    <Step n="✓" done title={`${tenantName} confirms your totals`} body="Done — your order is locked in." />
+                    {deliveryWindowLabel && (
+                        <Step n="2" title={`Food arrives ${deliveryWindowLabel}`} body="You'll get an email with the exact time." />
+                    )}
+                    <Step n={deliveryWindowLabel ? '3' : '2'} title="Hand out orders with your pickup sheet"
+                        body="Every family, every bundle, one checklist." />
+                </>
             )}
-            <Step n={deliveryWindowLabel ? '3' : '2'} title="Hand out orders with your pickup sheet"
-                body="Every family, every bundle, one checklist." />
         </section>
     );
 }

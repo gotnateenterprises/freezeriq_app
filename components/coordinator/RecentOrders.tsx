@@ -5,8 +5,11 @@ export function RecentOrders({
     onCancel,
     onViewAll,
     limit = 3,
+    isClosed = false,
 }: {
     orders: any[]; onCancel: (id: string) => void; onViewAll?: () => void; limit?: number;
+    /** Phase 7E-4: when true, hides cancel button so closed campaigns are read-only */
+    isClosed?: boolean;
 }) {
     const active = (orders || []).filter((o: any) => !o.canceled_at);
     const shown = active.slice(0, limit);
@@ -26,8 +29,11 @@ export function RecentOrders({
                         <span className="font-bold tabular-nums text-slate-900">
                             ${Number(o.total_amount ?? 0).toFixed(0)}
                         </span>
-                        <button onClick={() => onCancel(o.id)} aria-label="Cancel order"
-                            className="text-slate-300 hover:text-red-500">✕</button>
+                        {/* Phase 7E-4: hide cancel button when campaign is closed */}
+                        {!isClosed && (
+                            <button onClick={() => onCancel(o.id)} aria-label="Cancel order"
+                                className="text-slate-300 hover:text-red-500">✕</button>
+                        )}
                     </div>
                 ))}
             </div>
