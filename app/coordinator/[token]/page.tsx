@@ -12,7 +12,6 @@ import {
     Loader2,
     DollarSign,
     User,
-    Mail,
     Phone,
     MapPin,
     AlertCircle,
@@ -51,14 +50,9 @@ export default function CoordinatorPortal() {
     const [isCanceling, setIsCanceling] = useState(false);
     const [restoreOrderId, setRestoreOrderId] = useState<string | null>(null);
     const [isRestoring, setIsRestoring] = useState(false);
-    const [showCanceled, setShowCanceled] = useState(false);
     const [copied, setCopied] = useState(false);
-    const [copiedFb, setCopiedFb] = useState(false);
-    const [copiedText, setCopiedText] = useState(false);
     const [campaignAssets, setCampaignAssets] = useState<CampaignAsset[]>([]);
     const [promoScripts, setPromoScripts] = useState<PromoScriptsResponse | null>(null);
-    const [copiedEmail, setCopiedEmail] = useState(false);
-    const [copiedScoreboard, setCopiedScoreboard] = useState(false);
     const [actionSummary, setActionSummary] = useState<CoordinatorActionSummary | null>(null);
 
     // ── AI Content Generator state ──
@@ -256,153 +250,10 @@ export default function CoordinatorPortal() {
         setTimeout(() => setCopied(false), 2000);
     };
 
-    const handleCopyScoreboard = () => {
-        const url = getScoreboardUrl();
-        navigator.clipboard.writeText(url);
-        setCopiedScoreboard(true);
-        toast.success('Scoreboard link copied!');
-        setTimeout(() => setCopiedScoreboard(false), 2000);
-    };
 
-    // Helper: convert plain text with URLs into HTML with clickable anchor tags
-    const copyAsRichText = async (plainText: string, prebuiltHtml?: string) => {
-        const htmlContent = prebuiltHtml || plainText
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            .replace(/\n/g, '<br>')
-            .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#6366f1;font-weight:bold;">Campaign Fundraiser</a>');
-        try {
-            await navigator.clipboard.write([
-                new ClipboardItem({
-                    'text/html': new Blob([htmlContent], { type: 'text/html' }),
-                    'text/plain': new Blob([plainText], { type: 'text/plain' }),
-                }),
-            ]);
-        } catch {
-            await navigator.clipboard.writeText(plainText);
-        }
-    };
 
-    const handleCopyTextMessage = async () => {
-        if (!promoScripts?.scripts?.textMessage) {
-            toast.error('Promo scripts are still loading. Try again in a moment.');
-            return;
-        }
-        await copyAsRichText(promoScripts.scripts.textMessage);
-        setCopiedText(true);
-        toast.success('Text message copied!');
-        trackAction('copy_text_message');
-        setTimeout(() => setCopiedText(false), 2000);
-    };
-
-    const handleCopyFacebookPost = async () => {
-        if (!promoScripts?.scripts?.facebook) {
-            toast.error('Promo scripts are still loading. Try again in a moment.');
-            return;
-        }
-        await copyAsRichText(promoScripts.scripts.facebook);
-        setCopiedFb(true);
-        toast.success('Facebook post copied!');
-        trackAction('copy_facebook_post');
-        setTimeout(() => setCopiedFb(false), 2000);
-    };
-
-    const handleCopyEmailBlurb = async () => {
-        if (!promoScripts?.scripts?.emailBlurb) {
-            toast.error('Promo scripts are still loading. Try again in a moment.');
-            return;
-        }
-        await copyAsRichText(promoScripts.scripts.emailBlurb, promoScripts.scripts.emailBlurbHtml);
-        setCopiedEmail(true);
-        toast.success('Email blurb copied!');
-        trackAction('copy_email_blurb');
-        setTimeout(() => setCopiedEmail(false), 2000);
-    };
-
-    // ── Smart Share Handlers ───────────────────────────────
-
-    const getPublicUrl = () => {
-        // Prefer shop order page URL (drives sales)
-        return getShopOrderUrl();
-    };
-
-    const handleShareUniversal = async () => {
-        const url = getPublicUrl();
-        const text = promoScripts?.scripts?.textMessage || `Check out this fundraiser! ${url}`;
-        if (typeof navigator !== 'undefined' && navigator.share) {
-            try {
-                await navigator.share({
-                    title: campaign?.customer?.name || campaign?.name || 'Fundraiser',
-                    text,
-                    url,
-                });
-            } catch (err: any) {
-                // User cancelled — do nothing
-                if (err?.name === 'AbortError') return;
-                // Fallback: copy
-                await navigator.clipboard.writeText(`${text}\n\n${url}`);
-                toast.success('Message & link copied to clipboard!');
-            }
-        } else {
-            await navigator.clipboard.writeText(`${text}\n\n${url}`);
-            toast.success('Message & link copied — paste anywhere!');
-        }
-        trackAction('share_fundraiser');
-    };
-
-    const handleSmsShare = () => {
-        const url = getPublicUrl();
-        const text = promoScripts?.scripts?.textMessage || `Check out this fundraiser!`;
-        const body = `${text}\n\n${url}`;
-        // Mobile: open SMS app. Desktop: copy to clipboard.
-        const isMobile = typeof navigator !== 'undefined' &&
-            /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-        if (isMobile) {
-            window.location.href = `sms:?&body=${encodeURIComponent(body)}`;
-        } else {
-            navigator.clipboard.writeText(body);
-            toast.success('Text copied — paste into your messages!');
-        }
-        trackAction('send_text_blast');
-    };
-
-    const handleFacebookShare = async () => {
-        const url = getPublicUrl();
-        const fbText = promoScripts?.scripts?.facebook;
-        if (fbText) {
-            await navigator.clipboard.writeText(fbText);
-            toast.success('Copied! Paste into Facebook when it opens.');
-        }
-        window.open(
-            `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`,
-            '_blank',
-            'width=600,height=400'
-        );
-        trackAction('share_facebook');
-    };
-
-    const handleEmailShare = async () => {
-        const url = getPublicUrl();
-        const emailText = promoScripts?.scripts?.emailBlurb;
-        const fullMessage = emailText || `Check out this fundraiser!\n\nOrder here:\n${url}`;
-        await navigator.clipboard.writeText(fullMessage);
-        const subject = encodeURIComponent(`Support ${campaign?.name || 'our fundraiser'}!`);
-        const body = encodeURIComponent(fullMessage);
-        if (fullMessage.length < 1800) {
-            toast.success('Copied! Paste into your email when it opens.');
-            window.location.href = `mailto:?subject=${subject}&body=${body}`;
-        } else {
-            toast.success('Copied! Paste into your email.');
-        }
-        trackAction('share_email');
-    };
-
-    const handleInstagramShare = async () => {
-        const url = getPublicUrl();
-        const igText = promoScripts?.scripts?.textMessage || `Support our fundraiser! Link in bio: ${url}`;
-        await navigator.clipboard.writeText(igText);
-        toast.success('Copied! Paste into Instagram as your caption.');
-        trackAction('share_instagram');
-    };
+    // URL helper used by AI share-with-content handlers
+    const getPublicUrl = () => getShopOrderUrl();
 
     // ── *WithContent helpers (for re-sharing edited AI content) ──
     const handleFacebookShareWithContent = async (content: string) => {
@@ -636,19 +487,7 @@ export default function CoordinatorPortal() {
 
 
 
-    // AI share-with-content dispatcher (for ShareCenter)
-    const handleAiShareWithContent = (content: string, channel: string) => {
-        if (channel === 'facebook') { handleFacebookShareWithContent(content); }
-        else if (channel === 'text') { handleSmsShareWithContent(content); }
-        else if (channel === 'email') { handleEmailShareWithContent(content); }
-        else if (channel === 'instagram') { handleInstagramShareWithContent(content); }
-        else { navigator.clipboard.writeText(content); toast.success('Message copied!'); }
-    };
 
-    // Download asset helpers (for ShareCenter)
-    const handleDownloadFlyerAsset = (url: string) => { window.open(url, '_blank'); trackAction('download_flyer'); };
-    const handleDownloadQrAsset = (url: string) => { window.open(url, '_blank'); trackAction('download_qr'); };
-    const handleDownloadPacketAsset = (url: string) => { window.open(url, '_blank'); trackAction('download_packet'); };
 
     // Derive setup-checklist state
     const hasPaymentInfo = !!(campaign.payment_instructions || campaign.external_payment_link);
@@ -658,7 +497,6 @@ export default function CoordinatorPortal() {
 
     // Tenant name for ActionBar closed state
     const tenantName = campaign.customer?.business?.name || null;
-    const contactEmail = 'Laurie@MyFreezerChef.com';
 
     // Derive share URLs and asset hrefs for ShareCenter
     const shareUrl = getShopOrderUrl();
