@@ -8,7 +8,7 @@ import { Plus, Search, X, Trash, FileText, Folder, GripVertical, DollarSign, Clo
 import RecipeImporter from './RecipeImporter';
 import { Recipe, Category } from '@/types';
 import { DndContext, DragOverlay, DragEndEvent, DragStartEvent, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
-import { DroppableFolder, DraggableRecipe, DraggableFolderItem } from './DraggableComponents';
+import { DroppableFolder, DraggableRecipe } from './DraggableComponents';
 import { ClientOnly } from './ClientOnly';
 import { CategoryTree } from './recipes/CategoryTree';
 import { RecipeList } from './recipes/RecipeList';
