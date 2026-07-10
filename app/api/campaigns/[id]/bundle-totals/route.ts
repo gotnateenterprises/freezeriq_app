@@ -44,10 +44,16 @@ export async function GET(
             return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
         }
 
-        // Aggregate order items by bundle for this campaign
+        // Aggregate order items by bundle for this campaign.
+        // Phase 7E-1B: exclude canceled orders (canceled_at IS NOT NULL) so
+        // bundle totals, pickup sheets, and production counts are not inflated
+        // by orders the coordinator has soft-deleted.
         const items = await prisma.orderItem.findMany({
             where: {
-                order: { campaign_id: campaignId }
+                order: {
+                    campaign_id: campaignId,
+                    canceled_at: null   // exclude soft-canceled orders
+                }
             },
             select: {
                 bundle_id: true,
