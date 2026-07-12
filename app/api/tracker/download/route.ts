@@ -52,7 +52,7 @@ export async function GET(req: Request) {
 
         // 2. Fetch assigned bundles with their recipe contents
         const campaignBundles = await prisma.campaignBundle.findMany({
-            where: { campaign_id: campaign.id },
+            where: { campaign_id: campaign.id, state: 'active' },
             orderBy: { position: 'asc' },
             include: {
                 bundle: {

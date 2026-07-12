@@ -28,7 +28,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
         // Fetch assigned bundle IDs
         const assignments = await (prisma as any).campaignBundle.findMany({
-            where: { campaign_id: id },
+            where: { campaign_id: id, state: 'active' },
             orderBy: { position: 'asc' },
             select: { bundle_id: true, position: true }
         });

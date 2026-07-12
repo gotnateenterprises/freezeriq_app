@@ -139,6 +139,7 @@ async function getData(slug: string, fundraiserId: string) {
     const campaignBundles: any[] = await prisma.$queryRaw`
         SELECT bundle_id FROM campaign_bundles
         WHERE campaign_id = ${fundraiserId}
+        AND state = 'active'
         ORDER BY position ASC
     `;
     const assignedBundleIds = campaignBundles.map(cb => cb.bundle_id);

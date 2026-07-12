@@ -130,7 +130,7 @@ export async function GET(
         let bundles: any[] = [];
         try {
             const campaignBundles = await prisma.campaignBundle.findMany({
-                where: { campaign_id: campaign.id },
+                where: { campaign_id: campaign.id, state: 'active' },
                 orderBy: { position: 'asc' },
                 include: {
                     bundle: {

@@ -166,53 +166,27 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
 
 
     const handleDuplicateAsServes2 = async () => {
-        if (!confirm("Create a 'Serves 2' version of this bundle?\n\nThis will:\n1. Clone this bundle\n2. Rename it to '(Serves 2)'\n3. Switch all recipes to their '(Serves 2)' versions (if found)\n4. Set tier to 'serves_2'")) return;
+        if (!initialData?.id) return;
 
-        const current = watch();
-
-        // Map Contents
-        const newContents = current.contents.map((c: any) => {
-            const target = `${c.name} (Serves 2)`;
-            // Case-insensitive lookup
-            const match = allRecipes.find(r => r.name.toLowerCase() === target.toLowerCase());
-
-            if (match) {
-                return {
-                    recipe_id: match.id,
-                    quantity: c.quantity
-                };
-            }
-            return { recipe_id: c.recipe_id, quantity: c.quantity };
-        });
-
-        const payload = {
-            ...current,
-            name: `${current.name} (Serves 2)`,
-            sku: `${current.sku}-S2`,
-            serving_tier: 'serves_2',
-            contents: newContents,
-            price: Number(current.price) || null, // Keep price or clear? Keeping for reference.
-            is_active: true
-        };
+        if (!confirm("Create a 'Serves 2' version of this bundle?\n\nThis will:\n1. Clone this bundle\n2. Rename it to '(Serves 2)'\n3. Switch all recipes to their '(Serves 2)' versions (if found)\n4. Set tier to 'serves_2'\n5. Link both bundles with a shared family ID")) return;
 
         try {
-            const res = await fetch('/api/bundles', {
+            const res = await fetch(`/api/bundles/${initialData.id}/duplicate-serves-2`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                headers: { 'Content-Type': 'application/json' }
             });
 
             if (res.ok) {
-                const json = await res.json();
+                const clone: { id: string; name: string; family_id: string } = await res.json();
                 alert("Bundle Cloned Successfully!");
-                router.push(`/bundles/${json.id}`);
+                router.push(`/bundles/${clone.id}`);
                 router.refresh();
             } else {
-                const err = await res.json();
+                const err: { error: string; code?: string } = await res.json();
                 alert(`Failed to clone: ${err.error}`);
             }
         } catch (e) {
-            console.error(e);
+            console.error('[BundleEditor] Duplicate as Serves 2 failed:', e);
             alert("Error cloning bundle.");
         }
     };

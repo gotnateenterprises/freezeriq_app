@@ -60,6 +60,7 @@ export async function GET(req: Request) {
         const campaignBundles: any[] = await prisma.$queryRaw`
             SELECT bundle_id FROM campaign_bundles
             WHERE campaign_id = ${campaign.id}
+            AND state = 'active'
             ORDER BY position ASC
         `;
         const assignedBundleIds = campaignBundles.map(cb => cb.bundle_id);

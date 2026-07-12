@@ -55,8 +55,11 @@ export function validateLaunchReadiness(customer: any): LaunchReadinessResult {
   // 6. At least one bundle with recipes
   const hasBundle1 = !!info?.bundle1_recipes?.trim();
   const hasBundle2 = !!info?.bundle2_recipes?.trim();
-  // Also check campaign_bundles if available
-  const hasCampaignBundles = (campaign as any)?.campaign_bundles?.length > 0;
+  // Also check campaign_bundles if available (only active assignments count —
+  // candidate rows from CB-1 do not satisfy this readiness gate)
+  const activeCampaignBundles = ((campaign as any)?.campaign_bundles || [])
+    .filter((cb: any) => cb.state === 'active' || cb.state === undefined);
+  const hasCampaignBundles = activeCampaignBundles.length > 0;
   if (!hasBundle1 && !hasBundle2 && !hasCampaignBundles) {
     missing.push('At least one Bundle with recipes');
   }
