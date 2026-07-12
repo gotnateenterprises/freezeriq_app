@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { toast, Toaster } from 'sonner';
 import type { CampaignAsset } from '@/lib/campaignAssets';
 import type { PromoScriptsResponse } from '@/lib/generatePromoScripts';
@@ -34,6 +34,7 @@ import { RecentOrders } from '@/components/coordinator/RecentOrders';
 import { QuietLinks } from '@/components/coordinator/QuietLinks';
 import { DeliveryPrep } from '@/components/coordinator/DeliveryPrep';
 import { WhatsNext } from '@/components/coordinator/WhatsNext';
+import { BundleSelectionStep } from '@/components/coordinator/BundleSelectionStep';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 
@@ -44,6 +45,13 @@ export default function CoordinatorPortal() {
     const [campaign, setCampaign] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    // CB-3: true once bundle selection is confirmed by the server (or not required)
+    const [bundleSelectionDone, setBundleSelectionDone] = useState(false);
+    // CB-3-FIX-B: stable callback prevents the child's useCallback(fetchSelectionState)
+    // from re-running every time the parent re-renders after setBundleSelectionDone(true).
+    const handleBundleSelectionComplete = useCallback(() => {
+        setBundleSelectionDone(true);
+    }, []);
     const [showOrderModal, setShowOrderModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [cancelOrderId, setCancelOrderId] = useState<string | null>(null);
@@ -568,6 +576,20 @@ export default function CoordinatorPortal() {
             )}
 
             <main className="max-w-xl mx-auto px-4 sm:px-6 py-4 pb-24 space-y-4">
+                {/* ═══════════════════════════════════════════════
+                    CB-3: BUNDLE SELECTION STEP
+                    Shown before phase content when selection is required.
+                    Legacy (not_required) campaigns: component calls onSelectionComplete()
+                    immediately and renders null, so nothing changes for them.
+                ═══════════════════════════════════════════════ */}
+                <BundleSelectionStep
+                    token={token}
+                    onSelectionComplete={handleBundleSelectionComplete}
+                />
+
+                {/* Phase content deferred until selection is confirmed.
+                    CB-3 provides UX deferral only — CB-5 adds the server-side order gate. */}
+                {bundleSelectionDone && (<>
                 {/* Business Logo */}
                 {campaign.customer?.business?.logo_url && (
                     <div className="flex flex-col items-center justify-center pt-1 mb-0">
@@ -758,16 +780,20 @@ export default function CoordinatorPortal() {
                         isClosed={isClosed}
                     />
                 </>)}
+                </>)}
             </main>
 
             {/* ── Sticky Action Bar ── */}
+            {/* CB-3: ActionBar deferred until bundle selection is confirmed. */}
             {/* Phase 7E-4: isClosed forces phase=complete so ActionBar shows read-only copy */}
-            <ActionBar
-                phase={campaignPhase}
-                onAddOrder={() => { if (!isClosed) setShowOrderModal(true); }}
-                onShare={() => document.getElementById('share-center')?.scrollIntoView({ behavior: 'smooth' })}
-                tenantName={tenantName || undefined}
-            />
+            {bundleSelectionDone && (
+                <ActionBar
+                    phase={campaignPhase}
+                    onAddOrder={() => { if (!isClosed) setShowOrderModal(true); }}
+                    onShare={() => document.getElementById('share-center')?.scrollIntoView({ behavior: 'smooth' })}
+                    tenantName={tenantName || undefined}
+                />
+            )}
 
             {/* ══════════════════════════════════════════════════════════
                 MODALS — unchanged internals, only triggers relocated
@@ -841,8 +867,8 @@ export default function CoordinatorPortal() {
                 </div>
             )}
 
-            {/* Order Modal — Phase 7E-4: cannot be opened when campaign is closed */}
-            {showOrderModal && !isClosed && (
+            {/* Order Modal — CB-3: also hidden until bundle selection is done. Phase 7E-4: cannot be opened when campaign is closed */}
+            {showOrderModal && !isClosed && bundleSelectionDone && (
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-300 overflow-y-auto">
                     <div className="bg-white w-full max-w-lg rounded-t-2xl sm:rounded-2xl p-6 mt-10 shadow-2xl relative animate-in slide-in-from-bottom-10 duration-300">
                         <button
