@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
+import {
+  isCanonicalFamilyTier,
+  isCanonicalServes2Tier,
+} from '@/lib/campaignBundleSelection';
 
 
 // Helper to safely serialize BigInt
@@ -12,6 +16,55 @@ function safeJSON(data: any) {
     ));
 }
 
+// ── CB-4: Bundle selection request types ─────────────────────────────────────
+
+type CoordinatorSelectsPayload = {
+  mode: 'coordinator_selects';
+  candidateFamilyIds: string[];
+  selectionLimit: number;
+};
+
+type NotRequiredPayload = {
+  mode: 'not_required';
+};
+
+type BundleSelectionPayload =
+  | CoordinatorSelectsPayload
+  | NotRequiredPayload;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+function isBundleSelectionPayload(value: unknown): value is BundleSelectionPayload {
+    if (!isRecord(value) || typeof value.mode !== 'string') {
+        return false;
+    }
+
+    if (value.mode === 'coordinator_selects') {
+        return (
+            Array.isArray(value.candidateFamilyIds) &&
+            value.candidateFamilyIds.every((id): id is string => typeof id === 'string') &&
+            typeof value.selectionLimit === 'number'
+        );
+    }
+
+    return value.mode === 'not_required';
+}
+
+interface CreateCampaignBody {
+  customerId: string;
+  name: string;
+  bundleGoal?: number | null;
+  endDate?: string | null;
+  missionText?: string | null;
+  aboutText?: string | null;
+  participantLabel?: string | null;
+  groupLabel?: string | null;
+  // CB-4: new field — if absent, legacy branch applies
+  bundleSelection?: unknown; // We validate this manually at runtime
+}
+
 export async function POST(req: Request) {
     try {
         const session = await auth();
@@ -21,16 +74,25 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        const body = await req.json();
+        const businessId = session.user.businessId;
+
+        let body: CreateCampaignBody;
+        try {
+            body = await req.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+        }
+
         const {
             customerId,
             name,
             bundleGoal,
             endDate,
-            missionText, // Optional
-            aboutText, // Optional
-            participantLabel, // Optional
-            groupLabel // Optional
+            missionText,
+            aboutText,
+            participantLabel,
+            groupLabel,
+            bundleSelection,
         } = body;
 
         if (!customerId || !name) {
@@ -44,7 +106,7 @@ export async function POST(req: Request) {
         const customer = await prisma.customer.findFirst({
             where: {
                 id: customerId,
-                business_id: session.user.businessId,
+                business_id: businessId,
             },
             select: { id: true },
         });
@@ -53,6 +115,220 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
         }
 
+        // ── CB-4: Determine bundle selection mode ─────────────────────────────
+        //
+        // THREE branches:
+        //
+        //   A. bundleSelection.mode = 'coordinator_selects'
+        //      → Validate candidateFamilyIds + selectionLimit, create campaign as
+        //        pending + candidate rows (Serves-5 only, one per family).
+        //
+        //   B. bundleSelection.mode = 'not_required'
+        //      → Explicit legacy/exempt campaign. No candidate pool.
+        //
+        //   C. bundleSelection absent (legacy callers without the new field)
+        //      → Explicit legacy branch: not_required, no candidate pool.
+        //        Legacy callers: the handoff CRM-4 code skeleton and any pre-CB-4
+        //        callers that POST without bundleSelection.
+        //        NOT a fallback for bad coordinator_selects submissions.
+
+        if (bundleSelection !== undefined && bundleSelection !== null) {
+            if (!isBundleSelectionPayload(bundleSelection)) {
+                return NextResponse.json({
+                    error: `Invalid bundleSelection payload. Mode must be 'coordinator_selects' or 'not_required' with appropriate fields.`,
+                }, { status: 400 });
+            }
+
+            // ── Mode A: coordinator_selects ────────────────────────────────────
+            if (bundleSelection.mode === 'coordinator_selects') {
+                const rawFamilyIds = bundleSelection.candidateFamilyIds;
+                const selectionLimit = bundleSelection.selectionLimit;
+
+                if (!Number.isInteger(selectionLimit) || selectionLimit < 1) {
+                    return NextResponse.json({
+                        error: 'selectionLimit must be a positive integer',
+                    }, { status: 400 });
+                }
+
+                const candidateFamilyIds = rawFamilyIds.map((id) => id.trim());
+
+                if (candidateFamilyIds.some((id) => id.length === 0)) {
+                    return NextResponse.json({
+                        error: 'Candidate family IDs must be non-empty strings.',
+                    }, { status: 400 });
+                }
+
+                if (new Set(candidateFamilyIds).size !== candidateFamilyIds.length) {
+                    return NextResponse.json({
+                        error: 'Duplicate bundle families are not allowed.',
+                    }, { status: 400 });
+                }
+
+                if (candidateFamilyIds.length === 0) {
+                    return NextResponse.json({
+                        error: 'Choose at least one eligible bundle family.',
+                    }, { status: 400 });
+                }
+
+                if (selectionLimit > candidateFamilyIds.length) {
+                    return NextResponse.json({
+                        error: 'The coordinator must choose fewer families than are available in the pool.',
+                    }, { status: 400 });
+                }
+
+                // Validate each candidateFamilyId resolves to a canonical S5 bundle
+                // belonging to this tenant, with exactly one active S2 sibling.
+                const allFamilyBundles = await prisma.bundle.findMany({
+                    where: {
+                        business_id: businessId,
+                        family_id: { in: candidateFamilyIds },
+                        is_active: true,
+                    },
+                    select: {
+                        id: true,
+                        name: true,
+                        serving_tier: true,
+                        family_id: true,
+                    },
+                });
+
+                // Group by family_id and validate each
+                const familyBundleMap = new Map<
+                    string,
+                    { s5: typeof allFamilyBundles[number] | null; s5Count: number; s2Count: number }
+                >();
+
+                for (const b of allFamilyBundles) {
+                    if (!b.family_id) continue;
+                    const entry = familyBundleMap.get(b.family_id) ?? { s5: null, s5Count: 0, s2Count: 0 };
+                    if (isCanonicalFamilyTier(b.serving_tier)) {
+                        entry.s5 = b;
+                        entry.s5Count += 1;
+                    } else if (isCanonicalServes2Tier(b.serving_tier)) {
+                        entry.s2Count += 1;
+                    }
+                    familyBundleMap.set(b.family_id, entry);
+                }
+
+                // Every submitted family ID must:
+                //  - belong to this tenant (validated by business_id in query above)
+                //  - have exactly one canonical S5 variant
+                //  - have exactly one active S2 sibling
+                const candidateS5Bundles: Array<{ id: string; familyId: string; position: number }> = [];
+                const invalidFamilies: string[] = [];
+
+                for (let i = 0; i < candidateFamilyIds.length; i++) {
+                    const familyId = candidateFamilyIds[i];
+                    const entry = familyBundleMap.get(familyId);
+
+                    if (!entry) {
+                        // Family not found under this tenant
+                        invalidFamilies.push(familyId);
+                        continue;
+                    }
+
+                    if (entry.s5Count !== 1 || entry.s2Count !== 1 || entry.s5 === null) {
+                        // Malformed or ambiguous family
+                        invalidFamilies.push(familyId);
+                        continue;
+                    }
+
+                    candidateS5Bundles.push({
+                        id: entry.s5.id,
+                        familyId,
+                        position: i,
+                    });
+                }
+
+                if (invalidFamilies.length > 0) {
+                    return NextResponse.json({
+                        error: 'One or more selected families are no longer available. Refresh and try again.',
+                    }, { status: 400 });
+                }
+
+                // ── Atomic transaction: create campaign + candidate rows ────────
+                const campaign = await prisma.$transaction(async (tx) => {
+                    // Create campaign with pending bundle selection status
+                    const newCampaign = await tx.fundraiserCampaign.create({
+                        data: {
+                            customer_id: customerId,
+                            name,
+                            // @ts-ignore - Stale client: bundle_goal added in CB-1 migration
+                            bundle_goal: bundleGoal ? Number(bundleGoal) : undefined,
+                            end_date: endDate ? new Date(endDate) : undefined,
+                            // @ts-ignore - Stale client
+                            mission_text: missionText,
+                            // @ts-ignore - Stale client
+                            about_text: aboutText,
+                            // @ts-ignore - Stale client
+                            participant_label: participantLabel || 'Seller',
+                            // @ts-ignore - Stale client
+                            group_label: groupLabel,
+                            // @ts-ignore - Stale client
+                            is_group_enabled: !!groupLabel,
+                            status: 'Active',
+                            // CB-4: Set bundle selection fields
+                            bundle_selection_status: 'pending',
+                            bundle_selection_limit: selectionLimit,
+                            bundle_selection_at: null,
+                        },
+                    });
+
+                    // Create one candidate CampaignBundle row per family.
+                    // ONLY the Serves-5 (canonical family tier) bundle is stored as the candidate row.
+                    // The Serves-2 sibling is resolved at load time by loadCandidateFamilies()
+                    // using family_id + serving_tier — never stored as a separate candidate row.
+                    // This is the exact representation expected by CB-2 loadCandidateFamilies().
+                    if (candidateS5Bundles.length > 0) {
+                        await tx.campaignBundle.createMany({
+                            data: candidateS5Bundles.map(({ id: bundleId, position }) => ({
+                                campaign_id: newCampaign.id,
+                                bundle_id: bundleId,
+                                state: 'candidate',
+                                position,
+                            })),
+                        });
+                    }
+
+                    return newCampaign;
+                });
+
+                return NextResponse.json(campaign);
+            }
+
+            // ── Mode B: not_required (explicit) ───────────────────────────────
+            if (bundleSelection.mode === 'not_required') {
+                const campaign = await prisma.fundraiserCampaign.create({
+                    data: {
+                        customer_id: customerId,
+                        name,
+                        // @ts-ignore - Stale client
+                        bundle_goal: bundleGoal ? Number(bundleGoal) : undefined,
+                        end_date: endDate ? new Date(endDate) : undefined,
+                        // @ts-ignore - Stale client
+                        mission_text: missionText,
+                        // @ts-ignore - Stale client
+                        about_text: aboutText,
+                        participant_label: participantLabel || 'Seller',
+                        group_label: groupLabel,
+                        is_group_enabled: !!groupLabel,
+                        status: 'Active',
+                        bundle_selection_status: 'not_required',
+                    },
+                });
+                return NextResponse.json(campaign);
+            }
+
+            // Unreachable due to isBundleSelectionPayload, but required for exhaustiveness
+            return NextResponse.json({
+                error: `Invalid bundleSelection.mode. Expected 'coordinator_selects' or 'not_required'.`,
+            }, { status: 400 });
+        }
+
+        // ── Branch C: Legacy caller (no bundleSelection field) ─────────────────
+        // Pre-CB-4 callers that POST without bundleSelection are treated as not_required.
+        // This includes any integrations built before CB-4, or the CRM-4 handoff skeleton.
+        // The new wizard always sends an explicit bundleSelection.mode and never reaches here.
         const campaign = await prisma.fundraiserCampaign.create({
             data: {
                 customer_id: customerId,
@@ -71,9 +347,7 @@ export async function POST(req: Request) {
                 // @ts-ignore - Stale client
                 is_group_enabled: !!groupLabel,
                 status: 'Active',
-                // Generate tokens automatically via default(cuid()) in schema, 
-                // but we can also set them explicitly if we wanted specific formats. 
-                // Schema has @default(cuid()), so we leave them out.
+                bundle_selection_status: 'not_required',
             }
         });
 
@@ -84,6 +358,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: e.message || "Internal Server Error" }, { status: 500 });
     }
 }
+
 
 export async function GET(req: Request) {
     try {
