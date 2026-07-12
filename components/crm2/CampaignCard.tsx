@@ -1,9 +1,10 @@
 'use client';
 import Link from 'next/link';
 import { StageChip } from './StageChip';
+import { BundleSelectionStatusCard } from './BundleSelectionStatusCard';
 
 export function CampaignCard({ c, businessSlug }: { c: any; businessSlug?: string }) {
-    const closed = Boolean(c.closed_at) || ['Closed', 'Settled'].includes(c.status);
+    const closed = Boolean(c.closed_at) || ['Closed', 'Settled', 'Completed', 'Archived'].includes(c.status);
     const daysLeft = c.end_date ? Math.max(Math.ceil((new Date(c.end_date).getTime() - Date.now()) / 864e5), 0) : null;
     return (
         <section className="mb-3.5 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
@@ -31,6 +32,9 @@ export function CampaignCard({ c, businessSlug }: { c: any; businessSlug?: strin
                     </div>
                 </>
             )}
+
+            {/* CB-6: Tenant bundle selection status — renders for open and closed campaigns */}
+            <BundleSelectionStatusCard campaignId={c.id} />
 
             {closed && c.settlement_total != null && (
                 <div className="mt-1 flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 px-3.5 py-2.5 dark:border-orange-900 dark:bg-orange-950">
