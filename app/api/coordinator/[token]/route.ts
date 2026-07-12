@@ -21,6 +21,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
 import { buildBundlePriceMap } from '@/lib/pricing';
+import { resolveCampaignOrderMode, validateBundleEligibility } from '@/lib/campaignOrderBundles';
 
 /**
  * Phase 7E-1C: Returns true if the campaign has been server-closed.
@@ -222,6 +223,19 @@ export async function POST(
         const bundleIds = items
             .map((item: any) => item.bundleId || item.id)
             .filter(Boolean);
+
+        // CB-5: Campaign-level bundle eligibility enforcement.
+        // Must run BEFORE buildBundlePriceMap, order creation, or any side effect.
+        // Derives bundle_selection_status from the server-trusted campaign object.
+        const bundleMode = await resolveCampaignOrderMode(
+            campaign.id,
+            businessId,
+            campaign.bundle_selection_status,
+        );
+        const eligibility = validateBundleEligibility(bundleMode, bundleIds);
+        if (!eligibility.ok) {
+            return NextResponse.json({ error: eligibility.error }, { status: eligibility.status });
+        }
 
         // Price validation uses centralized buildBundlePriceMap() (LAW 1)
         const bundlePriceMap = await buildBundlePriceMap(businessId, bundleIds);

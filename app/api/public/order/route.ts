@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { resolveVariantSize, getServingMultiplier } from '@/lib/serving_multipliers';
 import { buildBundlePriceMap } from '@/lib/pricing';
+import { resolveCampaignOrderMode, validateBundleEligibility } from '@/lib/campaignOrderBundles';
 
 export async function POST(req: Request) {
     try {
@@ -36,12 +38,60 @@ export async function POST(req: Request) {
 
         const businessId = business.id;
 
-        // 1.5 SERVER-SIDE PRICE VALIDATION — never trust client prices
-        //     Uses centralized buildBundlePriceMap() from lib/pricing.ts (LAW 1)
+        // CB-5: Resolve campaign BEFORE price validation to enforce bundle eligibility.
+        // For non-campaign (direct storefront) orders, campaignId is absent and this
+        // block is skipped — preserving the existing storefront flow exactly.
+        type CampaignWithCustomer = Prisma.FundraiserCampaignGetPayload<{ include: { customer: true } }>;
+        let campaign: CampaignWithCustomer | null = null;
+        let orgContactEmail: string | null = null;
+        let paymentInstructions: string | null = null;
+        let externalPaymentLink: string | null = null;
+        let orgName: string | null = null;
+
+        if (campaignId) {
+            campaign = await prisma.fundraiserCampaign.findUnique({
+                where: { id: campaignId },
+                include: { customer: true }
+            });
+
+            // Validate campaign belongs to this business
+            if (campaign && campaign.customer?.business_id !== businessId) {
+                return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
+            }
+
+            if (campaign) {
+                paymentInstructions = campaign.payment_instructions;
+                externalPaymentLink = campaign.external_payment_link;
+                orgName = campaign.customer?.name || null;
+
+                if (campaign.customer?.contact_email) {
+                    orgContactEmail = campaign.customer.contact_email;
+                }
+            }
+        }
+
+        // Extract bundle IDs for validation and pricing (excludes manual_upsell sentinel)
         const bundleIds = items
             .filter((item: any) => item.bundleId && item.bundleId !== 'manual_upsell')
             .map((item: any) => item.bundleId);
 
+        // CB-5: Campaign-level bundle eligibility enforcement.
+        // Must run BEFORE buildBundlePriceMap, order creation, payment, or email.
+        // Non-campaign orders skip this (no campaignId → no campaign → no gate).
+        if (campaign) {
+            const bundleMode = await resolveCampaignOrderMode(
+                campaign.id,
+                businessId,
+                campaign.bundle_selection_status,
+            );
+            const eligibility = validateBundleEligibility(bundleMode, bundleIds);
+            if (!eligibility.ok) {
+                return NextResponse.json({ error: eligibility.error }, { status: eligibility.status });
+            }
+        }
+
+        // 1.5 SERVER-SIDE PRICE VALIDATION — never trust client prices
+        //     Uses centralized buildBundlePriceMap() from lib/pricing.ts (LAW 1)
         const bundlePriceMap = await buildBundlePriceMap(businessId, bundleIds);
 
         let manualUpsellPrice: number | null = null;
@@ -87,37 +137,6 @@ export async function POST(req: Request) {
         const serverTotal = resolvedItems.reduce(
             (sum: number, item: any) => sum + (item.serverPrice * item.quantity), 0
         );
-
-        // 1.6 Fetch Campaign & Org Details (if campaignId provided)
-        let campaign: any = null;
-        let orgContactEmail: string | null = null;
-        let paymentInstructions: string | null = null;
-        let externalPaymentLink: string | null = null;
-        let orgName: string | null = null;
-
-        if (campaignId) {
-            campaign = await prisma.fundraiserCampaign.findUnique({
-                where: { id: campaignId },
-                include: { customer: true } // Get the Organization customer
-            });
-
-            // Validate campaign belongs to this business
-            if (campaign && campaign.customer?.business_id !== businessId) {
-                return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
-            }
-
-            if (campaign) {
-                // @ts-ignore - Schema fields exist
-                paymentInstructions = campaign.payment_instructions;
-                // @ts-ignore
-                externalPaymentLink = campaign.external_payment_link;
-                orgName = campaign.customer?.name || null;
-
-                if (campaign.customer?.contact_email) {
-                    orgContactEmail = campaign.customer.contact_email;
-                }
-            }
-        }
 
         // 2. Find or Create Customer (Individual)
         // We try to find by email AND type='Individual' to avoid mixing with Org contacts
