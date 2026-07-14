@@ -40,7 +40,7 @@ ALTER TABLE "fundraiser_campaigns"
 
 -- Timestamp of coordinator's selection submission. Null until selected.
 ALTER TABLE "fundraiser_campaigns"
-  ADD COLUMN IF NOT EXISTS "bundle_selection_at" TIMESTAMPTZ;
+  ADD COLUMN IF NOT EXISTS "bundle_selection_at" TIMESTAMP(3);
 
 -- Number of families the coordinator must choose (default 2 per business rule).
 ALTER TABLE "fundraiser_campaigns"
