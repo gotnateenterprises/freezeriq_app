@@ -1,0 +1,338 @@
+<title>Delivery Day — Delivery Page Redesign</title>
+<style>
+  :root{
+    --ink:#1e2430; --ink-2:#5a6272; --paper:#f5f6f9; --panel:#fff; --line:#e3e6ee;
+    --chipbg:#059669; --chipfg:#fff;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{--ink:#e7eaf2; --ink-2:#9aa2b5; --paper:#14161d; --panel:#1d2029; --line:#2c3040}
+  }
+  :root[data-theme="dark"]{--ink:#e7eaf2; --ink-2:#9aa2b5; --paper:#14161d; --panel:#1d2029; --line:#2c3040}
+  :root[data-theme="light"]{--ink:#1e2430; --ink-2:#5a6272; --paper:#f5f6f9; --panel:#fff; --line:#e3e6ee}
+  *{box-sizing:border-box}
+  body{background:var(--paper); color:var(--ink); margin:0; padding:2rem 1.25rem 4rem;
+    font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1220px; margin:0 auto}
+  header.page h1{font-size:1.5rem; font-weight:800; letter-spacing:-.02em; margin:0 0 .35rem}
+  header.page p{color:var(--ink-2); max-width:66ch; margin:0 0 1.4rem}
+
+  .scroller{overflow-x:auto; border-radius:18px}
+  .window{min-width:1040px; background:#f1f4f9; color:#0f172a; border-radius:18px;
+    box-shadow:0 24px 60px -20px rgba(20,60,40,.35); overflow:hidden; font-size:13.5px; line-height:1.45}
+  .titlebar{display:flex; align-items:center; gap:.5rem; background:#e6eaf2; padding:.55rem .9rem}
+  .titlebar i{width:11px; height:11px; border-radius:99px; background:#cbd2e0}
+  .titlebar span{margin-left:.6rem; font:600 .72rem/1 ui-monospace,Consolas,monospace; color:#64748b}
+
+  .apphead{display:flex; align-items:center; gap:.8rem; background:#fff; border-bottom:1px solid #e6eaf2; padding:.8rem 1.2rem}
+  .apphead .logo{width:34px;height:34px;border-radius:10px;background:#059669;color:#fff;display:grid;place-items:center;font-size:1rem}
+  .apphead h2{margin:0;font-size:1.1rem;font-weight:900;letter-spacing:-.01em}
+  .viewtabs{display:flex;background:#f1f4f9;border-radius:11px;padding:.25rem;margin-left:.6rem}
+  .viewtabs button{border:0;background:none;font:800 .76rem/1 inherit;color:#64748b;padding:.5rem .85rem;border-radius:8px;cursor:pointer}
+  .viewtabs button.on{background:#fff;color:#0f172a;box-shadow:0 1px 4px rgba(20,25,60,.12)}
+  .kmode{margin-left:auto;display:flex;align-items:center;gap:.45rem;font-size:.72rem;font-weight:800;color:#64748b;cursor:pointer;user-select:none}
+  .kmode .sw{width:38px;height:22px;border-radius:99px;background:#cbd5e1;position:relative;transition:.2s}
+  .kmode .sw::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:99px;background:#fff;transition:.2s}
+  .window.driver .kmode .sw{background:#059669}
+  .window.driver .kmode .sw::after{left:19px}
+  .window.driver .lanes{font-size:1.08em}
+  .window.driver .bigbtn{padding:.95rem;font-size:.95rem}
+  .window.driver .stat .n{font-size:2rem}
+
+  .daybar{display:flex;align-items:center;gap:.5rem;padding:.85rem 1.2rem 0}
+  .daychip{border:1px solid #e2e7f0;background:#fff;border-radius:11px;padding:.5rem .85rem;font-size:.76rem;font-weight:800;color:#64748b;cursor:pointer}
+  .daychip.on{background:#0f172a;border-color:#0f172a;color:#fff}
+  .stats{display:flex;gap:.7rem;padding:.8rem 1.2rem}
+  .stat{flex:1;background:#fff;border:1px solid #e6eaf2;border-radius:16px;padding:.75rem 1rem;display:flex;align-items:center;gap:.8rem}
+  .stat .n{font-size:1.6rem;font-weight:900;font-variant-numeric:tabular-nums}
+  .stat .l{font-size:.68rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;line-height:1.3}
+  .stat.emerald .n{color:#059669}.stat.amber .n{color:#b45309}.stat.indigo .n{color:#4f46e5}
+
+  .lanes{display:grid;grid-template-columns:1.05fr 1.3fr 1fr;gap:1rem;padding:0 1.2rem 1.4rem;align-items:start}
+  .lane{background:#eef1f7;border-radius:18px;padding:.8rem}
+  .lane > h3{margin:.1rem .3rem .7rem;font-size:.72rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase;display:flex;align-items:center;gap:.5rem}
+  .lane > h3 .cnt{margin-left:auto;background:#fff;border-radius:99px;min-width:24px;text-align:center;padding:.15rem .45rem;font-variant-numeric:tabular-nums;color:#0f172a}
+  .lane.l1 > h3{color:#b45309}.lane.l2 > h3{color:#059669}.lane.l3 > h3{color:#4f46e5}
+
+  .card{background:#fff;border:1px solid #e6eaf2;border-radius:14px;padding:.8rem .9rem;margin-bottom:.7rem;transition:opacity .3s, transform .3s}
+  .card:last-child{margin-bottom:0}
+  .card .top{display:flex;align-items:baseline;gap:.5rem}
+  .card .top b{font-size:.9rem}
+  .card .top .tag{margin-left:auto;font-size:.66rem;font-weight:800;border-radius:99px;padding:.2rem .5rem;white-space:nowrap}
+  .tag.zone{color:#3730a3;background:#eef0fd}
+  .tag.warn{color:#b45309;background:#fef3c7}
+  .card .sub{font-size:.72rem;color:#64748b;margin:.15rem 0 .5rem}
+  .bigbtn{display:block;width:100%;border:0;border-radius:11px;padding:.7rem;font:800 .8rem/1 inherit;cursor:pointer;transition:transform .08s}
+  .bigbtn:active{transform:scale(.97)}
+  .bigbtn.done{background:#059669;color:#fff}
+  .bigbtn.ghost{background:#f1f5f9;color:#475569}
+  .bigbtn.load{background:#0f172a;color:#fff}
+  .btnrow{display:flex;gap:.5rem}
+  .btnrow .bigbtn{flex:1}
+
+  .prow{display:flex;align-items:center;gap:.55rem;padding:.35rem .1rem;font-size:.8rem;cursor:pointer;border-radius:8px}
+  .prow:hover{background:#f8fafc}
+  .prow .cb{width:20px;height:20px;border-radius:7px;border:2px solid #cbd5e1;display:grid;place-items:center;font-size:.7rem;color:#fff;flex:none;transition:.15s}
+  .prow.done .cb{background:#059669;border-color:#059669}
+  .prow.done span.nm{text-decoration:line-through;color:#94a3b8}
+  .prow .qty{margin-left:auto;font-size:.72rem;font-weight:800;color:#475569;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .prog{height:7px;border-radius:99px;background:#f1f5f9;overflow:hidden;margin:.35rem 0 .6rem}
+  .prog i{display:block;height:100%;background:#059669;border-radius:99px;transition:width .25s}
+
+  /* route stops */
+  .stop{display:flex;gap:.7rem;align-items:flex-start}
+  .stop .num{width:28px;height:28px;border-radius:99px;background:#0f172a;color:#fff;display:grid;place-items:center;font-weight:900;font-size:.78rem;flex:none;margin-top:.15rem}
+  .stop.done .num{background:#059669}
+  .stop .grip{color:#cbd5e1;cursor:grab;font-size:.95rem;margin-top:.3rem}
+  .stop .addr{font-size:.7rem;color:#4f46e5;cursor:pointer}
+  .stop .addr:hover{text-decoration:underline}
+  .routeprog{display:flex;align-items:center;gap:.6rem;margin:0 .3rem .7rem;font-size:.72rem;font-weight:800;color:#059669}
+  .routeprog .prog{flex:1;margin:0}
+
+  .keychip{width:22px;height:22px;border-radius:7px;background:var(--chipbg);color:var(--chipfg);
+    font:800 .72rem/22px ui-monospace,Consolas,monospace;text-align:center;display:inline-block;flex:none}
+  .floatchip{position:absolute;z-index:5;box-shadow:0 2px 6px rgba(20,90,60,.35)}
+
+  .printbar{display:flex;gap:.6rem;padding:0 1.2rem 1.2rem}
+  .printbar button{flex:1;border:1px solid #e2e7f0;background:#fff;border-radius:12px;padding:.7rem;font:700 .76rem/1 inherit;color:#475569;cursor:pointer}
+
+  .notes-sec{margin-top:1.8rem}
+  .notes-sec h2{font:700 .78rem/1 ui-monospace,Consolas,monospace;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-2);margin:0 0 .4rem}
+  .dnote{display:flex;gap:.85rem;padding:.9rem 0;border-top:1px solid var(--line)}
+  .dnote b{display:block;font-size:.9rem;margin-bottom:.15rem}
+  .dnote p{margin:0;color:var(--ink-2);font-size:.84rem;max-width:74ch}
+  .dnote .was{font-family:ui-monospace,Consolas,monospace;font-size:.72rem;color:#d97706;display:block;margin-top:.3rem}
+  @media (prefers-color-scheme: dark){ .dnote .was{color:#f5a94b} }
+</style>
+
+<div class="wrap">
+<header class="page">
+  <h1>Delivery Day — the handoff board</h1>
+  <p>The Kitchen Board ends at "Packed &amp; ready" — this picks up the same tickets and gets them out the
+  door. <b>Try it:</b> check off packing items to unlock "Load the van," mark route stops delivered and watch
+  the route progress, flip Driver Mode for phone-in-the-van sizing.</p>
+</header>
+
+<div class="scroller">
+<div class="window" id="win">
+  <div class="titlebar"><i></i><i></i><i></i><span>freezeriq.com/delivery</span></div>
+
+  <div class="apphead">
+    <span class="logo">🚚</span><h2>Delivery</h2>
+    <div class="viewtabs">
+      <button class="on">Delivery Day</button>
+      <button>Supplies &amp; Boxes</button>
+      <button>Print Center</button>
+    </div>
+    <label class="kmode" id="kmode"><span>DRIVER MODE</span><span class="sw"></span></label>
+  </div>
+
+  <div class="daybar" style="position:relative">
+    <span class="keychip floatchip" style="top:-8px;left:10px">A</span>
+    <button class="daychip on">Sat, Apr 19</button>
+    <button class="daychip">Wed, Apr 23</button>
+    <button class="daychip">Next week</button>
+    <span style="margin-left:auto;font-size:.72rem;color:#94a3b8;font-weight:600">8 stops · 3 pickups · 1 fundraiser handoff</span>
+  </div>
+
+  <div class="stats" style="position:relative">
+    <span class="keychip floatchip" style="top:-8px;left:10px">B</span>
+    <div class="stat amber"><span class="n">4</span><span class="l">boxes left<br>to pack</span></div>
+    <div class="stat indigo"><span class="n">8</span><span class="l">route stops<br>· 2 zones</span></div>
+    <div class="stat emerald"><span class="n">3</span><span class="l">pickups<br>10am–1pm</span></div>
+    <div class="stat"><span class="n">22</span><span class="l">boxes needed<br>≈ $28.60 packaging</span></div>
+  </div>
+
+  <div class="lanes">
+    <!-- LANE 1: PACK -->
+    <div class="lane l1" style="position:relative">
+      <span class="keychip floatchip" style="top:-9px;left:-9px">C</span>
+      <h3>📦 Pack station <span class="cnt">2</span></h3>
+
+      <div class="card">
+        <div class="top"><b>Kim Reynolds</b><span class="tag zone">ZONE 1 · stop 3</span></div>
+        <p class="sub">Family Favorites ×1 · 2 boxes</p>
+        <div class="prog"><i style="width:50%"></i></div>
+        <div id="pack1">
+          <div class="prow done"><span class="cb">✓</span><span class="nm">5 meals pulled &amp; checked</span></div>
+          <div class="prow"><span class="cb"></span><span class="nm">Labels on every tray</span><span class="qty">🏷 print</span></div>
+        </div>
+        <button class="bigbtn load" id="ld1" disabled style="opacity:.45;margin-top:.5rem">🚚 Loaded in van</button>
+      </div>
+
+      <div class="card">
+        <div class="top"><b>Delmar PTO — fundraiser</b><span class="tag warn">HANDOFF WED</span></div>
+        <p class="sub">9 orders released at closeout · sort by family on the pickup sheet</p>
+        <div class="prog"><i style="width:0%"></i></div>
+        <div>
+          <div class="prow"><span class="cb"></span><span class="nm">27 meals pulled</span></div>
+          <div class="prow"><span class="cb"></span><span class="nm">Grouped into 9 family bags</span><span class="qty">📦 sheet</span></div>
+        </div>
+        <button class="bigbtn load" disabled style="opacity:.45;margin-top:.5rem">🚚 Staged for Wednesday</button>
+      </div>
+    </div>
+
+    <!-- LANE 2: ROUTE -->
+    <div class="lane l2" style="position:relative">
+      <span class="keychip floatchip" style="top:-9px;left:-9px">D</span>
+      <h3>🗺 Saturday route <span class="cnt">3</span></h3>
+      <div class="btnrow" style="margin:0 .1rem .6rem">
+        <button class="bigbtn ghost" style="font-size:.72rem">⚡ Auto-arrange · closest first</button>
+        <button class="bigbtn ghost" style="font-size:.72rem">🗺 Open full route in Google Maps</button>
+      </div>
+      <div class="routeprog"><span id="rlabel">1 of 3 delivered</span><div class="prog"><i id="rprog" style="width:33%"></i></div></div>
+
+      <div class="card stop done">
+        <span class="grip">⠿</span><span class="num">✓</span>
+        <div style="flex:1">
+          <div class="top"><b>Priya Sharma</b><span class="tag zone">ZONE 1</span></div>
+          <p class="sub" style="margin-bottom:0">Delivered 9:42am · left at door per note</p>
+        </div>
+      </div>
+
+      <div class="card stop" id="st2">
+        <span class="grip">⠿</span><span class="num">2</span>
+        <div style="flex:1">
+          <div class="top"><b>Marta Gonzalez</b><span class="tag zone">ZONE 1</span></div>
+          <p class="sub">Comfort Classics ×2 · 3 boxes · <span class="addr">📍 418 Maple Ct — open in Maps</span></p>
+          <div class="btnrow">
+            <button class="bigbtn ghost">📞 Call</button>
+            <button class="bigbtn done" data-stop="st2">✓ Delivered</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card stop" id="st3">
+        <span class="grip">⠿</span><span class="num">3</span>
+        <div style="flex:1">
+          <div class="top"><b>Kim Reynolds</b><span class="tag zone">ZONE 2</span></div>
+          <p class="sub">Waiting on Pack station · <span class="addr">📍 77 Birchwood Dr — open in Maps</span></p>
+          <div class="btnrow">
+            <button class="bigbtn ghost">📞 Call</button>
+            <button class="bigbtn done" data-stop="st3" disabled style="opacity:.45">✓ Delivered</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LANE 3: PICKUPS -->
+    <div class="lane l3" style="position:relative">
+      <span class="keychip floatchip" style="top:-9px;left:-9px">E</span>
+      <h3>🤝 Pickups · Sat 10–1 <span class="cnt">3</span></h3>
+      <div class="card" id="pu1">
+        <div class="top"><b>Jessica Miller</b><span class="tag zone">paid ✓</span></div>
+        <p class="sub">Soup Sampler ×1 · 1 box · fridge shelf B</p>
+        <button class="bigbtn done" data-stop="pu1">✓ Picked up</button>
+      </div>
+      <div class="card" id="pu2">
+        <div class="top"><b>Deshawn Williams</b><span class="tag zone">paid ✓</span></div>
+        <p class="sub">Tex-Mex Bundle ×1 · 2 boxes · shelf B</p>
+        <button class="bigbtn done" data-stop="pu2">✓ Picked up</button>
+      </div>
+      <div class="card" id="pu3">
+        <div class="top"><b>Tom Baker</b><span class="tag warn">owes $45</span></div>
+        <p class="sub">Soup Sampler ×1 · manual order · collect on pickup</p>
+        <button class="bigbtn done" data-stop="pu3">✓ Paid &amp; picked up</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="printbar" style="position:relative">
+    <span class="keychip floatchip" style="top:-9px;left:10px">F</span>
+    <button>🖨 Route manifest</button>
+    <button>📄 Packing slips</button>
+    <button>🏷 Batch labels</button>
+    <button>📦 Fundraiser pickup sheet</button>
+  </div>
+
+</div><!-- /window -->
+</div>
+
+<section class="notes-sec">
+  <h2>Design notes</h2>
+  <div class="dnote"><span class="keychip">A</span><div>
+    <b>Day-first, not status-first</b>
+    <p>Delivery is a day-of-week job: the board opens on the next delivery day with its stops, pickups, and
+    handoffs. Today's page mixes a weekly grid, inventory management, labels, and stats into one 834-line
+    scroll; the redesign splits Supplies &amp; Boxes and Print Center into their own tabs.</p>
+    <span class="was">was: one page carrying inventory CRUD + orders + labels + stats simultaneously</span>
+  </div></div>
+  <div class="dnote"><span class="keychip">B</span><div>
+    <b>Load-out math up top</b>
+    <p>Boxes left to pack, stops by zone, pickups in the window, coolers needed — the van-loading checklist
+    as four numbers. Box/cooler counts come from the existing BoxCounter logic and supplies inventory.</p>
+  </div></div>
+  <div class="dnote"><span class="keychip">C</span><div>
+    <b>Pack station gates the route</b>
+    <p>Each order's packing checklist (meals pulled, labels on) must complete before "Loaded in van" unlocks —
+    and until then its route stop shows "Waiting on Pack station" with Delivered disabled. Nothing gets marked
+    delivered that never left the building. Fundraiser handoffs appear here only after closeout releases them,
+    staged separately with the pickup sheet.</p>
+    <span class="was">was: run page can mark production_ready (uncooked!) orders as delivered</span>
+  </div></div>
+  <div class="dnote"><span class="keychip">D</span><div>
+    <b>The route is the driver's phone screen</b>
+    <p>Numbered stops in delivery_sequence order (drag grips reuse the existing /api/delivery/route/reorder),
+    one-tap Maps link, Call button, and a big green Delivered per stop with a route progress bar. The EXISTING
+    Google routing gets top billing: ⚡ Auto-arrange calls your /api/delivery/optimize (Distance Matrix,
+    closest-first) and 🗺 Open full route hands the driver the whole multi-stop navigation in one tap —
+    both already built, just promoted from buried buttons to the route header. Driver Mode scales it for a
+    phone mounted in the van. Delivered lives HERE — the production page's duplicate buttons retire.</p>
+    <span class="was">was: two different pages could mark delivered; route page buried at /delivery/run</span>
+  </div></div>
+  <div class="dnote"><span class="keychip">E</span><div>
+    <b>Pickups are their own lane with payment truth</b>
+    <p>Saturday-window pickups show shelf location and payment state — including "owes $45, collect on pickup"
+    for manual orders — so whoever staffs the table needs zero context. Paid-state comes from data the orders
+    API already returns.</p>
+  </div></div>
+  <div class="dnote"><span class="keychip">F</span><div>
+    <b>Print Center: every paper in one row</b>
+    <p>Manifest, packing slips, batch labels, and the fundraiser pickup sheet already exist as separate pages —
+    they become one print bar scoped to the selected day, instead of four URLs the team has to remember.</p>
+  </div></div>
+</section>
+</div>
+
+<script>
+document.getElementById('kmode').addEventListener('click', () =>
+  document.getElementById('win').classList.toggle('driver'));
+
+// pack checklist → unlock load + stop 3 delivered
+document.querySelectorAll('.prow').forEach(r => r.addEventListener('click', () => {
+  r.classList.toggle('done');
+  r.querySelector('.cb').textContent = r.classList.contains('done') ? '✓' : '';
+  const card = r.closest('.card');
+  const rows = [...card.querySelectorAll('.prow')];
+  const done = rows.filter(x => x.classList.contains('done')).length;
+  const bar = card.querySelector('.prog i');
+  if (bar) bar.style.width = (done / rows.length * 100) + '%';
+  const load = card.querySelector('.bigbtn.load');
+  if (load){ load.disabled = done !== rows.length; load.style.opacity = done === rows.length ? '1' : '.45'; }
+  // pack1 complete → enable Kim's route stop
+  if (card.querySelector('#pack1') || r.closest('#pack1')){
+    const kim = document.querySelector('#st3 .bigbtn.done');
+    const ready = done === rows.length;
+    kim.disabled = !ready; kim.style.opacity = ready ? '1' : '.45';
+    if (ready) document.querySelector('#st3 .sub').innerHTML = 'Family Favorites ×1 · 2 boxes · <span class="addr">📍 77 Birchwood Dr — open in Maps</span>';
+  }
+}));
+
+// delivered / picked up
+let delivered = 1;
+document.querySelectorAll('[data-stop]').forEach(b => b.addEventListener('click', () => {
+  if (b.disabled) return;
+  const card = document.getElementById(b.dataset.stop);
+  if (card.classList.contains('stop')){
+    card.classList.add('done');
+    card.querySelector('.num').textContent = '✓';
+    card.querySelector('.btnrow')?.remove();
+    const sub = card.querySelector('.sub'); if (sub) sub.textContent = 'Delivered just now ✓';
+    delivered++;
+    document.getElementById('rprog').style.width = (delivered / 3 * 100) + '%';
+    document.getElementById('rlabel').textContent = `${delivered} of 3 delivered`;
+  } else {
+    card.style.opacity = '0'; card.style.transform = 'translateX(24px)';
+    setTimeout(() => card.remove(), 300);
+  }
+}));
+</script>

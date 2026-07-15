@@ -1,0 +1,772 @@
+<title>CRM Redesign — Working Prototype</title>
+<style>
+  :root{
+    --ink:#1e2430; --ink-2:#5a6272; --paper:#f5f6f9; --panel:#ffffff;
+    --line:#e3e6ee; --accent:#4f46e5; --chipbg:#4f46e5; --chipfg:#fff;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{--ink:#e7eaf2; --ink-2:#9aa2b5; --paper:#14161d; --panel:#1d2029; --line:#2c3040; --accent:#8b85f4}
+  }
+  :root[data-theme="dark"]{--ink:#e7eaf2; --ink-2:#9aa2b5; --paper:#14161d; --panel:#1d2029; --line:#2c3040; --accent:#8b85f4}
+  :root[data-theme="light"]{--ink:#1e2430; --ink-2:#5a6272; --paper:#f5f6f9; --panel:#ffffff; --line:#e3e6ee; --accent:#4f46e5}
+  *{box-sizing:border-box}
+  body{background:var(--paper); color:var(--ink); margin:0; padding:2rem 1.25rem 4rem;
+    font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1220px; margin:0 auto}
+  header.page h1{font-size:1.5rem; font-weight:800; letter-spacing:-.02em; margin:0 0 .35rem; text-wrap:balance}
+  header.page p{color:var(--ink-2); max-width:66ch; margin:0 0 1.5rem}
+
+  /* window frame — product UI stays light */
+  .scroller{overflow-x:auto; border-radius:18px}
+  .window{min-width:1080px; background:#f1f4f9; color:#0f172a; border-radius:18px;
+    box-shadow:0 24px 60px -20px rgba(20,25,60,.4); overflow:hidden; font-size:13.5px; line-height:1.45}
+  .titlebar{display:flex; align-items:center; gap:.5rem; background:#e6eaf2; padding:.55rem .9rem}
+  .titlebar i{width:11px; height:11px; border-radius:99px; background:#cbd2e0}
+  .titlebar span{margin-left:.6rem; font:600 .72rem/1 ui-monospace,Consolas,monospace; color:#64748b}
+
+  /* screen switcher (simulates sidebar nav) */
+  .navbar{display:flex; align-items:center; gap:.4rem; background:#fff; border-bottom:1px solid #e6eaf2; padding:.7rem 1.1rem}
+  .navbar .brand{font-weight:900; letter-spacing:-.01em; margin-right:.8rem; display:flex; align-items:center; gap:.45rem}
+  .navbar .brand i{width:26px;height:26px;border-radius:8px;background:#4f46e5;color:#fff;display:grid;place-items:center;font-style:normal;font-size:.75rem;font-weight:800}
+  .navbtn{border:0; background:none; font:700 .8rem/1 inherit; color:#64748b; padding:.5rem .8rem; border-radius:9px; cursor:pointer}
+  .navbtn.on{background:#eef0fd; color:#3730a3}
+  .navbtn:focus-visible{outline:2px solid #4f46e5; outline-offset:2px}
+
+  .screen{display:none; padding:1.25rem 1.35rem 1.6rem}
+  .screen.active{display:block}
+
+  /* shared bits inside product */
+  .card{background:#fff; border:1px solid #e6eaf2; border-radius:16px}
+  .h-row{display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; margin-bottom:1rem}
+  .h-row h2{margin:0; font-size:1.35rem; font-weight:900; letter-spacing:-.02em}
+  .h-row p{margin:.15rem 0 0; font-size:.78rem; color:#64748b}
+  .cta{background:#4f46e5; color:#fff; border:0; border-radius:11px; font-size:.8rem; font-weight:800; padding:.65rem 1rem; cursor:pointer; white-space:nowrap}
+  .cta.ghost{background:#eef0fd; color:#3730a3}
+
+  .keychip{width:22px;height:22px;border-radius:7px;background:var(--chipbg);color:var(--chipfg);
+    font:800 .72rem/22px ui-monospace,Consolas,monospace;text-align:center;display:inline-block}
+  .floatchip{position:absolute;z-index:3;box-shadow:0 2px 6px rgba(30,35,90,.35)}
+
+  /* attention strip */
+  .attn{display:flex; gap:.6rem; margin-bottom:1rem; flex-wrap:wrap}
+  .attn a{flex:1; min-width:220px; display:flex; align-items:center; gap:.65rem; text-decoration:none;
+    background:#fff; border:1px solid #e6eaf2; border-left:4px solid var(--stripe,#4f46e5); border-radius:12px; padding:.65rem .85rem; color:#0f172a}
+  .attn b{display:block; font-size:.82rem}
+  .attn span{font-size:.7rem; color:#64748b}
+  .attn .em{font-size:1.15rem}
+
+  /* filter bar */
+  .fbar{display:flex; gap:.6rem; align-items:center; margin-bottom:.9rem; flex-wrap:wrap}
+  .search{flex:1; min-width:240px; display:flex; align-items:center; gap:.5rem; background:#fff; border:1px solid #e2e7f0; border-radius:11px; padding:.55rem .8rem}
+  .search svg{flex:none; color:#94a3b8}
+  .search input{border:0; outline:0; background:none; font:inherit; width:100%; color:#0f172a}
+  .chips{display:flex; gap:.3rem; background:#fff; border:1px solid #e2e7f0; border-radius:11px; padding:.25rem}
+  .chips button{border:0; background:none; font:800 .7rem/1 inherit; letter-spacing:.04em; color:#94a3b8; padding:.45rem .7rem; border-radius:8px; cursor:pointer}
+  .chips button.on{background:#4f46e5; color:#fff}
+
+  /* org groups (fundraisers) */
+  .orggroup{margin-bottom:.75rem; overflow:hidden}
+  .orghead{display:flex; align-items:center; gap:.7rem; padding:.7rem .95rem; background:#f8fafc; border-bottom:1px solid #eef1f7; cursor:pointer}
+  .orghead .avatar{width:32px;height:32px;border-radius:10px;background:#eef0fd;color:#4f46e5;display:grid;place-items:center;font-weight:900;font-size:.75rem;flex:none}
+  .orghead .who b{display:block;font-size:.85rem}
+  .orghead .who span{font-size:.68rem;color:#64748b}
+  .orghead .meta{margin-left:auto;display:flex;gap:.9rem;align-items:center}
+  .orghead .meta .m{text-align:right}
+  .orghead .meta .m b{display:block;font-size:.8rem;font-variant-numeric:tabular-nums}
+  .orghead .meta .m span{font-size:.6rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em}
+  .orghead .caret{color:#94a3b8;transition:transform .2s}
+  .orggroup.closed .caret{transform:rotate(-90deg)}
+  .orggroup.closed .camp{display:none}
+
+  .camp{display:grid; grid-template-columns:1fr 130px 170px 190px auto; gap:.7rem; align-items:center;
+    padding:.65rem .95rem .65rem 3.1rem; border-bottom:1px solid #f1f5f9; cursor:pointer}
+  .camp:last-child{border-bottom:0}
+  .camp:hover{background:#fafbff}
+  .camp .n b{display:block;font-size:.8rem}
+  .camp .n span{font-size:.66rem;color:#94a3b8}
+  .stage{justify-self:start;font-size:.62rem;font-weight:800;letter-spacing:.04em;padding:.24rem .55rem;border-radius:99px;text-transform:uppercase}
+  .stage.lead{background:#fef3c7;color:#92400e}
+  .stage.onboarding{background:#e0f2fe;color:#075985}
+  .stage.active{background:#dcfce7;color:#166534}
+  .stage.production{background:#ede9fe;color:#5b21b6}
+  .stage.closed{background:#fde9d2;color:#9a3412}
+  .stage.settled{background:#e2e8f0;color:#334155}
+  .camp .dates{font-size:.72rem;color:#475569}
+  .camp .dates span{display:block;font-size:.64rem;color:#94a3b8}
+  .prog .bar{height:6px;border-radius:99px;background:#e7eaf3;overflow:hidden;margin-top:.3rem}
+  .prog .bar i{display:block;height:100%;background:#4f46e5;border-radius:99px}
+  .prog b{font-size:.72rem;font-variant-numeric:tabular-nums}
+  .prog span{font-size:.64rem;color:#94a3b8}
+  .prog .goalless{font-size:.68rem;color:#94a3b8;font-style:italic}
+  .prog .settle{font-size:.72rem;font-weight:800;color:#9a3412}
+  .rowact{display:flex;gap:.35rem;justify-self:end}
+  .rowact button, .rowact a{border:1px solid #e6eaf2;background:#fff;color:#475569;border-radius:8px;
+    font:700 .66rem/1 inherit;padding:.4rem .55rem;cursor:pointer;text-decoration:none;white-space:nowrap}
+  .rowact .warn{border-color:#fcd34d;background:#fffbeb;color:#92400e}
+  .rowact .good{border-color:#bbf7d0;background:#f0fdf4;color:#166534}
+
+  /* detail screen */
+  .backlink{display:inline-flex;align-items:center;gap:.35rem;border:0;background:none;color:#4f46e5;font:700 .75rem/1 inherit;cursor:pointer;padding:0;margin-bottom:.9rem}
+  .dethead{display:flex;gap:1rem;align-items:flex-start;padding:1.1rem 1.2rem;margin-bottom:.9rem;position:relative}
+  .dethead .avatar{width:52px;height:52px;border-radius:14px;background:#eef0fd;color:#4f46e5;display:grid;place-items:center;font-weight:900;font-size:1.05rem;flex:none}
+  .dethead h2{margin:0;font-size:1.2rem;font-weight:900;letter-spacing:-.01em}
+  .dethead .sub{font-size:.75rem;color:#64748b;margin-top:.15rem}
+  .dethead .contact{display:flex;gap:.9rem;margin-top:.5rem;flex-wrap:wrap}
+  .dethead .contact a{font-size:.72rem;color:#4f46e5;text-decoration:none;font-weight:700}
+  .dethead .actions{margin-left:auto;display:flex;gap:.5rem;flex:none}
+
+  .stepper{display:flex;gap:0;padding: .9rem 1.2rem;margin-bottom:.9rem;overflow-x:auto;position:relative}
+  .step{flex:1;min-width:88px;text-align:center;position:relative;font-size:.64rem;font-weight:800;letter-spacing:.03em;color:#94a3b8;text-transform:uppercase}
+  .step::before{content:'';display:block;width:12px;height:12px;border-radius:99px;background:#e2e8f0;margin:0 auto .35rem;position:relative;z-index:2}
+  .step::after{content:'';position:absolute;top:5px;left:calc(50% + 8px);width:calc(100% - 16px);height:2px;background:#e2e8f0}
+  .step:last-child::after{display:none}
+  .step.done{color:#166534}.step.done::before{background:#22c55e}.step.done::after{background:#22c55e}
+  .step.now{color:#3730a3}.step.now::before{background:#4f46e5;box-shadow:0 0 0 4px #eef0fd}
+
+  .detgrid{display:grid;grid-template-columns:1.6fr 1fr;gap:.9rem;align-items:start}
+  .campcard{padding:1rem 1.1rem;margin-bottom:.9rem;position:relative}
+  .campcard h3{margin:0;font-size:.95rem;font-weight:900}
+  .campcard .meta{font-size:.7rem;color:#64748b;margin:.15rem 0 .6rem}
+  .statrow{display:flex;gap:.5rem;margin:.6rem 0}
+  .stat{flex:1;background:#f7f8fc;border-radius:11px;padding:.5rem .6rem;text-align:center}
+  .stat b{display:block;font-size:.95rem;font-variant-numeric:tabular-nums}
+  .stat b.money{color:#059669}
+  .stat span{font-size:.6rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em}
+  .linkrow{display:flex;gap:.45rem;flex-wrap:wrap;margin-top:.6rem}
+  .linkrow a{font-size:.7rem;font-weight:700;color:#334155;background:#f7f8fc;border:1px solid #e6eaf2;border-radius:9px;padding:.42rem .7rem;text-decoration:none}
+  .settlebox{display:flex;align-items:center;gap:.8rem;background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:.7rem .85rem;margin-top:.6rem}
+  .settlebox b{font-size:.9rem;color:#9a3412;font-variant-numeric:tabular-nums}
+  .settlebox span{font-size:.68rem;color:#9a3412}
+  .settlebox .cta{margin-left:auto;padding:.5rem .8rem;font-size:.72rem}
+  .sidecard{padding:1rem 1.1rem;margin-bottom:.9rem;position:relative}
+  .sidecard h4{margin:0 0 .6rem;font-size:.7rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#94a3b8}
+  .tool{display:flex;align-items:center;gap:.6rem;padding:.5rem 0;border-top:1px solid #f1f5f9;font-size:.78rem}
+  .tool:first-of-type{border-top:0}
+  .tool .st{margin-left:auto;font-size:.62rem;font-weight:800}
+  .tool .st.done{color:#166534}.tool .st.todo{color:#b45309}
+  .notes textarea{width:100%;border:1px solid #e6eaf2;border-radius:10px;padding:.6rem .7rem;font:inherit;font-size:.78rem;min-height:74px;resize:vertical;color:#0f172a;background:#fbfcfe}
+
+  /* customers screen */
+  .seg{display:flex;background:#fff;border:1px solid #e2e7f0;border-radius:11px;padding:.25rem;width:fit-content}
+  .seg button{border:0;background:none;font:800 .74rem/1 inherit;color:#94a3b8;padding:.45rem .9rem;border-radius:8px;cursor:pointer}
+  .seg button.on{background:#4f46e5;color:#fff}
+  .custrow{display:grid;grid-template-columns:1.5fr 130px 1fr 120px auto;gap:.7rem;align-items:center;padding:.65rem .95rem;border-bottom:1px solid #f1f5f9;cursor:pointer}
+  .custrow:hover{background:#fafbff}
+  .custrow:last-child{border-bottom:0}
+  .custrow .who{display:flex;align-items:center;gap:.65rem;min-width:0}
+  .custrow .avatar{width:30px;height:30px;border-radius:9px;background:#f1f5f9;color:#475569;display:grid;place-items:center;font-weight:900;font-size:.68rem;flex:none}
+  .custrow .who b{display:block;font-size:.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .custrow .who span{font-size:.66rem;color:#94a3b8}
+  .custrow .act{font-size:.7rem;color:#64748b}
+  .custrow .act span{display:block;font-size:.62rem;color:#94a3b8}
+  .custrow .spend{font-size:.78rem;font-weight:800;font-variant-numeric:tabular-nums;color:#059669}
+  .lhead2{display:grid;grid-template-columns:1.5fr 130px 1fr 120px auto;gap:.7rem;padding:.5rem .95rem;font-size:.62rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#94a3b8;border-bottom:1px solid #eef1f7}
+
+  /* design notes */
+  .notes-sec{margin-top:1.8rem}
+  .notes-sec h2{font:700 .78rem/1 ui-monospace,Consolas,monospace;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-2);margin:0 0 .4rem}
+  .dnote{display:flex;gap:.85rem;padding:.9rem 0;border-top:1px solid var(--line)}
+  .dnote b{display:block;font-size:.9rem;margin-bottom:.15rem}
+  .dnote p{margin:0;color:var(--ink-2);font-size:.84rem;max-width:74ch}
+  .dnote .was{font-family:ui-monospace,Consolas,monospace;font-size:.72rem;color:#d97706;display:block;margin-top:.3rem}
+  @media (prefers-color-scheme: dark){ .dnote .was{color:#f5a94b} }
+</style>
+
+<div class="wrap">
+<header class="page">
+  <h1>CRM redesign — working prototype</h1>
+  <p>Three screens, live controls. <b>Try it:</b> search, click the stage filters, collapse an
+  organization, click any campaign row to open the org profile, and flip Customers between
+  Organizations and People. Letter chips map to the design notes below.</p>
+</header>
+
+<div class="scroller">
+<div class="window">
+  <div class="titlebar"><i></i><i></i><i></i><span>freezeriq.com — CRM</span></div>
+  <div class="navbar">
+    <span class="brand"><i>CF</i>Cascade Freezer Meals</span>
+    <button class="navbtn" data-screen="customers">Customers</button>
+    <button class="navbtn on" data-screen="fundraisers">Fundraisers</button>
+    <button class="navbtn" data-screen="detail">↳ Coles County Farm Bureau</button>
+    <button class="navbtn" data-screen="growth">Growth Engine</button>
+    <button class="navbtn" data-screen="wizard" style="margin-left:auto;background:#4f46e5;color:#fff">＋ Start a Fundraiser</button>
+  </div>
+
+  <!-- ============ FUNDRAISERS ============ -->
+  <div class="screen active" data-screen="fundraisers">
+    <div class="h-row">
+      <div><h2>Fundraisers</h2><p>Every organization campaign, from first call to settlement.</p></div>
+      <button class="cta">+ Start a Fundraiser</button>
+    </div>
+
+    <div class="attn" style="position:relative">
+      <span class="keychip floatchip" style="top:-9px;left:-9px">A</span>
+      <a href="#" style="--stripe:#d97706"><span class="em">⏰</span><span><b>2 campaigns end within 7 days</b><span>Coles County (Apr 28) · Edgar County (Apr 28)</span></span></a>
+      <a href="#" style="--stripe:#4f46e5"><span class="em">📦</span><span><b>34 held orders · $4,405 awaiting closeout</b><span>Close a campaign to release orders to production</span></span></a>
+      <a href="#" style="--stripe:#dc2626"><span class="em">📞</span><span><b>4 leads silent for 14+ days</b><span>Clark Co · Cumberland Co · Jasper Co · Ag in the Class</span></span></a>
+      <a href="#" data-goto-static="growth" style="--stripe:#b91c1c"><span class="em">🚨</span><span><b>1 campaign at risk</b><span>Hilltop Academy — 0 orders, 8 days left → Growth Engine</span></span></a>
+    </div>
+
+    <div class="fbar" style="position:relative">
+      <span class="keychip floatchip" style="top:-9px;left:-9px">B</span>
+      <div class="search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="fq" type="search" placeholder="Search organizations, coordinators, campaigns…">
+      </div>
+      <div class="chips" id="fchips">
+        <button class="on" data-f="all">All</button>
+        <button data-f="lead">Leads</button>
+        <button data-f="onboarding">Onboarding</button>
+        <button data-f="active">Active</button>
+        <button data-f="production">Production</button>
+        <button data-f="closed">Closed</button>
+      </div>
+    </div>
+
+    <div id="orglist" style="position:relative">
+      <span class="keychip floatchip" style="top:-9px;left:-9px">C</span>
+    </div>
+  </div>
+
+  <!-- ============ ORG DETAIL ============ -->
+  <div class="screen" data-screen="detail">
+    <button class="backlink" data-screen-link="fundraisers">← All fundraisers</button>
+
+    <div class="card dethead">
+      <span class="keychip floatchip" style="top:-9px;left:-9px">D</span>
+      <div class="avatar">CC</div>
+      <div>
+        <h2>Coles County Farm Bureau</h2>
+        <div class="sub">Organization · Fundraiser partner since 2025 · 2 campaigns · <b style="color:#059669">Lifetime raised: $4,257</b></div>
+        <div class="contact">
+          <a href="#">👤 Kristin Iverson</a><a href="#">✉️ kiverson@ccfb.org</a><a href="#">📞 (217) 555-0184</a>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="cta ghost">✉️ Send email</button>
+        <button class="cta">+ New campaign</button>
+      </div>
+    </div>
+
+    <div class="card stepper">
+      <span class="keychip floatchip" style="top:-9px;left:-9px">E</span>
+      <div class="step done">Lead</div><div class="step done">Agreement</div><div class="step done">Onboarding</div>
+      <div class="step now">Active</div><div class="step">Production</div><div class="step">Delivery</div><div class="step">Closed</div>
+    </div>
+
+    <div class="detgrid">
+      <div>
+        <div class="card campcard">
+          <span class="keychip floatchip" style="top:-9px;left:-9px">F</span>
+          <div style="display:flex;align-items:center;gap:.6rem">
+            <h3>Spring 2026 Fundraiser</h3><span class="stage active">Active</span>
+          </div>
+          <div class="meta">Ends Apr 28, 2026 · Goal: 20 bundles · Coordinator: Kristin Iverson</div>
+          <div class="statrow">
+            <div class="stat"><b>14</b><span>bundles sold</span></div>
+            <div class="stat"><b class="money">$1,410</b><span>sales</span></div>
+            <div class="stat"><b>9</b><span>held orders</span></div>
+            <div class="stat"><b>12</b><span>days left</span></div>
+          </div>
+          <div class="prog"><div class="bar"><i style="width:70%"></i></div></div>
+          <div class="linkrow">
+            <a href="#">🛒 Public order page</a><a href="#">🎯 Coordinator portal</a><a href="#">🏆 Scoreboard</a><a href="#">📦 Pickup sheet</a>
+          </div>
+        </div>
+
+        <div class="card campcard">
+          <div style="display:flex;align-items:center;gap:.6rem">
+            <h3>Fall 2025 Fundraiser</h3><span class="stage closed">Closed</span>
+          </div>
+          <div class="meta">Closed Nov 21, 2025 · 41 orders · 168 bundles</div>
+          <div class="settlebox">
+            <span>💰</span>
+            <span><b>$2,847.00</b><br>Settlement frozen at closeout — not yet invoiced</span>
+            <button class="cta ghost" style="margin-left:auto">📄 Impact report</button>
+            <button class="cta" style="margin-left:0">Create invoice</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card sidecard">
+          <span class="keychip floatchip" style="top:-9px;left:-9px">G</span>
+          <h4>Coordinator toolkit</h4>
+          <div class="tool">📨 Info packet sent <span class="st done">DONE · Mar 2</span></div>
+          <div class="tool">🎨 Marketing packet <span class="st done">DONE · Mar 9</span></div>
+          <div class="tool">💳 Payment instructions set <span class="st done">DONE</span></div>
+          <div class="tool">📣 First share logged <span class="st todo">WAITING</span></div>
+        </div>
+        <div class="card sidecard notes">
+          <h4>Notes & activity</h4>
+          <textarea>4/10 — Kristin wants delivery before Mother's Day. Confirmed Apr 30 production slot.</textarea>
+          <div class="tool" style="margin-top:.4rem">📄 Agreement signed <span class="st done">Feb 12</span></div>
+          <div class="tool">📞 Intro call — Laurie <span class="st done">Feb 5</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ CUSTOMERS ============ -->
+  <div class="screen" data-screen="customers">
+    <div class="h-row">
+      <div><h2>Customers</h2><p>People buy meals. Organizations run fundraisers. One list, two lenses.</p></div>
+      <button class="cta">+ Add customer</button>
+    </div>
+
+    <div class="fbar" style="position:relative">
+      <span class="keychip floatchip" style="top:-9px;left:-9px">H</span>
+      <div class="seg" id="custseg">
+        <button class="on" data-t="people">People</button>
+        <button data-t="orgs">Organizations</button>
+      </div>
+      <div class="search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="cq" type="search" placeholder="Search by name, email, phone…">
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="lhead2"><span>Customer</span><span>Status</span><span>Last activity</span><span>Total spend</span><span></span></div>
+      <div id="custlist"></div>
+    </div>
+  </div>
+
+  <!-- ============ GROWTH ENGINE ============ -->
+  <div class="screen" data-screen="growth">
+    <div class="h-row">
+      <div><h2>Growth Engine</h2><p>Turn finished fundraisers into next season's pipeline — automatically.</p></div>
+    </div>
+
+    <div class="detgrid">
+      <div>
+        <!-- Rebook pipeline -->
+        <div class="card sidecard" style="position:relative">
+          <span class="keychip floatchip" style="top:-9px;left:-9px">L</span>
+          <h4>🔁 Ready to rebook — $7,900 est. pipeline</h4>
+          <p style="font-size:.72rem;color:#64748b;margin:0 0 .6rem">Organizations whose last campaign ended 6–12 months ago with no next campaign scheduled. Suggested ask = last result +10%.</p>
+
+          <div class="camp" style="grid-template-columns:1fr 170px 150px auto;padding-left:.95rem" data-goto="wizard">
+            <span class="n"><b>Delmar PTO</b><span>Fall 2025 · raised $2,847 · settled ✓</span></span>
+            <span class="dates">Last ended 8 mo ago<span>no spring campaign booked</span></span>
+            <span class="prog"><b>Suggest: $3,150</b><span> goal</span></span>
+            <span class="rowact"><button class="good">Clone into wizard →</button></span>
+          </div>
+          <div class="camp" style="grid-template-columns:1fr 170px 150px auto;padding-left:.95rem" data-goto="wizard">
+            <span class="n"><b>Riverside Elementary</b><span>Spring 2025 · raised $1,960 · settled ✓</span></span>
+            <span class="dates">Last ended 12 mo ago<span>ran spring last year — same window open now</span></span>
+            <span class="prog"><b>Suggest: $2,150</b><span> goal</span></span>
+            <span class="rowact"><button class="good">Clone into wizard →</button></span>
+          </div>
+          <div class="camp" style="grid-template-columns:1fr 170px 150px auto;padding-left:.95rem" data-goto="wizard">
+            <span class="n"><b>St. Mary's Boosters</b><span>Fall 2025 · raised $2,290 · settled ✓</span></span>
+            <span class="dates">Last ended 7 mo ago<span>coordinator opened last email 2d ago 👀</span></span>
+            <span class="prog"><b>Suggest: $2,500</b><span> goal</span></span>
+            <span class="rowact"><button class="good">Clone into wizard →</button></span>
+          </div>
+        </div>
+
+        <!-- Inbound leads -->
+        <div class="card sidecard" style="position:relative">
+          <span class="keychip floatchip" style="top:-9px;left:-9px">M</span>
+          <h4>📥 Inbound leads — from your own public pages</h4>
+          <p style="font-size:.72rem;color:#64748b;margin:0 0 .6rem">"Run a fundraiser for YOUR group" capture on scoreboards and order pages. Every buyer is a potential coordinator.</p>
+          <div class="camp" style="grid-template-columns:1fr 200px auto;padding-left:.95rem" data-goto="wizard">
+            <span class="n"><b>Riverside Band Boosters</b><span>Sarah Mitchell · saw the Coles County scoreboard</span></span>
+            <span class="dates">2 hours ago<span>"How much could our band raise?"</span></span>
+            <span class="rowact"><button class="good">Start in wizard →</button></span>
+          </div>
+          <div class="camp" style="grid-template-columns:1fr 200px auto;padding-left:.95rem" data-goto="wizard">
+            <span class="n"><b>Troop 141 Scouts</b><span>Dan Okafor · ordered from Edgar County's page</span></span>
+            <span class="dates">Yesterday<span>clicked "run your own" after checkout</span></span>
+            <span class="rowact"><button class="good">Start in wizard →</button></span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <!-- At-risk -->
+        <div class="card sidecard" style="position:relative;border-color:#fecaca">
+          <span class="keychip floatchip" style="top:-9px;left:-9px">N</span>
+          <h4 style="color:#b91c1c">⚠️ Campaign at risk</h4>
+          <b style="font-size:.85rem">Hilltop Academy</b>
+          <p style="font-size:.72rem;color:#64748b;margin:.15rem 0 .5rem">0 of 100 bundles · 8 days left · coordinator hasn't shared the link yet and hasn't set payment instructions.</p>
+          <div class="statrow">
+            <div class="stat"><b>0</b><span>orders</span></div>
+            <div class="stat"><b>8</b><span>days left</span></div>
+            <div class="stat"><b style="color:#dc2626">0</b><span>shares</span></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:.4rem;margin-top:.5rem">
+            <button class="cta" style="font-size:.72rem">✨ Send coordinator a boost message</button>
+            <button class="cta ghost" style="font-size:.72rem">📞 Log a check-in call</button>
+            <button class="cta ghost" style="font-size:.72rem">📅 Offer to extend end date</button>
+          </div>
+        </div>
+
+        <!-- Automations -->
+        <div class="card sidecard" style="position:relative">
+          <span class="keychip floatchip" style="top:-9px;left:-9px">P</span>
+          <h4>🤖 Automations — works while you cook</h4>
+          <div class="tool">📬 Monday digest to you<span class="st done">ON</span></div>
+          <div class="tool">🔁 Rebook nudge (6–12 mo window)<span class="st done">ON</span></div>
+          <div class="tool">🚨 At-risk alert, same day<span class="st done">ON</span></div>
+          <div class="tool">🏆 Goal-hit celebration to coordinator<span class="st done">ON</span></div>
+          <div class="tool">💌 Win-back: lapsed customers (6 mo)<span class="st todo">OFF</span></div>
+        </div>
+
+        <!-- Benchmarks -->
+        <div class="card sidecard" style="position:relative">
+          <span class="keychip floatchip" style="top:-9px;left:-9px">O</span>
+          <h4>📈 Your benchmarks</h4>
+          <div class="tool">Average campaign<span class="st" style="color:#0f172a">$1,730</span></div>
+          <div class="tool">Best month to launch<span class="st" style="color:#0f172a">September</span></div>
+          <div class="tool">Coordinator shares → sales<span class="st done">every 3 shares ≈ 1 order</span></div>
+          <div class="tool">Rebooked orgs raise<span class="st done">+23% vs first-timers</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ WIZARD ============ -->
+  <div class="screen" data-screen="wizard">
+    <div class="h-row"><div><h2>Start a Fundraiser</h2><p>One flow: organization → campaign → launch kit. About 2 minutes.</p></div></div>
+
+    <div class="card stepper" style="margin-bottom:1rem">
+      <div class="step wstep now" data-ws="1">1 · Organization</div>
+      <div class="step wstep" data-ws="2">2 · Campaign</div>
+      <div class="step wstep" data-ws="3">3 · Launch Kit</div>
+    </div>
+
+    <!-- Step 1 -->
+    <div class="card wpane" data-wp="1" style="padding:1.2rem;max-width:620px;position:relative">
+      <span class="keychip floatchip" style="top:-9px;left:-9px">I</span>
+      <h3 style="margin:0 0 .7rem;font-size:.95rem;font-weight:900">Who is this fundraiser for?</h3>
+      <div class="search" style="margin-bottom:.6rem">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input type="search" value="Ag in the Class" readonly>
+      </div>
+      <div style="border:1px solid #e6eaf2;border-radius:11px;overflow:hidden;margin-bottom:.9rem">
+        <div style="display:flex;align-items:center;gap:.6rem;padding:.6rem .8rem;background:#fffbeb;border-bottom:1px solid #fde68a;font-size:.78rem">
+          ⚠️ <b>Ag in the Classroom</b> already exists (Karen Seuring) — <a href="#" style="color:#4f46e5;font-weight:800">use existing</a>
+        </div>
+        <div style="padding:.6rem .8rem;font-size:.72rem;color:#94a3b8">…or create new below</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem">
+        <label style="font-size:.66rem;font-weight:800;color:#94a3b8;text-transform:uppercase">Organization<input class="winput" value="Ag in the Class"></label>
+        <label style="font-size:.66rem;font-weight:800;color:#94a3b8;text-transform:uppercase">Coordinator<input class="winput" value="Karen Seuring"></label>
+        <label style="font-size:.66rem;font-weight:800;color:#94a3b8;text-transform:uppercase">Email<input class="winput" value="karen@agintheclass.org"></label>
+        <label style="font-size:.66rem;font-weight:800;color:#94a3b8;text-transform:uppercase">Phone<input class="winput" value="(217) 555-0142"></label>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:1rem"><button class="cta" data-wgo="2">Next: Campaign →</button></div>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="card wpane" data-wp="2" hidden style="padding:1.2rem;max-width:620px;position:relative">
+      <span class="keychip floatchip" style="top:-9px;left:-9px">J</span>
+      <h3 style="margin:0 0 .7rem;font-size:.95rem;font-weight:900">Set up the campaign</h3>
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:.6rem">
+        <label style="font-size:.66rem;font-weight:800;color:#94a3b8;text-transform:uppercase">Campaign name<input class="winput" value="Ag in the Class Spring 2026"></label>
+        <label style="font-size:.66rem;font-weight:800;color:#94a3b8;text-transform:uppercase">Ends<input class="winput" value="May 15, 2026"></label>
+        <label style="font-size:.66rem;font-weight:800;color:#94a3b8;text-transform:uppercase">Goal (bundles)<input class="winput" value="50"></label>
+      </div>
+      <p style="font-size:.66rem;font-weight:800;color:#94a3b8;text-transform:uppercase;margin:.9rem 0 .4rem">Bundles they can sell <span style="color:#4f46e5;text-transform:none;letter-spacing:0">· ✨ suggested picks pre-checked from your sales history</span></p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem">
+        <label class="wbundle"><input type="checkbox" checked> Family Favorites Box · $180 <span style="margin-left:auto;font-size:.6rem;font-weight:800;color:#7c3aed;background:#f3e8ff;border-radius:5px;padding:.1rem .35rem">⭐ FUNDRAISER FAVORITE</span></label>
+        <label class="wbundle"><input type="checkbox" checked> Comfort Classics · $135 <span style="margin-left:auto;font-size:.6rem;font-weight:800;color:#c2410c;background:#ffedd5;border-radius:5px;padding:.1rem .35rem">🔥 TOP SELLER</span></label>
+        <label class="wbundle"><input type="checkbox" checked> Tex-Mex Bundle · $95 <span style="margin-left:auto;font-size:.6rem;font-weight:800;color:#7c3aed;background:#f3e8ff;border-radius:5px;padding:.1rem .35rem">⭐ FUNDRAISER FAVORITE</span></label>
+        <label class="wbundle"><input type="checkbox"> Soup Sampler · $60</label>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:1rem">
+        <button class="cta ghost" data-wgo="1">← Back</button>
+        <button class="cta" data-wgo="3">Create & build launch kit →</button>
+      </div>
+    </div>
+
+    <!-- Step 3 -->
+    <div class="wpane" data-wp="3" hidden style="max-width:720px;position:relative">
+      <span class="keychip floatchip" style="top:-9px;left:-9px">K</span>
+      <div class="card" style="padding:1rem 1.2rem;margin-bottom:.8rem;background:#f0fdf4;border-color:#bbf7d0">
+        <b style="font-size:.9rem">🎉 Fundraiser created — launch kit ready</b>
+        <p style="margin:.2rem 0 0;font-size:.74rem;color:#166534">Everything below was generated automatically. Nothing left to remember.</p>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem;margin-bottom:.8rem">
+        <div class="card" style="padding:.85rem 1rem"><b style="font-size:.8rem">🎯 Coordinator portal</b><p style="margin:.25rem 0 .45rem;font-size:.68rem;color:#64748b;font-family:ui-monospace,Consolas,monospace">freezeriq.com/coordinator/tk_8f2a…</p><button class="cta ghost" style="padding:.4rem .7rem;font-size:.68rem">Copy link</button></div>
+        <div class="card" style="padding:.85rem 1rem"><b style="font-size:.8rem">🛒 Public order page</b><p style="margin:.25rem 0 .45rem;font-size:.68rem;color:#64748b;font-family:ui-monospace,Consolas,monospace">freezeriq.com/shop/cascade/f/agitc…</p><button class="cta ghost" style="padding:.4rem .7rem;font-size:.68rem">Copy link</button></div>
+        <div class="card" style="padding:.85rem 1rem"><b style="font-size:.8rem">📄 Flyer + QR code</b><p style="margin:.25rem 0 .45rem;font-size:.68rem;color:#64748b">PDF, links to the order page</p><button class="cta ghost" style="padding:.4rem .7rem;font-size:.68rem">Download</button></div>
+        <div class="card" style="padding:.85rem 1rem"><b style="font-size:.8rem">📊 Sales & tracking sheet</b><p style="margin:.25rem 0 .45rem;font-size:.68rem;color:#64748b">Printable, for offline orders</p><button class="cta ghost" style="padding:.4rem .7rem;font-size:.68rem">Download</button></div>
+      </div>
+      <div class="card" style="padding:1rem 1.2rem">
+        <b style="font-size:.8rem">✉️ Info packet — drafted for Karen</b>
+        <p style="margin:.3rem 0 .6rem;font-size:.72rem;color:#64748b">Portal link, success guide, scoreboard, and payment-setup steps — in your kitchen's branding.</p>
+        <div style="display:flex;gap:.5rem"><button class="cta">Send it now</button><button class="cta ghost">Preview first</button><button class="cta ghost">Send later</button></div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /window -->
+</div><!-- /scroller -->
+
+<section class="notes-sec">
+  <h2>Design notes</h2>
+  <div class="dnote"><span class="keychip" style="flex:none">A</span><div>
+    <b>Needs-attention strip answers "what do I do today?"</b>
+    <p>Campaigns ending soon, held orders awaiting closeout (the money number you already compute), and stale
+    leads — each links to its filtered view. The stat cards weren't wrong, they were passive; this is the same
+    data made actionable.</p>
+    <span class="was">was: 3 static count cards (Active / High Leads / Held Orders)</span>
+  </div></div>
+  <div class="dnote"><span class="keychip" style="flex:none">B</span><div>
+    <b>Stage filters match the real pipeline — including Closed</b>
+    <p>Leads / Onboarding / Active / Production / Closed mirror the statuses the API actually emits (fixes the
+    COMPLETED-tab mismatch where Closed campaigns never surfaced). Search covers org, coordinator, and campaign names.</p>
+    <span class="was">was: ALL / ACTIVE / LEAD / COMPLETED — 'Closed' matched none of them</span>
+  </div></div>
+  <div class="dnote"><span class="keychip" style="flex:none">C</span><div>
+    <b>Campaigns grouped by organization</b>
+    <p>Your current table shows four near-identical "Karen Seuring / Ag in the Classroom" rows. Grouping puts the
+    relationship first: one collapsible org header with rollup totals, campaigns nested under it — duplicates become
+    visible instead of noise. Actions are labeled text buttons (Close out, Invoice, Portal) instead of five mystery
+    icons; Invoice is hidden on leads, and "goal not set" renders as a quiet prompt instead of "$0 No goal set."</p>
+    <span class="was">was: one flat row per campaign; icon-only actions; placeholder leads mixed in as fake campaigns</span>
+  </div></div>
+  <div class="dnote"><span class="keychip" style="flex:none">D</span><div>
+    <b>Org profile leads with the relationship, not a form</b>
+    <p>Contact, tenure, and the two actions you actually take (email, new campaign) — the edit form moves behind an
+    action instead of dominating the page.</p>
+  </div></div>
+  <div class="dnote"><span class="keychip" style="flex:none">E</span><div>
+    <b>Pipeline stepper replaces the status dropdown</b>
+    <p>The Lead → Closed journey is visible at a glance and doubles as a click-to-advance control. Same statuses the
+    API validates today — purely a presentation change.</p>
+  </div></div>
+  <div class="dnote"><span class="keychip" style="flex:none">F</span><div>
+    <b>Campaign cards carry the settlement story</b>
+    <p>Active campaigns show sold/held/days-left plus every outward link (order page, portal, scoreboard, pickup
+    sheet) in one place. Closed campaigns surface the frozen <code>settlement_total</code> with a one-click
+    "Create invoice" prefilled from it — the wiring gap the closeout audit flagged.</p>
+    <span class="was">was: closed campaigns look identical to open ones; settlement_total never displayed</span>
+  </div></div>
+  <div class="dnote"><span class="keychip" style="flex:none">G</span><div>
+    <b>Toolkit becomes a checklist with state</b>
+    <p>Info packet / marketing packet / payment instructions / first share — each shows done-or-waiting instead of
+    being buttons you have to remember whether you pressed.</p>
+  </div></div>
+  <div class="dnote"><span class="keychip" style="flex:none">H</span><div>
+    <b>Customers: one list, two lenses</b>
+    <p>People (meal buyers, with spend and last order) and Organizations (fundraiser partners, with campaign rollups)
+    are the same table with a segmented toggle — replacing the Customer CRM vs Fundraiser CRM naming collision. An
+    org's row links straight to the same org profile the Fundraisers screen uses.</p>
+    <span class="was">was: two sidebar items both called "CRM"; org data split across two different detail pages</span>
+  </div></div>
+  <div class="dnote"><span class="keychip" style="flex:none">L</span><div>
+    <b>Rebook pipeline — the renewal engine</b>
+    <p>Fundraising is seasonal: an org that raised money last fall is your warmest possible lead for next fall.
+    A simple query (closed campaign 6–12 months ago, nothing scheduled since) surfaces them with a suggested
+    ask of last-result +10%, and "Clone into wizard" prefills everything. Repeat orgs already raise +23% vs
+    first-timers — this makes rebooking a one-click habit instead of a memory exercise.</p>
+    <span class="was">build: one query over existing campaign data + wizard prefill — no schema, no new APIs</span>
+  </div></div>
+  <div class="dnote"><span class="keychip" style="flex:none">M</span><div>
+    <b>Inbound lead capture from your own public pages</b>
+    <p>Every scoreboard viewer and storefront buyer is a parent in some other group. A "Run a fundraiser for
+    YOUR group" CTA on those pages writes straight into a Leads inbox (the BusinessLead model already exists).
+    Your existing campaigns become your ad network.</p>
+    <span class="was">build: one CTA + one form → existing BusinessLead table → this inbox</span>
+  </div></div>
+  <div class="dnote"><span class="keychip" style="flex:none">N</span><div>
+    <b>Campaign health score — save campaigns while they're alive</b>
+    <p>Pace vs goal + days since last order + coordinator engagement (shares/downloads are already tracked in
+    CoordinatorActionEvent) = a simple rule-based at-risk flag. Today a flop is discovered at closeout, when
+    it's too late. The at-risk card prescribes the intervention: boost message, check-in call, extend the date.
+    Also shown inline on the dashboard rows ("⚠ at risk" / "on pace").</p>
+    <span class="was">build: computed score from existing fields — no ML, no schema</span>
+  </div></div>
+  <div class="dnote"><span class="keychip" style="flex:none">J+</span><div>
+    <b>Bundle auto-suggest — the wizard already knows what sells</b>
+    <p>Step 2 sorts the bundle checklist by real sales history: "⭐ Fundraiser favorite" = top sellers in past
+    campaigns, "🔥 Top seller" = storefront best-sellers, top picks pre-checked. Rebooks preselect exactly what
+    that org sold last time. One group-by query over OrderItem — data that already exists.</p>
+    <span class="was">was: alphabetical checklist; tenant guesses what a school group will actually buy</span>
+  </div></div>
+  <div class="dnote"><span class="keychip" style="flex:none">P</span><div>
+    <b>Automations — the CRM acts on its own</b>
+    <p>Weekly Monday digest to the tenant, automatic rebook nudges when an org enters the 6–12 month window,
+    same-day at-risk alerts, goal-hit celebrations to coordinators (with a share prompt), and win-back emails
+    to lapsed customers reusing the existing "We Miss You" template. All of it hangs off ONE new cron route —
+    the same infrastructure the planned monthly "Top of Mind" coordinator email needs.</p>
+    <span class="was">build: vercel.json cron + one /api/cron/growth route + Resend templates that already exist</span>
+  </div></div>
+  <div class="dnote"><span class="keychip" style="flex:none">O</span><div>
+    <b>Impact report + lifetime value — the artifacts that sell next year</b>
+    <p>At closeout, auto-generate a branded one-pager ("You raised $2,847 — 168 bundles, 41 families") the
+    coordinator forwards to their school board — which is exactly who approves next year's fundraiser. Lifetime
+    raised on the org profile tells you which partners deserve white-glove treatment. Benchmarks card turns your
+    own history into coaching ("every 3 shares ≈ 1 order").</p>
+    <span class="was">build: reuses the existing flyer/PDF generation + settlement data</span>
+  </div></div>
+</section>
+</div>
+
+<script>
+/* ---------- data (from the real dashboard) ---------- */
+const ORGS = [
+  { id:'ccfb', name:'Coles County Farm Bureau', coord:'Kristin Iverson', init:'CC', held:9, heldAmt:1410,
+    camps:[
+      {n:'Spring 2026 Fundraiser', id:'C99467D7', stage:'active', dates:'Ends Apr 28, 2026', sub:'12 days left', sold:14, goal:20, sales:1410, held:9},
+      {n:'Fall 2025 Fundraiser', id:'F82A11C0', stage:'closed', dates:'Closed Nov 21, 2025', sub:'41 orders', settle:2847},
+    ]},
+  { id:'ecfb', name:'Edgar County Farm Bureau', coord:'Wyatt Williamson', init:'EC', held:17, heldAmt:2065,
+    camps:[
+      {n:'Edgar County Fundraiser', id:'EA12979B', stage:'active', dates:'Ends Apr 28, 2026', sub:'12 days left', sold:15, goal:20, sales:2190, held:17},
+    ]},
+  { id:'hill', name:'Hilltop Academy', coord:'Principal Hacker', init:'HA', held:0, heldAmt:0,
+    camps:[
+      {n:'Hilltop Academy Fundraiser', id:'DF425603', stage:'active', dates:'Ends Apr 24, 2026', sub:'8 days left', sold:0, goal:100, sales:0, held:0, risk:true},
+    ]},
+  { id:'delmar', name:'Delmar PTO', coord:'Jessica Banowetz', init:'DP', held:0, heldAmt:0,
+    camps:[
+      {n:'Feb 2026 Campaign', id:'B43D125E', stage:'production', dates:'Ended Feb 17, 2026', sub:'in production', sold:9, goal:10, sales:400, held:0},
+    ]},
+  { id:'agitc', name:'Ag in the Classroom', coord:'Karen Seuring', init:'AC', held:0, heldAmt:0,
+    camps:[
+      {n:'Spring Fundraiser 2026', id:'A4B9E14D', stage:'onboarding', dates:'Starts Feb 5, 2026', sub:'kickoff scheduled'},
+      {n:'Spring Fundraiser 2026', id:'38412148', stage:'lead', dates:'Feb 5, 2026', sub:'possible duplicate ⚠', dup:true},
+      {n:'Spring 2026 Fundraiser', id:'036B1F23', stage:'lead', dates:'Feb 2, 2026', sub:'possible duplicate ⚠', dup:true},
+    ]},
+  { id:'clark', name:'Clark Co Farm Bureau', coord:'Lindsey Vogt', init:'CF', held:0, heldAmt:0,
+    camps:[ {n:'Clark Co Fundraiser (lead)', id:'NEW-6835', stage:'lead', dates:'No date yet', sub:'follow up', lead:true} ]},
+  { id:'cumb', name:'Cumberland Co Farm Bureau', coord:'Lindsey Vogt', init:'CU', held:0, heldAmt:0,
+    camps:[ {n:'Cumberland Co Fundraiser (lead)', id:'NEW-AFA7', stage:'lead', dates:'No date yet', sub:'follow up', lead:true} ]},
+];
+
+const PEOPLE = [
+  {n:'Kim Reynolds', e:'kim.r@gmail.com', st:'active', stl:'Repeat', act:'Ordered 4 bundles', when:'3 days ago', spend:'$540'},
+  {n:'Priya Sharma', e:'priya.s@outlook.com', st:'active', stl:'Repeat', act:'Ordered 5 bundles', when:'1 week ago', spend:'$625'},
+  {n:'Deshawn Williams', e:'dwill@yahoo.com', st:'lead', stl:'New', act:'First order placed', when:'2 weeks ago', spend:'$95'},
+  {n:'Marta Gonzalez', e:'marta.g@gmail.com', st:'active', stl:'Repeat', act:'Opened spring menu email', when:'2 days ago', spend:'$310'},
+  {n:'Tom Baker', e:'tbaker@gmail.com', st:'closed', stl:'Lapsed', act:'Last order Oct 2025', when:'6 months ago', spend:'$180'},
+];
+
+/* ---------- fundraisers screen ---------- */
+const orglist = document.getElementById('orglist');
+let fFilter = 'all', fQuery = '';
+
+function stageChip(s){ return `<span class="stage ${s}">${s}</span>`; }
+function money(n){ return '$' + n.toLocaleString(); }
+
+function renderOrgs(){
+  const q = fQuery.toLowerCase();
+  let html = '';
+  for (const org of ORGS){
+    const camps = org.camps.filter(c =>
+      (fFilter==='all' || c.stage===fFilter) &&
+      (!q || org.name.toLowerCase().includes(q) || org.coord.toLowerCase().includes(q) || c.n.toLowerCase().includes(q)));
+    if (!camps.length) continue;
+    html += `<div class="card orggroup" data-org="${org.id}">
+      <div class="orghead" onclick="this.parentElement.classList.toggle('closed')">
+        <span class="avatar">${org.init}</span>
+        <span class="who"><b>${org.name}</b><span>Coordinator: ${org.coord}</span></span>
+        <span class="meta">
+          ${org.held ? `<span class="m"><b>${org.held} held</b><span>${money(org.heldAmt)}</span></span>` : ''}
+          <span class="m"><b>${org.camps.length}</b><span>campaign${org.camps.length>1?'s':''}</span></span>
+          <span class="caret">▾</span>
+        </span>
+      </div>
+      ${camps.map(c => `
+        <div class="camp" data-goto="detail">
+          <span class="n"><b>${c.n}</b><span>ID ${c.id}${c.dup ? ' · <span style="color:#b45309">possible duplicate</span>':''}</span></span>
+          ${stageChip(c.stage)}
+          <span class="dates">${c.dates}<span>${c.sub||''}${c.risk ? ' · <b style="color:#dc2626">⚠ at risk</b>' : (c.stage==='active' && c.sold>0) ? ' · <b style="color:#059669">on pace</b>' : ''}</span></span>
+          <span class="prog">${
+            c.settle != null ? `<span class="settle">Settled: ${money(c.settle)}</span><span> · awaiting invoice</span>` :
+            c.goal ? `<b>${c.sold} / ${c.goal} bundles</b> <span>· ${money(c.sales)}</span><div class="bar"><i style="width:${Math.min(c.sold/c.goal*100,100)}%"></i></div>` :
+            `<span class="goalless">No goal yet — set one →</span>`
+          }</span>
+          <span class="rowact" onclick="event.stopPropagation()">
+            ${c.stage==='active' ? `<a href="#">Portal</a><button class="warn">Close out</button>` : ''}
+            ${c.settle != null ? `<button class="good">Invoice</button>` : ''}
+            ${c.lead || c.dup ? `<a href="#">Follow up</a>` : ''}
+          </span>
+        </div>`).join('')}
+    </div>`;
+  }
+  orglist.innerHTML = html || '<p style="padding:2rem;text-align:center;color:#94a3b8;font-size:.8rem">No campaigns match.</p>';
+  orglist.querySelectorAll('[data-goto]').forEach(el =>
+    el.addEventListener('click', () => showScreen('detail')));
+}
+
+document.getElementById('fq').addEventListener('input', e => { fQuery = e.target.value; renderOrgs(); });
+document.querySelectorAll('#fchips button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#fchips button').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); fFilter = b.dataset.f; renderOrgs();
+}));
+
+/* ---------- customers screen ---------- */
+const custlist = document.getElementById('custlist');
+let custMode = 'people', cQuery = '';
+
+function renderCust(){
+  const q = cQuery.toLowerCase();
+  if (custMode === 'people'){
+    custlist.innerHTML = PEOPLE
+      .filter(p => !q || p.n.toLowerCase().includes(q) || p.e.toLowerCase().includes(q))
+      .map(p => `<div class="custrow">
+        <span class="who"><span class="avatar">${p.n.split(' ').map(w=>w[0]).join('')}</span><span><b>${p.n}</b><span>${p.e}</span></span></span>
+        <span class="stage ${p.st}">${p.stl}</span>
+        <span class="act">${p.act}<span>${p.when}</span></span>
+        <span class="spend">${p.spend}</span>
+        <span class="rowact"><a href="#" onclick="event.stopPropagation()">✉️</a><a href="#" onclick="event.stopPropagation()">＋ Order</a></span>
+      </div>`).join('');
+  } else {
+    custlist.innerHTML = ORGS
+      .filter(o => !q || o.name.toLowerCase().includes(q) || o.coord.toLowerCase().includes(q))
+      .map(o => `<div class="custrow" data-goto="detail">
+        <span class="who"><span class="avatar">${o.init}</span><span><b>${o.name}</b><span>Coordinator: ${o.coord}</span></span></span>
+        <span class="stage ${o.camps[0].stage}">${o.camps[0].stage}</span>
+        <span class="act">${o.camps.length} campaign${o.camps.length>1?'s':''}<span>${o.held ? o.held + ' held orders' : 'no held orders'}</span></span>
+        <span class="spend">${o.heldAmt ? money(o.heldAmt) : '—'}</span>
+        <span class="rowact"><a href="#" onclick="event.stopPropagation()">Profile →</a></span>
+      </div>`).join('');
+    custlist.querySelectorAll('[data-goto]').forEach(el =>
+      el.addEventListener('click', () => showScreen('detail')));
+  }
+}
+document.getElementById('cq').addEventListener('input', e => { cQuery = e.target.value; renderCust(); });
+document.querySelectorAll('#custseg button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#custseg button').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); custMode = b.dataset.t; renderCust();
+}));
+
+/* ---------- screen switching ---------- */
+function showScreen(name){
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.dataset.screen === name));
+  document.querySelectorAll('.navbtn').forEach(b => b.classList.toggle('on', b.dataset.screen === name));
+}
+document.querySelectorAll('.navbtn').forEach(b => b.addEventListener('click', () => showScreen(b.dataset.screen)));
+document.querySelectorAll('[data-screen-link]').forEach(b => b.addEventListener('click', () => showScreen(b.dataset.screenLink)));
+
+/* ---------- growth engine + static nav links ---------- */
+document.querySelectorAll('[data-screen="growth"] [data-goto]').forEach(el =>
+  el.addEventListener('click', () => showScreen(el.dataset.goto)));
+document.querySelectorAll('[data-goto-static]').forEach(el =>
+  el.addEventListener('click', (e) => { e.preventDefault(); showScreen(el.dataset.gotoStatic); }));
+
+/* ---------- wizard steps ---------- */
+function showWStep(n){
+  document.querySelectorAll('.wpane').forEach(p => p.hidden = p.dataset.wp !== String(n));
+  document.querySelectorAll('.wstep').forEach(s => {
+    const k = Number(s.dataset.ws);
+    s.classList.toggle('now', k === n);
+    s.classList.toggle('done', k < n);
+  });
+}
+document.querySelectorAll('[data-wgo]').forEach(b =>
+  b.addEventListener('click', () => showWStep(Number(b.dataset.wgo))));
+
+renderOrgs(); renderCust();
+</script>
+<style>
+  .winput{display:block;width:100%;margin-top:.25rem;border:1px solid #e2e7f0;border-radius:9px;padding:.5rem .65rem;font:600 .8rem/1.3 system-ui,sans-serif;color:#0f172a;background:#fbfcfe;text-transform:none;letter-spacing:0}
+  .wbundle{display:flex;align-items:center;gap:.5rem;border:1px solid #e6eaf2;border-radius:10px;padding:.5rem .7rem;font-size:.76rem;font-weight:600;color:#334155;cursor:pointer;background:#fff}
+  .wbundle:has(input:checked){border-color:#4f46e5;background:#eef0fd}
+</style>

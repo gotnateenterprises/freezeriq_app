@@ -1,0 +1,767 @@
+<title>Storefront Redesign — Cozy Mobile Demo</title>
+<style>
+  :root{
+    --ink:#1e2430; --ink-2:#5a6272; --paper:#f5f6f9; --panel:#fff; --line:#e3e6ee;
+    --chipbg:#a64d66; --chipfg:#fff;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{--ink:#e7eaf2; --ink-2:#9aa2b5; --paper:#14161d; --panel:#1d2029; --line:#2c3040}
+  }
+  :root[data-theme="dark"]{--ink:#e7eaf2; --ink-2:#9aa2b5; --paper:#14161d; --panel:#1d2029; --line:#2c3040}
+  :root[data-theme="light"]{--ink:#1e2430; --ink-2:#5a6272; --paper:#f5f6f9; --panel:#fff; --line:#e3e6ee}
+  *{box-sizing:border-box}
+  body{background:var(--paper); color:var(--ink); margin:0; padding:2rem 1.25rem 4rem;
+    font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1080px; margin:0 auto}
+  header.page h1{font-size:1.5rem; font-weight:800; letter-spacing:-.02em; margin:0 0 .35rem; text-wrap:balance}
+  header.page p{color:var(--ink-2); max-width:66ch; margin:0 0 1.4rem}
+
+  .tabs{display:flex; gap:.4rem; flex-wrap:wrap; margin-bottom:1.4rem}
+  .tabs button{font:700 .78rem/1 ui-monospace,Consolas,monospace; letter-spacing:.03em;
+    padding:.55rem .9rem; border-radius:999px; border:1px solid var(--line);
+    background:var(--panel); color:var(--ink-2); cursor:pointer}
+  .tabs button[aria-selected="true"]{background:#a64d66; border-color:#a64d66; color:#fff}
+  .tabs button:focus-visible{outline:2px solid #a64d66; outline-offset:2px}
+
+  .cols{display:flex; gap:2.25rem; align-items:flex-start}
+  .phone-col{position:sticky; top:1.25rem; flex:0 0 auto}
+  .notes-col{flex:1 1 320px; min-width:0}
+  @media (max-width:900px){ .cols{flex-direction:column} .phone-col{position:static; align-self:center} }
+
+  /* ---------- phone (the storefront's own warm light world) ---------- */
+  .phone{width:392px; max-width:100%; background:#241a1d; border-radius:46px; padding:10px;
+    box-shadow:0 24px 60px -18px rgba(60,25,40,.45)}
+  .screen{height:724px; border-radius:36px; background:#faf5ef; color:#3b2a2f;
+    overflow-y:auto; overflow-x:hidden; position:relative; display:none;
+    font-size:14px; line-height:1.5; scrollbar-width:thin}
+  .screen.active{display:block}
+  .serif{font-family:Georgia,'Iowan Old Style','Times New Roman',serif}
+
+  .topbar{position:sticky; top:0; z-index:6; display:flex; align-items:center; gap:.55rem;
+    background:rgba(250,245,239,.92); backdrop-filter:blur(8px); padding:.75rem 1rem .6rem;
+    border-bottom:1px solid #eee2d6}
+  .topbar .logo{width:30px;height:30px;border-radius:99px;background:#a64d66;color:#fff;
+    display:grid;place-items:center;font-size:.85rem;flex:none}
+  .topbar b{font-family:Georgia,serif;font-size:1rem;letter-spacing:.01em}
+  .topbar .pts{margin-left:auto;font-size:.66rem;font-weight:800;color:#7d5a2b;background:#f8ecd3;
+    border-radius:99px;padding:.3rem .6rem}
+
+  .body{padding:0 0 6.2rem}
+
+  /* order-week strip */
+  .weekstrip{display:flex;align-items:center;gap:.5rem;background:#f3e8e0;padding:.5rem 1rem;
+    font-size:.72rem;color:#6b4d3f;font-weight:600}
+  .weekstrip b{color:#3b2a2f}
+
+  /* hero */
+  .hero{padding:1.3rem 1.15rem 1rem}
+  .hero h1{font-family:Georgia,serif;font-weight:400;font-size:1.7rem;line-height:1.15;margin:0;letter-spacing:-.01em}
+  .hero h1 em{font-style:italic;color:#a64d66}
+  .hero p{margin:.45rem 0 0;font-size:.82rem;color:#7a6258}
+
+  /* your usual */
+  .usual{margin:0.9rem 1rem 0;display:flex;gap:.7rem;align-items:center;background:#fff;
+    border:1px solid #eee2d6;border-radius:18px;padding:.75rem .9rem}
+  .usual .ph{width:44px;height:44px;border-radius:12px;flex:none;display:grid;place-items:center;font-size:1.3rem;background:linear-gradient(135deg,#f6e3e4,#f3d8c8)}
+  .usual b{display:block;font-size:.8rem}
+  .usual span{font-size:.68rem;color:#9a8075}
+  .usual button{margin-left:auto;flex:none;background:#a64d66;color:#fff;border:0;border-radius:10px;
+    font-size:.7rem;font-weight:800;padding:.5rem .75rem;cursor:pointer}
+
+  /* categories */
+  .cats{display:flex;gap:.4rem;padding:.9rem 1rem .3rem;overflow-x:auto;scrollbar-width:none}
+  .cats button{flex:none;border:1px solid #e9d9cb;background:#fff;border-radius:999px;
+    font-size:.72rem;font-weight:700;color:#7a6258;padding:.45rem .8rem;cursor:pointer}
+  .cats button.on{background:#3b2a2f;border-color:#3b2a2f;color:#fff}
+
+  /* bundle cards */
+  .cards{display:flex;flex-direction:column;gap:.85rem;padding:.8rem 1rem}
+  .bcard{background:#fff;border:1px solid #eee2d6;border-radius:20px;overflow:hidden;cursor:pointer}
+  .bcard .img{height:120px;display:grid;place-items:center;font-size:2.2rem;position:relative}
+  .bcard .img.f1{background:linear-gradient(135deg,#f3d8c8,#eec3ad)}
+  .bcard .img.f2{background:linear-gradient(135deg,#e8e4d0,#d5d9bd)}
+  .bcard .img.f3{background:linear-gradient(135deg,#f6e3e4,#eccfd4)}
+  .bcard .fav{position:absolute;top:.6rem;left:.6rem;font-size:.58rem;font-weight:800;letter-spacing:.05em;
+    background:rgba(255,255,255,.9);color:#a64d66;border-radius:99px;padding:.25rem .55rem}
+  .bcard .inner{padding:.8rem .95rem .9rem}
+  .bcard h3{margin:0;font-family:Georgia,serif;font-weight:400;font-size:1.05rem}
+  .bcard .inside{margin:.25rem 0 .4rem;font-size:.7rem;color:#9a8075;line-height:1.45}
+  .bcard .rowb{display:flex;align-items:center;gap:.6rem}
+  .bcard .price{font-size:.95rem;font-weight:800;font-variant-numeric:tabular-nums}
+  .bcard .serves{font-size:.66rem;color:#9a8075}
+  .addbtn{margin-left:auto;background:#a64d66;color:#fff;border:0;border-radius:12px;
+    font-size:.74rem;font-weight:800;padding:.55rem .95rem;cursor:pointer;transition:transform .1s}
+  .addbtn:active{transform:scale(.96)}
+  .addbtn.added{background:#7d8f72}
+
+  /* founder note + testimonial */
+  .founder{margin:1rem;background:#fff;border:1px solid #eee2d6;border-radius:20px;padding:1rem 1.05rem;display:flex;gap:.8rem}
+  .founder .ava{width:44px;height:44px;border-radius:99px;flex:none;background:linear-gradient(135deg,#eccfd4,#e5b8c1);display:grid;place-items:center;font-size:1.2rem}
+  .founder p{margin:0;font-family:Georgia,serif;font-style:italic;font-size:.82rem;color:#5d463d;line-height:1.5}
+  .founder span{display:block;margin-top:.3rem;font-family:system-ui,sans-serif;font-style:normal;font-size:.66rem;font-weight:700;color:#9a8075}
+  .quote{margin:0 1rem 1rem;text-align:center;padding:.9rem 1.2rem}
+  .quote p{margin:0;font-family:Georgia,serif;font-style:italic;font-size:.86rem;color:#6b4d3f}
+  .quote span{font-size:.66rem;font-weight:700;color:#b09484}
+  .stars{color:#e0a52e;font-size:.75rem;letter-spacing:2px}
+
+  /* sticky cart bar */
+  .cartbar{position:sticky;bottom:0;z-index:7;background:#3b2a2f;color:#fff;margin:0;
+    padding:.7rem 1rem calc(.7rem + env(safe-area-inset-bottom));display:flex;align-items:center;gap:.7rem;cursor:pointer}
+  .cartbar .count{background:#a64d66;border-radius:99px;min-width:22px;height:22px;display:grid;place-items:center;
+    font-size:.7rem;font-weight:800}
+  .cartbar .lbl{font-size:.8rem;font-weight:700}
+  .cartbar .tot{margin-left:auto;font-weight:800;font-variant-numeric:tabular-nums}
+  .cartbar .go{background:#fff;color:#3b2a2f;border:0;border-radius:11px;font-size:.74rem;font-weight:800;padding:.5rem .8rem}
+  .freebar{background:#f8ecd3;padding:.45rem 1rem;font-size:.68rem;color:#7d5a2b;font-weight:700;position:sticky;bottom:56px;z-index:7}
+  .freebar .track{height:5px;background:#ecd9ab;border-radius:99px;margin-top:.3rem;overflow:hidden}
+  .freebar .track i{display:block;height:100%;background:#7d8f72;border-radius:99px;transition:width .3s}
+
+  /* detail screen */
+  .dimg{height:190px;display:grid;place-items:center;font-size:3rem;background:linear-gradient(135deg,#f3d8c8,#eec3ad)}
+  .dbody{padding:1rem 1.1rem}
+  .dbody h2{font-family:Georgia,serif;font-weight:400;font-size:1.45rem;margin:0}
+  .meta-chips{display:flex;gap:.4rem;flex-wrap:wrap;margin:.55rem 0}
+  .mchip{font-size:.64rem;font-weight:700;background:#f3e8e0;color:#6b4d3f;border-radius:99px;padding:.3rem .6rem}
+  .mchip.sage{background:#e8ede2;color:#4f6142}
+  .sizetog{display:flex;background:#f3e8e0;border-radius:14px;padding:.3rem;margin:.7rem 0}
+  .sizetog button{flex:1;border:0;border-radius:11px;background:none;font-size:.76rem;font-weight:700;
+    color:#7a6258;padding:.55rem;cursor:pointer}
+  .sizetog button.on{background:#fff;color:#3b2a2f;box-shadow:0 1px 4px rgba(60,25,40,.12)}
+  .sizetog button span{display:block;font-size:.64rem;font-weight:600;color:#9a8075}
+  .inside-list{margin:.5rem 0}
+  .irow{display:flex;align-items:center;gap:.6rem;padding:.5rem 0;border-bottom:1px dashed #eee2d6;font-size:.8rem}
+  .irow:last-child{border-bottom:0}
+  .irow .em{width:30px;height:30px;border-radius:9px;background:#f6ede2;display:grid;place-items:center;font-size:.95rem;flex:none}
+  .irow span:last-child{margin-left:auto;font-size:.66rem;color:#9a8075;white-space:nowrap}
+  .pair{margin-top:.9rem;background:#fdf3ee;border:1px solid #f3d8c8;border-radius:16px;padding:.75rem .9rem;display:flex;gap:.7rem;align-items:center}
+  .pair .ph{width:40px;height:40px;border-radius:11px;background:linear-gradient(135deg,#f6e3e4,#eccfd4);display:grid;place-items:center;font-size:1.1rem;flex:none}
+  .pair b{display:block;font-size:.76rem}
+  .pair span{font-size:.66rem;color:#9a8075}
+  .pair button{margin-left:auto;flex:none;background:#fff;border:1.5px solid #a64d66;color:#a64d66;border-radius:10px;
+    font-size:.68rem;font-weight:800;padding:.45rem .7rem;cursor:pointer}
+  .pair button.added{background:#7d8f72;border-color:#7d8f72;color:#fff}
+
+  /* bag screen */
+  .bagitem{display:flex;gap:.7rem;align-items:center;background:#fff;border:1px solid #eee2d6;border-radius:16px;padding:.7rem .85rem;margin:0 1rem .6rem}
+  .bagitem .ph{width:42px;height:42px;border-radius:11px;display:grid;place-items:center;font-size:1.15rem;flex:none;background:linear-gradient(135deg,#f3d8c8,#eec3ad)}
+  .bagitem b{display:block;font-size:.78rem}
+  .bagitem span{font-size:.66rem;color:#9a8075}
+  .bagitem .pr{margin-left:auto;font-weight:800;font-variant-numeric:tabular-nums;font-size:.8rem}
+  .sectionlbl{font-size:.64rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#b09484;padding:.9rem 1.15rem .45rem}
+  .minirow{display:flex;gap:.6rem;padding:0 1rem;overflow-x:auto;scrollbar-width:none}
+  .mini{flex:none;width:150px;background:#fff;border:1px solid #eee2d6;border-radius:16px;padding:.6rem}
+  .mini .ph{height:56px;border-radius:10px;display:grid;place-items:center;font-size:1.4rem;margin-bottom:.4rem}
+  .mini b{font-size:.72rem;display:block;line-height:1.25}
+  .mini span{font-size:.66rem;color:#9a8075}
+  .mini button{width:100%;margin-top:.45rem;background:#f6ede2;border:0;color:#a64d66;border-radius:9px;font-size:.68rem;font-weight:800;padding:.4rem;cursor:pointer}
+  .mini button.added{background:#7d8f72;color:#fff}
+  .loyal{margin:1rem;background:#f8ecd3;border-radius:16px;padding:.75rem .95rem;font-size:.74rem;color:#7d5a2b;display:flex;gap:.6rem;align-items:center}
+  .fulfil{margin:0 1rem;display:flex;gap:.5rem}
+  .fulfil button{flex:1;border:1.5px solid #e9d9cb;background:#fff;border-radius:14px;padding:.6rem;font-size:.74rem;font-weight:700;color:#7a6258;cursor:pointer}
+  .fulfil button.on{border-color:#a64d66;color:#a64d66;background:#fdf3ee}
+  .checkoutbtn{display:block;margin:1rem;background:#a64d66;color:#fff;border:0;border-radius:16px;width:calc(100% - 2rem);
+    padding:.95rem;font-size:.95rem;font-weight:800;cursor:pointer;font-family:inherit}
+  .trust{text-align:center;font-size:.64rem;color:#b09484;padding-bottom:.5rem}
+
+  /* confirm screen */
+  .confetti-head{padding:2rem 1.2rem .8rem;text-align:center}
+  .confetti-head .big{font-size:2.6rem}
+  .confetti-head h2{font-family:Georgia,serif;font-weight:400;font-size:1.5rem;margin:.3rem 0 .2rem}
+  .confetti-head p{margin:0;font-size:.8rem;color:#7a6258}
+  .nextsteps{margin:1rem;background:#fff;border:1px solid #eee2d6;border-radius:18px;padding:.9rem 1rem}
+  .ns{display:flex;gap:.7rem;padding:.5rem 0;border-top:1px dashed #eee2d6;font-size:.78rem;align-items:flex-start}
+  .ns:first-of-type{border-top:0}
+  .ns .n{width:24px;height:24px;border-radius:99px;background:#f6ede2;color:#a64d66;font-weight:800;font-size:.72rem;display:grid;place-items:center;flex:none}
+  .ns b{display:block;font-size:.78rem}
+  .ns span{font-size:.68rem;color:#9a8075}
+  .refer{margin:1rem;background:linear-gradient(135deg,#a64d66,#8d3b56);color:#fff;border-radius:20px;padding:1.1rem}
+  .refer b{font-family:Georgia,serif;font-weight:400;font-size:1.05rem}
+  .refer p{margin:.3rem 0 .6rem;font-size:.74rem;opacity:.9}
+  .refer button{background:#fff;color:#8d3b56;border:0;border-radius:11px;font-size:.72rem;font-weight:800;padding:.55rem .9rem;cursor:pointer}
+
+  /* ---------- notes ---------- */
+  .keychip{width:22px;height:22px;border-radius:7px;background:var(--chipbg);color:var(--chipfg);
+    font:800 .72rem/22px ui-monospace,Consolas,monospace;text-align:center;display:inline-block;flex:none}
+  .floatchip{position:absolute;z-index:5;box-shadow:0 2px 6px rgba(120,40,70,.35)}
+  .notes h2{font:700 .78rem/1 ui-monospace,Consolas,monospace;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-2);margin:0 0 .4rem}
+  .note{display:flex;gap:.85rem;padding:.9rem 0;border-top:1px solid var(--line)}
+  .note b{display:block;font-size:.9rem;margin-bottom:.15rem}
+  .note p{margin:0;color:var(--ink-2);font-size:.84rem;max-width:60ch}
+  .note .was{font-family:ui-monospace,Consolas,monospace;font-size:.72rem;color:#d97706;display:block;margin-top:.3rem}
+  @media (prefers-color-scheme: dark){ .note .was{color:#f5a94b} }
+</style>
+
+<div class="wrap">
+<header class="page">
+  <h1>Storefront redesign — cozy, mobile-first, gently persuasive</h1>
+  <p><b>Try it:</b> tap Add on a bundle and watch the free-delivery bar fill; open the bundle,
+  flip the serving toggle, add the pairing; then check the bag. Every upsell is an invitation,
+  never a countdown.</p>
+</header>
+
+<div class="tabs" role="tablist">
+  <button role="tab" aria-selected="false" data-s="first">First visit</button>
+  <button role="tab" aria-selected="true"  data-s="home">Returning</button>
+  <button role="tab" aria-selected="false" data-s="detail">Bundle</button>
+  <button role="tab" aria-selected="false" data-s="bag">Bag</button>
+  <button role="tab" aria-selected="false" data-s="done">Confirmation</button>
+  <button role="tab" aria-selected="false" data-s="fund">Fundraiser</button>
+</div>
+
+<div class="cols">
+<div class="phone-col">
+<div class="phone">
+
+  <!-- ================= FIRST VISIT ================= -->
+  <div class="screen" data-s="first">
+    <div class="topbar">
+      <span class="logo">🍲</span><b>Cascade Kitchen</b>
+      <span class="pts" style="background:#fdf3ee;color:#a64d66">🎁 $10 off first box</span>
+    </div>
+    <div class="weekstrip">📦 Ordering for the week of <b>&nbsp;Nov 17</b>&nbsp;· order by Wed 9pm</div>
+    <div class="body">
+      <div class="hero" style="position:relative">
+        <span class="keychip floatchip" style="top:-4px;right:8px">J</span>
+        <h1>What if dinner was<br>already <em>done?</em></h1>
+        <p>Handcrafted freezer meals, made fresh weekly by a real local kitchen. Thaw, heat, gather — 25 minutes to the table.</p>
+      </div>
+
+      <!-- How it works: 3 compact steps, ABOVE products for first-timers -->
+      <div style="display:flex;gap:.4rem;padding:.7rem 1rem 0">
+        <div style="flex:1;background:#fff;border:1px solid #eee2d6;border-radius:14px;padding:.6rem .5rem;text-align:center">
+          <div style="font-size:1.2rem">🛒</div><b style="font-size:.66rem;display:block">Order by Wed</b>
+          <span style="font-size:.6rem;color:#9a8075">pick your meals</span></div>
+        <div style="flex:1;background:#fff;border:1px solid #eee2d6;border-radius:14px;padding:.6rem .5rem;text-align:center">
+          <div style="font-size:1.2rem">👩‍🍳</div><b style="font-size:.66rem;display:block">We cook fresh</b>
+          <span style="font-size:.6rem;color:#9a8075">small batches</span></div>
+        <div style="flex:1;background:#fff;border:1px solid #eee2d6;border-radius:14px;padding:.6rem .5rem;text-align:center">
+          <div style="font-size:1.2rem">🧊</div><b style="font-size:.66rem;display:block">Stock &amp; relax</b>
+          <span style="font-size:.6rem;color:#9a8075">dinner in 25 min</span></div>
+      </div>
+
+      <!-- Welcome offer replaces "Your usual" -->
+      <div class="usual">
+        <span class="ph">🎁</span>
+        <span><b>Try us once — we think you'll stay.</b><span>$10 off your first box · applied automatically</span></span>
+        <button data-add="fam" data-price="170">Start</button>
+      </div>
+
+      <!-- Most-loved = social proof replaces reorder -->
+      <div class="cards">
+        <div class="bcard" data-goto="detail">
+          <div class="img f1"><span class="fav">💛 MOST LOVED THIS MONTH</span>🥧</div>
+          <div class="inner">
+            <h3>Family Favorites Box</h3>
+            <p class="inside">Chicken pot pie · Beef stroganoff · Enchilada bake · Shepherd's pie · Mac &amp; cheese</p>
+            <div class="rowb">
+              <span><span class="price">$180</span> <span class="serves">· 5 meals · serves 5 · ★ 4.9 (86)</span></span>
+              <button class="addbtn" data-add="fam" data-price="180">Add</button>
+            </div>
+          </div>
+        </div>
+        <div class="bcard" data-goto="detail">
+          <div class="img f2"><span class="fav">👋 PERFECT FIRST TRY</span>🍲</div>
+          <div class="inner">
+            <h3>Soup Sampler</h3>
+            <p class="inside">Three quart jars — the low-risk way to taste what we do</p>
+            <div class="rowb">
+              <span><span class="price">$60</span> <span class="serves">· 3 quarts · 6 servings</span></span>
+              <button class="addbtn" data-add="soup" data-price="60">Add</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="founder">
+        <span class="ava">👩‍🍳</span>
+        <p>"I started this kitchen when my third baby arrived and dinner became the hardest part of my day.
+        Every recipe here is one my own family asks for by name."
+        <span>— Laurie, founder &amp; head cook · licensed kitchen · 400+ local families</span></p>
+      </div>
+
+      <div class="quote">
+        <div class="stars">★★★★★</div>
+        <p>"My picky 7-year-old asked for seconds. SECONDS."</p>
+        <span>— Jessica M., ordered 6 times</span>
+      </div>
+
+      <!-- Soft capture for the not-ready -->
+      <div style="margin:0 1rem 1.2rem;background:#fff;border:1.5px dashed #e9d9cb;border-radius:18px;padding:.9rem 1rem;text-align:center">
+        <b style="font-size:.8rem;font-family:Georgia,serif;font-weight:400">Not ready to order?</b>
+        <p style="margin:.2rem 0 .55rem;font-size:.7rem;color:#9a8075">Get next week's menu in your inbox — no spam, just dinner ideas.</p>
+        <div style="display:flex;gap:.4rem">
+          <input placeholder="your@email.com" style="flex:1;border:1px solid #e9d9cb;border-radius:10px;padding:.5rem .7rem;font:inherit;font-size:.72rem;background:#faf5ef">
+          <button style="background:#3b2a2f;color:#fff;border:0;border-radius:10px;font-size:.7rem;font-weight:800;padding:.5rem .8rem">Send it</button>
+        </div>
+      </div>
+    </div>
+    <div class="cartbar" data-goto="bag">
+      <span class="count c3">0</span><span class="lbl">Your bag</span>
+      <span class="tot">$0</span>
+      <button class="go">View →</button>
+    </div>
+  </div>
+
+  <!-- ================= HOME ================= -->
+  <div class="screen active" data-s="home">
+    <div class="topbar">
+      <span class="logo">🍲</span><b>Cascade Kitchen</b>
+      <span class="pts">✨ 240 pts = $12</span>
+    </div>
+    <div class="weekstrip" style="position:relative">
+      <span class="keychip floatchip" style="top:-9px;left:6px">A</span>
+      📦 Ordering for the week of <b>&nbsp;Nov 17</b>&nbsp;· order by Wed 9pm
+    </div>
+    <div class="body">
+      <div class="hero">
+        <h1>Dinner, <em>solved.</em><br>Made with love, frozen with care.</h1>
+        <p>Handcrafted freezer meals from our licensed kitchen to your table — 25 minutes, no stress, all comfort.</p>
+      </div>
+
+      <div class="usual" style="position:relative">
+        <span class="keychip floatchip" style="top:-9px;left:-9px">B</span>
+        <span class="ph">🧡</span>
+        <span><b>Welcome back, Sarah!</b><span>Your usual: Family Favorites Box · ordered 3× </span></span>
+        <button data-add="usual" data-price="180">Reorder</button>
+      </div>
+
+      <div class="cats">
+        <button class="on">All</button><button>Family dinners</button><button>Date night</button>
+        <button>Soups</button><button>Gluten-free</button><button>Sweet endings</button>
+      </div>
+
+      <div class="cards" style="position:relative">
+        <span class="keychip floatchip" style="top:-6px;left:6px">C</span>
+        <div class="bcard" data-goto="detail">
+          <div class="img f1"><span class="fav">💛 CUSTOMER FAVORITE</span>🥧</div>
+          <div class="inner">
+            <h3>Family Favorites Box</h3>
+            <p class="inside">Chicken pot pie · Beef stroganoff · Enchilada bake · Shepherd's pie · Mac &amp; cheese</p>
+            <div class="rowb">
+              <span><span class="price">$180</span> <span class="serves">· 5 meals · serves 5</span></span>
+              <button class="addbtn" data-add="fam" data-price="180">Add</button>
+            </div>
+          </div>
+        </div>
+        <div class="bcard" data-goto="detail">
+          <div class="img f2">🍲</div>
+          <div class="inner">
+            <h3>Soup Sampler</h3>
+            <p class="inside">Broccoli cheddar · Chicken tortilla · Tomato basil — quart jars, ready in 15</p>
+            <div class="rowb">
+              <span><span class="price">$60</span> <span class="serves">· 3 quarts · 6 servings</span></span>
+              <button class="addbtn" data-add="soup" data-price="60">Add</button>
+            </div>
+          </div>
+        </div>
+        <div class="bcard" data-goto="detail">
+          <div class="img f3">🍰</div>
+          <div class="inner">
+            <h3>Sweet Endings</h3>
+            <p class="inside">Apple crisp · Peach cobbler — oven-ready, smells like Sunday</p>
+            <div class="rowb">
+              <span><span class="price">$45</span> <span class="serves">· 2 desserts · 8 servings</span></span>
+              <button class="addbtn" data-add="sweet" data-price="45">Add</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="founder" style="position:relative">
+        <span class="keychip floatchip" style="top:-9px;left:-9px">D</span>
+        <span class="ava">👩‍🍳</span>
+        <p>"I started this kitchen when my third baby arrived and dinner became the hardest part of my day.
+        Every recipe here is one my own family asks for by name."
+        <span>— Laurie, founder &amp; head cook</span></p>
+      </div>
+
+      <div class="quote">
+        <div class="stars">★★★★★</div>
+        <p>"My picky 7-year-old asked for seconds. SECONDS."</p>
+        <span>— Jessica M., ordered 6 times</span>
+      </div>
+    </div>
+    <div class="freebar" id="freebar" hidden>
+      <span id="freetext"></span>
+      <div class="track"><i id="freefill" style="width:0%"></i></div>
+    </div>
+    <div class="cartbar" data-goto="bag" style="position:sticky">
+      <span class="keychip floatchip" style="top:-9px;right:6px">E</span>
+      <span class="count" id="ccount">0</span><span class="lbl">Your bag</span>
+      <span class="tot" id="ctotal">$0</span>
+      <button class="go">View →</button>
+    </div>
+  </div>
+
+  <!-- ================= DETAIL ================= -->
+  <div class="screen" data-s="detail">
+    <div class="topbar"><span style="cursor:pointer" data-goto="home">←</span><b>Family Favorites Box</b></div>
+    <div class="body">
+      <div class="dimg">🥧</div>
+      <div class="dbody" style="position:relative">
+        <span class="keychip floatchip" style="top:8px;right:8px">F</span>
+        <h2>Family Favorites Box</h2>
+        <div class="meta-chips">
+          <span class="mchip">⏱ table in 25–40 min</span>
+          <span class="mchip sage">🌾 GF option</span>
+          <span class="mchip">🧊 freezer-ready 3 months</span>
+        </div>
+        <div class="sizetog">
+          <button class="on" data-size="5">Serves 5 <span>$180 · family night</span></button>
+          <button data-size="2">Serves 2 <span>$95 · date night</span></button>
+        </div>
+        <div class="inside-list">
+          <div class="irow"><span class="em">🥧</span>Chicken Pot Pie <span>bake 40 min</span></div>
+          <div class="irow"><span class="em">🍄</span>Beef Stroganoff <span>stovetop 25 min</span></div>
+          <div class="irow"><span class="em">🌯</span>Chicken Enchilada Bake <span>bake 35 min</span></div>
+          <div class="irow"><span class="em">🥔</span>Shepherd's Pie <span>bake 40 min</span></div>
+          <div class="irow"><span class="em">🧀</span>Mac &amp; Cheese <span>bake 30 min</span></div>
+        </div>
+        <div class="pair">
+          <span class="ph">🍎</span>
+          <span><b>Families also love: Apple Crisp</b><span>turns Tuesday into an occasion · +$12</span></span>
+          <button data-add="crisp" data-price="12">+ Add</button>
+        </div>
+      </div>
+    </div>
+    <div class="freebar" hidden></div>
+    <div class="cartbar">
+      <span class="count c2">0</span><span class="lbl" id="dsize">Add · Serves 5</span>
+      <span class="tot" id="dprice">$180</span>
+      <button class="go" data-add="fam" data-price="180">Add to bag</button>
+    </div>
+  </div>
+
+  <!-- ================= BAG ================= -->
+  <div class="screen" data-s="bag">
+    <div class="topbar"><span style="cursor:pointer" data-goto="home">←</span><b>Your bag</b></div>
+    <div class="body">
+      <div id="bagitems"><p style="padding:2rem 1.2rem;text-align:center;font-size:.8rem;color:#b09484">Your bag is empty — add something cozy 🧡</p></div>
+
+      <div class="sectionlbl" style="position:relative">
+        <span class="keychip floatchip" style="top:-4px;left:-6px">G</span>
+        Round out your freezer week
+      </div>
+      <div class="minirow">
+        <div class="mini"><div class="ph" style="background:linear-gradient(135deg,#e8e4d0,#d5d9bd)">🍲</div>
+          <b>Tomato Basil Soup</b><span>quart · $18</span><button data-add="tom" data-price="18">+ Add</button></div>
+        <div class="mini"><div class="ph" style="background:linear-gradient(135deg,#f6e3e4,#eccfd4)">🍞</div>
+          <b>Garlic Herb Rolls</b><span>dozen · $9</span><button data-add="rolls" data-price="9">+ Add</button></div>
+        <div class="mini"><div class="ph" style="background:linear-gradient(135deg,#f3d8c8,#eec3ad)">🍎</div>
+          <b>Apple Crisp</b><span>serves 8 · $12</span><button data-add="crisp2" data-price="12">+ Add</button></div>
+      </div>
+
+      <div class="loyal" style="position:relative">
+        <span class="keychip floatchip" style="top:-9px;left:-9px">H</span>
+        ✨ <span>This order earns <b id="earnpts">0 points</b> — that's <b id="earndollars">$0</b> toward next time.</span>
+      </div>
+
+      <div class="sectionlbl">How would you like it?</div>
+      <div class="fulfil">
+        <button class="on">🚗 Pickup · Sat 10–1<br><span style="font-weight:600;font-size:.64rem;color:#9a8075">free</span></button>
+        <button>🚚 Home delivery<br><span style="font-weight:600;font-size:.64rem;color:#9a8075">free over $150</span></button>
+      </div>
+
+      <p class="trust">🔒 Secure checkout · licensed kitchen · loved by 400+ local families</p>
+    </div>
+    <div class="freebar" id="freebar2" hidden>
+      <span id="freetext2"></span>
+      <div class="track"><i id="freefill2" style="width:0%"></i></div>
+    </div>
+    <div class="cartbar" data-goto="done">
+      <span class="lbl">Total</span>
+      <span class="tot" id="checkouttot">$0</span>
+      <button class="go" style="background:#a64d66;color:#fff">Checkout securely →</button>
+    </div>
+  </div>
+
+  <!-- ================= CONFIRMATION ================= -->
+  <div class="screen" data-s="done">
+    <div class="topbar"><span class="logo">🍲</span><b>Cascade Kitchen</b></div>
+    <div class="body">
+      <div class="confetti-head">
+        <div class="big">🧡</div>
+        <h2>Your freezer thanks you, Sarah.</h2>
+        <p>Order #1284 confirmed — a receipt is in your inbox.</p>
+      </div>
+      <div class="nextsteps" style="position:relative">
+        <span class="keychip floatchip" style="top:-9px;left:-9px">I</span>
+        <div class="ns"><span class="n">1</span><span><b>We cook it fresh this week</b><span>small batches, real kitchen, real people</span></span></div>
+        <div class="ns"><span class="n">2</span><span><b>Pickup Saturday 10–1</b><span>we'll text you when it's packed — bring a cooler bag!</span></span></div>
+        <div class="ns"><span class="n">3</span><span><b>Dinner in 25 minutes</b><span>heating card included with every meal</span></span></div>
+      </div>
+      <div class="loyal">✨ <span>You earned <b>257 points</b> — <b>$12.85</b> is waiting for your next order.</span></div>
+      <div class="refer">
+        <b>Know a busy family who needs this?</b>
+        <p>Give a friend $10 off their first box — you get $10 when they order.</p>
+        <button>💌 Share your link</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= FUNDRAISER BUYER PAGE ================= -->
+  <div class="screen" data-s="fund">
+    <div class="topbar">
+      <span class="logo">🍲</span><b>Lincoln Elementary Fundraiser</b>
+      <span class="pts" style="background:#fdf3ee;color:#a64d66">by Cascade Kitchen</span>
+    </div>
+    <div class="body" id="fundbody">
+      <!-- progress hero -->
+      <div style="padding:1.1rem 1.15rem .4rem;position:relative">
+        <span class="keychip floatchip" style="top:2px;right:8px">K</span>
+        <h1 class="serif" style="font-weight:400;font-size:1.45rem;line-height:1.2;margin:0">Help our kids hit <em style="color:#a64d66">20 bundles</em> 🧡</h1>
+        <div style="display:flex;gap:.5rem;margin:.7rem 0 .35rem;font-size:.72rem;font-weight:700;color:#6b4d3f">
+          <span>14 of 20 bundles</span><span style="margin-left:auto">$1,410 raised · 12 days left</span>
+        </div>
+        <div style="height:9px;border-radius:99px;background:#eee2d6;overflow:hidden">
+          <i style="display:block;height:100%;width:70%;background:#a64d66;border-radius:99px"></i>
+        </div>
+        <p style="margin:.5rem 0 0;font-size:.68rem;color:#9a8075">🧡 Kim R. just ordered · Marta G. · Priya S. · +38 supporters</p>
+      </div>
+
+      <!-- pay badge -->
+      <div style="margin:.7rem 1rem;background:#e8ede2;border-radius:14px;padding:.6rem .85rem;font-size:.72rem;font-weight:700;color:#4f6142">
+        💵 No card needed here — you'll pay your coordinator directly (Venmo or check). We'll show you how after you order.
+      </div>
+
+      <!-- bundles -->
+      <div class="cards" id="fundcards">
+        <div class="bcard">
+          <div class="img f1"><span class="fav">💛 CUSTOMER FAVORITE</span>🥧</div>
+          <div class="inner">
+            <h3>Family Favorites Box</h3>
+            <p class="inside">Chicken pot pie · Beef stroganoff · Enchilada bake · Shepherd's pie · Mac &amp; cheese</p>
+            <div class="rowb">
+              <span><span class="price">$180</span> <span class="serves">· serves 5</span></span>
+              <button class="addbtn fadd" data-p="180">Add</button>
+            </div>
+          </div>
+        </div>
+        <div class="bcard">
+          <div class="img f2">🍲</div>
+          <div class="inner">
+            <h3>Soup Sampler</h3>
+            <p class="inside">Broccoli cheddar · Chicken tortilla · Tomato basil</p>
+            <div class="rowb">
+              <span><span class="price">$60</span> <span class="serves">· 6 servings</span></span>
+              <button class="addbtn fadd" data-p="60">Add</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- order form -->
+      <div id="fundform" style="margin:0 1rem 1.2rem;background:#fff;border:1px solid #eee2d6;border-radius:20px;padding:1rem 1.05rem">
+        <b class="serif" style="font-weight:400;font-size:1rem">Your order · <span id="ftot">$0</span></b>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-top:.6rem">
+          <input placeholder="Your name" style="border:1px solid #e9d9cb;border-radius:10px;padding:.55rem .7rem;font:inherit;font-size:.76rem;background:#faf5ef">
+          <input placeholder="Phone" style="border:1px solid #e9d9cb;border-radius:10px;padding:.55rem .7rem;font:inherit;font-size:.76rem;background:#faf5ef">
+        </div>
+        <label style="display:block;margin-top:.55rem;font-size:.64rem;font-weight:800;color:#9a8075;text-transform:uppercase;letter-spacing:.05em">Who are you supporting? 🏅
+          <select style="width:100%;margin-top:.25rem;border:1px solid #e9d9cb;border-radius:10px;padding:.55rem .6rem;font:inherit;font-size:.76rem;background:#faf5ef;color:#3b2a2f">
+            <option>Emma R. — Mrs. Lee's class</option><option>Jack T. — Mrs. Johnson's class</option><option>Just supporting the school!</option>
+          </select>
+        </label>
+        <button id="fsubmit" style="width:100%;margin-top:.8rem;background:#a64d66;color:#fff;border:0;border-radius:14px;padding:.85rem;font-size:.9rem;font-weight:800;cursor:pointer;font-family:inherit">Place my order →</button>
+        <p style="margin:.5rem 0 0;text-align:center;font-size:.62rem;color:#b09484">No payment taken online · your order counts toward the goal instantly</p>
+      </div>
+
+      <!-- thanks state (hidden) -->
+      <div id="fundthanks" hidden>
+        <div style="padding:1.4rem 1.2rem .6rem;text-align:center">
+          <div style="font-size:2.4rem">🎉</div>
+          <h2 class="serif" style="font-weight:400;font-size:1.35rem;margin:.3rem 0 .2rem">You just backed Lincoln Elementary!</h2>
+          <p style="margin:0;font-size:.78rem;color:#7a6258">That's <b>15 of 20 bundles</b> — Emma gets the credit 🏅</p>
+        </div>
+        <div style="margin:.8rem 1rem;background:#fff;border:2px solid #a64d66;border-radius:18px;padding:.95rem 1.05rem">
+          <b style="font-size:.82rem">💵 One last step — pay your coordinator</b>
+          <p style="margin:.35rem 0 .5rem;font-size:.76rem;color:#5d463d">Venmo <b>@lincoln-pta</b> or a check payable to <b>Lincoln PTA</b> — $180 for order #F-1291.</p>
+          <button style="background:#f6ede2;border:0;color:#a64d66;border-radius:10px;font-size:.7rem;font-weight:800;padding:.5rem .8rem;cursor:pointer">Open Venmo →</button>
+        </div>
+        <div style="margin:0 1rem .8rem;background:#fff;border:1px solid #eee2d6;border-radius:18px;padding:.9rem 1.05rem;text-align:center">
+          <b class="serif" style="font-weight:400;font-size:.9rem">Every share sells another bundle 📣</b>
+          <div style="display:flex;gap:.5rem;margin-top:.6rem">
+            <button style="flex:1;background:#3b2a2f;color:#fff;border:0;border-radius:11px;font-size:.7rem;font-weight:800;padding:.6rem">💬 Text it</button>
+            <button style="flex:1;background:#3b5998;color:#fff;border:0;border-radius:11px;font-size:.7rem;font-weight:800;padding:.6rem">📘 Share</button>
+            <button style="flex:1;background:#f6ede2;color:#a64d66;border:0;border-radius:11px;font-size:.7rem;font-weight:800;padding:.6rem">🔗 Copy</button>
+          </div>
+        </div>
+        <div class="founder" style="margin:0 1rem .9rem">
+          <span class="ava">👩‍🍳</span>
+          <p>"Thank you for supporting our local kids — and if your freezer ever needs a refill after the fundraiser, we're here all year."
+          <span>— Laurie, Cascade Kitchen · <u>get the weekly menu →</u></span></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /phone -->
+</div>
+
+<div class="notes-col">
+  <div class="notes">
+    <h2>Design notes — what changed & why it converts</h2>
+    <div class="note"><span class="keychip">A</span><div>
+      <b>Real deadline, zero pressure</b>
+      <p>The order-week strip states a fact ("ordering for the week of Nov 17 · order by Wed") — genuinely useful
+      for meal planning. The countdown timer and deals popup are gone: pressure widgets read as pushy and fight a
+      cozy brand. Facts create urgency; timers create anxiety.</p>
+      <span class="was">was: CountdownBanner + DealsPopup interrupt on load</span>
+    </div></div>
+    <div class="note"><span class="keychip">J</span><div>
+      <b>First visit: prove it fast, sell it gently</b>
+      <p>A new customer today scrolls through hero → brand story → how-it-works → testimonial wall before seeing a
+      single product, with a popup and countdown firing on arrival. The redesigned first visit compresses trust
+      into one screen-length: question-hook hero, 3-chip how-it-works, a $10 welcome offer (auto-applied — no code
+      hunting), then products SECOND — badged with social proof ("Most loved · ★4.9") and a low-risk entry point
+      ("Perfect first try" sampler). The not-ready visitor gets a soft menu-email capture instead of a popup, so
+      even a bounce becomes a subscriber.</p>
+      <span class="was">was: products 5 sections deep; DealsPopup + CountdownBanner on load; no first-order offer; no email capture</span>
+    </div></div>
+    <div class="note"><span class="keychip">B</span><div>
+      <b>"Your usual" — the stickiest card on the page</b>
+      <p>Returning customers see their name and a one-tap reorder of what they actually buy. Order history exists;
+      this is the single highest-converting element a food storefront can add. New visitors see a "most loved this
+      month" card instead.</p>
+    </div></div>
+    <div class="note"><span class="keychip">C</span><div>
+      <b>Cards answer the three questions in one glance</b>
+      <p>What's inside (real recipe names, not marketing copy), who it feeds, what it costs — then Add. One column
+      on mobile, big thumb targets, category chips scroll horizontally. Serif names + warm gradients keep it
+      feeling like a kitchen, not a warehouse.</p>
+    </div></div>
+    <div class="note"><span class="keychip">D</span><div>
+      <b>The founder note is the brand</b>
+      <p>Female-centric done honestly: a real woman, a real reason ("my third baby arrived"), her face near her
+      food. Trust for family-food purchases is personal, not corporate. One five-star quote with a specific detail
+      ("asked for seconds") beats a wall of testimonials.</p>
+    </div></div>
+    <div class="note"><span class="keychip">E</span><div>
+      <b>Thumb-zone cart, always</b>
+      <p>The dark bag bar never leaves the bottom edge — count, total, one tap to view. Above it, the free-delivery
+      progress bar appears only after the first add: "You're $30 from free delivery" is goal-gradient psychology —
+      the customer upsells herself to finish the bar.</p>
+      <span class="was">was: MobileStickyCart exists but competes with popups and a sticky category bar</span>
+    </div></div>
+    <div class="note"><span class="keychip">F</span><div>
+      <b>The serving toggle is honest merchandising</b>
+      <p>Serves 5 / Serves 2 on one card ("family night" / "date night") instead of two confusing catalog entries.
+      Heat-times per meal ("bake 40 min") sell the real product: a calm weeknight. The single pairing suggestion
+      ("Families also love Apple Crisp") is one warm invitation — never a carousel of pressure.</p>
+    </div></div>
+    <div class="note"><span class="keychip">G</span><div>
+      <b>Upsell = "round out your week," capped small</b>
+      <p>Bag add-ons are low-cost sides ($9–18) framed as completing her plan, not spending more. Three items max,
+      horizontal scroll, one tap. Combined with the free-delivery bar this raises order value while feeling like help.</p>
+      <span class="was">was: single configured upsell fires only at checkout — the decision moment, worst timing</span>
+    </div></div>
+    <div class="note"><span class="keychip">H</span><div>
+      <b>Loyalty shown before checkout, not after</b>
+      <p>"This order earns 257 points = $12.85 toward next time" makes the NEXT order part of this one's value.
+      The points chip in the header (240 pts = $12) greets returning customers with a reason to buy again. The
+      LoyaltyWidget exists — it just needs to move upstream.</p>
+    </div></div>
+    <div class="note"><span class="keychip">K</span><div>
+      <b>Fundraiser page: from brochure to order engine</b>
+      <p>Today's buyer page ends in a <code>mailto:</code> link — the buyer types their own order into an email
+      and the coordinator re-types it into the portal. The redesign is a real self-serve form (bundles → name →
+      "who are you supporting?" → submit) that records the order instantly as a held fundraiser order — still
+      <b>zero online payment</b>: the confirmation walks the buyer to the coordinator's Venmo/check, exactly as
+      the flow is designed. Seller credit fuels the leaderboard; the share row turns every buyer into a promoter;
+      and the tenant's founder note + menu-email link appear only AFTER the order, so discovery never competes
+      with the campaign. Try it: add a bundle and place the order.</p>
+      <span class="was">was: "Order" opens the buyer's email app; nothing recorded; coordinator double-enters</span>
+    </div></div>
+    <div class="note"><span class="keychip">I</span><div>
+      <b>Confirmation is the retention page</b>
+      <p>Warm thank-you by name, three concrete next steps ("we'll text you when it's packed — bring a cooler bag"),
+      points earned banner, and the referral card ("give a friend $10") at the exact moment of peak goodwill.
+      This screen currently says thanks and stops; it should start the next order and the next customer.</p>
+    </div></div>
+  </div>
+</div>
+</div>
+
+<script>
+const FREE_AT = 150;
+let cart = [];   // {key, name, price, emoji}
+const NAMES = {
+  usual:['Family Favorites Box','🥧',180], fam:['Family Favorites Box','🥧',180],
+  soup:['Soup Sampler','🍲',60], sweet:['Sweet Endings','🍰',45],
+  crisp:['Apple Crisp','🍎',12], crisp2:['Apple Crisp','🍎',12],
+  tom:['Tomato Basil Soup','🍲',18], rolls:['Garlic Herb Rolls','🍞',9],
+};
+
+function total(){ return cart.reduce((s,i)=>s+i.price,0); }
+function render(){
+  const t = total(), n = cart.length;
+  document.getElementById('ccount').textContent = n;
+  document.getElementById('ctotal').textContent = '$' + t;
+  document.getElementById('checkouttot').textContent = '$' + t;
+  const pts = Math.round(t * 1.4), dollars = (pts/20).toFixed(2);
+  document.getElementById('earnpts').textContent = pts + ' points';
+  document.getElementById('earndollars').textContent = '$' + dollars;
+  // free delivery bars
+  [['freebar','freetext','freefill'],['freebar2','freetext2','freefill2']].forEach(([bar,txt,fill])=>{
+    const b = document.getElementById(bar); if(!b) return;
+    if (n === 0){ b.hidden = true; return; }
+    b.hidden = false;
+    const remain = FREE_AT - t;
+    document.getElementById(txt).innerHTML = remain > 0
+      ? `🚚 You're <b>$${remain}</b> away from free home delivery`
+      : `🎉 You've unlocked <b>free home delivery</b>!`;
+    document.getElementById(fill).style.width = Math.min(t/FREE_AT*100,100) + '%';
+  });
+  // bag items
+  const bag = document.getElementById('bagitems');
+  bag.innerHTML = n === 0
+    ? '<p style="padding:2rem 1.2rem;text-align:center;font-size:.8rem;color:#b09484">Your bag is empty — add something cozy 🧡</p>'
+    : cart.map((i,idx)=>`<div class="bagitem"><span class="ph">${i.emoji}</span>
+        <span><b>${i.name}</b><span>serves 5 · qty 1</span></span>
+        <span class="pr">$${i.price}</span>
+        <span style="color:#d8c3b5;cursor:pointer;padding:0 .2rem" data-rm="${idx}">✕</span></div>`).join('');
+  bag.querySelectorAll('[data-rm]').forEach(x=>x.addEventListener('click',()=>{ cart.splice(Number(x.dataset.rm),1); render(); }));
+}
+document.querySelectorAll('[data-add]').forEach(b=>b.addEventListener('click',(e)=>{
+  e.stopPropagation();
+  const k = b.dataset.add, [name,emoji,price] = NAMES[k];
+  cart.push({key:k,name,emoji,price:Number(b.dataset.price)||price});
+  b.classList.add('added'); const old = b.textContent; b.textContent = '✓ Added';
+  setTimeout(()=>{ b.classList.remove('added'); b.textContent = old; }, 1400);
+  render();
+}));
+function show(s){
+  document.querySelectorAll('.screen').forEach(x=>x.classList.toggle('active', x.dataset.s===s));
+  document.querySelectorAll('.tabs button').forEach(x=>x.setAttribute('aria-selected', String(x.dataset.s===s)));
+  document.querySelector('.screen.active').scrollTop = 0;
+}
+document.querySelectorAll('.tabs button').forEach(b=>b.addEventListener('click',()=>show(b.dataset.s)));
+document.querySelectorAll('[data-goto]').forEach(el=>el.addEventListener('click',(e)=>{
+  if (e.target.closest('[data-add]')) return;
+  show(el.dataset.goto);
+}));
+// serving toggle
+document.querySelectorAll('[data-size]').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('[data-size]').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  const five = b.dataset.size === '5';
+  document.getElementById('dprice').textContent = five ? '$180' : '$95';
+  document.getElementById('dsize').textContent = five ? 'Add · Serves 5' : 'Add · Serves 2';
+  document.querySelector('[data-s="detail"] .cartbar [data-add]').dataset.price = five ? 180 : 95;
+}));
+render();
+
+/* ---------- fundraiser screen ---------- */
+let ftot = 0;
+document.querySelectorAll('.fadd').forEach(b => b.addEventListener('click', () => {
+  ftot += Number(b.dataset.p);
+  document.getElementById('ftot').textContent = '$' + ftot;
+  b.classList.add('added'); b.textContent = '✓ Added';
+}));
+document.getElementById('fsubmit').addEventListener('click', () => {
+  document.getElementById('fundform').hidden = true;
+  document.getElementById('fundcards').hidden = true;
+  document.getElementById('fundthanks').hidden = false;
+  document.querySelector('[data-s="fund"]').scrollTop = 0;
+});
+</script>

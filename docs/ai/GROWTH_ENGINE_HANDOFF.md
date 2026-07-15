@@ -571,64 +571,117 @@ One badge per bundle, priority: org_previous > fundraiser_favorite > top_seller.
 
 **Files:** new `lib/bundles/autoBuilder.ts`, new `app/api/bundles/auto-suggest/route.ts`, additive UI on `app/bundles/page.tsx`. **Do NOT touch `components/BundleEditor.tsx` (locked) or `lib/pricing.ts`/`lib/kitchen_engine.ts` (read-only reuse).**
 
-### `lib/bundles/autoBuilder.ts`
+### `lib/bundles/autoBuilder.ts` (v2 — Random Bundle Creator constraints, approved 2026-07-12)
 
 ```ts
 /**
- * Auto Bundle Builder — SPEC §6.1 GE-11 (locked constraints).
- * Constrained random sampler over the tenant's recipes:
- *   - exactly 5 meals
- *   - container mix: 2 tray + 3 bag OR 3 tray + 2 bag
+ * Random Bundle Creator — SPEC §6.1 GE-11 (locked constraints, v2):
+ *   - exactly 5 meals; container mix 2 tray + 3 bag OR 3 tray + 2 bag
+ *   - at least 3 DIFFERENT proteins across the 5 meals
+ *   - food cost ≤ 35% of the serves-5 price
  *   - max 2 "expensive" recipes (top-quartile cost)
- *   - total food cost ≤ TARGET_FOOD_COST_PCT of the serves-5 price
+ *   - among valid candidates, MAXIMIZE ingredient overlap
+ *     (fewest distinct ingredients = simplest supplier order + prep day)
  */
-export type CandidateRecipe = { id: string; name: string; container_type: 'tray' | 'bag'; cost: number };
+export type Protein = 'chicken' | 'beef' | 'pork' | 'turkey' | 'seafood' | 'lamb' | 'vegetarian';
+export type CandidateRecipe = {
+    id: string; name: string; container_type: 'tray' | 'bag'; cost: number;
+    ingredientIds: string[];        // child ingredient ids (from the same costing traversal)
+    ingredientNames: string[];      // lowercase, for protein detection
+    categoryNames?: string[];       // fallback protein signal
+};
 export type BuiltBundle = {
-    recipes: CandidateRecipe[]; totalCost: number; foodCostPct: number;
-    estMargin: number; mix: { tray: number; bag: number }; constraintsMet: boolean; notes: string[];
+    recipes: CandidateRecipe[]; totalCost: number; foodCostPct: number; estMargin: number;
+    mix: { tray: number; bag: number }; proteins: Protein[];
+    distinctIngredients: number; sharedIngredients: number;   // overlap telemetry for the preview
+    constraintsMet: boolean; notes: string[];
 };
 
-export const BUNDLE_PRICE = 125;              // serves-5 set price
-export const TARGET_FOOD_COST_PCT = 0.40;     // tenant-tunable later
+export const BUNDLE_PRICE = 125;
+export const TARGET_FOOD_COST_PCT = 0.35;   // emerald zone
+export const MAX_FOOD_COST_PCT = 0.40;      // hard cap — BAND decision 2026-07-12
+export const MIN_PROTEINS = 3;
 export const MAX_EXPENSIVE = 2;
 const MIXES: Array<[number, number]> = [[2, 3], [3, 2]]; // [tray, bag]
 
+const PROTEIN_KEYWORDS: Record<Protein, string[]> = {
+    chicken:  ['chicken'],
+    beef:     ['beef', 'sirloin', 'ground chuck', 'steak', 'brisket', 'meatball', 'meatloaf'],
+    pork:     ['pork', 'ham', 'bacon', 'sausage', 'chorizo'],
+    turkey:   ['turkey'],
+    seafood:  ['shrimp', 'salmon', 'fish', 'cod', 'tilapia', 'crab'],
+    lamb:     ['lamb'],
+    vegetarian: [], // assigned when nothing else matches
+};
+
+/** Detect a recipe's protein from its ingredients (primary) or categories (fallback). */
+export function detectProtein(r: Pick<CandidateRecipe, 'ingredientNames' | 'categoryNames' | 'name'>): Protein {
+    const hay = [...r.ingredientNames, ...(r.categoryNames ?? []), r.name].join(' ').toLowerCase();
+    for (const [p, words] of Object.entries(PROTEIN_KEYWORDS) as [Protein, string[]][]) {
+        if (words.some(w => hay.includes(w))) return p;
+    }
+    return 'vegetarian';
+}
+
+const sample = <T,>(arr: T[], n: number): T[] => [...arr].sort(() => Math.random() - 0.5).slice(0, n);
+
 export function buildRandomBundle(all: CandidateRecipe[], opts?: { price?: number; tries?: number }): BuiltBundle | null {
     const price = opts?.price ?? BUNDLE_PRICE;
-    const tries = opts?.tries ?? 60;
+    const tries = opts?.tries ?? 120;                     // more tries: we rank, not first-valid
     const trays = all.filter(r => r.container_type === 'tray' && r.cost > 0);
     const bags  = all.filter(r => r.container_type === 'bag'  && r.cost > 0);
-    if (trays.length < 2 || bags.length < 2 || trays.length + bags.length < 5) return null; // not enough variety
+    if (trays.length < 2 || bags.length < 2 || trays.length + bags.length < 5) return null;
 
     const costs = [...all.map(r => r.cost)].sort((a, b) => a - b);
     const expensiveCut = costs[Math.floor(costs.length * 0.75)] ?? Infinity;
-    const isExpensive = (r: CandidateRecipe) => r.cost >= expensiveCut;
-    const sample = <T,>(arr: T[], n: number): T[] =>
-        [...arr].sort(() => Math.random() - 0.5).slice(0, n);
 
-    let best: BuiltBundle | null = null;
+    const evaluate = (pick: CandidateRecipe[], t: number, b: number): BuiltBundle => {
+        const totalCost = pick.reduce((s, r) => s + r.cost, 0);
+        const foodCostPct = totalCost / price;
+        const expensive = pick.filter(r => r.cost >= expensiveCut).length;
+        const proteins = [...new Set(pick.map(detectProtein))];
+        const allIng = pick.flatMap(r => r.ingredientIds);
+        const distinct = new Set(allIng).size;
+        const notes: string[] = [];
+        if (foodCostPct > MAX_FOOD_COST_PCT) notes.push(`food cost ${(foodCostPct * 100).toFixed(0)}% (hard cap 40%)`);
+        if (expensive > MAX_EXPENSIVE) notes.push(`${expensive} high-cost meals (max ${MAX_EXPENSIVE})`);
+        if (proteins.length < MIN_PROTEINS) notes.push(`only ${proteins.length} protein${proteins.length === 1 ? '' : 's'} (need ${MIN_PROTEINS}+)`);
+        return {
+            recipes: pick, totalCost, foodCostPct, estMargin: price - totalCost,
+            mix: { tray: t, bag: b }, proteins,
+            distinctIngredients: distinct, sharedIngredients: allIng.length - distinct,
+            constraintsMet: notes.length === 0, notes,
+        };
+    };
+
+    let bestValid: BuiltBundle | null = null;
+    let bestAny: BuiltBundle | null = null;
     for (let i = 0; i < tries; i++) {
         const [t, b] = MIXES[Math.floor(Math.random() * MIXES.length)];
         if (trays.length < t || bags.length < b) continue;
-        const pick = [...sample(trays, t), ...sample(bags, b)];
-        const totalCost = pick.reduce((s, r) => s + r.cost, 0);
-        const expensive = pick.filter(isExpensive).length;
-        const foodCostPct = totalCost / price;
-        const met = expensive <= MAX_EXPENSIVE && foodCostPct <= TARGET_FOOD_COST_PCT;
-        const candidate: BuiltBundle = {
-            recipes: pick, totalCost, foodCostPct, estMargin: price - totalCost,
-            mix: { tray: t, bag: b }, constraintsMet: met,
-            notes: met ? [] : [
-                ...(expensive > MAX_EXPENSIVE ? [`${expensive} high-cost meals (max ${MAX_EXPENSIVE})`] : []),
-                ...(foodCostPct > TARGET_FOOD_COST_PCT ? [`food cost ${(foodCostPct * 100).toFixed(0)}% (target ≤ ${TARGET_FOOD_COST_PCT * 100}%)`] : []),
-            ],
-        };
-        if (met) return candidate;                                  // first valid wins
-        if (!best || candidate.foodCostPct < best.foodCostPct) best = candidate; // keep best attempt
+        const c = evaluate([...sample(trays, t), ...sample(bags, b)], t, b);
+        if (c.constraintsMet) {
+            // BAND-AWARE OVERLAP RANKING: emerald-zone (≤35%) beats band (35–40%);
+            // within a zone, fewer distinct ingredients wins; tiebreak lower cost.
+            const zone = (x: BuiltBundle) => (x.foodCostPct <= TARGET_FOOD_COST_PCT ? 0 : 1);
+            if (!bestValid
+                || zone(c) < zone(bestValid)
+                || (zone(c) === zone(bestValid) && c.distinctIngredients < bestValid.distinctIngredients)
+                || (zone(c) === zone(bestValid) && c.distinctIngredients === bestValid.distinctIngredients && c.totalCost < bestValid.totalCost)) {
+                bestValid = c;
+            }
+        }
+        if (!bestAny || c.notes.length < bestAny.notes.length) bestAny = c;
     }
-    return best; // constraintsMet=false ⇒ UI shows notes + suggests Shuffle
+    return bestValid ?? bestAny; // valid best-overlap, else closest attempt (constraintsMet=false → UI shows notes)
 }
 ```
+
+**Preview additions (AutoBundleModal):** protein chips row (🐔🥩🐷 detected proteins), and the overlap line — `"These 5 meals share {sharedIngredients} ingredients — {distinctIngredients} items on the shopping list"` — styled emerald. That line IS the Production-page connection: fewer distinct items = shorter supplier order and simpler prep day, and the created bundle flows into Kitchen Board batches automatically.
+
+**Data plumbing:** the auto-suggest API's candidate mapping must now also collect, per recipe, `ingredientIds` + lowercase `ingredientNames` (both available in the same `child_items` traversal the extracted costing helper already walks — no extra queries) and `categoryNames` from the recipe's categories.
+
+**CB connection (fundraiser-ready pairs):** the preview gains an optional checkbox — `"Also create the Serves 2 version (fundraiser-ready)"`. When checked, after creating the serves-5 bundle the client repeats the create with the serves-2 mapping (same recipe-name `"(Serves 2)"` convention + `-S2` SKU the BundleEditor clone uses — replicate that mapping in the creator, do NOT modify BundleEditor) and, once CB-1's `family_id` exists, stamps both with a shared family id — making creator output immediately eligible for coordinator candidate pools. When a recipe lacks a Serves 2 sibling, the checkbox shows "3 of 5 recipes have Serves 2 versions — create those first" and disables.
 
 ### `app/api/bundles/auto-suggest/route.ts`
 

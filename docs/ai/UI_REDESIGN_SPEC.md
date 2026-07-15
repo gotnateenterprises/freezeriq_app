@@ -2,7 +2,7 @@
 
 Status: APPROVED DIRECTION — implementation phased, proposal-first where marked.
 Scope: Coordinator Panel redesign + Recipe Library redesign + CRM redesign + Growth
-Engine + Prospect Finder + Coordinator Bundle Selection (§8).
+Engine + Prospect Finder + Coordinator Bundle Selection (§8) + Storefront redesign (§9).
 This file is the single source of truth for both redesigns. If a chat transcript,
 handoff doc, or mockup disagrees with this file, this file wins.
 
@@ -312,22 +312,34 @@ fundraiser tools in core; GE-1..5 as the growth tier) — gate later via Busines
   4. No history at all → plain alphabetical list, no badges, nothing pre-checked.
   Suggest-only: the tenant can always uncheck/override. No schema changes.
   (AI-composed NEW bundle suggestions = future idea, not in scope — but see GE-11.)
-- **GE-11 — Auto Bundle Builder on the Bundles page (approved 2026-07-10).**
-  "✨ Auto-build a bundle" button generates a candidate 5-meal bundle from the
-  tenant's recipes under LOCKED constraints:
+- **GE-11 — Random Bundle Creator on the Bundles page (approved 2026-07-10;
+  v2 constraints approved 2026-07-12).** "✨ Create a Random Bundle" generates a
+  candidate 5-meal bundle from the tenant's recipes under LOCKED constraints:
   1. **Container mix:** exactly 2 tray + 3 bag OR 3 tray + 2 bag
      (`Recipe.container_type`).
-  2. **Cost balance:** recipes classified into cost tiers from their computed
-     costs; max 2 "expensive" recipes (top-quartile cost) per bundle — never
-     5 expensive meals together.
-  3. **Margin gate:** total recipe cost must keep food-cost ≤ target % of the
-     serves-5 price ($125 default; target default 40%, tenant-tunable later).
-  Preview shows the 5 meals + computed food-cost % + est. margin, with Shuffle
-  (re-roll) and "Create this bundle" → creates via the EXISTING bundle-create API
-  as a draft the tenant names/reviews in the normal editor. BundleEditor internals
-  untouched. Recipe costs come from the same server-side calculation the recipes
-  page already performs — extract/reuse, do not reimplement. Optional monthly nudge
-  ("build this month's bundle") rides GE-5 cron later, default OFF.
+  2. **Protein variety:** at least 3 DIFFERENT proteins across the 5 meals
+     (chicken/beef/pork/turkey/seafood/lamb/vegetarian), detected from recipe
+     ingredients (primary) and categories (fallback) — no schema, no manual tagging.
+  3. **Margin gate (BAND, decision 2026-07-12):** food cost target ≤ **35%**,
+     hard cap **40%** of the serves-5 price ($125 default). ≤35% = emerald;
+     35–40% = amber "within variance band" (valid); >40% = rejected. The sampler
+     prefers ≤35% candidates before band candidates, then ranks by overlap.
+  4. **Cost balance:** max 2 "expensive" recipes (top-quartile cost).
+  5. **Ingredient-overlap maximization:** among valid candidates, pick the set
+     with the FEWEST distinct ingredients — streamlines supplier ordering and
+     prep. Preview surfaces it: "share N ingredients — M shopping-list items."
+  Preview shows the 5 meals, protein chips, food-cost %, margin, and the overlap
+  line, with Shuffle and "Create this bundle" → EXISTING bundle-create API →
+  tenant reviews/names in the normal editor. BundleEditor internals untouched;
+  costing reused from the extracted recipes-page helper.
+  **CB connection:** optional "also create the Serves 2 version (fundraiser-ready)"
+  — clones via the same recipe-sibling/`-S2` SKU convention BundleEditor uses
+  (replicated in the creator, editor untouched) and stamps `family_id` once CB-1
+  lands, so creator output is immediately eligible for coordinator candidate pools;
+  disabled with guidance when Serves-2 recipe siblings are missing.
+  **Production connection:** overlap metric = shorter shopping lists; created
+  bundles flow into Kitchen Board batches automatically. Optional monthly nudge
+  rides GE-5 cron later, default OFF.
 
 Explicitly rejected (do not build): SMS/Twilio nudges (new integration + compliance),
 referral attribution tracking (schema cost > insight), cross-tenant benchmarks
@@ -497,3 +509,364 @@ gates alone as a security fix. Both files are locked → proposal-first.
 CRM-4 handoff immediately (docs change) and binds when CRM-4 is implemented. If
 CRM-4 gets built before CB-1 lands, it ships with original active-assignment
 semantics and CB-4 migrates it — but the cheap path is CB-1 first.
+
+---
+
+## 9. Storefront Redesign — "Cozy Commerce" (SF-1..12) — APPROVED 2026-07-11
+
+**Exact code:** `docs/ai/STOREFRONT_REDESIGN_HANDOFF.md`. **Pixel reference:**
+`docs/ai/prototypes/storefront_prototype.html` (6 screens: First visit / Returning /
+Bundle / Bag / Confirmation / Fundraiser). Prototype wins when look or copy is ambiguous.
+
+**Design law:** persuasion by invitation, never pressure. Facts create urgency
+(order-by date from real cutoffs); timers and popups are REMOVED. Every upsell is
+one warm suggestion, capped small, framed as completing her plan.
+
+**Hard boundaries (unchanged):** `app/api/checkout/**`, `app/api/webhooks/**`,
+`app/api/public/order/route.ts` stay locked. The CheckoutModal's details → payment →
+confirm steps are UNTOUCHED — SF only re-skins the bag step and everything before/after
+payment. No Stripe/Square logic changes anywhere (SF-12 is dashboard config, verified
+proposal-first).
+
+### Phases
+- **SF-1 — Brand token system.** Storefront layout reads TenantBranding once and emits
+  CSS custom properties (`--brand-primary/-ink/-soft/-ground` + derived tints with
+  WCAG contrast guard). Replace the 19 scattered inline `primary_color` styles with
+  tokens. Curated palettes (6, berry/linen default) + custom mode in StorefrontSettings
+  with live preview.
+- **SF-2 — Landing re-orchestration.** New/returning conditional (session/customer
+  cookie): first visit = hook hero, 3-chip how-it-works, auto-applied welcome offer,
+  most-loved badges, founder note, soft menu-email capture (writes BusinessLead,
+  source `storefront_menu_signup`); returning = greeting, points chip, "Your usual"
+  one-tap reorder. Week strip driven by earliest real `order_cutoff_date`.
+  **DELETE CountdownBanner + DealsPopup from the storefront render** (components may
+  remain in repo).
+- **SF-3 — Cards, serving toggle, gentle upsell.** Bundle cards (photo, real recipe
+  names, serves, price, Add); Serves-5/Serves-2 on ONE card via `family_id` pairing
+  (CB-1 dependency; until it lands, fall back to two cards as today); one pairing
+  suggestion per detail view; sticky bottom cart bar + free-delivery progress bar
+  (goal gradient, threshold from delivery settings).
+- **SF-4 — Bag redesign.** Sticky "Checkout securely" bar with live total; "round out
+  your week" mini-row (≤3 low-price add-ons); loyalty earn line BEFORE checkout;
+  pickup/delivery selector. Bag step only.
+- **SF-5 — Confirmation retention page.** Named thank-you, 3 concrete next steps,
+  points-earned banner, refer-a-friend card (rides existing DiscountCode system).
+- **SF-6 — Storefront schema proposal (PROPOSAL-FIRST, one migration):**
+  `Order.is_gift Boolean @default(false)`, `Order.gift_note String?`,
+  `Order.gift_recipient_name String?`, new `StorefrontReview` table
+  (business_id, order_id?, customer_name, rating, quote, status pending/approved,
+  created_at). Nothing else.
+- **SF-7 — Gifting ("Send dinner to someone you love").** Buyer pays normally; order
+  carries recipient address + gift note; gift-shaped confirmation email. NO gift
+  cards / stored value.
+- **SF-8 — Review loop.** Post-delivery ask email (GE-5 cron, 2 days after
+  delivered/pickup) → one-tap star + quote capture route → StorefrontReview pending →
+  tenant approves → feeds TestimonialWall. Suppress re-asks per order.
+- **SF-9 — Label QR loop.** Label QR encodes `/shop/{slug}/recipe/{recipeId}`
+  (existing PublicRecipeDetail) + heating card + "Running low? Reorder →" CTA.
+  Tenant-side label config only; no locked files.
+- **SF-10 — "Usual box" email (subscription-lite).** Monthly GE-5 cron job (default
+  OFF, tenant toggle): customers with 2+ orders get their usual box as a one-tap
+  prefilled cart link (`/shop/{slug}?cart=…`); storefront reads the param and
+  preloads the bag. NO auto-charge.
+- **SF-11 — PWA.** Per-tenant manifest route (name/colors/logo from branding),
+  icons, install prompt affordance. No offline/service-worker scope.
+- **SF-12 — Express wallets (PROPOSAL-FIRST).** Verify Apple/Google Pay render on
+  Stripe hosted Checkout (dashboard payment-method config + session inspection).
+  Config only — any code change to checkout session = stop and propose.
+
+### 9.1 Extension seams — build these shapes so deferred features drop in later
+1. **True subscriptions (DEFERRED):** payment creation stays behind the existing
+   `getPaymentProvider(businessId)` abstraction; SF-10's "usual box" definition
+   (customer→bundle set) is stored/derivable so a future subscription = new provider
+   method + webhook handling, ZERO storefront rewrite. Do not scatter one-off
+   checkout calls that bypass the provider abstraction.
+2. **Group orders / payment splitting (DEFERRED):** keep order creation
+   single-payer; the gift fields (SF-6) deliberately separate purchaser from
+   recipient — a future group order extends that separation (N purchasers) without
+   reshaping Order. Do not merge purchaser and recipient concepts anywhere.
+3. **REJECTED for storefront:** gift cards/stored value, SMS, countdown/pressure
+   widgets (permanent), popup interrupts (permanent).
+
+**Dependencies:** SF-1 first (everything themes through it). SF-3's single-card
+toggle wants CB-1's family_id. SF-8/SF-10 want GE-5 cron. SF-6 gates SF-7/SF-8.
+Paywall note: SF-7..11 are candidates for the growth tier.
+
+---
+
+## 10. Fundraiser Buyer Page (FR-1..4) — APPROVED 2026-07-11
+
+**Pixel reference:** `docs/ai/prototypes/storefront_prototype.html` → "Fundraiser" screen.
+**Exact code:** FR section of `docs/ai/STOREFRONT_REDESIGN_HANDOFF.md`.
+**Problem being solved:** the current buyer page's Order button is a `mailto:` link
+(`FundraiserClient.tsx:41,410`) — nothing is recorded; the coordinator re-types
+emailed orders into the portal. This track replaces it with self-serve ordering
+while preserving the LOCKED no-payment fundraiser boundary.
+
+### Locked decisions
+1. **Self-serve orders, ZERO online payment.** The form creates a held order; the
+   confirmation screen then shows the coordinator's payment instructions
+   (`payment_instructions` / `external_payment_link` — existing fields) with an
+   "Open Venmo →" style external link. Never Stripe/Square on this page — permanent.
+2. **Order shape = coordinator-entered orders exactly:** `source='fundraiser'`,
+   `status='fundraiser_hold'`, `campaign_id`, `participant_name`, server-side prices
+   via `buildBundlePriceMap`, bundle ids validated against ACTIVE `campaign_bundles`
+   (`state='active'` post-CB-1), gated by `isCampaignOrderable()` (CB) and the
+   campaign-closed check (7E-1C pattern). This also closes the legacy hazard of
+   storefront-sourced orders carrying a campaign_id with the wrong source.
+3. **Seller credit:** "Who are you supporting?" writes `participant_name`
+   (existing field) — free text, or a picker when GE-6 group mode is enabled.
+   Feeds the leaderboard.
+4. **Tenant discovery placement law:** founder note, menu-email capture
+   (BusinessLead, `source='fundraiser_buyer'`), and "run your own fundraiser" CTA
+   appear ONLY on the post-order confirmation and page footer — never above or
+   between bundles. Discovery must not compete with the campaign.
+5. Buyer PII: the form collects name + phone (order fields that exist); it is NOT
+   exposed back on any public surface (scoreboard masking rules unchanged).
+
+### Phases
+- **FR-1 — Order endpoint (PROPOSAL-FIRST):** new
+  `app/api/public/fundraiser-order/route.ts`, campaign-scoped via the campaign id +
+  business slug resolved server-side (same pattern as the page's own data fetch).
+  Rate-limit lightly; reject when campaign closed, not orderable (CB), or any bundle
+  not an active assignment. Mirrors the coordinator POST's validation — read it,
+  do not modify it.
+- **FR-2 — Page rebuild:** SF-1 brand tokens + SF-3 BundleCard reuse; progress hero
+  with days-left + masked recent-supporters ticker; "no card needed" pay badge ABOVE
+  the bundles; order form (bundles → name/phone → supporting whom → submit).
+  Replaces the mailto flow entirely.
+- **FR-3 — Confirmation + share loop:** goal-impact headline ("that's 15 of 20!"),
+  payment-instructions card, share row (text / Facebook / copy — FB-1's corrected
+  order-page link), seller-credit echo.
+- **FR-4 — Tenant discovery:** founder note + menu-email capture + run-your-own CTA
+  per decision 4; FB-3 OG image covers rich sharing.
+
+**Dependencies:** FR-2..4 want SF-1 tokens (fall back to current styling if SF-1
+not merged). FR-1 must respect CB gates when CB-1+ land; before CB, it validates
+against existing `campaign_bundles` rows as-is. GE-6 leaderboard integrates
+automatically via `participant_name`.
+
+---
+
+## 11. Visibility Pack (VP-1..3) — APPROVED 2026-07-11 · VP-F1/F2 FUTURE
+
+**Exact code:** VP section of `docs/ai/STOREFRONT_REDESIGN_HANDOFF.md`.
+
+- **VP-1 — "Add dinners to your calendar" (ICS export).** On the order confirmation:
+  one tap downloads an `.ics` scheduling one all-day dinner event per meal
+  (name + heating instructions + reorder link), starting the day after
+  delivery/pickup. Pure client-side string generation — no backend, no schema.
+- **VP-2 — One-tap weekly menu graphic.** Public image route
+  `/shop/{slug}/menu-card` renders a branded, IG-portrait menu card
+  (this week's `show_on_storefront` bundles, prices, order-by date, QR/URL) via
+  `next/og` ImageResponse using SF-1 brand colors. Backend button "📸 Share this
+  week's menu" downloads it + copies a pre-written caption. Same image tech as
+  FB-3 (synergy, not a hard dependency).
+- **VP-3 — Bundle Finder quiz.** "Not sure where to start?" on the first-visit
+  landing → 3 questions (household size / food style / prep preference) →
+  scored recommendation card with Add button. Pure client-side scoring over
+  existing bundle fields (serving_tier, price, contents) — NO AI call.
+
+**FUTURE (approved direction, do NOT build yet):**
+- **VP-F1 — Scoreboard TV Mode** (`?tv=1` fullscreen auto-refresh + order QR) —
+  build when fundraiser volume justifies it.
+- **VP-F2 — Year-end "Wrapped"** (shareable tenant/org stat cards) — build on
+  GE-8 + VP-2 image infra once a year of data exists.
+
+**Rules:** all three respect SF-1 tokens and §9 hard boundaries (no checkout/
+payment/locked files); VP-2's route is public-read-only and cached; quiz never
+auto-adds to cart — recommendation only.
+
+---
+
+## 12. Kitchen Board + Delivery Day (KB/DD) — APPROVED 2026-07-12
+
+**Exact code:** `docs/ai/KITCHEN_DELIVERY_HANDOFF.md`. **Pixel references:**
+`docs/ai/prototypes/kitchen_board_prototype.html` and
+`docs/ai/prototypes/delivery_day_prototype.html`. One synergistic pipeline:
+Kitchen ends at "Packed & ready"; Delivery picks up the same tickets.
+
+**Design laws:** every order appears in exactly ONE lane at a time; time (this
+week / today) is the first filter on both boards; the Pack station gates the
+route (nothing can be marked delivered that was never cooked and packed);
+"delivered" is written by DELIVERY surfaces only. Existing Google routing
+(auto-arrange via /api/delivery/optimize + multi-stop Maps export + per-stop
+links + drag reorder via /api/delivery/route/reorder) is PRESERVED and promoted
+to the route-lane header. Packing is cardboard boxes — no cooler/returnable
+tracking (decision recorded 2026-07-12).
+
+### Phases
+- **DD-0 — Pipeline correctness (build FIRST, ships value alone):**
+  1. Production dashboard fundraiser filter: exclude by `status='fundraiser_hold'`
+     instead of `source='fundraiser'` on all three queries — closeout-released
+     orders MUST reach the kitchen (today they skip it but appear on delivery).
+  2. `order_count` bug: count DISTINCT order ids per bundle, not line items
+     (dashboard route aggregation).
+  3. Week-filter leak in /api/orders GET: stop pinning ALL completed-status and
+     ALL null-delivery_date orders into every week — pin only when created
+     within 30 days; add a one-time backfill marking stale completed rows
+     delivered (backfill = proposal-first script).
+  4. /delivery/run queries `ready_to_ship` only (never production_ready).
+  5. Orders PATCH transition guard (PROPOSAL-FIRST — order mutation): allowed
+     prior-states map; delivered only from ready_to_ship/completed; make the
+     production_ready side effects (loyalty/invoice sync) idempotent.
+- **KB-1 — Kitchen Board UI:** replace the production dashboard render with the
+  pipeline board (New orders → To cook → Packed & ready), week/today filter,
+  4-stat header, batch cards with per-recipe check-off gating the Pack button,
+  Kitchen Mode scale toggle. Same three APIs underneath (dashboard, bulk-status,
+  batch-update-by-bundle). Rename "Manual Planner" → "Shopping & Prep Sheets",
+  pre-filled from the To-Cook lane; give Schedule a real tab. DELETE the
+  production page's mark-delivered buttons (delivered moves to DD-1).
+- **DD-1 — Delivery Day board UI:** day-first board (Pack station → Route →
+  Pickups), load-out stats incl. boxes + packaging cost, pack checklists gating
+  "Loaded in van" AND the stop's Delivered button, route lane with Auto-arrange +
+  Open-full-route promoted, Driver Mode toggle, pickups lane with payment state
+  ("owes $45 — collect"). Supplies & Boxes and Print Center become tabs
+  (existing inventory CRUD + manifest/packing-slips/batch-labels/pickup-sheet
+  pages consolidated into a day-scoped print bar).
+- **DD-2 — Fundraiser Handoff Kit:** per released campaign — bag labels grouped
+  by `customer_name` (big name, org, contents, "Bag 1 of N", storefront QR per
+  SF-9), A–Z interactive handoff check-off card on the Delivery board. Grouping
+  mirrors the existing /api/tracker/pickup-sheet aggregation; label rendering
+  reuses the existing batch-label printing.
+- **DD-3 — Scan-to-deliver:** order-QR on packing slips + bag labels; the
+  existing scanner pages (@yudiel/react-qr-scanner) gain a "delivery mode" that
+  marks the scanned order delivered (through the DD-0 guarded transition).
+- **DD-4 — Notifications:** "out for delivery" batch email on van load-out and
+  "ready for pickup" email on pack completion — tenant-branded via lib/email.ts,
+  per-tenant toggles (default OFF), no emails to fundraiser buyers.
+- **DD-5 — Cleanup + cost visibility:** archive orphans
+  (components/production/InProductionArea.tsx, /api/production/deduct);
+  packaging cost per run + low-stock nudge on the Supplies tab.
+
+**FUTURE (do not build yet):** Kitchen Wall Mode (?wall=1 auto-refresh display),
+capacity forecast (batch-hours from recipe cook times), photo proof of delivery
+(S3 client exists — needs storage wiring + its own proposal).
+
+**Dependencies:** DD-0 first (independent, high value). KB-1/DD-1 in either
+order after DD-0. DD-2 needs the closeout engine (shipped) + DD-0.1. DD-3 needs
+DD-0.5's guard. DD-4 rides existing email infra. Fundraiser boundary: handoff
+kit and boards only ever see RELEASED (post-closeout) fundraiser orders; no
+payment anything.
+
+---
+
+## 13. Bundles Page track (BP-1..5) — APPROVED 2026-07-12
+
+Home of the Random Bundle Creator (GE-11) plus five approved upgrades. Exact
+code will be added to `docs/ai/GROWTH_ENGINE_HANDOFF.md` alongside GE-11 when
+these phases queue (BP-1's flag rides the CB-1 migration — see below).
+
+- **BP-1 — Fundraiser Lineup tab (the coordinator-pool selector).** A 4th tab on
+  the Bundles page (Bundles / Catalogs / Surplus / **Fundraiser Lineup**):
+  1. Lists bundle FAMILIES (grouped by `family_id`), each with a checkmark —
+     checked = "offered to coordinators right now." Storage:
+     `Bundle.fundraiser_eligible Boolean @default(false)` on the family
+     representative — ADD THIS COLUMN TO THE CB-1 MIGRATION (one proposal,
+     not two).
+  2. Only PAIRED families (both tiers exist + active) can be checked; unpaired
+     rows show the pairing status chip and a one-tap "Create Serves 2 pair"
+     action (the GE-11 clone convention). This absorbs former idea #1
+     ("fundraiser-ready column").
+  3. **SEMANTICS (locked):** the lineup is the DEFAULT candidate pool for NEW
+     campaigns — CRM-4/CB-4's wizard Step 2 opens pre-checked from it (tenant
+     can still adjust per campaign). Lineup changes do NOT retro-apply to
+     running campaigns (their candidate pools were snapshotted into
+     campaign_bundles rows at creation) — a coordinator's choices are never
+     yanked mid-campaign. Editing a running campaign's pool stays a deliberate
+     per-campaign action via the existing assignment route.
+  4. Each row shows margin health (BP-2 chip) and velocity (BP-3 chip) so
+     lineup curation is informed: offer coordinators what sells AND holds margin.
+- **BP-2 — Margin health chips + drift surfacing.** Per-bundle live food-cost %
+  chip against the 35/40 band (emerald ≤35, amber 35–40, red >40) computed from
+  the extracted costing helper; surface `lib/drift_alert.ts` findings on the row
+  ("ingredient costs rose — was 33%, now 38%"). Display-only; no pricing writes.
+- **BP-3 — Seller velocity chips.** "🔥 Top seller" / "💤 No sales 60+ days"
+  from the GE-10 tally queries (channel-aware: storefront vs fundraiser).
+- **BP-4 — Catalog scheduler awakening.** The dormant `Catalog` model
+  (start/end/is_active) becomes scheduled menus: "Week of Nov 17" auto-activates
+  its bundles' storefront visibility in its window (a small daily check — rides
+  GE-5 cron or activation-on-read). Feeds the storefront WeekStrip and the VP-2
+  menu graphic. Manual toggling remains available; scheduler is additive.
+- **BP-5 — Lineup overlap report.** The GE-11 overlap math pointed at currently
+  ACTIVE bundles: "this week's lineup = 31 shopping-list items" + best single-swap
+  suggestion. Read-only card on the Bundles tab; direct Production-page synergy.
+
+**Boundaries:** no BundleEditor internal changes; no pricing writes anywhere;
+BP-1's flag is the only schema touch (inside CB-1's proposal). Order: BP-1 with
+CB-1/CB-4 · BP-2 with GE-11 (shared costing) · BP-3 anytime after GE-10 ·
+BP-4/BP-5 independent.
+
+### 13.1 Add-On Bundles: Sides & Desserts — APPROVED 2026-07-12 (cross-cutting)
+
+Sides/dessert bundles as coordinator-offered upsells ("above and beyond" the 2
+main families). One schema touch, then amendments to phases already specced:
+
+- **Schema (joins the CB-1 migration — still ONE proposal):**
+  `Bundle.bundle_type String @default("meal")` — `meal` | `side` | `dessert`.
+  Priced freely (typically small: $9–$45); NO serving-tier pairing requirement.
+- **BP-1 amendment:** Lineup tab gains a second section "Add-ons: Sides &
+  Desserts" — checkmark = offered to coordinators (`fundraiser_eligible` same
+  flag; eligibility rule differs: must be active, pairing NOT required).
+- **CB-2/CB-3 amendment:** coordinator selection gains an optional add-ons step
+  after the exactly-N main choice — check any/none; add-ons do NOT count toward
+  `bundle_selection_limit`; validation exempts `bundle_type != 'meal'` from the
+  family-pairing requirement. Selected add-ons become active campaign_bundles
+  rows like mains — so the offline-order modal, bundle totals, pickup sheets,
+  and DD-2 family bag labels include them with ZERO changes to those surfaces.
+- **FR-2 amendment:** buyer page renders add-ons in a separate "Add a little
+  extra 🍰" strip BELOW the main bundles (upsell placement); freely orderable —
+  an add-on-only order is allowed (DECISION 2026-07-12).
+- **GOAL-COUNTING DECISION (locked):** add-ons count toward DOLLARS
+  (total_sales, settlement, the org's 20% share — automatic via order totals)
+  but NOT toward bundle-set goal progress. `equivalentSets()` and every goal/
+  progress computation counts `bundle_type='meal'` items only. Scoreboard/
+  coordinator progress bars unaffected by add-on volume; money totals include it.
+- **20% share:** NO new math — add-on revenue flows through order totals into
+  settlement_total; lib/fundraiserMetrics.ts orgShare applies unchanged.
+- **GE-11 note (future, optional):** a "create a dessert add-on" creator mode
+  (3-item, side/dessert recipes, same margin band) — not in scope now.
+
+**CB-3 add-on nudge (approved 2026-07-12):** the coordinator's add-ons step is
+an INVITATION with the earnings math visible, per the §14 doctrine:
+"✨ Boost your total — offer desserts & sides. Supporters love easy extras, and
+your group earns 20% on every one." Each add-on card shows "+$X to your group"
+(20% of price). Skippable in one tap ("No thanks, just the bundles") — never a
+blocker, never a countdown.
+
+---
+
+## 14. Coordinator Buy-In Doctrine — GOVERNS ALL FUNDRAISER-PLATFORM WORK
+
+The entire fundraiser platform depends on volunteer coordinators buying in.
+Every phase touching coordinator-facing surfaces (portal, selection, guide,
+scoreboard, buyer page, closeout, settlement) MUST satisfy these laws. Agents:
+check new work against this section before proposing it.
+
+1. **Setup is minutes, not meetings.** A first-time volunteer completes portal
+   setup (payment instructions → bundle choices → first share) unassisted in
+   under 5 minutes. Any step that can be pre-filled by the tenant or the system
+   IS pre-filled (GE-10 suggestions, launch-kit generation, lineup defaults).
+2. **Every screen answers "what do I do next?"** Exactly one primary action per
+   state (the phase engine's job). No screen may strand a coordinator — every
+   locked, pending, or complete state names the next step or who to contact.
+3. **Earnings-framed copy everywhere.** Coordinators act when they see what
+   their GROUP gets: show the 20% share ("your group earns ~$X"), never gross
+   sales alone, in nudges, previews, selection steps, and reports
+   (lib/fundraiserMetrics.ts is the single source of that math).
+4. **Nudges are invitations with math, never pressure.** No countdowns, no
+   guilt, no blockers. Pattern: benefit + number + one-tap skip (see the CB-3
+   add-on nudge). Applies to emails (GE-5/GE-7) and portal copy alike.
+5. **Close-and-pay is the payoff, not the chore.** The end of a campaign must
+   feel like winning: final scoreboard → "what happens next" in 3 concrete
+   steps → settlement statement (what the group keeps, what's owed, how to
+   pay — checks_payable/instructions surfaced) → visible "Settled ✓" when the
+   tenant marks it paid. A coordinator should never have to ASK what they owe
+   or whether it's done.
+6. **Their effort is always visible.** Progress bars, pace coaching, leader-
+   boards, impact reports — the system celebrates the coordinator's work back
+   to them, because recognized volunteers rebook (GE-1 depends on this).
+7. **Acceptance test (add to §7 gates for any coordinator-facing phase):** walk
+   the full journey as a brand-new coordinator on a phone — receive link →
+   set up → select bundles (+add-ons nudge) → share → take an order → close →
+   see settlement → know exactly how to pay. Zero moments of "now what?"

@@ -1,0 +1,357 @@
+<title>Kitchen Board — Production Redesign</title>
+<style>
+  :root{
+    --ink:#1e2430; --ink-2:#5a6272; --paper:#f5f6f9; --panel:#fff; --line:#e3e6ee;
+    --chipbg:#4f46e5; --chipfg:#fff;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{--ink:#e7eaf2; --ink-2:#9aa2b5; --paper:#14161d; --panel:#1d2029; --line:#2c3040}
+  }
+  :root[data-theme="dark"]{--ink:#e7eaf2; --ink-2:#9aa2b5; --paper:#14161d; --panel:#1d2029; --line:#2c3040}
+  :root[data-theme="light"]{--ink:#1e2430; --ink-2:#5a6272; --paper:#f5f6f9; --panel:#fff; --line:#e3e6ee}
+  *{box-sizing:border-box}
+  body{background:var(--paper); color:var(--ink); margin:0; padding:2rem 1.25rem 4rem;
+    font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1220px; margin:0 auto}
+  header.page h1{font-size:1.5rem; font-weight:800; letter-spacing:-.02em; margin:0 0 .35rem}
+  header.page p{color:var(--ink-2); max-width:66ch; margin:0 0 1.4rem}
+
+  .scroller{overflow-x:auto; border-radius:18px}
+  .window{min-width:1040px; background:#f1f4f9; color:#0f172a; border-radius:18px;
+    box-shadow:0 24px 60px -20px rgba(20,25,60,.4); overflow:hidden; font-size:13.5px; line-height:1.45}
+  .titlebar{display:flex; align-items:center; gap:.5rem; background:#e6eaf2; padding:.55rem .9rem}
+  .titlebar i{width:11px; height:11px; border-radius:99px; background:#cbd2e0}
+  .titlebar span{margin-left:.6rem; font:600 .72rem/1 ui-monospace,Consolas,monospace; color:#64748b}
+
+  /* app header */
+  .apphead{display:flex; align-items:center; gap:.8rem; background:#fff; border-bottom:1px solid #e6eaf2; padding:.8rem 1.2rem}
+  .apphead .logo{width:34px;height:34px;border-radius:10px;background:#4f46e5;color:#fff;display:grid;place-items:center;font-size:1rem}
+  .apphead h2{margin:0;font-size:1.1rem;font-weight:900;letter-spacing:-.01em}
+  .viewtabs{display:flex;background:#f1f4f9;border-radius:11px;padding:.25rem;margin-left:.6rem}
+  .viewtabs button{border:0;background:none;font:800 .76rem/1 inherit;color:#64748b;padding:.5rem .85rem;border-radius:8px;cursor:pointer}
+  .viewtabs button.on{background:#fff;color:#0f172a;box-shadow:0 1px 4px rgba(20,25,60,.12)}
+  .kmode{margin-left:auto;display:flex;align-items:center;gap:.45rem;font-size:.72rem;font-weight:800;color:#64748b;cursor:pointer;user-select:none}
+  .kmode .sw{width:38px;height:22px;border-radius:99px;background:#cbd5e1;position:relative;transition:.2s}
+  .kmode .sw::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:99px;background:#fff;transition:.2s}
+  .window.kitchen .kmode .sw{background:#4f46e5}
+  .window.kitchen .kmode .sw::after{left:19px}
+
+  /* day strip + stats */
+  .daybar{display:flex;align-items:center;gap:.5rem;padding:.85rem 1.2rem 0}
+  .daychip{border:1px solid #e2e7f0;background:#fff;border-radius:11px;padding:.5rem .85rem;font-size:.76rem;font-weight:800;color:#64748b;cursor:pointer}
+  .daychip.on{background:#0f172a;border-color:#0f172a;color:#fff}
+  .stats{display:flex;gap:.7rem;padding:.8rem 1.2rem}
+  .stat{flex:1;background:#fff;border:1px solid #e6eaf2;border-radius:16px;padding:.75rem 1rem;display:flex;align-items:center;gap:.8rem}
+  .stat .n{font-size:1.6rem;font-weight:900;font-variant-numeric:tabular-nums}
+  .stat .l{font-size:.68rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;line-height:1.3}
+  .stat.amber .n{color:#b45309} .stat.indigo .n{color:#4f46e5} .stat.emerald .n{color:#059669}
+
+  /* pipeline */
+  .lanes{display:grid;grid-template-columns:1fr 1.35fr 1fr;gap:1rem;padding:0 1.2rem 1.4rem;align-items:start}
+  .lane{background:#eef1f7;border-radius:18px;padding:.8rem}
+  .lane > h3{margin:.1rem .3rem .7rem;font-size:.72rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#64748b;display:flex;align-items:center;gap:.5rem}
+  .lane > h3 .cnt{margin-left:auto;background:#fff;border-radius:99px;min-width:24px;text-align:center;padding:.15rem .45rem;font-variant-numeric:tabular-nums;color:#0f172a}
+  .lane.l1 > h3{color:#4f46e5}.lane.l2 > h3{color:#b45309}.lane.l3 > h3{color:#059669}
+
+  .card{background:#fff;border:1px solid #e6eaf2;border-radius:14px;padding:.8rem .9rem;margin-bottom:.7rem}
+  .card:last-child{margin-bottom:0}
+  .card .top{display:flex;align-items:baseline;gap:.5rem}
+  .card .top b{font-size:.9rem}
+  .card .top .due{margin-left:auto;font-size:.66rem;font-weight:800;color:#b45309;background:#fef3c7;border-radius:99px;padding:.2rem .5rem;white-space:nowrap}
+  .card .top .due.ok{color:#475569;background:#f1f5f9}
+  .card .sub{font-size:.72rem;color:#64748b;margin:.15rem 0 .5rem}
+  .bigbtn{display:block;width:100%;border:0;border-radius:11px;padding:.7rem;font:800 .8rem/1 inherit;cursor:pointer;transition:transform .08s}
+  .bigbtn:active{transform:scale(.97)}
+  .bigbtn.approve{background:#eef0fd;color:#3730a3}
+  .bigbtn.start{background:#4f46e5;color:#fff}
+  .bigbtn.pack{background:#b45309;color:#fff}
+  .bigbtn.done{background:#059669;color:#fff}
+  .bigbtn.ghost{background:#f1f5f9;color:#475569}
+  .btnrow{display:flex;gap:.5rem}
+  .btnrow .bigbtn{flex:1}
+
+  /* batch card details */
+  .prep{margin:.4rem 0 .6rem;border-top:1px dashed #e6eaf2;padding-top:.45rem}
+  .prow{display:flex;align-items:center;gap:.55rem;padding:.32rem .1rem;font-size:.8rem;cursor:pointer;border-radius:8px}
+  .prow:hover{background:#f8fafc}
+  .prow .cb{width:20px;height:20px;border-radius:7px;border:2px solid #cbd5e1;display:grid;place-items:center;font-size:.7rem;color:#fff;flex:none;transition:.15s}
+  .prow.done .cb{background:#059669;border-color:#059669}
+  .prow.done span.nm{text-decoration:line-through;color:#94a3b8}
+  .prow .qty{margin-left:auto;font-size:.72rem;font-weight:800;color:#475569;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .prog{height:7px;border-radius:99px;background:#f1f5f9;overflow:hidden;margin:.35rem 0 .6rem}
+  .prog i{display:block;height:100%;background:#059669;border-radius:99px;transition:width .25s}
+
+  .keychip{width:22px;height:22px;border-radius:7px;background:var(--chipbg);color:var(--chipfg);
+    font:800 .72rem/22px ui-monospace,Consolas,monospace;text-align:center;display:inline-block;flex:none}
+  .floatchip{position:absolute;z-index:5;box-shadow:0 2px 6px rgba(30,35,90,.35)}
+
+  /* kitchen mode scaling */
+  .window.kitchen .lanes{font-size:1.08em}
+  .window.kitchen .card .top b{font-size:1.05rem}
+  .window.kitchen .prow{font-size:.95rem;padding:.5rem .1rem}
+  .window.kitchen .prow .cb{width:26px;height:26px}
+  .window.kitchen .bigbtn{padding:.95rem;font-size:.95rem}
+  .window.kitchen .stat .n{font-size:2rem}
+
+  /* planner tab stub */
+  .planner{padding:1rem 1.2rem 1.4rem;display:none}
+  .planner.on{display:block}
+  .laneswrap{display:block}
+  .laneswrap.off{display:none}
+  .planner .card{max-width:640px}
+
+  /* notes */
+  .notes-sec{margin-top:1.8rem}
+  .notes-sec h2{font:700 .78rem/1 ui-monospace,Consolas,monospace;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-2);margin:0 0 .4rem}
+  .dnote{display:flex;gap:.85rem;padding:.9rem 0;border-top:1px solid var(--line)}
+  .dnote b{display:block;font-size:.9rem;margin-bottom:.15rem}
+  .dnote p{margin:0;color:var(--ink-2);font-size:.84rem;max-width:74ch}
+  .dnote .was{font-family:ui-monospace,Consolas,monospace;font-size:.72rem;color:#d97706;display:block;margin-top:.3rem}
+  @media (prefers-color-scheme: dark){ .dnote .was{color:#f5a94b} }
+</style>
+
+<div class="wrap">
+<header class="page">
+  <h1>Kitchen Board — production redesign</h1>
+  <p><b>Try it:</b> check off prep steps and watch the batch progress fill; tap the big buttons to
+  move work down the line; flip <b>Kitchen Mode</b> for tablet-with-wet-hands sizing. One pipeline,
+  every order appears exactly once.</p>
+</header>
+
+<div class="scroller">
+<div class="window" id="win">
+  <div class="titlebar"><i></i><i></i><i></i><span>freezeriq.com/production</span></div>
+
+  <div class="apphead">
+    <span class="logo">👨‍🍳</span><h2>Kitchen</h2>
+    <div class="viewtabs">
+      <button class="on" data-v="board">Today's Board</button>
+      <button data-v="planner">Shopping &amp; Prep Sheets</button>
+      <button data-v="x" disabled style="opacity:.45">Schedule</button>
+    </div>
+    <label class="kmode" id="kmode"><span>KITCHEN MODE</span><span class="sw"></span></label>
+  </div>
+
+  <div class="laneswrap" id="boardview">
+    <div class="daybar" style="position:relative">
+      <span class="keychip floatchip" style="top:-8px;left:10px">A</span>
+      <button class="daychip on">This week</button>
+      <button class="daychip">Today</button>
+      <button class="daychip">Next week</button>
+      <button class="daychip">Everything</button>
+      <span style="margin-left:auto;font-size:.72rem;color:#94a3b8;font-weight:600">Friday, Apr 18 · deliveries Sat 10–1</span>
+    </div>
+
+    <div class="stats" style="position:relative">
+      <span class="keychip floatchip" style="top:-8px;left:10px">B</span>
+      <div class="stat indigo"><span class="n">6</span><span class="l">new orders<br>to approve</span></div>
+      <div class="stat amber"><span class="n">4</span><span class="l">batches<br>to cook</span></div>
+      <div class="stat emerald"><span class="n">9</span><span class="l">boxes ready<br>for Saturday</span></div>
+      <div class="stat"><span class="n">86</span><span class="l">meals due<br>this week</span></div>
+    </div>
+
+    <div class="lanes">
+      <!-- LANE 1: NEW -->
+      <div class="lane l1" style="position:relative">
+        <span class="keychip floatchip" style="top:-9px;left:-9px">C</span>
+        <h3>📥 New orders <span class="cnt">2</span></h3>
+        <div class="card" id="no1">
+          <div class="top"><b>Kim Reynolds</b><span class="due">due Sat</span></div>
+          <p class="sub">Family Favorites Box ×1 · $180 · storefront (paid ✓)</p>
+          <button class="bigbtn approve" data-move="no1">✓ Approve for kitchen</button>
+        </div>
+        <div class="card" id="no2">
+          <div class="top"><b>Tom Baker</b><span class="due ok">due Apr 25</span></div>
+          <p class="sub">Soup Sampler ×2 · $120 · manual entry</p>
+          <button class="bigbtn approve" data-move="no2">✓ Approve for kitchen</button>
+        </div>
+      </div>
+
+      <!-- LANE 2: COOKING -->
+      <div class="lane l2" style="position:relative">
+        <span class="keychip floatchip" style="top:-9px;left:-9px">D</span>
+        <h3>🔥 To cook <span class="cnt" id="cookcnt">2</span></h3>
+
+        <div class="card">
+          <div class="top"><b>Family Favorites Box</b><span class="due">6 orders · due Sat</span></div>
+          <p class="sub">Make <b>7 units</b> of each recipe below <b>· 5 recipes · ~4 hrs</b></p>
+          <div class="prog"><i id="pg1" style="width:40%"></i></div>
+          <div class="prep" id="batch1">
+            <div class="prow done"><span class="cb">✓</span><span class="nm">Chicken Pot Pie Filling</span><span class="qty">7 trays</span></div>
+            <div class="prow done"><span class="cb">✓</span><span class="nm">Beef Stroganoff</span><span class="qty">7 bags</span></div>
+            <div class="prow"><span class="cb"></span><span class="nm">Enchilada Bake</span><span class="qty">7 trays</span></div>
+            <div class="prow"><span class="cb"></span><span class="nm">Shepherd's Pie</span><span class="qty">7 trays</span></div>
+            <div class="prow"><span class="cb"></span><span class="nm">Mac &amp; Cheese</span><span class="qty">7 trays</span></div>
+          </div>
+          <div class="btnrow">
+            <button class="bigbtn ghost">🖨 Prep sheet</button>
+            <button class="bigbtn pack" id="pk1" disabled style="opacity:.45">📦 All cooked → Pack &amp; label</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="top"><b>Soup Sampler</b><span class="due ok">3 orders · due Apr 25</span></div>
+          <p class="sub">Make <b>9 quarts</b> across 3 recipes · ~2 hrs</p>
+          <div class="prog"><i style="width:0%"></i></div>
+          <div class="prep">
+            <div class="prow"><span class="cb"></span><span class="nm">Broccoli Cheddar</span><span class="qty">3 qt</span></div>
+            <div class="prow"><span class="cb"></span><span class="nm">Chicken Tortilla</span><span class="qty">3 qt</span></div>
+            <div class="prow"><span class="cb"></span><span class="nm">Tomato Basil</span><span class="qty">3 qt</span></div>
+          </div>
+          <div class="btnrow">
+            <button class="bigbtn ghost">🖨 Prep sheet</button>
+            <button class="bigbtn pack" disabled style="opacity:.45">📦 All cooked → Pack &amp; label</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- LANE 3: READY -->
+      <div class="lane l3" style="position:relative">
+        <span class="keychip floatchip" style="top:-9px;left:-9px">E</span>
+        <h3>🚗 Packed &amp; ready <span class="cnt">3</span></h3>
+        <div class="card" id="rd1">
+          <div class="top"><b>Priya Sharma</b><span class="due">Sat pickup</span></div>
+          <p class="sub">Family Favorites ×1 · labels printed ✓</p>
+          <div class="btnrow">
+            <button class="bigbtn ghost">🏷 Labels</button>
+            <button class="bigbtn done" data-gone="rd1">✓ Picked up</button>
+          </div>
+        </div>
+        <div class="card" id="rd2">
+          <div class="top"><b>Marta Gonzalez</b><span class="due">Sat delivery</span></div>
+          <p class="sub">Comfort Classics ×2 · route stop #4</p>
+          <div class="btnrow">
+            <button class="bigbtn ghost">🏷 Labels</button>
+            <button class="bigbtn done" data-gone="rd2">✓ Delivered</button>
+          </div>
+        </div>
+        <div class="card" id="rd3">
+          <div class="top"><b>Delmar PTO (fundraiser)</b><span class="due ok">Wed handoff</span></div>
+          <p class="sub">9 held orders released at closeout · pickup sheet ✓</p>
+          <div class="btnrow">
+            <button class="bigbtn ghost">📦 Pickup sheet</button>
+            <button class="bigbtn done" data-gone="rd3">✓ Handed off</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- planner stub -->
+  <div class="planner" id="plannerview">
+    <div class="card" style="position:relative">
+      <span class="keychip floatchip" style="top:-9px;left:-9px">F</span>
+      <div class="top"><b>Shopping &amp; Prep Sheets</b></div>
+      <p class="sub">The existing Manual Planner lives here unchanged — pick bundles &amp; quantities, generate
+      the shopping list and prep plan, print both. Renamed so the kitchen knows what it's for, and it now
+      pre-fills from the board's "To cook" batches instead of starting empty.</p>
+      <div class="btnrow" style="max-width:420px">
+        <button class="bigbtn ghost">🛒 Shopping list</button>
+        <button class="bigbtn ghost">📋 Prep plan</button>
+        <button class="bigbtn ghost">🖨 Print both</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /window -->
+</div>
+
+<section class="notes-sec">
+  <h2>Design notes</h2>
+  <div class="dnote"><span class="keychip">A</span><div>
+    <b>Time is the first filter</b>
+    <p>The board defaults to <b>this week</b> — the kitchen's actual planning unit — with Today/Next week/
+    Everything one tap away. Today the dashboard shows every order in the system with no date lens, so a
+    busy season buries Saturday's work under next month's.</p>
+    <span class="was">was: no date filtering anywhere on the production dashboard</span>
+  </div></div>
+  <div class="dnote"><span class="keychip">B</span><div>
+    <b>Four numbers answer "how's today look?"</b>
+    <p>New orders, batches to cook, boxes ready, meals due — the morning stand-up in one glance, sized to be
+    readable from across the counter.</p>
+  </div></div>
+  <div class="dnote"><span class="keychip">C</span><div>
+    <b>Every order appears exactly once</b>
+    <p>Today a paid storefront order shows in the Holding Area <i>and</i> inside the Production Queue
+    aggregation simultaneously — two lanes claim the same work. The redesign is a strict pipeline:
+    New → To Cook → Packed → Out. Approve moves it forward and it leaves the lane. Paid-status shown
+    as a fact ("paid ✓"), not a separate pile.</p>
+    <span class="was">was: production_ready orders listed in Holding Area AND aggregated in Production Queue</span>
+  </div></div>
+  <div class="dnote"><span class="keychip">D</span><div>
+    <b>Batch cards cook the way kitchens cook</b>
+    <p>Grouped by bundle with the recipe checklist inside — "make 7 trays of pot pie filling" — and the big
+    Pack button stays locked until every recipe is checked, so nothing ships half-cooked. Checking rows fills
+    the progress bar; the whole card is built for a greasy thumb on a tablet. Same
+    batch-update-by-bundle API underneath — this is presentation, not new plumbing.</p>
+    <span class="was">was: recipe lists shown but no per-recipe check-off on the dashboard; status buttons small</span>
+  </div></div>
+  <div class="dnote"><span class="keychip">E</span><div>
+    <b>Packed &amp; Ready is delivery-day truth</b>
+    <p>Sorted by handoff moment (Saturday pickups, route stops, fundraiser handoffs) with labels and pickup
+    sheets one tap away, and a single verb per card: Picked up / Delivered / Handed off. Fundraiser handoffs
+    appear here only after closeout releases them — the boundary holds.</p>
+  </div></div>
+  <div class="dnote"><span class="keychip">F</span><div>
+    <b>Kitchen Mode + honest naming</b>
+    <p>The header toggle scales type and touch targets ~15% for tablet use at the prep counter. "Manual
+    Planner" becomes "Shopping &amp; Prep Sheets" (what it actually makes), pre-filled from the board's To-Cook
+    batches. The orphaned Schedule page gets a real tab instead of being reachable only from the Orders page.</p>
+    <span class="was">was: "Manual Planner" label; schedule/run pages unlinked from the production dashboard</span>
+  </div></div>
+</section>
+</div>
+
+<script>
+// view tabs
+document.querySelectorAll('.viewtabs button[data-v]').forEach(b => b.addEventListener('click', () => {
+  if (b.disabled) return;
+  document.querySelectorAll('.viewtabs button').forEach(x => x.classList.remove('on'));
+  b.classList.add('on');
+  document.getElementById('boardview').classList.toggle('off', b.dataset.v !== 'board');
+  document.getElementById('plannerview').classList.toggle('on', b.dataset.v === 'planner');
+}));
+// kitchen mode
+document.getElementById('kmode').addEventListener('click', () =>
+  document.getElementById('win').classList.toggle('kitchen'));
+// prep check-off → progress + unlock pack button
+const batch1 = document.getElementById('batch1');
+function refreshBatch1(){
+  const rows = [...batch1.querySelectorAll('.prow')];
+  const done = rows.filter(r => r.classList.contains('done')).length;
+  document.getElementById('pg1').style.width = (done / rows.length * 100) + '%';
+  const pk = document.getElementById('pk1');
+  const ready = done === rows.length;
+  pk.disabled = !ready; pk.style.opacity = ready ? '1' : '.45';
+}
+document.querySelectorAll('.prep .prow').forEach(r => r.addEventListener('click', () => {
+  r.classList.toggle('done');
+  r.querySelector('.cb').textContent = r.classList.contains('done') ? '✓' : '';
+  if (r.closest('#batch1')) refreshBatch1();
+  else {
+    const card = r.closest('.card');
+    const rows = [...card.querySelectorAll('.prow')];
+    const done = rows.filter(x => x.classList.contains('done')).length;
+    card.querySelector('.prog i').style.width = (done / rows.length * 100) + '%';
+    const pk = card.querySelector('.bigbtn.pack');
+    if (pk){ pk.disabled = done !== rows.length; pk.style.opacity = done === rows.length ? '1' : '.45'; }
+  }
+}));
+// approve / done actions remove cards + decrement counts
+document.querySelectorAll('[data-move]').forEach(b => b.addEventListener('click', () => {
+  const card = document.getElementById(b.dataset.move);
+  card.style.transition = 'opacity .3s, transform .3s'; card.style.opacity = '0'; card.style.transform = 'translateX(24px)';
+  setTimeout(() => card.remove(), 300);
+}));
+document.querySelectorAll('[data-gone]').forEach(b => b.addEventListener('click', () => {
+  const card = document.getElementById(b.dataset.gone);
+  card.style.transition = 'opacity .3s, transform .3s'; card.style.opacity = '0'; card.style.transform = 'translateX(24px)';
+  setTimeout(() => card.remove(), 300);
+}));
+// pack button on batch1 → remove card
+document.getElementById('pk1').addEventListener('click', () => {
+  const card = document.getElementById('pk1').closest('.card');
+  card.style.transition = 'opacity .3s'; card.style.opacity = '0';
+  setTimeout(() => { card.remove(); document.getElementById('cookcnt').textContent = '1'; }, 300);
+});
+</script>

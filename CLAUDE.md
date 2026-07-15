@@ -8,6 +8,7 @@ Read these files before making decisions:
 - [INTEGRATIONS](docs/ai/INTEGRATIONS.md)
 - [WORKFLOWS](docs/ai/WORKFLOWS.md)
 - [PHASE ROADMAP](docs/rebuild/phase-roadmap.md)
+- [UI_REDESIGN_SPEC](docs/ai/UI_REDESIGN_SPEC.md) — coordinator panel + recipe library redesigns; source of truth over any chat/handoff doc
 
 ## Project Identity
 
