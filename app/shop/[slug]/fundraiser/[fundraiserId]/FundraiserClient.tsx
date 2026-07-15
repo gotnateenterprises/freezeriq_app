@@ -9,6 +9,7 @@ export default function FundraiserClient({
     business,
     campaign,
     bundleProgress,
+    orderMode,
     slug,
     fundraiserId
 }: any) {
@@ -143,6 +144,7 @@ export default function FundraiserClient({
                         </div>
 
                         {/* === Progress Card === */}
+                        {orderMode?.mode !== 'pending' && orderMode?.mode !== 'invalid' && orderMode?.mode !== 'closed' && (
                         <div className="bg-white/10 backdrop-blur-2xl p-5 sm:p-8 md:p-10 rounded-2xl sm:rounded-[3rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)] max-w-xl w-full border-2 border-white/40 overflow-hidden relative">
                             <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent pointer-events-none" />
 
@@ -188,6 +190,7 @@ export default function FundraiserClient({
                                 </a>
                             )}
                         </div>
+                        )}
                     </div>
                 </div>
             </div>
@@ -200,7 +203,39 @@ export default function FundraiserClient({
                     <div className="w-full space-y-10 sm:space-y-16">
 
                         {/* === Bundle Cards Section === */}
-                        {bundles.length > 0 && (
+                        {orderMode?.mode === 'closed' ? (
+                            <section className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm p-8 sm:p-12 text-center">
+                                <div className="mx-auto w-16 h-16 rounded-2xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-slate-400 mb-6">
+                                    <Info size={32} />
+                                </div>
+                                <h2 className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight uppercase mb-4">Campaign Closed</h2>
+                                <p className="text-base sm:text-lg text-slate-500 dark:text-slate-400 font-medium max-w-lg mx-auto">
+                                    {orderMode.safeMessage || 'This campaign is closed. Order changes are no longer permitted.'}
+                                </p>
+                            </section>
+                        ) : orderMode?.mode === 'pending' ? (
+                            <section className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm p-8 sm:p-12 text-center">
+                                <div className="mx-auto w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600 mb-6">
+                                    <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                    </svg>
+                                </div>
+                                <h2 className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight uppercase mb-4">Bundle Selection Pending</h2>
+                                <p className="text-base sm:text-lg text-slate-500 dark:text-slate-400 font-medium max-w-lg mx-auto">
+                                    {orderMode.safeMessage || 'The coordinator is currently selecting the bundles for this fundraiser. Please check back later to place your order.'}
+                                </p>
+                            </section>
+                        ) : orderMode?.mode === 'invalid' || (orderMode?.mode === 'selected' && bundles.length === 0) ? (
+                            <section className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm p-8 sm:p-12 text-center">
+                                <div className="mx-auto w-16 h-16 rounded-2xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-slate-400 mb-6">
+                                    <Info size={32} />
+                                </div>
+                                <h2 className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight uppercase mb-4">Temporarily Unavailable</h2>
+                                <p className="text-base sm:text-lg text-slate-500 dark:text-slate-400 font-medium max-w-lg mx-auto">
+                                    {orderMode.safeMessage || "This fundraiser's bundle configuration is being updated. Please check back shortly."}
+                                </p>
+                            </section>
+                        ) : bundles.length > 0 ? (
                             <section className="space-y-4 sm:space-y-6">
                                 <div className="flex items-center gap-2">
                                     <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600">
@@ -224,7 +259,7 @@ export default function FundraiserClient({
                                     ))}
                                 </div>
                             </section>
-                        )}
+                        ) : null}
 
                         {/* === Fundraiser Details (replaces On The Menu) === */}
                         {(endDateStr || deliveryDateStr || pickupLocation) && (

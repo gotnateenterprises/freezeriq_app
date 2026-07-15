@@ -14,6 +14,7 @@
  */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
 
 export async function GET(req: Request) {
     try {
@@ -49,22 +50,25 @@ export async function GET(req: Request) {
         }
 
         // 2. Fetch assigned bundles (for column headers)
-        const campaignBundles = await prisma.campaignBundle.findMany({
-            where: { campaign_id: campaign.id, state: 'active' },
-            orderBy: { position: 'asc' },
-            include: {
-                bundle: {
-                    select: { id: true, name: true, is_active: true }
-                }
-            }
-        });
+        const orderMode = await resolveCampaignOrderMode(campaign, campaign.customer!.business_id!);
+        let bundles: { id: string, name: string }[] = [];
 
-        const bundles = campaignBundles
-            .filter(cb => cb.bundle.is_active)
-            .map(cb => ({
-                id: cb.bundle.id,
-                name: cb.bundle.name
-            }));
+        if (orderMode.mode === 'legacy') {
+            bundles = await prisma.bundle.findMany({
+                where: { business_id: campaign.customer!.business_id!, is_active: true, show_on_storefront: true },
+                orderBy: { name: 'asc' },
+                select: { id: true, name: true }
+            });
+        } else if (orderMode.mode === 'selected' && orderMode.activeOrderableBundleIds.length > 0) {
+            const selectedBundles = await prisma.bundle.findMany({
+                where: { id: { in: orderMode.activeOrderableBundleIds } },
+                select: { id: true, name: true }
+            });
+            bundles = orderMode.activeOrderableBundleIds
+                .map(id => selectedBundles.find(b => b.id === id))
+                .filter(Boolean)
+                .map(b => ({ id: b!.id, name: b!.name }));
+        }
 
         // 3. Fetch all orders for this campaign with items
         const orders = await prisma.order.findMany({

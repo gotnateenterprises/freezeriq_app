@@ -14,10 +14,11 @@
  */
 
 import { NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
+import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
 import { generateFullPacket } from '@/lib/generateFullPacket';
 import type { FlyerBundle } from '@/lib/generateFlyer';
-import { Prisma } from '@prisma/client';
 import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
 
 export async function GET(req: Request) {
@@ -57,30 +58,25 @@ export async function GET(req: Request) {
         const orgName = (campaign.customer as any)?.name || 'Organization';
 
         // 2. Fetch assigned bundles (or fallback to all active bundles for business)
-        const campaignBundles: any[] = await prisma.$queryRaw`
-            SELECT bundle_id FROM campaign_bundles
-            WHERE campaign_id = ${campaign.id}
-            AND state = 'active'
-            ORDER BY position ASC
-        `;
-        const assignedBundleIds = campaignBundles.map(cb => cb.bundle_id);
+        const orderMode = await resolveCampaignOrderMode(campaign, businessId);
+        let bundles: any[] = [];
 
-        let bundles: any[];
-        if (assignedBundleIds.length > 0) {
-            bundles = await prisma.$queryRaw`
-                SELECT id, name, price, serving_tier FROM bundles
-                WHERE id IN(${Prisma.join(assignedBundleIds)})
-                AND business_id = ${businessId}
-                AND is_active = true
-                ORDER BY array_position(${assignedBundleIds}::text[], id::text)
-            `;
-        } else {
+        if (orderMode.mode === 'legacy') {
             bundles = await prisma.$queryRaw`
                 SELECT id, name, price, serving_tier FROM bundles
                 WHERE business_id = ${businessId}
                 AND is_active = true
+                AND show_on_storefront = true
                 ORDER BY name ASC
                 LIMIT 10
+            `;
+        } else if (orderMode.mode === 'selected' && orderMode.activeOrderableBundleIds.length > 0) {
+            bundles = await prisma.$queryRaw`
+                SELECT id, name, price, serving_tier FROM bundles
+                WHERE id IN(${Prisma.join(orderMode.activeOrderableBundleIds)})
+                AND business_id = ${businessId}
+                AND is_active = true
+                ORDER BY array_position(${orderMode.activeOrderableBundleIds}::text[], id::text)
             `;
         }
 

@@ -80,9 +80,8 @@ export async function POST(req: Request) {
         // Non-campaign orders skip this (no campaignId → no campaign → no gate).
         if (campaign) {
             const bundleMode = await resolveCampaignOrderMode(
-                campaign.id,
-                businessId,
-                campaign.bundle_selection_status,
+                campaign,
+                businessId
             );
             const eligibility = validateBundleEligibility(bundleMode, bundleIds);
             if (!eligibility.ok) {

@@ -8,10 +8,12 @@ export function SetupChecklist({
     onSetPayment,
     onShare,
     onAddOrder,
+    orderingAllowed,
 }: {
     coordinatorFirstName?: string;
     hasPaymentInfo: boolean; hasSharedOnce: boolean; hasFirstOrder: boolean;
     onSetPayment: () => void; onShare: () => void; onAddOrder: () => void;
+    orderingAllowed?: boolean;
 }) {
     const steps = [
         {
@@ -26,12 +28,12 @@ export function SetupChecklist({
             body: 'Text it to 5 people to get rolling.',
             cta: 'Share', onClick: onShare,
         },
-        {
+        ...(orderingAllowed ? [{
             done: hasFirstOrder, attn: hasSharedOnce && !hasFirstOrder,
             title: 'Log your first order',
             body: 'Takes about 20 seconds.',
             cta: 'Add order', onClick: onAddOrder,
-        },
+        }] : []),
     ];
     return (
         <section className="bg-white border border-slate-200 rounded-2xl p-4">

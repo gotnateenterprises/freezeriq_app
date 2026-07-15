@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import FundraiserClient from './FundraiserClient';
 import { computeFundraiserProgress } from '@/lib/fundraiserMetrics';
+import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
 import type { Metadata } from 'next';
 
 // ── OG Metadata (controls Facebook link preview) ───────────
@@ -135,34 +136,27 @@ async function getData(slug: string, fundraiserId: string) {
         ordersWithItems
     );
 
-    // 5. Check for campaign-specific bundle assignments
-    const campaignBundles: any[] = await prisma.$queryRaw`
-        SELECT bundle_id FROM campaign_bundles
-        WHERE campaign_id = ${fundraiserId}
-        AND state = 'active'
-        ORDER BY position ASC
-    `;
-    const assignedBundleIds = campaignBundles.map(cb => cb.bundle_id);
+    // 5. Fetch Bundles based on the authoritative orderMode
 
-    // 6. Fetch Bundles — only assigned bundles if campaign has assignments,
-    //    otherwise fall back to all active bundles for this business.
-    //    Both paths enforce business_id to prevent cross-tenant leakage.
-    let bundles: any[];
-    if (assignedBundleIds.length > 0) {
-        bundles = await prisma.$queryRaw`
-            SELECT * FROM bundles
-            WHERE id IN(${Prisma.join(assignedBundleIds)})
-            AND business_id = ${business.id}
-            AND is_active = true
-            ORDER BY array_position(${assignedBundleIds}::text[], id::text)
-        `;
-    } else {
+    const orderMode = await resolveCampaignOrderMode(campaign, business.id);
+
+    // 6. Fetch Bundles based on the authoritative orderMode
+    let bundles: any[] = [];
+    if (orderMode.mode === 'legacy') {
         bundles = await prisma.$queryRaw`
             SELECT * FROM bundles 
             WHERE business_id = ${business.id} 
             AND is_active = true
             AND show_on_storefront = true
             ORDER BY name ASC
+        `;
+    } else if (orderMode.mode === 'selected' && orderMode.activeOrderableBundleIds.length > 0) {
+        bundles = await prisma.$queryRaw`
+            SELECT * FROM bundles
+            WHERE id IN(${Prisma.join(orderMode.activeOrderableBundleIds)})
+            AND business_id = ${business.id}
+            AND is_active = true
+            ORDER BY array_position(${orderMode.activeOrderableBundleIds}::text[], id::text)
         `;
     }
 
@@ -201,7 +195,7 @@ async function getData(slug: string, fundraiserId: string) {
 
     (business as any).bundles = formattedBundles;
 
-    return { business, campaign, bundleProgress };
+    return { business, campaign, bundleProgress, orderMode };
 }
 
 export default async function FundraiserPage({ params }: { params: Promise<{ slug: string; fundraiserId: string }> }) {
@@ -210,13 +204,14 @@ export default async function FundraiserPage({ params }: { params: Promise<{ slu
 
     if (!data) notFound();
 
-    const { business, campaign, bundleProgress } = data;
+    const { business, campaign, bundleProgress, orderMode } = data;
 
     return (
         <FundraiserClient
             business={business}
             campaign={campaign}
             bundleProgress={bundleProgress}
+            orderMode={orderMode}
             slug={slug}
             fundraiserId={fundraiserId}
         />

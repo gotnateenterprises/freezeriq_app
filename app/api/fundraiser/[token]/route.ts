@@ -23,6 +23,7 @@ export async function GET(
                 id: true,
                 name: true,
                 status: true,
+                bundle_selection_status: true,
                 start_date: true,
                 end_date: true,
                 goal_amount: true,

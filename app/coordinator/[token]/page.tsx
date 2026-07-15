@@ -640,6 +640,7 @@ export default function CoordinatorPortal() {
                         onSetPayment={() => setShowSettingsModal(true)}
                         onShare={() => document.getElementById('share-center')?.scrollIntoView({ behavior: 'smooth' })}
                         onAddOrder={() => setShowOrderModal(true)}
+                        orderingAllowed={campaign.orderMode?.allowed === true}
                     />
                     <ProgressHero
                         dimmed
@@ -792,6 +793,7 @@ export default function CoordinatorPortal() {
                     onAddOrder={() => { if (!isClosed) setShowOrderModal(true); }}
                     onShare={() => document.getElementById('share-center')?.scrollIntoView({ behavior: 'smooth' })}
                     tenantName={tenantName || undefined}
+                    orderingAllowed={campaign.orderMode?.allowed === true}
                 />
             )}
 

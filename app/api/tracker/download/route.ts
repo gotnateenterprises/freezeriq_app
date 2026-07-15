@@ -15,6 +15,7 @@
  */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
 import path from 'path';
 
 export async function GET(req: Request) {
@@ -51,32 +52,42 @@ export async function GET(req: Request) {
         }
 
         // 2. Fetch assigned bundles with their recipe contents
-        const campaignBundles = await prisma.campaignBundle.findMany({
-            where: { campaign_id: campaign.id, state: 'active' },
-            orderBy: { position: 'asc' },
-            include: {
-                bundle: {
-                    select: {
-                        id: true,
-                        name: true,
-                        is_active: true,
-                        contents: {
-                            orderBy: { position: 'asc' },
-                            include: {
-                                recipe: { select: { name: true } }
-                            }
-                        }
+        const orderMode = await resolveCampaignOrderMode(campaign, campaign.customer!.business_id!);
+        let bundles: { name: string, recipes: string[] }[] = [];
+
+        if (orderMode.mode === 'legacy') {
+            const legacyBundles = await prisma.bundle.findMany({
+                where: { business_id: campaign.customer!.business_id!, is_active: true, show_on_storefront: true },
+                orderBy: { name: 'asc' },
+                include: {
+                    contents: {
+                        orderBy: { position: 'asc' },
+                        include: { recipe: { select: { name: true } } }
                     }
                 }
-            }
-        });
-
-        const bundles = campaignBundles
-            .filter(cb => cb.bundle.is_active)
-            .map(cb => ({
-                name: cb.bundle.name,
-                recipes: cb.bundle.contents.map(c => (c as any).recipe?.name).filter(Boolean)
+            });
+            bundles = legacyBundles.map(b => ({
+                name: b.name,
+                recipes: b.contents.map(c => (c as any).recipe?.name).filter(Boolean)
             }));
+        } else if (orderMode.mode === 'selected' && orderMode.activeOrderableBundleIds.length > 0) {
+            const selectedBundles = await prisma.bundle.findMany({
+                where: { id: { in: orderMode.activeOrderableBundleIds } },
+                include: {
+                    contents: {
+                        orderBy: { position: 'asc' },
+                        include: { recipe: { select: { name: true } } }
+                    }
+                }
+            });
+            bundles = orderMode.activeOrderableBundleIds
+                .map(id => selectedBundles.find(b => b.id === id))
+                .filter(Boolean)
+                .map(b => ({
+                    name: b!.name,
+                    recipes: b!.contents.map(c => (c as any).recipe?.name).filter(Boolean)
+                }));
+        }
 
         // 3. Load the SAME template used by the marketing packet
         const ExcelJS = (await import('exceljs')).default;

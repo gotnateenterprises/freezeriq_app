@@ -127,26 +127,44 @@ export async function GET(
             return NextResponse.json({ error: "Portal unavailable (Plan Restriction)" }, { status: 403 });
         }
 
-        // 4. Fetch campaign-assigned bundles only (no fallback to all bundles)
+        // 4. Determine ordering mode and fetch orderable bundles
         let bundles: any[] = [];
+        type CampaignOrderBundleMode = Awaited<ReturnType<typeof resolveCampaignOrderMode>>;
+        let orderMode: CampaignOrderBundleMode | null = null;
         try {
-            const campaignBundles = await prisma.campaignBundle.findMany({
-                where: { campaign_id: campaign.id, state: 'active' },
-                orderBy: { position: 'asc' },
-                include: {
-                    bundle: {
-                        select: { id: true, name: true, price: true, serving_tier: true, is_active: true }
-                    }
+            orderMode = await resolveCampaignOrderMode(campaign, businessId);
+
+            if (orderMode.allowed) {
+                if (orderMode.mode === 'legacy') {
+                    // Fall back to business-wide catalog for legacy campaigns
+                    const legacyBundles = await prisma.bundle.findMany({
+                        where: { business_id: businessId, is_active: true, show_on_storefront: true },
+                        orderBy: { name: 'asc' },
+                        select: { id: true, name: true, price: true, serving_tier: true }
+                    });
+                    bundles = legacyBundles.map(b => ({
+                        ...b,
+                        price: b.price ?? 0
+                    }));
+                } else if (orderMode.mode === 'selected' && orderMode.activeOrderableBundleIds.length > 0) {
+                    const selectedBundles = await prisma.bundle.findMany({
+                        where: { id: { in: orderMode.activeOrderableBundleIds } },
+                        select: { id: true, name: true, price: true, serving_tier: true }
+                    });
+
+                    // Maintain original order based on activeOrderableBundleIds
+                    type SelectedBundle = typeof selectedBundles[number];
+                    bundles = orderMode.activeOrderableBundleIds
+                        .map((id: string) => selectedBundles.find(b => b.id === id))
+                        .filter((b): b is SelectedBundle => b !== undefined)
+                        .map((b: SelectedBundle) => ({
+                            id: b.id,
+                            name: b.name,
+                            price: b.price ?? 0,
+                            serving_tier: b.serving_tier
+                        }));
                 }
-            });
-            bundles = campaignBundles
-                .filter(cb => cb.bundle.is_active)
-                .map(cb => ({
-                    id: cb.bundle.id,
-                    name: cb.bundle.name,
-                    price: cb.bundle.price ?? 0,
-                    serving_tier: cb.bundle.serving_tier
-                }));
+            }
         } catch (bundleErr) {
             console.error("Bundle fetch error (non-blocking):", bundleErr);
             // Continue with empty bundles — don't block portal access
@@ -162,7 +180,8 @@ export async function GET(
             ...campaign,
             total_sales: computedTotalSales,
             canceledOrders,
-            availableBundles: bundles
+            availableBundles: bundles,
+            orderMode
         });
 
     } catch (e: any) {
@@ -228,9 +247,8 @@ export async function POST(
         // Must run BEFORE buildBundlePriceMap, order creation, or any side effect.
         // Derives bundle_selection_status from the server-trusted campaign object.
         const bundleMode = await resolveCampaignOrderMode(
-            campaign.id,
-            businessId,
-            campaign.bundle_selection_status,
+            campaign,
+            businessId
         );
         const eligibility = validateBundleEligibility(bundleMode, bundleIds);
         if (!eligibility.ok) {

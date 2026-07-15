@@ -115,36 +115,50 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
             </div>
 
             <main className="max-w-xl mx-auto -mt-10 px-6 pb-20 relative z-20 space-y-6">
-                {/* Scoreboard Card */}
-                <div className="bg-white rounded-[2.5rem] p-10 shadow-2xl shadow-indigo-600/10 border border-slate-100 text-center">
-                    <div className="space-y-2 mb-8">
-                        <p className="text-6xl font-black tracking-tighter text-slate-900">{formatBundleCount(metrics.totalBundlesSold)}</p>
-                        <p className="text-sm font-black text-slate-400 uppercase tracking-widest">Bundles Sold</p>
-                    </div>
-
-                    {/* Progress Bar */}
-                    <div className="relative pt-6">
-                        <div className="absolute top-0 right-0 text-indigo-600 font-black italic text-sm">
-                            {progress.toFixed(0)}% Complete!
+                {campaign.bundle_selection_status === 'pending' ? (
+                    <div className="bg-white rounded-[2.5rem] p-10 shadow-2xl shadow-indigo-600/10 border border-slate-100 text-center">
+                        <div className="mx-auto w-16 h-16 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600 mb-6">
+                            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                            </svg>
                         </div>
-                        <div className="w-full h-6 bg-slate-100 rounded-full overflow-hidden border-2 border-slate-50">
-                            <div
-                                className="h-full bg-gradient-to-r from-indigo-500 to-indigo-600 transition-all duration-1000 ease-out relative"
-                                style={{ width: `${progress}%` }}
-                            >
-                                <div className="absolute inset-0 bg-white/20 animate-pulse" />
+                        <h2 className="text-xl sm:text-3xl font-black text-slate-900 tracking-tight uppercase mb-4">Bundle Selection Pending</h2>
+                        <p className="text-base sm:text-lg text-slate-500 font-medium max-w-lg mx-auto leading-relaxed">
+                            The coordinator is currently finalizing the menu for this fundraiser. Please check back later, and ordering will open afterward.
+                        </p>
+                    </div>
+                ) : (
+                    /* Scoreboard Card */
+                    <div className="bg-white rounded-[2.5rem] p-10 shadow-2xl shadow-indigo-600/10 border border-slate-100 text-center">
+                        <div className="space-y-2 mb-8">
+                            <p className="text-6xl font-black tracking-tighter text-slate-900">{formatBundleCount(metrics.totalBundlesSold)}</p>
+                            <p className="text-sm font-black text-slate-400 uppercase tracking-widest">Bundles Sold</p>
+                        </div>
+
+                        {/* Progress Bar */}
+                        <div className="relative pt-6">
+                            <div className="absolute top-0 right-0 text-indigo-600 font-black italic text-sm">
+                                {progress.toFixed(0)}% Complete!
+                            </div>
+                            <div className="w-full h-6 bg-slate-100 rounded-full overflow-hidden border-2 border-slate-50">
+                                <div
+                                    className="h-full bg-gradient-to-r from-indigo-500 to-indigo-600 transition-all duration-1000 ease-out relative"
+                                    style={{ width: `${progress}%` }}
+                                >
+                                    <div className="absolute inset-0 bg-white/20 animate-pulse" />
+                                </div>
+                            </div>
+                            <div className="flex justify-between mt-3 px-1">
+                                <span className="text-xs font-black text-slate-300 uppercase tracking-widest">0</span>
+                                <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Goal: {metrics.bundleGoal} Bundles</span>
                             </div>
                         </div>
-                        <div className="flex justify-between mt-3 px-1">
-                            <span className="text-xs font-black text-slate-300 uppercase tracking-widest">0</span>
-                            <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Goal: {metrics.bundleGoal} Bundles</span>
-                        </div>
-                    </div>
 
-                    <p className="mt-8 text-slate-500 font-medium leading-relaxed">
-                        {campaign.about_text || 'Help us reach our goal! Every purchase directly supports our organization.'}
-                    </p>
-                </div>
+                        <p className="mt-8 text-slate-500 font-medium leading-relaxed">
+                            {campaign.about_text || 'Help us reach our goal! Every purchase directly supports our organization.'}
+                        </p>
+                    </div>
+                )}
 
                 {/* Social Share Box */}
                 <div className="bg-white rounded-[2rem] p-8 border border-slate-200 shadow-sm text-center">
@@ -179,37 +193,39 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
                 </div>
 
                 {/* Recent Activity Ticker */}
-                <div className="space-y-4">
-                    <h2 className="text-sm font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2 px-4">
-                        <TrendingUp size={16} /> Recent Support
-                    </h2>
-                    <div className="space-y-3">
-                        {(campaign.orders || []).length === 0 ? (
-                            <div className="bg-slate-50 rounded-3xl p-8 text-center border border-slate-100">
-                                <p className="text-slate-400 italic font-bold">Be the first to support us!</p>
-                            </div>
-                        ) : (
-                            campaign.orders.map((order: any, idx: number) => (
-                                <div key={idx} className="bg-white p-5 rounded-3xl border border-slate-200 flex justify-between items-center group animate-in slide-in-from-right duration-500" style={{ animationDelay: `${idx * 100}ms` }}>
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600 transition-transform group-hover:rotate-12">
-                                            <HandHeart size={20} />
-                                        </div>
-                                        <div>
-                                            <p className="font-black text-slate-900">{order.customer_name || 'Anonymous'}</p>
-                                            <p className="text-[10px] font-black text-slate-300 uppercase">
-                                                {format(new Date(order.created_at), 'MMM d, h:mm a')}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className="text-indigo-600 font-black text-lg">+{formatBundleCount(computeBundleUnitsFromItems(order.items || []))} {computeBundleUnitsFromItems(order.items || []) === 1 ? 'bundle' : 'bundles'}</p>
-                                    </div>
+                {campaign.bundle_selection_status !== 'pending' && (
+                    <div className="space-y-4">
+                        <h2 className="text-sm font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2 px-4">
+                            <TrendingUp size={16} /> Recent Support
+                        </h2>
+                        <div className="space-y-3">
+                            {(campaign.orders || []).length === 0 ? (
+                                <div className="bg-slate-50 rounded-3xl p-8 text-center border border-slate-100">
+                                    <p className="text-slate-400 italic font-bold">Be the first to support us!</p>
                                 </div>
-                            ))
-                        )}
+                            ) : (
+                                campaign.orders.map((order: any, idx: number) => (
+                                    <div key={idx} className="bg-white p-5 rounded-3xl border border-slate-200 flex justify-between items-center group animate-in slide-in-from-right duration-500" style={{ animationDelay: `${idx * 100}ms` }}>
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600 transition-transform group-hover:rotate-12">
+                                                <HandHeart size={20} />
+                                            </div>
+                                            <div>
+                                                <p className="font-black text-slate-900">{order.customer_name || 'Anonymous'}</p>
+                                                <p className="text-[10px] font-black text-slate-300 uppercase">
+                                                    {format(new Date(order.created_at), 'MMM d, h:mm a')}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-indigo-600 font-black text-lg">+{formatBundleCount(computeBundleUnitsFromItems(order.items || []))} {computeBundleUnitsFromItems(order.items || []) === 1 ? 'bundle' : 'bundles'}</p>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
                     </div>
-                </div>
+                )}
 
                 {/* Instructions Box */}
                 {(campaign.payment_instructions || campaign.external_payment_link) && (
