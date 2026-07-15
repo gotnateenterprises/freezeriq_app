@@ -1,0 +1,320 @@
+<title>Mission Control — Dashboard Redesign</title>
+<style>
+  :root{--ink:#1e2430;--ink-2:#5a6272;--paper:#f5f6f9;--panel:#fff;--line:#e3e6ee;--chipbg:#4f46e5;--chipfg:#fff}
+  @media (prefers-color-scheme: dark){:root{--ink:#e7eaf2;--ink-2:#9aa2b5;--paper:#14161d;--panel:#1d2029;--line:#2c3040}}
+  :root[data-theme="dark"]{--ink:#e7eaf2;--ink-2:#9aa2b5;--paper:#14161d;--panel:#1d2029;--line:#2c3040}
+  :root[data-theme="light"]{--ink:#1e2430;--ink-2:#5a6272;--paper:#f5f6f9;--panel:#fff;--line:#e3e6ee}
+  *{box-sizing:border-box}
+  body{background:var(--paper);color:var(--ink);margin:0;padding:2rem 1.25rem 4rem;font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1220px;margin:0 auto}
+  header.page h1{font-size:1.5rem;font-weight:800;letter-spacing:-.02em;margin:0 0 .35rem}
+  header.page p{color:var(--ink-2);max-width:66ch;margin:0 0 1.4rem}
+  .scroller{overflow-x:auto;border-radius:18px}
+  .window{min-width:1060px;background:#f1f4f9;color:#0f172a;border-radius:18px;box-shadow:0 24px 60px -20px rgba(20,25,60,.4);overflow:hidden;font-size:13.5px;line-height:1.45}
+  .titlebar{display:flex;align-items:center;gap:.5rem;background:#e6eaf2;padding:.55rem .9rem}
+  .titlebar i{width:11px;height:11px;border-radius:99px;background:#cbd2e0}
+  .titlebar span{margin-left:.6rem;font:600 .72rem/1 ui-monospace,Consolas,monospace;color:#64748b}
+
+  .apphead{display:flex;align-items:center;gap:.8rem;background:#fff;border-bottom:1px solid #e6eaf2;padding:.85rem 1.3rem}
+  .apphead h2{margin:0;font-size:1.15rem;font-weight:900;letter-spacing:-.01em}
+  .apphead .sub{font-size:.72rem;color:#94a3b8;font-weight:600}
+  .rangetog{display:flex;background:#f1f4f9;border-radius:11px;padding:.25rem;margin-left:auto}
+  .rangetog button{border:0;background:none;font:800 .76rem/1 inherit;color:#64748b;padding:.5rem .95rem;border-radius:8px;cursor:pointer}
+  .rangetog button.on{background:#fff;color:#0f172a;box-shadow:0 1px 4px rgba(20,25,60,.12)}
+
+  .pad{padding:1rem 1.3rem 1.4rem}
+  .keychip{width:22px;height:22px;border-radius:7px;background:var(--chipbg);color:var(--chipfg);font:800 .72rem/22px ui-monospace,Consolas,monospace;text-align:center;display:inline-block;flex:none}
+  .floatchip{position:absolute;z-index:5;box-shadow:0 2px 6px rgba(30,35,90,.35)}
+
+  /* attention strip */
+  .attn{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem;position:relative}
+  .attn a{flex:1;min-width:215px;display:flex;align-items:center;gap:.6rem;text-decoration:none;background:#fff;border:1px solid #e6eaf2;border-left:4px solid var(--s,#4f46e5);border-radius:12px;padding:.6rem .8rem;color:#0f172a}
+  .attn b{display:block;font-size:.8rem}
+  .attn span.d{font-size:.68rem;color:#64748b}
+  .attn .em{font-size:1.05rem}
+
+  /* pulse stats */
+  .pulse{display:flex;gap:.7rem;margin-bottom:1rem;position:relative}
+  .pstat{flex:1;background:#fff;border:1px solid #e6eaf2;border-radius:16px;padding:.85rem 1rem;cursor:pointer}
+  .pstat .l{font-size:.66rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8}
+  .pstat .n{font-size:1.65rem;font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:-.02em;margin:.1rem 0}
+  .pstat .g{font-size:.68rem;font-weight:800}
+  .pstat .g.up{color:#059669}.pstat .g.dn{color:#dc2626}
+  .spark{display:flex;align-items:flex-end;gap:2px;height:22px;margin-top:.35rem}
+  .spark i{flex:1;background:#c7d2fe;border-radius:2px}
+  .pstat.hero .spark i{background:#a5b4fc}
+  .pstat.hero .spark i.hi{background:#4f46e5}
+
+  .grid{display:grid;grid-template-columns:1.25fr 1fr;gap:1rem;align-items:start}
+  .card{background:#fff;border:1px solid #e6eaf2;border-radius:16px;padding:1rem 1.1rem;position:relative}
+  .card h3{margin:0 0 .6rem;font-size:.72rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#64748b;display:flex;align-items:center;gap:.5rem}
+  .card h3 .lnk{margin-left:auto;font-size:.68rem;color:#4f46e5;text-decoration:none;text-transform:none;letter-spacing:0;cursor:pointer}
+
+  /* inquiries */
+  .inq{border:1px solid #eef1f7;border-radius:13px;padding:.7rem .85rem;margin-bottom:.6rem}
+  .inq .top{display:flex;align-items:center;gap:.55rem}
+  .inq .src{font-size:.6rem;font-weight:800;border-radius:99px;padding:.18rem .5rem}
+  .src.fund{background:#ede9fe;color:#5b21b6}.src.store{background:#dcfce7;color:#166534}.src.fb{background:#dbeafe;color:#1d4ed8}.src.menu{background:#fef3c7;color:#92400e}
+  .inq .top b{font-size:.82rem}
+  .inq .when{margin-left:auto;font-size:.64rem;color:#94a3b8}
+  .inq p.msg{margin:.3rem 0 .5rem;font-size:.76rem;color:#475569}
+  .qr{display:none;background:#f8fafc;border:1px solid #eef1f7;border-radius:10px;padding:.6rem .7rem;margin:.45rem 0;font-size:.74rem;color:#334155}
+  .inq.open .qr{display:block}
+  .qr .tag{font-size:.58rem;font-weight:800;color:#4f46e5;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:.25rem}
+  .ibtns{display:flex;gap:.4rem}
+  .ibtns button{border:0;border-radius:9px;font:800 .68rem/1 inherit;padding:.5rem .7rem;cursor:pointer}
+  .b-reply{background:#eef0fd;color:#3730a3}
+  .b-send{background:#4f46e5;color:#fff}
+  .b-conv{background:#f0fdf4;color:#166534;border:1px solid #bbf7d0 !important}
+  .b-dis{background:#f8fafc;color:#94a3b8}
+
+  /* calendar strip */
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:.4rem}
+  .cday{background:#f8fafc;border:1px solid #eef1f7;border-radius:11px;padding:.5rem .5rem .55rem;min-height:88px}
+  .cday.today{border-color:#4f46e5;background:#eef0fd}
+  .cday .d{font-size:.62rem;font-weight:800;color:#94a3b8;text-transform:uppercase}
+  .cday.today .d{color:#4f46e5}
+  .cday .n{font-size:.95rem;font-weight:900}
+  .ev{margin-top:.3rem;font-size:.6rem;font-weight:700;border-radius:6px;padding:.18rem .35rem;line-height:1.25}
+  .ev.del{background:#dcfce7;color:#166534}.ev.camp{background:#ede9fe;color:#5b21b6}.ev.cut{background:#fef3c7;color:#92400e}.ev.pick{background:#dbeafe;color:#1d4ed8}
+
+  /* funnel */
+  .funnel{display:flex;gap:.35rem;margin-top:.2rem}
+  .fstage{flex:1;text-align:center;cursor:pointer;border-radius:10px;padding:.55rem .2rem;background:#f8fafc;border:1px solid #eef1f7}
+  .fstage:hover{border-color:#c7d2fe}
+  .fstage .fn{font-size:1.15rem;font-weight:900;font-variant-numeric:tabular-nums}
+  .fstage .fl{font-size:.56rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8}
+  .fstage.hot .fn{color:#4f46e5}
+  .farrow{align-self:center;color:#cbd5e1;font-weight:900}
+
+  .notes-sec{margin-top:1.8rem}
+  .notes-sec h2{font:700 .78rem/1 ui-monospace,Consolas,monospace;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-2);margin:0 0 .4rem}
+  .dnote{display:flex;gap:.85rem;padding:.9rem 0;border-top:1px solid var(--line)}
+  .dnote b{display:block;font-size:.9rem;margin-bottom:.15rem}
+  .dnote p{margin:0;color:var(--ink-2);font-size:.84rem;max-width:74ch}
+  .dnote .was{font-family:ui-monospace,Consolas,monospace;font-size:.72rem;color:#d97706;display:block;margin-top:.3rem}
+  @media (prefers-color-scheme: dark){.dnote .was{color:#f5a94b}}
+</style>
+
+<div class="wrap">
+<header class="page">
+  <h1>Mission Control — the dashboard redesign</h1>
+  <p><b>Try it:</b> flip Day/Week/Month and watch every number re-scope; click an inquiry's
+  <b>Reply</b> to see the suggested response; the funnel is the CRM's front door. Every tile
+  deep-links into the boards we've built.</p>
+</header>
+
+<div class="scroller">
+<div class="window">
+  <div class="titlebar"><i></i><i></i><i></i><span>freezeriq.com/dashboard</span></div>
+
+  <div class="apphead">
+    <div><h2>Good morning, Laurie ☀️</h2>
+    <span class="sub">Saturday, Apr 19 · delivery day · 3 pickups 10–1</span></div>
+    <div class="rangetog" id="rt">
+      <button data-r="day">Today</button>
+      <button class="on" data-r="week">This Week</button>
+      <button data-r="month">Month</button>
+    </div>
+  </div>
+
+  <div class="pad">
+    <!-- ATTENTION -->
+    <div class="attn">
+      <span class="keychip floatchip" style="top:-9px;left:-9px">A</span>
+      <a href="#" style="--s:#dc2626"><span class="em">🚨</span><span><b>Hilltop Academy at risk</b><span class="d">0 orders · 8 days left · nudge the coordinator</span></span></a>
+      <a href="#" style="--s:#b45309"><span class="em">🍳</span><span><b>2 batches due for Saturday</b><span class="d">Family Favorites · Soup Sampler → Kitchen Board</span></span></a>
+      <a href="#" style="--s:#4f46e5"><span class="em">💬</span><span><b>3 inquiries waiting</b><span class="d">oldest 2 hours — reply below</span></span></a>
+      <a href="#" style="--s:#059669"><span class="em">💰</span><span><b>Delmar PTO settled — invoice unpaid</b><span class="d">$2,847 frozen · create invoice</span></span></a>
+    </div>
+
+    <!-- PULSE -->
+    <div class="pulse">
+      <span class="keychip floatchip" style="top:-9px;left:-9px">B</span>
+      <div class="pstat hero">
+        <span class="l">Revenue</span>
+        <div class="n" id="p1">$3,240</div>
+        <span class="g up" id="g1">▲ 18% vs last week</span>
+        <div class="spark"><i style="height:30%"></i><i style="height:45%"></i><i style="height:38%"></i><i style="height:65%"></i><i style="height:52%"></i><i style="height:80%"></i><i class="hi" style="height:100%"></i></div>
+      </div>
+      <div class="pstat"><span class="l">Orders in progress</span><div class="n" id="p2">14</div><span class="g up" id="g2">▲ 4 new</span></div>
+      <div class="pstat"><span class="l">Batches to cook</span><div class="n" id="p3">4</div><span class="g" id="g3" style="color:#b45309">2 due Sat</span></div>
+      <div class="pstat"><span class="l">Raised for groups</span><div class="n" id="p4">$1,410</div><span class="g up" id="g4">2 active campaigns</span></div>
+    </div>
+
+    <div class="grid">
+      <div>
+        <!-- INQUIRIES -->
+        <div class="card">
+          <span class="keychip floatchip" style="top:-9px;left:-9px">C</span>
+          <h3>💬 New inquiries <span class="lnk">Inbox →</span></h3>
+
+          <div class="inq" id="i1">
+            <div class="top"><span class="src fund">FUNDRAISER LEAD</span><b>Riverside Band Boosters</b><span class="when">2h ago</span></div>
+            <p class="msg">"Saw the Coles County scoreboard — how much could our band raise?"</p>
+            <div class="qr"><span class="tag">✨ Suggested reply · review before sending</span>
+              Hi Sarah! Bands your size typically raise $1,500–$3,000 — your group keeps 20% of every sale.
+              I'd love to set you up — here's how it works… <u>edit</u></div>
+            <div class="ibtns">
+              <button class="b-reply" data-open="i1">✨ Reply</button>
+              <button class="b-send" hidden data-sent>Review &amp; send</button>
+              <button class="b-conv">🚀 Start fundraiser wizard</button>
+              <button class="b-dis">Later</button>
+            </div>
+          </div>
+
+          <div class="inq" id="i2">
+            <div class="top"><span class="src fb">MESSENGER</span><b>Amanda K.</b><span class="when">4h ago</span></div>
+            <p class="msg">"Do you have any gluten-free options for next week?"</p>
+            <div class="qr"><span class="tag">✨ Suggested reply</span>
+              Hi Amanda! Yes — our Clean Eating bundle is fully GF this week. Menu &amp; ordering: [your link] 🧡 <u>edit</u></div>
+            <div class="ibtns">
+              <button class="b-reply" data-open="i2">✨ Reply</button>
+              <button class="b-send" hidden data-sent>Review &amp; send</button>
+              <button class="b-conv">＋ Add to customers</button>
+              <button class="b-dis">Later</button>
+            </div>
+          </div>
+
+          <div class="inq" id="i3">
+            <div class="top"><span class="src menu">MENU LIST</span><b>t.nguyen@gmail.com</b><span class="when">Yesterday</span></div>
+            <p class="msg">Joined the weekly menu list from the storefront.</p>
+            <div class="ibtns">
+              <button class="b-conv">＋ Add to customers</button>
+              <button class="b-dis">Auto-welcomed ✓</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- FUNNEL -->
+        <div class="card" style="margin-top:1rem">
+          <span class="keychip floatchip" style="top:-9px;left:-9px">D</span>
+          <h3>🎯 CRM funnel — click a stage to work it <span class="lnk">Customers →</span></h3>
+          <div class="funnel">
+            <div class="fstage hot"><div class="fn">7</div><div class="fl">Leads</div></div><span class="farrow">›</span>
+            <div class="fstage"><div class="fn">2</div><div class="fl">Agreement</div></div><span class="farrow">›</span>
+            <div class="fstage"><div class="fn">1</div><div class="fl">Onboarding</div></div><span class="farrow">›</span>
+            <div class="fstage"><div class="fn">4</div><div class="fl">Active</div></div><span class="farrow">›</span>
+            <div class="fstage"><div class="fn">2</div><div class="fl">Production</div></div><span class="farrow">›</span>
+            <div class="fstage"><div class="fn">1</div><div class="fl">Delivery</div></div>
+          </div>
+          <p style="margin:.55rem 0 0;font-size:.7rem;color:#94a3b8">7 leads · 3 silent 14+ days → <span style="color:#4f46e5;font-weight:700;cursor:pointer">send follow-ups ✨</span></p>
+        </div>
+      </div>
+
+      <div>
+        <!-- CALENDAR -->
+        <div class="card">
+          <span class="keychip floatchip" style="top:-9px;left:-9px">E</span>
+          <h3>📅 Your week <span class="lnk">Calendar →</span></h3>
+          <div class="cal">
+            <div class="cday"><span class="d">Mon</span><div class="n">14</div></div>
+            <div class="cday"><span class="d">Tue</span><div class="n">15</div><span class="ev cut">🛒 order cutoff 9pm</span></div>
+            <div class="cday"><span class="d">Wed</span><div class="n">16</div><span class="ev camp">🎪 Delmar handoff</span></div>
+            <div class="cday"><span class="d">Thu</span><div class="n">17</div><span class="ev cut">🍳 cook day</span></div>
+            <div class="cday"><span class="d">Fri</span><div class="n">18</div><span class="ev cut">🍳 cook + pack</span></div>
+            <div class="cday today"><span class="d">Sat</span><div class="n">19</div><span class="ev del">🚚 8 stops</span><span class="ev pick">🤝 3 pickups</span></div>
+            <div class="cday"><span class="d">Sun</span><div class="n">20</div><span class="ev camp">⏰ Coles Co ends</span></div>
+          </div>
+        </div>
+
+        <!-- FUNDRAISER PULSE -->
+        <div class="card" style="margin-top:1rem">
+          <span class="keychip floatchip" style="top:-9px;left:-9px">F</span>
+          <h3>🎪 Fundraisers <span class="lnk">Growth Engine →</span></h3>
+          <div style="display:flex;flex-direction:column;gap:.5rem">
+            <div style="display:flex;align-items:center;gap:.6rem;font-size:.78rem">
+              <b style="min-width:0;flex:1">Coles County FB</b><span style="color:#059669;font-weight:800">on pace</span>
+              <span style="color:#94a3b8">14/20 · ends Sun</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:.6rem;font-size:.78rem">
+              <b style="min-width:0;flex:1">Hilltop Academy</b><span style="color:#dc2626;font-weight:800">⚠ at risk</span>
+              <span style="color:#94a3b8">0/100 · 8 days</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:.6rem;font-size:.78rem;border-top:1px dashed #eef1f7;padding-top:.5rem">
+              <b style="min-width:0;flex:1">🔁 2 orgs ready to rebook</b>
+              <span style="color:#4f46e5;font-weight:800;cursor:pointer">$5,000 est →</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div><!-- /window -->
+</div>
+
+<section class="notes-sec">
+  <h2>Design notes</h2>
+  <div class="dnote"><span class="keychip">A</span><div>
+    <b>The attention strip is now cross-platform</b>
+    <p>One strip surfaces the top item from every system we've built: campaign health (GE-3), batches due
+    (Kitchen Board), waiting inquiries, unpaid settlements (7E). Ranked by urgency, max 4, each deep-links to
+    the exact board that fixes it. The dashboard's job is triage, not decoration.</p>
+    <span class="was">was: no attention concept — 4 static stat cards</span>
+  </div></div>
+  <div class="dnote"><span class="keychip">B</span><div>
+    <b>One toggle re-scopes everything</b>
+    <p>Today / This Week / Month drives all four pulse stats and the sparkline — the API already computes
+    week+month with growth vs prior period; this adds "today" and binds the UI to one range state. And
+    fundraising money finally appears on the dashboard ("Raised for groups"), fixed to the org-share framing —
+    the current dash excludes fundraisers from every metric, which made the platform's flagship feature invisible.</p>
+    <span class="was">was: fixed week/month mix; fundraiser $ excluded everywhere; "Family/Couple Size" hardcoded panel</span>
+  </div></div>
+  <div class="dnote"><span class="keychip">C</span><div>
+    <b>The unified inquiry inbox with semi-auto replies</b>
+    <p>Every inbound stream in one card — fundraiser leads (GE-2), Messenger (existing meta/reply endpoint),
+    menu-list signups, storefront questions — each with a source chip, a ✨ suggested reply built from the
+    tenant-branded templates, and a Review &amp; Send button. NEVER auto-sent (doctrine); the suggestion kills
+    the blank-page problem that makes tenants reply late or never. Convert buttons launch straight into the
+    funnel: "Start fundraiser wizard" (CRM-4) or "Add to customers." Menu signups get an automatic branded
+    welcome (the one true auto-response — it's a receipt, not a reply).</p>
+    <span class="was">was: Messenger-only panel; leads only in email notifications; no suggested replies; no convert action</span>
+  </div></div>
+  <div class="dnote"><span class="keychip">D</span><div>
+    <b>The funnel is the CRM's front door</b>
+    <p>Live counts across the existing CustomerStatus pipeline; click a stage to open the CRM filtered to it.
+    The stale-lead line ("3 silent 14+ days → send follow-ups ✨") turns the funnel from a chart into a to-do.</p>
+    <span class="was">was: funnel visible nowhere; stage counts require visiting the CRM and counting</span>
+  </div></div>
+  <div class="dnote"><span class="keychip">E</span><div>
+    <b>Calendar promoted from footer to co-pilot</b>
+    <p>The week strip shows the operational rhythm — cutoffs, cook days, delivery/pickup day, campaign
+    handoffs and endings — sourced from data that already exists (order_cutoff_date, delivery days, campaign
+    dates). The existing CalendarWidget remains the full view; this is its seven-day distillation, placed
+    where eyes land.</p>
+    <span class="was">was: CalendarWidget buried at the very bottom of the page</span>
+  </div></div>
+  <div class="dnote"><span class="keychip">F</span><div>
+    <b>Fundraisers get a pulse card</b>
+    <p>Active campaigns with health + pace, plus the rebook pipeline teaser — the Growth Engine's Monday
+    digest, live on the dashboard every day.</p>
+  </div></div>
+</section>
+</div>
+
+<script>
+const DATA = {
+  day:   { p1:'$580', g1:'▲ 2 orders today', p2:'14', g2:'3 due today', p3:'2', g3:'due today', p4:'$95',  g4:'1 order today' },
+  week:  { p1:'$3,240', g1:'▲ 18% vs last week', p2:'14', g2:'▲ 4 new', p3:'4', g3:'2 due Sat', p4:'$1,410', g4:'2 active campaigns' },
+  month: { p1:'$11,860', g1:'▲ 9% vs March', p2:'31', g2:'this month', p3:'—', g3:'see production', p4:'$4,257', g4:'incl. settled campaigns' },
+};
+document.querySelectorAll('#rt button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#rt button').forEach(x => x.classList.remove('on'));
+  b.classList.add('on');
+  const d = DATA[b.dataset.r];
+  for (const k of ['p1','p2','p3','p4']) document.getElementById(k).textContent = d[k];
+  document.getElementById('g1').textContent = d.g1; document.getElementById('g2').textContent = d.g2;
+  document.getElementById('g3').textContent = d.g3; document.getElementById('g4').textContent = d.g4;
+}));
+document.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => {
+  const inq = document.getElementById(b.dataset.open);
+  inq.classList.toggle('open');
+  const send = inq.querySelector('[data-sent]');
+  send.hidden = !inq.classList.contains('open');
+}));
+document.querySelectorAll('[data-sent]').forEach(b => b.addEventListener('click', () => {
+  const inq = b.closest('.inq');
+  inq.style.transition = 'opacity .3s'; inq.style.opacity = '.45';
+  inq.querySelector('.ibtns').innerHTML = '<span style="font-size:.72rem;font-weight:800;color:#059669">✓ Sent — moved to Leads</span>';
+}));
+</script>

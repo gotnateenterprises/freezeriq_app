@@ -19,6 +19,8 @@ For any work on the coordinator panel or recipe library redesigns, also read:
 - [storefront_prototype.html](docs/ai/prototypes/storefront_prototype.html) — APPROVED visual reference for the customer storefront + fundraiser buyer page (6 screens).
 - [KITCHEN_DELIVERY_HANDOFF](docs/ai/KITCHEN_DELIVERY_HANDOFF.md) — exact code for the Kitchen Board + Delivery Day pipeline, phases DD-0..DD-5 + KB-1 (spec §12).
 - [kitchen_board_prototype.html](docs/ai/prototypes/kitchen_board_prototype.html) + [delivery_day_prototype.html](docs/ai/prototypes/delivery_day_prototype.html) — APPROVED visual references for spec §12.
+- [MISSION_CONTROL_HANDOFF](docs/ai/MISSION_CONTROL_HANDOFF.md) — exact code for the dashboard redesign MC-0..5 (spec §15).
+- [mission_control_prototype.html](docs/ai/prototypes/mission_control_prototype.html) — APPROVED visual reference for the dashboard.
 
 ## Execution Rules
 - Make the smallest safe change.

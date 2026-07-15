@@ -870,3 +870,61 @@ check new work against this section before proposing it.
    the full journey as a brand-new coordinator on a phone — receive link →
    set up → select bundles (+add-ons nudge) → share → take an order → close →
    see settlement → know exactly how to pay. Zero moments of "now what?"
+
+---
+
+## 15. Mission Control — Dashboard redesign (MC-0..5) — APPROVED 2026-07-14
+
+**Exact code:** `docs/ai/MISSION_CONTROL_HANDOFF.md`. **Pixel reference:**
+`docs/ai/prototypes/mission_control_prototype.html`. The dashboard is the hub
+that surfaces every track: triage first, information second, one door into
+every board. §14 doctrine applies to all inquiry/nudge copy.
+
+### Phases
+- **MC-0 — Dashboard API fixes:**
+  1. Chart window/bucket mismatch: bucket by DATE key over one agreed window
+     (rolling 7 days), not weekday names.
+  2. Low stock: hardcoded `< 20 units` replaced by per-ingredient
+     `Ingredient.low_stock_threshold Decimal?` (JOINS THE CB-1 MIGRATION —
+     proposal-first) with an interim unit-aware default map until it lands.
+  3. Retire the price-based size-guess fallback for itemless orders — count
+     them as an explicit "unmapped" bucket instead.
+  4. Remove the hardcoded Family/Couple demand panel (MC-1 replaces it).
+- **MC-1 — Mission Control board:** cross-platform attention strip (campaign
+  health GE-3, batches due, waiting inquiries, unpaid settlements — ranked,
+  max 4, deep-linked); Day/Week/Month toggle re-scoping all pulse stats
+  (additive `range` param on /api/dashboard); "Raised for groups" pulse stat
+  in org-share framing (fundraiser money visible WITHOUT polluting revenue —
+  separate stat, revenue metrics keep their exclusions); week calendar strip
+  (cutoffs, cook days, delivery/pickup, campaign handoffs/endings); fundraiser
+  pulse card (active campaigns + health + rebook teaser); CRM funnel bar with
+  stage click-through to the filtered CRM.
+- **MC-2 — Funnel Autopilot:** unified inquiries feed (BusinessLead +
+  Messenger Activity + menu signups + fundraiser requests) with source chips;
+  ✨ suggested replies per source from the tenant-branded template helpers —
+  ALWAYS Review & Send, NEVER auto-sent (§14); ONE true auto-response: the
+  menu-signup welcome receipt (tenant toggle, default ON — it is a receipt,
+  not a reply); convert actions launching the funnel (Start fundraiser wizard
+  prefilled / Add to customers); statusWorkflow gains a pure suggestion map
+  (stage → suggested next action + template) — suggestions only, no writes,
+  no auto-emails; stale-lead follow-up line on the funnel bar.
+- **MC-3 — ⌘K command palette + live pulse:** palette over customers, recipes,
+  bundles, campaigns + an action registry (new order, start fundraiser, close
+  campaign, boards); lazy index on first open; Cmd/Ctrl+K everywhere in the
+  tenant backend. Live pulse: light polling endpoint (new orders/inquiries
+  since timestamp) → sonner toasts while the dashboard is open.
+- **MC-4 — Self-explaining deltas + personal records:** rule-based attribution
+  (compare periods by bundle and source, name the top movers — NO AI); personal
+  records ("Best Saturday ever — $X") from historical daily maxima, celebrated
+  once (existing confetti), never for serious-context metrics.
+- **MC-5 — Day-One Mode:** when activation is incomplete (no recipes / bundles /
+  storefront bundles / orders), the board becomes a §14-style setup checklist
+  (① recipes → ② bundle — "✨ try the Random Creator" → ③ storefront → ④ first
+  order) with progress; dismisses itself forever once complete.
+
+**Rejected (recorded):** weather widgets (external dependency), AI-written
+daily summaries (rule-based attribution suffices), customizable/draggable
+widget layouts (maintenance tax; fixed layout is the design).
+**Dependencies:** MC-1's attention items degrade gracefully — each source
+renders only if its track is merged (GE-3 health, 7E settlements). MC-2 leans
+on FIX-3 templates. MC-0.2's column joins CB-1. Everything else independent.
