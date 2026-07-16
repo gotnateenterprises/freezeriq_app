@@ -119,14 +119,18 @@ const navSections: NavSection[] = [
 
 export default function Sidebar() {
     const pathname = usePathname();
-    const [logo, setLogo] = useState<string | null>(() => {
-        if (typeof window !== 'undefined') return localStorage.getItem('kitchenLogo');
-        return null;
-    });
-    const [appName, setAppName] = useState(() => {
-        if (typeof window !== 'undefined') return localStorage.getItem('appName') || 'FreezerIQ';
-        return 'FreezerIQ';
-    });
+    const [logo, setLogo] = useState<string | null>(null);
+    const [appName, setAppName] = useState('FreezerIQ');
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const savedLogo = localStorage.getItem('kitchenLogo');
+            if (savedLogo) setLogo(savedLogo);
+
+            const savedName = localStorage.getItem('appName');
+            if (savedName) setAppName(savedName);
+        }
+    }, []);
     const [businessSlug, setBusinessSlug] = useState<string | null>(null);
     const [showLogoInHeader, setShowLogoInHeader] = useState(false);
 
