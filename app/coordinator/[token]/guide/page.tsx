@@ -14,7 +14,6 @@ import {
     Star,
     Rocket,
     Users,
-    Target,
     AlertCircle
 } from 'lucide-react';
 import { useParams } from 'next/navigation';
@@ -114,7 +113,6 @@ export default function SuccessGuide() {
     const publicUrl = slug && campaign?.id
         ? `${window.location.origin}/shop/${slug}/fundraiser/${campaign.id}`
         : `${window.location.origin}/fundraiser/${campaign?.public_token}`;
-    const portalUrl = `${window.location.origin}/coordinator/${token}`;
 
     return (
         <div className="min-h-screen bg-slate-50 pb-20 font-sans selection:bg-indigo-100 selection:text-indigo-900">
