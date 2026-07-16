@@ -195,7 +195,14 @@ async function getData(slug: string, fundraiserId: string) {
 
     (business as any).bundles = formattedBundles;
 
-    return { business, campaign, bundleProgress, orderMode };
+    // Serialize the full return value to plain objects before the Server→Client boundary.
+    // $queryRaw returns TIMESTAMP(3) columns as Date objects and any DECIMAL columns as
+    // strings/numbers — all of which must be plain primitives before being passed to a
+    // Client Component (Next.js "Only plain objects" constraint).
+    // JSON.stringify converts Date → ISO string; JSON.parse produces a plain object.
+    // This is the same approach as safeJSON() in /api/campaigns/route.ts.
+    return JSON.parse(JSON.stringify({ business, campaign, bundleProgress, orderMode }));
+
 }
 
 export default async function FundraiserPage({ params }: { params: Promise<{ slug: string; fundraiserId: string }> }) {
