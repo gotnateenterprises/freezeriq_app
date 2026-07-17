@@ -558,7 +558,7 @@ model CampaignBundle {
   campaign    FundraiserCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
   bundle      Bundle             @relation(fields: [bundle_id], references: [id], onDelete: Cascade)
 
-  @@unique([campaign_id, bundle_id])
+  @@unique([campaign_id, bundle_id, state])
   @@index([campaign_id])
   @@index([campaign_id, state])
   @@map("campaign_bundles")
