@@ -25,6 +25,7 @@
 
 import { prisma } from '@/lib/db';
 import { isCampaignClosed } from '@/lib/campaignBundleSelection';
+import { normalizeStrictServingTier } from '@/lib/serving_multipliers';
 
 // ── Domain types ─────────────────────────────────────────────────────────────
 
@@ -149,10 +150,15 @@ export async function resolveCampaignOrderMode(
 
             const f = families.get(b.family_id) || { s5: false, s2: false };
 
-            if (b.serving_tier === 'serves_5') {
+            // Strict tier resolution: recognizes the same alias vocabulary as
+            // the coordinator-selection path (resolveVariantSize's DB_MAP), but
+            // never defaults an unrecognized tier to serves_5 — fail closed.
+            const tier = normalizeStrictServingTier(b.serving_tier);
+
+            if (tier === 'serves_5') {
                 if (f.s5) return { allowed: false, mode: 'invalid', reasonCode: 'invalid', safeMessage: 'Campaign bundle availability is not configured correctly', activeOrderableBundleIds: [] };
                 f.s5 = true;
-            } else if (b.serving_tier === 'serves_2') {
+            } else if (tier === 'serves_2') {
                 if (f.s2) return { allowed: false, mode: 'invalid', reasonCode: 'invalid', safeMessage: 'Campaign bundle availability is not configured correctly', activeOrderableBundleIds: [] };
                 f.s2 = true;
             } else {

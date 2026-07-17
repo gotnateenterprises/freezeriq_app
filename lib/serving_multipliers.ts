@@ -53,6 +53,23 @@ const VALID_SERVING_SIZES: ReadonlySet<string> = Object.freeze(
 );
 
 /**
+ * Freeform tier-string → DbVariantSize alias map.
+ * Shared, frozen source of truth for both the permissive resolver
+ * (resolveVariantSize) and the strict resolver (normalizeStrictServingTier)
+ * below, so the two can never drift into recognizing different vocabularies.
+ */
+const DB_MAP: Readonly<Record<string, DbVariantSize>> = Object.freeze({
+    'serves_5': 'serves_5',
+    'serves_2': 'serves_2',
+    'start_fresh': 'serves_5', // Same 1.0 multiplier — safe for DB storage
+    'family': 'serves_5',
+    'family_size': 'serves_5',
+    'couple': 'serves_2',
+    'couples': 'serves_2',
+    'single': 'serves_2',
+});
+
+/**
  * Returns the numeric serving multiplier for a given variant_size.
  *
  * CALCULATION CONSTITUTION — LAW 2:
@@ -120,18 +137,6 @@ export function resolveVariantSize(tierInput: string | null | undefined): DbVari
 
     const normalized = tierInput.toLowerCase().trim().replace(/[\s_-]+/g, '_');
 
-    // Map to DB-safe values (only serves_2 or serves_5)
-    const DB_MAP: Record<string, DbVariantSize> = {
-        'serves_5': 'serves_5',
-        'serves_2': 'serves_2',
-        'start_fresh': 'serves_5', // Same 1.0 multiplier — safe for DB storage
-        'family': 'serves_5',
-        'family_size': 'serves_5',
-        'couple': 'serves_2',
-        'couples': 'serves_2',
-        'single': 'serves_2',
-    };
-
     const resolved = DB_MAP[normalized];
     if (resolved) return resolved;
 
@@ -142,6 +147,31 @@ export function resolveVariantSize(tierInput: string | null | undefined): DbVari
         `Add to DB_MAP if this is a valid tier.`
     );
     return 'serves_5';
+}
+
+/**
+ * Strict variant of resolveVariantSize() for fail-closed authorities (e.g. CB-5
+ * ordering eligibility) that must never silently accept an unrecognized tier.
+ *
+ * Uses the exact same normalization preprocessing and DB_MAP vocabulary as
+ * resolveVariantSize() — so this recognizes precisely the aliases the rest of
+ * the system already treats as valid, no more and no less — but returns null
+ * instead of defaulting to "serves_5" and does not log-and-continue. Callers
+ * MUST treat a null result as invalid/rejected, not as a fallback tier.
+ *
+ * @param tierInput - Raw serving tier string to validate
+ * @returns The canonical DbVariantSize, or null if unrecognized (including
+ *          null, undefined, empty, or whitespace-only input)
+ */
+export function normalizeStrictServingTier(
+    tierInput: string | null | undefined
+): DbVariantSize | null {
+    if (!tierInput) return null;
+
+    const normalized = tierInput.toLowerCase().trim().replace(/[\s_-]+/g, '_');
+    if (!normalized) return null;
+
+    return DB_MAP[normalized] ?? null;
 }
 
 /**
