@@ -41,6 +41,49 @@ export interface FlyerInput {
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
+/**
+ * Strips a trailing serving-size parenthetical — "(Serves 2)",
+ * "(Serves a Family of 4)", etc. — from a bundle/menu name.
+ *
+ * Shared by formatMenuLabel() and the menu-grouping key builder below so
+ * the two can never recognize a different suffix vocabulary and drift.
+ */
+function stripServingSuffix(value: string): string {
+    return value.replace(/\s*\(serves\b[^)]*\)\s*$/i, '').trim();
+}
+
+/**
+ * Formats a selected bundle-family menu label for flyer display.
+ *
+ * Strips a leading quarter prefix ("Q1 - " … "Q4 - ") and a trailing
+ * serving-size suffix, appends "Bundle" exactly once (never doubling if
+ * the result already ends in "Bundle"), and prefixes the ordinal only
+ * when more than one menu is present.
+ *
+ * @param baseName - The menu's grouped base name (e.g. "Q1 - Hearty Meals")
+ * @param ordinal  - 1-based position among selected menus, or null for a
+ *                    single-menu flyer (no ordinal is shown)
+ */
+function formatMenuLabel(baseName: string, ordinal: number | null): string {
+    // 1-2. Null/undefined → empty string, then trim.
+    let name = (baseName || '').trim();
+    // 3. Strip the anchored quarter prefix.
+    name = name.replace(/^Q[1-4]\s*-\s*/i, '');
+    // 4. Strip the trailing serving suffix.
+    name = stripServingSuffix(name);
+    // 5. Trim again.
+    name = name.trim();
+
+    // 6. Append "Bundle" only if not already present at the end.
+    const hasTrailingBundle = /\bbundle\s*$/i.test(name);
+    const label = name
+        ? (hasTrailingBundle ? name : `${name} Bundle`)
+        : 'Bundle';
+
+    // 7. Apply the ordinal when provided.
+    return ordinal === null ? label : `#${ordinal} – ${label}`;
+}
+
 function formatDate(iso: string): string {
     if (!iso) return 'TBD';
     try {
@@ -108,10 +151,10 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
 
     const menuMap = new Map<string, Menu>();
     for (const b of input.bundles) {
-        // Normalise name: strip trailing "(Serves 2)" or "(serves 2)" etc.
-        const baseName = b.name
-            .replace(/\s*\(serves\s*2\)$/i, '')
-            .trim();
+        // Normalise name: strip any trailing "(Serves ...)" suffix so the
+        // family and serves-2 siblings — regardless of exact suffix wording
+        // ("(Serves 2)", "(Serves a Family of 4)", etc.) — group as one menu.
+        const baseName = stripServingSuffix(b.name);
         let menu = menuMap.get(baseName);
         if (!menu) {
             menu = { baseName, familyPrice: null, couplePrice: null, meals: [] };
@@ -278,10 +321,8 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
         doc.setLineWidth(0.6);
         roundedRect(doc, bx, by, bundleColW, uniformCardH, 4, 'FD');
 
-        // Card title: "BUNDLE 1" / "BUNDLE 2" (or base name if only 1)
-        const cardTitle = menus.length === 1
-            ? menu.baseName.toUpperCase()
-            : `BUNDLE ${i + 1}`;
+        // Card title: real bundle-family name, with ordinal when multiple menus exist.
+        const cardTitle = formatMenuLabel(menu.baseName, menus.length === 1 ? null : i + 1);
         doc.setFontSize(11);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...hexToRgb(secondary));
@@ -415,7 +456,7 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     // One section per menu, with sub-rows for Family Size and Serves 2
     doc.setFontSize(9);
     menus.forEach((menu, mi) => {
-        const menuLabel = menus.length === 1 ? menu.baseName : `Bundle ${mi + 1}`;
+        const menuLabel = formatMenuLabel(menu.baseName, menus.length === 1 ? null : mi + 1);
 
         // Family Size row
         if (mi % 2 === 0) {
