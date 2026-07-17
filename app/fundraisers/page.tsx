@@ -24,6 +24,7 @@ import { useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
 import { useSession } from 'next-auth/react';
 import UpgradeRequired from '@/components/UpgradeRequired';
+import { StartFundraiserWizard } from '@/components/crm2/StartFundraiserWizard';
 
 interface Fundraiser {
     id: string;
@@ -65,6 +66,9 @@ export default function FundraisersPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
     const [filterStatus, setFilterStatus] = useState('all');
+
+    // ── CRM-4: Start a Fundraiser wizard modal ───────────────────────────
+    const [showWizard, setShowWizard] = useState(false);
 
     // ── Phase 7E-3: Closeout modal state ──────────────────────────────────
     const [closeoutTarget, setCloseoutTarget] = useState<Fundraiser | null>(null);
@@ -198,12 +202,13 @@ export default function FundraisersPage() {
                         Track and manage organization campaigns across your kitchen.
                     </p>
                 </div>
-                <Link
-                    href="/customers?type=ORGANIZATION&action=new"
+                <button
+                    id="open-wizard-btn"
+                    onClick={() => setShowWizard(true)}
                     className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-2xl font-black shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-95"
                 >
                     <Plus size={20} /> Launch New Fundraiser
-                </Link>
+                </button>
             </div>
 
             {/* Quick Stats */}
@@ -526,6 +531,17 @@ export default function FundraisersPage() {
                 </div>
             </div>
         )}
+        {/* CRM-4 — Start a Fundraiser wizard */}
+        {showWizard && (
+            <StartFundraiserWizard
+                onClose={() => {
+                    setShowWizard(false);
+                    // Reload so the new campaign row appears immediately
+                    window.location.reload();
+                }}
+            />
+        )}
         </>
+
     );
 }
