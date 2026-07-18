@@ -116,7 +116,7 @@ export async function GET() {
             bundle_name: string;
             sku: string;
             total_quantity: number;
-            order_count: number;
+            order_ids: Set<string>;
             status: string;
             recipes: { id: string, name: string, quantity: number, label_text?: string | null }[];
         }>();
@@ -134,7 +134,7 @@ export async function GET() {
                         bundle_name: item.bundle.name,
                         sku: item.bundle.sku,
                         total_quantity: 0,
-                        order_count: 0,
+                        order_ids: new Set<string>(),
                         status: status,
                         recipes: (item.bundle.contents || []).map(c => ({
                             id: c.recipe?.id || 'unknown',
@@ -147,13 +147,13 @@ export async function GET() {
 
                 const entry = prepMap.get(key)!;
                 entry.total_quantity += item.quantity;
-                entry.order_count += 1;
+                entry.order_ids.add(order.id);
             });
         });
 
         return NextResponse.json({
             pending: pendingOrders,
-            prep: Array.from(prepMap.values()),
+            prep: Array.from(prepMap.values()).map(({ order_ids, ...e }) => ({ ...e, order_count: order_ids.size })),
             completed: completedOrders
         });
 
