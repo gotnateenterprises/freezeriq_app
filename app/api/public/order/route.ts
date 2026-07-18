@@ -14,6 +14,23 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Cart is empty" }, { status: 400 });
         }
 
+        // FR-LAUNCH-1A: every quantity must be a positive integer. Validated up
+        // front — before totals, customer/order creation, or inventory decrement —
+        // and never silently coerced, rounded, dropped, or defaulted. A single bad
+        // quantity rejects the whole request.
+        const hasInvalidQuantity = items.some((item: any) =>
+            typeof item?.quantity !== 'number' ||
+            !Number.isFinite(item.quantity) ||
+            !Number.isInteger(item.quantity) ||
+            item.quantity <= 0
+        );
+        if (hasInvalidQuantity) {
+            return NextResponse.json({
+                error: 'Every item quantity must be a positive integer',
+                code: 'INVALID_QUANTITY',
+            }, { status: 400 });
+        }
+
         if (!customer || !customer.email || !customer.name) {
             return NextResponse.json({ error: "Customer details required" }, { status: 400 });
         }
@@ -48,27 +65,43 @@ export async function POST(req: Request) {
         let externalPaymentLink: string | null = null;
         let orgName: string | null = null;
 
-        if (campaignId) {
+        // FR-LAUNCH-1A: campaign behavior is driven by a campaign the SERVER
+        // resolved and owns — never by the presence of a client-supplied id. A
+        // supplied-but-unresolvable campaignId is a hard 404 so a raw, unverified
+        // value can never reach Order.campaign_id.
+        if (campaignId !== undefined && campaignId !== null) {
+            if (typeof campaignId !== 'string' || campaignId.trim().length === 0) {
+                return NextResponse.json({
+                    error: 'Campaign not found',
+                    code: 'CAMPAIGN_NOT_FOUND',
+                }, { status: 404 });
+            }
+
             campaign = await prisma.fundraiserCampaign.findUnique({
-                where: { id: campaignId },
+                where: { id: campaignId.trim() },
                 include: { customer: true }
             });
 
-            // Validate campaign belongs to this business
-            if (campaign && campaign.customer?.business_id !== businessId) {
-                return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
+            // Missing campaign and wrong-tenant campaign are treated identically,
+            // so campaign ownership is never disclosed across businesses.
+            if (!campaign || campaign.customer?.business_id !== businessId) {
+                return NextResponse.json({
+                    error: 'Campaign not found',
+                    code: 'CAMPAIGN_NOT_FOUND',
+                }, { status: 404 });
             }
 
-            if (campaign) {
-                paymentInstructions = campaign.payment_instructions;
-                externalPaymentLink = campaign.external_payment_link;
-                orgName = campaign.customer?.name || null;
+            paymentInstructions = campaign.payment_instructions;
+            externalPaymentLink = campaign.external_payment_link;
+            orgName = campaign.customer?.name || null;
 
-                if (campaign.customer?.contact_email) {
-                    orgContactEmail = campaign.customer.contact_email;
-                }
+            if (campaign.customer?.contact_email) {
+                orgContactEmail = campaign.customer.contact_email;
             }
         }
+
+        // Single server-authoritative condition used for every campaign branch below.
+        const isCampaignOrder = campaign !== null;
 
         // Extract bundle IDs for validation and pricing (excludes manual_upsell sentinel)
         const bundleIds = items
@@ -160,8 +193,9 @@ export async function POST(req: Request) {
                     delivery_address: formattedAddress,
                     type: 'direct_customer',
                     status: 'LEAD',
-                    source: campaignId ? 'Fundraiser' : 'Storefront',
-                    notes: `Created via ${campaignId ? 'Fundraiser' : 'Storefront'} Order.${campaign ? ` Campaign: ${campaign.name}` : ''}`,
+                    // FR-LAUNCH-1A: driven by the resolved campaign, not the raw request.
+                    source: isCampaignOrder ? 'Fundraiser' : 'Storefront',
+                    notes: `Created via ${isCampaignOrder ? 'Fundraiser' : 'Storefront'} Order.${campaign ? ` Campaign: ${campaign.name}` : ''}`,
                     external_id: `sf_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
                 }
             });
@@ -176,7 +210,7 @@ export async function POST(req: Request) {
                     name: customer.name,
                     email: customer.email,
                     phone: customer.phone,
-                    source: campaignId ? 'Fundraiser' : 'Storefront'
+                    source: isCampaignOrder ? 'Fundraiser' : 'Storefront'
                 });
             }
         } else if (formattedAddress && dbCustomer.delivery_address !== formattedAddress) {
@@ -194,13 +228,19 @@ export async function POST(req: Request) {
                 customer_id: dbCustomer.id,
                 customer_name: customer.name,
                 participant_name: customer.participantCode || null,
+                // FR-LAUNCH-1A: a server-resolved campaign order enters the fundraiser
+                // lifecycle so campaign closeout — the sole owner of
+                // fundraiser_hold -> production_ready — can release it. Without this it
+                // would count toward settlement_total yet never reach production.
+                // The regular storefront fallback path is unchanged.
                 // @ts-ignore - 'storefront' was just added to enum
-                source: 'storefront',
-                status: 'pending',
+                source: isCampaignOrder ? 'fundraiser' : 'storefront',
+                status: isCampaignOrder ? 'fundraiser_hold' : 'pending',
                 total_amount: serverTotal,
                 delivery_address: customer.address ? `${customer.address}, ${customer.city}, ${customer.state} ${customer.zip}` : customer.notes,
                 external_id: `ord_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                campaign_id: campaignId || null,
+                // Server-resolved campaign id only — never the raw request value.
+                campaign_id: campaign ? campaign.id : null,
                 items: {
                     create: resolvedItems.map((item: any) => ({
                         bundle_id: (item.bundleId === 'manual_upsell' || !item.bundleId) ? null : item.bundleId,
