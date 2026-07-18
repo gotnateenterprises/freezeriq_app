@@ -317,6 +317,16 @@ export async function PATCH(req: NextRequest) {
             return NextResponse.json({ error: 'Order not found' }, { status: 404 });
         }
 
+        // 4b. KB-1A: a canceled order is terminal for status purposes. Checked only
+        //     after ownership is proven so cancellation state is never disclosed for
+        //     another tenant's order. Cancellation storage (canceled_at) is unchanged.
+        if (existingOrder.canceled_at) {
+            return NextResponse.json({
+                error: 'Canceled orders cannot be updated',
+                code: 'ORDER_CANCELED',
+            }, { status: 400 });
+        }
+
         // 5 + 6. DD-0.5: normalize the stored status and validate the transition using
         //    the shared canonical matrix. Uses write-normalization inside
         //    validateOrderStatusTransition — NOT read-candidate expansion — so a legacy

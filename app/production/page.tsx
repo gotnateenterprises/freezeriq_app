@@ -82,7 +82,7 @@ export default function ProductionPage() {
                                 <div className="flex items-center justify-between">
                                     <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
                                         <div className="w-2 h-8 bg-indigo-500 rounded-full" />
-                                        Holding Area
+                                        New Orders
                                     </h2>
                                     <button
                                         onClick={refreshData}
@@ -111,7 +111,7 @@ export default function ProductionPage() {
                                 <div className="flex items-center justify-between">
                                     <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
                                         <div className="w-2 h-8 bg-amber-500 rounded-full" />
-                                        Production Queue
+                                        To Prep
                                     </h2>
                                 </div>
 

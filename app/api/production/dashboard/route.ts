@@ -10,15 +10,18 @@ export async function GET() {
         if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         const businessId = session.user.businessId;
 
-        // 1. Fetch PENDING or PAID orders (Holding Area)
+        // 1. Fetch PENDING orders (New Orders lane)
+        // KB-1A: production_ready/APPROVED were previously included here as well, which
+        // put an approved order in BOTH New Orders and To Prep and left it stuck in the
+        // New Orders lane after approval. This lane is now unapproved orders only;
+        // production_ready/APPROVED belong to the To Prep query below.
         const pendingOrders = await prisma.order.findMany({
             where: {
                 business_id: businessId,
-                // Phase 5H-0: use helper so legacy PENDING/APPROVED rows are still
-                // matched alongside canonical pending/production_ready rows.
+                // Phase 5H-0: use helper so legacy PENDING rows are still matched
+                // alongside canonical pending rows.
                 status: { in: [
                     ...toDbOrderStatusReadCandidates('pending'),
-                    ...toDbOrderStatusReadCandidates('production_ready'),
                 ] as any },
                 // DD-0.1: held fundraiser orders stay out; released ones flow in.
                 AND: [

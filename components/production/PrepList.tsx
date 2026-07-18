@@ -84,7 +84,7 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
     };
 
     const handleUpdateStatus = async (bundleId: string, currentStatus: string, newStatus: string) => {
-        const action = newStatus === 'in_production' ? 'Start Production' : 'Complete Production';
+        const action = newStatus === 'in_production' ? 'Start Prep' : 'Mark Packed & Ready';
         if (!confirm(`${action} for this bundle?`)) return;
 
         try {
@@ -116,7 +116,7 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
                     <ChefHat size={32} />
                 </div>
                 <h3 className="text-lg font-black text-slate-900 dark:text-white">Nothing to Prep</h3>
-                <p className="text-slate-500 max-w-xs mt-2">Approve orders from the Holding Area to populate the prep list.</p>
+                <p className="text-slate-500 max-w-xs mt-2">Approve orders from New Orders to populate the prep list.</p>
             </div>
         );
     }
@@ -174,7 +174,7 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
                                         className="w-full flex items-center justify-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-emerald-500 hover:text-white dark:hover:bg-emerald-600 text-slate-600 dark:text-slate-300 py-3 rounded-xl font-bold transition-all print:hidden group-hover:bg-emerald-50 dark:group-hover:bg-emerald-900/20 group-hover:text-emerald-600 dark:group-hover:text-emerald-400"
                                     >
                                         <ArrowRight size={18} />
-                                        Start Production
+                                        Start Prep
                                     </button>
                                 </div>
                             </div>
@@ -183,12 +183,12 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
                 </div>
             )}
 
-            {/* Section 2: In Production */}
+            {/* Section 2: In Prep */}
             {productionItems.length > 0 && (
                 <div className="space-y-4">
                     <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
                         <div className="w-2 h-6 bg-emerald-500 rounded-full" />
-                        In Production
+                        In Prep
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                         {productionItems.map((item: PrepItem) => (
@@ -199,7 +199,7 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
                                             {item.sku}
                                         </span>
                                         <span className="text-xs font-bold text-emerald-600/60">
-                                            Cooking Now
+                                            In Prep
                                         </span>
                                     </div>
                                     <h3 className="text-xl font-black text-slate-900 dark:text-white mb-2 leading-tight">
@@ -225,7 +225,7 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
                                         className="w-full flex items-center justify-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700 py-3 rounded-xl font-bold transition-all shadow-lg shadow-emerald-200 dark:shadow-none"
                                     >
                                         <CheckCircle2 size={18} />
-                                        Mark Done
+                                        Mark Packed &amp; Ready
                                     </button>
                                 </div>
                             </div>

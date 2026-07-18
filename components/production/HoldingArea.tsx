@@ -8,6 +8,11 @@ import { toast } from 'sonner';
 interface Order {
     id: string;
     customer: { name: string; type: string } | null;
+    // KB-1A: dashboard payload scalars used as identity fallbacks. A manual order
+    // carries customer_name even when no Customer relation was linked, so relying on
+    // the relation alone renders a named customer as "Unknown Customer / GUEST".
+    customer_name?: string | null;
+    source?: string | null;
     created_at: string;
     total_amount: number;
     items: {
@@ -23,10 +28,36 @@ interface HoldingAreaProps {
     onRefresh: () => void;
 }
 
+// KB-1A: per-order approval failure detail so the operator can see which order
+// failed and why.
+interface ApprovalFailure {
+    id: string;
+    httpStatus: number;
+    code?: string;
+    message?: string;
+}
+
+// KB-1A identity fallbacks. An order may carry a usable name on the customer_name
+// scalar without a linked Customer relation (manual and imported orders), so the
+// relation alone must not decide the display.
+const displayCustomerName = (order: Order): string =>
+    order.customer?.name || order.customer_name || 'Unknown Customer';
+
+// Badge precedence: relation type → source (when a related name OR customer_name
+// exists) → 'customer' (named but sourceless) → 'guest' (genuinely unidentified).
+const displayCustomerBadge = (order: Order): string => {
+    if (order.customer?.type) return order.customer.type;
+    if (order.customer?.name || order.customer_name) {
+        return order.source || 'customer';
+    }
+    return 'guest';
+};
+
 export default function HoldingArea({ orders, onRefresh }: HoldingAreaProps) {
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [isUpdating, setIsUpdating] = useState(false);
     const [isDeleting, setIsDeleting] = useState<string | null>(null);
+    const [failures, setFailures] = useState<ApprovalFailure[]>([]);
 
     const handleDeleteOrder = async (e: React.MouseEvent, orderId: string) => {
         e.stopPropagation();
@@ -60,36 +91,88 @@ export default function HoldingArea({ orders, onRefresh }: HoldingAreaProps) {
         else setSelected(new Set(orders.map(o => o.id)));
     };
 
-    const handleBulkAction = async (action: 'APPROVE' | 'ARCHIVE') => {
-        if (selected.size === 0) return;
+    // KB-1A: approval now runs one guarded PATCH per order instead of a single
+    // bulk-status call, so each order passes the DD-0.5 transition guard, the
+    // canceled-order guard, and (while LOY-P0 is active) the paused loyalty gate.
+    // This is intentionally PER-ORDER and may partially succeed — it is not atomic.
+    const APPROVAL_CONCURRENCY = 5;
 
-        setIsUpdating(true);
+    const approveOne = async (orderId: string): Promise<ApprovalFailure | null> => {
         try {
-            const res = await fetch('/api/orders/bulk-status', {
-                method: 'POST',
+            const res = await fetch('/api/orders', {
+                method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    orderIds: Array.from(selected),
-                    // Phase 5F: send canonical production_ready; writer maps to DB-safe value.
-                    // TODO (follow-up blocker): ARCHIVE action sends 'ARCHIVED' which is not in the
-                    // OrderStatus enum and has no dedicated archive endpoint. The bulk-status writer
-                    // will return 400 for 'ARCHIVED'. Do not invent behavior here — this needs a
-                    // separate /api/orders/archive endpoint (set canceled_at, not a status change).
-                    status: action === 'APPROVE' ? 'production_ready' : 'ARCHIVED'
-                })
+                body: JSON.stringify({ id: orderId, status: 'production_ready' })
             });
 
-            if (res.ok) {
-                toast.success(`${selected.size} orders updated`);
-                setSelected(new Set());
-                onRefresh();
-            } else {
-                toast.error("Failed to update orders");
+            // 200 = approved. An idempotent same-status 200 counts as already approved.
+            if (res.ok) return null;
+
+            let code: string | undefined;
+            let message: string | undefined;
+            try {
+                const body = await res.json();
+                code = body?.code;
+                message = body?.error;
+            } catch {
+                // Non-JSON error body — fall back to the HTTP status alone.
             }
-        } catch (e) {
-            toast.error("An error occurred");
+            return { id: orderId, httpStatus: res.status, code, message };
+        } catch (e: any) {
+            return { id: orderId, httpStatus: 0, code: 'NETWORK_ERROR', message: e?.message };
+        }
+    };
+
+    const handleApprove = async () => {
+        if (selected.size === 0 || isUpdating) return;
+
+        // Preserve the selected IDs for the duration of the run.
+        const orderIds = Array.from(selected);
+        setIsUpdating(true);
+        setFailures([]);
+
+        try {
+            const collected: ApprovalFailure[] = [];
+
+            // Bounded concurrency: at most APPROVAL_CONCURRENCY requests in flight.
+            for (let i = 0; i < orderIds.length; i += APPROVAL_CONCURRENCY) {
+                const chunk = orderIds.slice(i, i + APPROVAL_CONCURRENCY);
+                const settled = await Promise.allSettled(chunk.map(approveOne));
+
+                settled.forEach((result, idx) => {
+                    if (result.status === 'fulfilled') {
+                        if (result.value) collected.push(result.value);
+                    } else {
+                        collected.push({
+                            id: chunk[idx],
+                            httpStatus: 0,
+                            code: 'REQUEST_FAILED',
+                            message: String(result.reason)
+                        });
+                    }
+                });
+            }
+
+            const total = orderIds.length;
+            const failed = collected.length;
+            const approved = total - failed;
+
+            setFailures(collected);
+
+            if (failed === 0) {
+                toast.success(`${approved} order${approved === 1 ? '' : 's'} approved and sent to prep.`);
+                setSelected(new Set());
+            } else if (approved === 0) {
+                toast.error(`No orders were approved. ${failed} require attention.`);
+            } else {
+                toast.warning(`${approved} of ${total} orders approved. ${failed} require attention.`);
+                // Keep only the still-failing orders selected so the operator can retry.
+                setSelected(new Set(collected.map(f => f.id)));
+            }
         } finally {
+            // Refresh exactly once, after every request has settled.
             setIsUpdating(false);
+            onRefresh();
         }
     };
 
@@ -122,14 +205,36 @@ export default function HoldingArea({ orders, onRefresh }: HoldingAreaProps) {
                 </div>
                 <div className="flex gap-2">
                     <button
-                        onClick={() => handleBulkAction('APPROVE')}
+                        onClick={handleApprove}
                         disabled={selected.size === 0 || isUpdating}
                         className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm shadow-sm transition-all disabled:opacity-50 disabled:scale-100 hover:scale-105"
                     >
-                        {isUpdating ? 'Updating...' : `Approve & Send to Kitchen`}
+                        {isUpdating ? 'Approving…' : `Approve & Send to Prep`}
                     </button>
                 </div>
             </div>
+
+            {/* KB-1A: per-order approval failures — approval is per-order and may
+                partially succeed, so surface exactly which orders need attention. */}
+            {failures.length > 0 && (
+                <div className="bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800/50 rounded-2xl p-4 space-y-2">
+                    <div className="flex items-center gap-2 text-rose-700 dark:text-rose-300 font-black text-sm">
+                        <AlertCircle size={16} />
+                        {failures.length} order{failures.length === 1 ? '' : 's'} require attention
+                    </div>
+                    <ul className="space-y-1">
+                        {failures.map(f => (
+                            <li key={f.id} className="text-xs font-medium text-rose-800 dark:text-rose-200">
+                                <span className="font-mono font-bold">{f.id.slice(0, 8)}</span>
+                                {' — '}
+                                {f.message || 'Approval failed'}
+                                {f.code ? ` (${f.code})` : ''}
+                                {f.httpStatus ? ` [HTTP ${f.httpStatus}]` : ''}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
 
             {/* List */}
             <div className="space-y-3">
@@ -155,10 +260,10 @@ export default function HoldingArea({ orders, onRefresh }: HoldingAreaProps) {
                                     <div>
                                         <div className="flex items-center gap-2">
                                             <h4 className="font-black text-slate-900 dark:text-white text-lg">
-                                                {order.customer?.name || 'Unknown Customer'}
+                                                {displayCustomerName(order)}
                                             </h4>
                                             <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-500 text-[10px] font-bold uppercase rounded-md">
-                                                {order.customer?.type || 'guest'}
+                                                {displayCustomerBadge(order)}
                                             </span>
                                         </div>
                                         <p className="text-xs font-bold text-slate-400">

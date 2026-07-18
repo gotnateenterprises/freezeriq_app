@@ -1,9 +1,7 @@
 "use client";
 
-import { useState } from 'react';
-import { Package, Truck, Printer, CheckCircle2 } from 'lucide-react';
+import { Package, Printer } from 'lucide-react';
 import { format } from 'date-fns';
-import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 
 interface Order {
@@ -13,6 +11,9 @@ interface Order {
         type: string;
         delivery_address?: string;
     } | null;
+    // KB-1A: identity fallback for orders with no linked Customer relation
+    // (manual and imported orders still carry this scalar).
+    customer_name?: string | null;
     created_at: string;
     items: {
         quantity: number;
@@ -27,35 +28,10 @@ interface DeliveryQueueProps {
 
 export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps) {
     const router = useRouter();
-    const [selected, setSelected] = useState<Set<string>>(new Set());
 
-    const handleMarkDelivered = async (orderId?: string) => {
-        const ids = orderId ? [orderId] : Array.from(selected);
-        if (ids.length === 0) return;
-
-        if (!confirm(`Mark ${ids.length} orders as Delivered?`)) return;
-
-        try {
-            const res = await fetch('/api/orders/bulk-status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    orderIds: ids,
-                    status: 'delivered' // Phase 5F: canonical value; writer normalizes as needed
-                })
-            });
-
-            if (res.ok) {
-                toast.success("Orders Marked Delivered");
-                setSelected(new Set());
-                onRefresh();
-            } else {
-                toast.error("Failed to update status");
-            }
-        } catch (e) {
-            toast.error("An error occurred");
-        }
-    };
+    // KB-1A: the Kitchen Board stops at ready_to_ship. Delivery completion moved to
+    // the guarded delivery workflow (DD-1); the mark-delivered handler, its
+    // bulk-status call to 'delivered', and the selection it drove were removed here.
 
     const handlePrintLabel = (order: Order) => {
         // Construct label URL - Using existing /labels route or similar logic
@@ -90,8 +66,8 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                 <div className="w-16 h-16 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center mb-4 text-slate-400">
                     <Package size={32} />
                 </div>
-                <h3 className="text-lg font-black text-slate-900 dark:text-white">Ready to Ship</h3>
-                <p className="text-slate-500 max-w-xs mt-2">Orders marked as Completed will appear here for final delivery.</p>
+                <h3 className="text-lg font-black text-slate-900 dark:text-white">Packed &amp; Ready</h3>
+                <p className="text-slate-500 max-w-xs mt-2">Orders marked Packed &amp; Ready will appear here for delivery.</p>
             </div>
         );
     }
@@ -100,18 +76,8 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
             <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm">
                 <div>
-                    <h2 className="text-xl font-black text-slate-900 dark:text-white">Ready for Delivery</h2>
-                    <p className="text-slate-500 font-medium">{orders.length} orders pending shipment</p>
-                </div>
-                <div className="flex gap-2">
-                    {selected.size > 0 && (
-                        <button
-                            onClick={() => handleMarkDelivered()}
-                            className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold shadow-lg hover:bg-indigo-700 transition-colors"
-                        >
-                            Mark {selected.size} Delivered
-                        </button>
-                    )}
+                    <h2 className="text-xl font-black text-slate-900 dark:text-white">Packed &amp; Ready</h2>
+                    <p className="text-slate-500 font-medium">{orders.length} orders packed and ready for delivery</p>
                 </div>
             </div>
 
@@ -119,21 +85,8 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                 {orders.map(order => (
                     <div key={order.id} className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div className="flex items-start gap-4">
-                            <div className="pt-1">
-                                <input
-                                    type="checkbox"
-                                    checked={selected.has(order.id)}
-                                    onChange={() => {
-                                        const next = new Set(selected);
-                                        if (next.has(order.id)) next.delete(order.id);
-                                        else next.add(order.id);
-                                        setSelected(next);
-                                    }}
-                                    className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                                />
-                            </div>
                             <div>
-                                <h4 className="font-black text-slate-900 dark:text-white text-lg">{order.customer?.name || 'Unknown Customer'}</h4>
+                                <h4 className="font-black text-slate-900 dark:text-white text-lg">{order.customer?.name || order.customer_name || 'Unknown Customer'}</h4>
                                 <div className="text-sm text-slate-500 flex flex-col">
                                     <span>#{order.id.slice(0, 8)} • {format(new Date(order.created_at), 'MMM d')}</span>
                                     {order.customer?.delivery_address && (
@@ -159,13 +112,6 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                                 title="Print Label"
                             >
                                 <Printer size={20} />
-                            </button>
-                            <button
-                                onClick={() => handleMarkDelivered(order.id)}
-                                className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-xl font-bold hover:bg-emerald-500 hover:text-white transition-colors"
-                            >
-                                <Truck size={18} />
-                                Send to Delivery
                             </button>
                         </div>
                     </div>
