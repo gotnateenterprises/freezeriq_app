@@ -42,14 +42,18 @@ export default function MobileDeliveryRunPage() {
     const fetchOrders = async () => {
         try {
             setLoading(true);
-            // Phase 5F: use canonical 'ready_to_ship' so the GET route maps it to 'completed'
-            // via toDbOrderStatusReadCandidates (temporary until enum migration adds ready_to_ship).
-            const res = await fetch(`/api/orders?status=production_ready,ready_to_ship${weekParam}`);
+            const res = await fetch(`/api/orders?status=ready_to_ship${weekParam}`);
             if (!res.ok) throw new Error("Failed to load delivery queue");
             const data = await res.json();
 
+            // DD-0.4: toDbOrderStatusReadCandidates('ready_to_ship') still includes
+            // 'completed' for legacy-row compatibility (Phase 5D/5F). A merely
+            // 'completed' order is cooked but not yet packed — it must not reach
+            // the delivery run. Narrow locally rather than changing the shared helper.
+            const readyToShip = data.filter((o: any) => o.status === 'ready_to_ship');
+
             // Sort by delivery sequence
-            const sorted = data.sort((a: any, b: any) =>
+            const sorted = readyToShip.sort((a: any, b: any) =>
                 (a.delivery_sequence || 999) - (b.delivery_sequence || 999)
             );
             setOrders(sorted);
