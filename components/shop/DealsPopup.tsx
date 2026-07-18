@@ -71,7 +71,7 @@ export default function DealsPopup({ businessName, primaryColor, onCapture, isAu
                             Get $10 Off Your First Order!
                         </h2>
                         <p className="text-slate-500 dark:text-slate-400 mb-8 font-medium">
-                            Join the {businessName} community to get secret deals, loyalty points, and $10 off your first set of freezer-ready meals.
+                            Join the {businessName} community to get secret deals and $10 off your first set of freezer-ready meals.
                         </p>
 
                         <form onSubmit={handleSubmit} className="space-y-4">

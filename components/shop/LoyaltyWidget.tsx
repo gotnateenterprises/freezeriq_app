@@ -100,7 +100,7 @@ export default function LoyaltyWidget({ businessId, primaryColor }: LoyaltyWidge
                 </div>
                 <div>
                     <h3 className="text-xl font-black text-slate-900 dark:text-white">Customer Rewards</h3>
-                    <p className="text-sm text-slate-500 font-medium">Earn points on every purchase.</p>
+                    <p className="text-sm text-slate-500 font-medium">View and redeem your existing rewards.</p>
                 </div>
             </div>
 

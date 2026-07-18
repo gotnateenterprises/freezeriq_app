@@ -102,7 +102,7 @@ export default async function SubscribePage({ params }: { params: Promise<{ slug
                             <Gift size={32} />
                         </div>
                         <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-3">VIP Perks</h3>
-                        <p className="text-slate-500 font-medium">Save 10% on every box, earn double loyalty points, and get first access to our seasonal mystery meals.</p>
+                        <p className="text-slate-500 font-medium">Save 10% on every box, and get first access to our seasonal mystery meals.</p>
                     </div>
 
                     <div className="bg-white dark:bg-slate-900 p-8 rounded-[2rem] shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-800 text-center">

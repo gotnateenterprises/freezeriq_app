@@ -64,7 +64,7 @@ export default function LoyaltyDashboard() {
                     </Link>
                     <h1 className="text-4xl font-black mb-4">Loyalty Rewards</h1>
                     <p className="text-slate-500 font-medium max-w-md mx-auto">
-                        Earn 1 point for every $1 spent. Every 100 points unlocks a $5 credit toward your next meal prep kit.
+                        New point earning is currently paused. Your existing points, rewards, and activity remain available.
                     </p>
                 </div>
             </div>

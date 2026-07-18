@@ -394,7 +394,7 @@ export default function InvoiceComposeModal({
                             <div className="p-4 bg-amber-50 dark:bg-amber-900/10 rounded-2xl border border-amber-100 dark:border-amber-900/30 flex items-start gap-3">
                                 <DollarSign className="w-5 h-5 text-amber-600 mt-1 shrink-0" />
                                 <p className="text-xs text-amber-800 dark:text-amber-200 leading-relaxed font-medium">
-                                    **Note**: Marking this invoice as PAID will automatically issue loyalty points to the customer's account.
+                                    **Note**: Marking this invoice as PAID will update the invoice status. New loyalty-point earning is currently paused.
                                 </p>
                             </div>
                         </div>
