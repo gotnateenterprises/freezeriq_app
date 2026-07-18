@@ -27,18 +27,22 @@ export async function GET(req: NextRequest) {
             whereClause.status = { in: dbCandidates };
         }
 
-        // Week filter: only return orders within a 7-day window (or null delivery_date)
+        // Week filter: selected delivery week, plus recent null-date or completed escape-hatch rows.
         const deliveryWeekStart = searchParams.get('delivery_week_start');
         if (deliveryWeekStart) {
             const weekStart = new Date(deliveryWeekStart);
             const weekEnd = new Date(weekStart);
             weekEnd.setDate(weekEnd.getDate() + 7);
+            // DD-0.3: scope the null-date and completed-status escape hatches to
+            // recently created rows only, so they don't pin every week forever.
+            const thirtyDaysAgo = new Date(Date.now() - 30 * 864e5);
             whereClause.OR = [
                 { delivery_date: { gte: weekStart, lt: weekEnd } },
-                { delivery_date: null },
+                { delivery_date: null, created_at: { gte: thirtyDaysAgo } },
                 // Phase 5G-2: also pin 'completed' and 'ready_to_ship' rows regardless
                 // of delivery_date (they may have no date set but still need to appear)
-                { status: { in: toDbOrderStatusReadCandidates('completed') as any } }
+                { status: { in: toDbOrderStatusReadCandidates('completed') as any },
+                  created_at: { gte: thirtyDaysAgo } }
             ];
         }
 
