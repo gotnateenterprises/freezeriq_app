@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { buildBundlePriceMap } from '@/lib/pricing';
 import { toDbSafeOrderStatus, toDbOrderStatusReadCandidates, validateOrderStatusTransition, normalizeOrderStatus } from '@/lib/orderStatus';
+import { LOYALTY_ACCRUAL_ENABLED } from '@/lib/loyalty';
 
 
 export async function GET(req: NextRequest) {
@@ -375,9 +376,11 @@ export async function PATCH(req: NextRequest) {
                 });
 
                 // Award loyalty points ONLY if NOT a fundraiser organization
+                // LOY-P0: new accrual is globally paused. The invoice sync above is
+                // deliberately OUTSIDE this gate and still runs.
                 // @ts-ignore
                 const customer = existingOrder.customer;
-                if (customer && customer.type !== 'fundraiser_org') {
+                if (LOYALTY_ACCRUAL_ENABLED && customer && customer.type !== 'fundraiser_org') {
                     const points = Math.floor(Number(existingOrder.total_amount));
                     if (points > 0) {
                         // @ts-ignore - Stale Prisma Client

@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db';
 import type { VariantSize } from '@prisma/client';
 import { buildBundlePriceMap } from '@/lib/pricing';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
+import { LOYALTY_ACCRUAL_ENABLED } from '@/lib/loyalty';
 
 // ---------------------------------------------------------------------------
 // Local helper — round money to two decimal places consistently.
@@ -275,7 +276,8 @@ export async function POST(request: Request) {
             }
 
             // If created as PAID, add loyalty points (Direct Customers/Orgs only)
-            if (status === 'PAID' && invoice.customer.type !== 'fundraiser_org') {
+            // LOY-P0: new accrual is globally paused; invoice creation is unaffected.
+            if (LOYALTY_ACCRUAL_ENABLED && status === 'PAID' && invoice.customer.type !== 'fundraiser_org') {
                 const points = Math.floor(serverTotal);
                 // @ts-ignore - Stale Prisma Client
                 await tx.loyaltyPoint.create({
@@ -466,7 +468,9 @@ export async function PUT(request: Request) {
             }
 
             // If updated to PAID, add loyalty points (Direct Customers/Orgs only)
-            if (status === 'PAID' && invoice.customer.type !== 'fundraiser_org') {
+            // LOY-P0: new accrual is globally paused; the invoice status update is
+            // unaffected and the reason-string lookup below is unreachable while paused.
+            if (LOYALTY_ACCRUAL_ENABLED && status === 'PAID' && invoice.customer.type !== 'fundraiser_org') {
                 const points = Math.floor(serverTotal);
                 // Check if points already awarded? 
                 // For simplicity, typically we'd check if a LoyaltyPoint record exists for this invoice.
