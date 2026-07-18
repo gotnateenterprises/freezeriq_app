@@ -20,9 +20,11 @@ export async function GET() {
                     ...toDbOrderStatusReadCandidates('pending'),
                     ...toDbOrderStatusReadCandidates('production_ready'),
                 ] as any },
-                // Exclude fundraiser coordinator orders — they belong in Fundraiser Dashboard
-                source: { not: 'fundraiser' as any },
-                NOT: { source: 'storefront', status: 'pending' }
+                // DD-0.1: held fundraiser orders stay out; released ones flow in.
+                AND: [
+                    { NOT: { status: 'fundraiser_hold' as any } },
+                    { NOT: { source: 'storefront', status: 'pending' } },
+                ]
             },
             include: {
                 customer: {
@@ -52,7 +54,7 @@ export async function GET() {
             where: {
                 business_id: businessId,
                 status: { in: prepListStatuses as any },
-                source: { not: 'fundraiser' as any }
+                NOT: { status: 'fundraiser_hold' as any }
             },
             include: {
                 items: {
@@ -91,7 +93,7 @@ export async function GET() {
             where: {
                 business_id: businessId,
                 status: { in: deliveryQueueStatuses as any },
-                source: { not: 'fundraiser' as any }
+                NOT: { status: 'fundraiser_hold' as any }
             },
             include: {
                 customer: {
