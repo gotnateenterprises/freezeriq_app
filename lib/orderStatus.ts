@@ -269,26 +269,32 @@ export function toDbOrderStatusReadCandidates(
 
 // ─── 11. Transition Map ───────────────────────────────────────────────────────
 //
-// Documents intended valid forward transitions in the order lifecycle.
-// Not enforced by any route in Phase 5D — value validation only.
-// Transition enforcement is deferred to Phase 5E after the enum migration.
+// The single canonical matrix of forward Order.status transitions permitted via
+// the Orders PATCH route. DD-0.5 promoted this from documentation to the enforced
+// source of truth (see validateOrderStatusTransition below). It has no other
+// consumers, so reconciling the cells here changes no live workflow.
 //
 // Notes:
-//   - fundraiser_hold can advance to pending (coordinator approves)
-//     OR directly to production_ready (coordinator marks as paid on release)
-//   - production_ready can skip to completed (no formal in_production step used)
-//   - completed can skip ready_to_ship and go straight to delivered
-//     (for tenants who don't use the "staged" step)
+//   - fundraiser_hold has NO PATCH transition. Fundraiser release
+//     (fundraiser_hold -> production_ready) is performed exclusively by the
+//     campaign closeout route via an atomic updateMany, and is intentionally
+//     OUTSIDE this PATCH guard.
+//   - production_ready / in_production may skip straight to ready_to_ship for
+//     tenants who don't use every staged step.
+//   - completed may skip ready_to_ship and go straight to delivered.
+//   - delivered is terminal.
+//   - Same-status requests are idempotent and handled by
+//     validateOrderStatusTransition, not by this map.
 //   - Cancellation is NOT modeled here — it is represented by canceled_at.
 
 export const ORDER_STATUS_TRANSITIONS: Record<
   CanonicalOrderStatus,
   readonly CanonicalOrderStatus[]
 > = {
-  fundraiser_hold:  ['pending', 'production_ready'],
+  fundraiser_hold:  [],
   pending:          ['production_ready'],
-  production_ready: ['in_production', 'completed'],
-  in_production:    ['completed'],
+  production_ready: ['in_production', 'completed', 'ready_to_ship'],
+  in_production:    ['completed', 'ready_to_ship'],
   completed:        ['ready_to_ship', 'delivered'],
   ready_to_ship:    ['delivered'],
   delivered:        [],
@@ -319,4 +325,48 @@ export function canTransitionOrderStatus(
 
   return (ORDER_STATUS_TRANSITIONS[fromCanonical] as readonly string[])
     .includes(toCanonical);
+}
+
+// ─── 13. validateOrderStatusTransition ───────────────────────────────────────
+//
+// DD-0.5 structured, non-throwing validator used by the Orders PATCH route to
+// authorize a status write. Normalizes BOTH the current stored status and the
+// requested status to canonical values via normalizeOrderStatus (write
+// normalization — NOT toDbOrderStatusReadCandidates), so a legacy read alias
+// (e.g. 'completed' standing in for 'ready_to_ship') can never authorize a write.
+//
+// Returns exactly one of:
+//   - { status: 'same',    ... }  current === requested canonical → idempotent
+//   - { status: 'allowed', ... }  a legal forward transition per the matrix
+//   - { status: 'illegal', ... }  not permitted (or unnormalizable input)
+// The canonical from/to are returned for the caller's response body and logging.
+
+export type OrderStatusTransition =
+  | { status: 'same';    from: CanonicalOrderStatus; to: CanonicalOrderStatus }
+  | { status: 'allowed'; from: CanonicalOrderStatus; to: CanonicalOrderStatus }
+  | { status: 'illegal'; from: CanonicalOrderStatus | null; to: CanonicalOrderStatus | null };
+
+export function validateOrderStatusTransition(
+  from: string | null | undefined,
+  to: string | null | undefined,
+): OrderStatusTransition {
+  const fromCanonical = normalizeOrderStatus(from);
+  const toCanonical   = normalizeOrderStatus(to);
+
+  // Unnormalizable on either side → never authorize a write.
+  if (fromCanonical == null || toCanonical == null) {
+    return { status: 'illegal', from: fromCanonical, to: toCanonical };
+  }
+
+  // Same canonical status → idempotent (caller skips the write + side effects).
+  if (fromCanonical === toCanonical) {
+    return { status: 'same', from: fromCanonical, to: toCanonical };
+  }
+
+  const allowed = (ORDER_STATUS_TRANSITIONS[fromCanonical] as readonly string[])
+    .includes(toCanonical);
+
+  return allowed
+    ? { status: 'allowed', from: fromCanonical, to: toCanonical }
+    : { status: 'illegal', from: fromCanonical, to: toCanonical };
 }

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { buildBundlePriceMap } from '@/lib/pricing';
-import { toDbSafeOrderStatus, toDbOrderStatusReadCandidates } from '@/lib/orderStatus';
+import { toDbSafeOrderStatus, toDbOrderStatusReadCandidates, validateOrderStatusTransition, normalizeOrderStatus } from '@/lib/orderStatus';
 
 
 export async function GET(req: NextRequest) {
@@ -271,16 +271,25 @@ export async function DELETE(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
     try {
+        // 1. Authenticate first — an anonymous caller must get 401 before the body is
+        //    even parsed; do no request work before this gate.
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+        const businessId = session.user.businessId;
+
+        // 2. Parse the request body only after authentication.
         const body = await req.json();
         const { id, status } = body;
 
+        // 2a. Validate the request presence.
         if (!id || !status) {
             return NextResponse.json({ error: 'Missing ID or status' }, { status: 400 });
         }
 
-        // Phase 5D: validate and normalize status to a DB-safe value.
-        // Accepts both canonical lowercase values and legacy uppercase forms.
-        // Returns null for any unrecognized input.
+        // 2b. Validate and normalize the requested status to a DB-safe WRITE value.
+        //    Accepts canonical lowercase and legacy uppercase; null for anything else.
         const dbSafeStatus = toDbSafeOrderStatus(status);
         if (dbSafeStatus === null) {
             return NextResponse.json({ error: 'Invalid order status' }, { status: 400 });
@@ -290,18 +299,11 @@ export async function PATCH(req: NextRequest) {
             console.log(`[ORDER_STATUS] PATCH normalized "${status}" -> "${dbSafeStatus}"`);
         }
 
-        const session = await auth();
-        if (!session?.user?.businessId) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
-
-        // Try finding by internal ID first (UUID)
+        // 3. Locate the order (internal id first, then external_id).
         let existingOrder = await (prisma.order as any).findUnique({
             where: { id },
             include: { invoice: true, customer: true }
         });
-
-        // If not found, try external ID
         if (!existingOrder) {
             existingOrder = await (prisma.order as any).findUnique({
                 where: { external_id: id },
@@ -309,19 +311,58 @@ export async function PATCH(req: NextRequest) {
             });
         }
 
-        if (!existingOrder || existingOrder.business_id !== session.user.businessId) {
+        // 4. Verify business ownership BEFORE exposing any transition detail.
+        if (!existingOrder || existingOrder.business_id !== businessId) {
             return NextResponse.json({ error: 'Order not found' }, { status: 404 });
         }
 
-        const result = await prisma.$transaction(async (tx) => {
-            // Update the order status using the DB-safe normalized value
-            const updatedOrder = await tx.order.update({
-                where: { id: existingOrder.id },
+        // 5 + 6. DD-0.5: normalize the stored status and validate the transition using
+        //    the shared canonical matrix. Uses write-normalization inside
+        //    validateOrderStatusTransition — NOT read-candidate expansion — so a legacy
+        //    read alias (e.g. 'completed' standing in for 'ready_to_ship') can never
+        //    authorize a write.
+        const transition = validateOrderStatusTransition(existingOrder.status, dbSafeStatus);
+
+        if (transition.status === 'illegal') {
+            console.log(`[ORDER_STATUS] rejected ${transition.from}→${transition.to} order=${existingOrder.id}`);
+            return NextResponse.json({
+                error: `Cannot move an order from '${transition.from}' to '${transition.to}'`,
+                code: 'ILLEGAL_STATUS_TRANSITION',
+                from: transition.from,
+                to: transition.to,
+            }, { status: 400 });
+        }
+
+        // Same canonical status → idempotent accept: do not rewrite status, do not run
+        // transition-only side effects. Return the current row in the existing shape.
+        if (transition.status === 'same') {
+            const current = await (prisma.order as any).findFirst({ where: { id: existingOrder.id, business_id: businessId } });
+            return NextResponse.json(current);
+        }
+
+        // 7 + 8. Atomic conditional write inside the existing transaction. The WHERE
+        //    compares against the EXACT raw status read from the owned row, so if any
+        //    other writer changed it between our read and write, count === 0 (lost race)
+        //    and no status change or side effect occurs.
+        const wonTransition = await prisma.$transaction(async (tx) => {
+            const updateResult = await tx.order.updateMany({
+                where: {
+                    id: existingOrder.id,
+                    business_id: businessId,
+                    status: existingOrder.status,
+                },
                 data: { status: dbSafeStatus as any }
             });
 
-            // SYNC LINKED INVOICE
-            // If marking as paid (production_ready), also mark the linked invoice as PAID.
+            if (updateResult.count !== 1) {
+                return false; // lost race — another writer won; do not run side effects
+            }
+
+            // SYNC LINKED INVOICE + LOYALTY — transition-only side effects.
+            // Runs ONLY on a real successful transition INTO production_ready. The prior
+            // status cannot already be production_ready here (same-status is handled and
+            // returned above; production_ready is reachable only from pending per the
+            // matrix), so loyalty/invoice sync fires exactly once and never on retry.
             // Check uses dbSafeStatus so that inputs like 'APPROVED' also trigger this
             // side effect correctly after normalization.
             // @ts-ignore
@@ -359,10 +400,23 @@ export async function PATCH(req: NextRequest) {
                 }
             }
 
-            return updatedOrder;
+            return true;
         });
 
-        return NextResponse.json(result);
+        // 10. Lost race: the row's status changed between our read and conditional write.
+        //     Do not overwrite the winner, do not run side effects. Report canonical current.
+        if (!wonTransition) {
+            const current = await (prisma.order as any).findFirst({ where: { id: existingOrder.id, business_id: businessId } });
+            return NextResponse.json({
+                error: 'Order status changed concurrently; please retry',
+                code: 'STATUS_CHANGED_CONCURRENTLY',
+                current: normalizeOrderStatus(current?.status),
+            }, { status: 409 });
+        }
+
+        // 9. Re-read and return the order using the existing successful response shape.
+        const updatedOrder = await (prisma.order as any).findFirst({ where: { id: existingOrder.id, business_id: businessId } });
+        return NextResponse.json(updatedOrder);
     } catch (e: any) {
         console.error('Failed to update order:', e);
         return NextResponse.json({ error: 'Failed to update order' }, { status: 500 });
