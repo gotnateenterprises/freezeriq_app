@@ -1,113 +1,188 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
-import { toDbSafeOrderStatus, toDbOrderStatusReadCandidates } from '@/lib/orderStatus';
+import { toDbSafeOrderStatus, normalizeOrderStatus, validateOrderStatusTransition } from '@/lib/orderStatus';
 
 /**
- * Returns all DB-safe status values to use in the WHERE clause for currentStatus.
- * Covers both canonical and legacy uppercase values stored in the DB via
- * toDbOrderStatusReadCandidates, which owns the full mapping table.
+ * KB-1B: statuses a kitchen batch route may TARGET.
  *
- * Fallback: if input is invalid/missing, returns candidates for 'production_ready'
- * (includes both 'production_ready' and 'APPROVED') to preserve the original
- * PrepList behavior where the initial batch step may not send a currentStatus.
+ * This is a route capability restriction, NOT a transition matrix. Every
+ * from -> to legality decision is delegated to validateOrderStatusTransition,
+ * which owns the single canonical matrix in lib/orderStatus.ts.
  *
- * Phase 5H-0: Replaced the manual switch statement (which had a dead
- * 'IN_PRODUCTION' case after Phase 5G-2) with a delegate to the helper.
+ * These are EXACT raw request values, matched before normalization — aliases such
+ * as 'READY_TO_SHIP', 'COMPLETED', or 'APPROVED' never qualify.
  */
-function getDbSafeCurrentStatusCandidates(input: string | null | undefined): string[] {
-    const candidates = toDbOrderStatusReadCandidates(input);
+const BATCHABLE_TARGETS = new Set(['in_production', 'ready_to_ship']);
 
-    if (candidates.length === 0) {
-        // Unrecognized or missing status — default to production_ready bucket.
-        // This covers both 'production_ready' rows and legacy 'APPROVED' rows.
-        return toDbOrderStatusReadCandidates('production_ready');
+/** Thrown inside the transaction so any mismatch rolls back the whole batch. */
+class ConcurrentChangeError extends Error {
+    ids: string[];
+    constructor(ids: string[]) {
+        super('STATUS_CHANGED_CONCURRENTLY');
+        this.ids = ids;
     }
-
-    return candidates;
 }
 
 export async function POST(req: Request) {
     try {
+        // 1. Authenticate — a tenant context is required for every read and write.
         const session = await auth();
-        if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+        const businessId = session.user.businessId;
 
         const { bundleId, currentStatus, newStatus } = await req.json();
 
-        if (!bundleId || !newStatus) {
-            return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+        // 2. Body validation. currentStatus is REQUIRED — it is never silently
+        //    defaulted, because defaulting it would advance orders belonging to a
+        //    card the operator did not click.
+        const isNonEmptyString = (v: unknown): v is string =>
+            typeof v === 'string' && v.trim().length > 0;
+
+        if (!isNonEmptyString(bundleId) || !isNonEmptyString(currentStatus) || !isNonEmptyString(newStatus)) {
+            return NextResponse.json({
+                error: 'Invalid batch request',
+                code: 'INVALID_PAYLOAD',
+            }, { status: 400 });
         }
 
-        // Phase 5D: validate and normalize newStatus to a DB-safe value.
-        // Hard reject: if newStatus is unrecognized, return 400.
-        const dbSafeNewStatus = toDbSafeOrderStatus(newStatus);
-        if (dbSafeNewStatus === null) {
-            return NextResponse.json({ error: 'Invalid order status' }, { status: 400 });
-        }
-        // Temporary observability: log when normalization changes the input value
-        if (newStatus !== dbSafeNewStatus) {
-            console.log(`[ORDER_STATUS] batch-update-by-bundle newStatus normalized "${newStatus}" -> "${dbSafeNewStatus}"`);
-        }
-
-        // Phase 5D: build WHERE candidates for currentStatus.
-        // Returns all legacy DB variants so rows stored under old uppercase values are still matched.
-        const dbSafeCurrentStatusCandidates = getDbSafeCurrentStatusCandidates(currentStatus);
-        if (currentStatus && !dbSafeCurrentStatusCandidates.includes(currentStatus)) {
-            console.log(`[ORDER_STATUS] batch-update-by-bundle currentStatus "${currentStatus}" -> candidates [${dbSafeCurrentStatusCandidates.join(', ')}]`);
+        // 3. Validate the requested target status.
+        const requestedTarget = newStatus.trim();
+        const canonicalTarget = normalizeOrderStatus(requestedTarget);
+        const dbSafeNewStatus = toDbSafeOrderStatus(requestedTarget);
+        if (canonicalTarget === null || dbSafeNewStatus === null) {
+            return NextResponse.json({
+                error: 'Invalid order status',
+                code: 'INVALID_STATUS',
+            }, { status: 400 });
         }
 
-        // Find all orders that have an item with this bundleId AND are in currentStatus (or a legacy equivalent)
-        const ordersToUpdate = await prisma.order.findMany({
+        // Capability is checked against the EXACT trimmed raw value, never the
+        // normalized one, so a recognized alias (e.g. 'READY_TO_SHIP', 'COMPLETED',
+        // 'APPROVED') can never satisfy it. Only the two exact canonical kitchen
+        // target strings are accepted, which also guarantees the write value below
+        // is canonical rather than a legacy form.
+        if (!BATCHABLE_TARGETS.has(requestedTarget)) {
+            return NextResponse.json({
+                error: 'This status cannot be applied through a kitchen batch operation',
+                code: 'TRANSITION_NOT_BATCHABLE',
+                to: canonicalTarget,
+            }, { status: 400 });
+        }
+
+        // 4. Select by the EXACT raw currentStatus supplied by the displayed prep
+        //    card. Deliberately NOT expanded to canonical/legacy alias candidates:
+        //    the dashboard can render separate cards for 'production_ready' and
+        //    'APPROVED', and clicking one card must never advance orders belonging
+        //    to the other. canceled_at is not filtered here so canceled rows are
+        //    reported explicitly.
+        const rows = await prisma.order.findMany({
             where: {
-                business_id: session.user.businessId,
-                status: { in: dbSafeCurrentStatusCandidates as any },
-                items: {
-                    some: {
-                        bundle_id: bundleId
-                    }
-                }
+                business_id: businessId,
+                status: currentStatus as any,
+                items: { some: { bundle_id: bundleId } },
             },
-            select: { id: true, customer_id: true }
+            select: { id: true, status: true, canceled_at: true },
         });
 
-        const orderIds = ordersToUpdate.map(o => o.id);
-        const customerIds = ordersToUpdate
-            .map(o => o.customer_id)
-            .filter((id): id is string => !!id);
-
-        if (orderIds.length === 0) {
-            return NextResponse.json({ count: 0, message: "No matching orders found" });
+        // 5. No matches — preserve the existing count-compatible response.
+        if (rows.length === 0) {
+            return NextResponse.json({
+                count: 0,
+                updated: 0,
+                unchanged: 0,
+                orderIds: [],
+                message: 'No matching orders found',
+            });
         }
 
-        // Use a transaction to update both orders and customers
-        const result = await prisma.$transaction(async (tx) => {
-            const updateCount = await tx.order.updateMany({
-                where: {
-                    id: { in: orderIds }
-                },
-                data: { status: dbSafeNewStatus as any }
-            });
+        // 6. Canceled orders reject the whole batch.
+        const canceled = rows.filter(r => r.canceled_at !== null);
+        if (canceled.length > 0) {
+            return NextResponse.json({
+                error: 'Canceled orders cannot be updated',
+                code: 'ORDER_CANCELED',
+                failures: canceled.map(r => ({ id: r.id })),
+            }, { status: 400 });
+        }
 
-            // If we are marking as completed, also move customers to DELIVERY status.
-            // Check uses dbSafeNewStatus so inputs like 'COMPLETED' also trigger this
-            // side effect correctly after normalization.
-            if (dbSafeNewStatus === 'completed' && customerIds.length > 0) {
-                await tx.customer.updateMany({
+        // 7. Canonical transition preflight for every matched row.
+        const toWrite: { id: string; status: string }[] = [];
+        const unchanged: { id: string; status: string }[] = [];
+        const illegal: { id: string; from: string | null; to: string | null }[] = [];
+
+        for (const row of rows) {
+            const result = validateOrderStatusTransition(row.status, canonicalTarget);
+            if (result.status === 'allowed') {
+                toWrite.push({ id: row.id, status: row.status });
+            } else if (result.status === 'same') {
+                unchanged.push({ id: row.id, status: row.status });
+            } else {
+                illegal.push({ id: row.id, from: result.from, to: result.to });
+            }
+        }
+
+        // 8. Any illegal transition rejects the entire batch — nothing is written.
+        if (illegal.length > 0) {
+            return NextResponse.json({
+                error: 'One or more order transitions are not allowed',
+                code: 'ILLEGAL_STATUS_TRANSITION',
+                failures: illegal,
+            }, { status: 400 });
+        }
+
+        // 9. All-or-nothing write conditioned on the EXACT raw prior status, so a
+        //    concurrent change misses and rolls the whole transaction back.
+        //    KB-1B: the former `completed -> Customer.status = DELIVERY` side effect
+        //    was removed. `completed` is no longer a batchable target, so the branch
+        //    was unreachable; kitchen batch writes are now side-effect-free.
+        await prisma.$transaction(async (tx) => {
+            for (const row of toWrite) {
+                const res = await tx.order.updateMany({
                     where: {
-                        id: { in: customerIds },
-                        business_id: session.user.businessId
+                        id: row.id,
+                        business_id: businessId,
+                        status: row.status as any,
+                        canceled_at: null,
                     },
-                    data: { status: 'DELIVERY' }
+                    data: { status: dbSafeNewStatus as any },
                 });
+                if (res.count !== 1) throw new ConcurrentChangeError([row.id]);
             }
 
-            return updateCount;
+            // Same-status rows are verified, never rewritten.
+            for (const row of unchanged) {
+                const stillMatches = await tx.order.count({
+                    where: {
+                        id: row.id,
+                        business_id: businessId,
+                        status: row.status as any,
+                        canceled_at: null,
+                    },
+                });
+                if (stillMatches !== 1) throw new ConcurrentChangeError([row.id]);
+            }
         });
 
-        return NextResponse.json({ count: result.count });
+        // 10. Success. `count` stays compatible with existing count-based consumers.
+        return NextResponse.json({
+            count: toWrite.length + unchanged.length,
+            updated: toWrite.length,
+            unchanged: unchanged.length,
+            orderIds: [...toWrite.map(r => r.id), ...unchanged.map(r => r.id)],
+        });
 
     } catch (e) {
-        console.error("Batch Update Error:", e);
-        return NextResponse.json({ error: "Failed to update orders" }, { status: 500 });
+        if (e instanceof ConcurrentChangeError) {
+            return NextResponse.json({
+                error: 'One or more orders changed while the batch was being processed',
+                code: 'STATUS_CHANGED_CONCURRENTLY',
+                failures: e.ids.map(id => ({ id })),
+            }, { status: 409 });
+        }
+        console.error('Batch Update Error:', e);
+        return NextResponse.json({ error: 'Failed to update orders' }, { status: 500 });
     }
 }

@@ -18,6 +18,8 @@ export async function GET() {
         const pendingOrders = await prisma.order.findMany({
             where: {
                 business_id: businessId,
+                // KB-1B: soft-canceled orders never appear on the Kitchen Board.
+                canceled_at: null,
                 // Phase 5H-0: use helper so legacy PENDING rows are still matched
                 // alongside canonical pending rows.
                 status: { in: [
@@ -56,6 +58,8 @@ export async function GET() {
         const productionOrders = await prisma.order.findMany({
             where: {
                 business_id: businessId,
+                // KB-1B: soft-canceled orders never appear on the Kitchen Board.
+                canceled_at: null,
                 status: { in: prepListStatuses as any },
                 NOT: { status: 'fundraiser_hold' as any }
             },
@@ -95,6 +99,8 @@ export async function GET() {
         const completedOrders = await prisma.order.findMany({
             where: {
                 business_id: businessId,
+                // KB-1B: soft-canceled orders never appear on the Kitchen Board.
+                canceled_at: null,
                 status: { in: deliveryQueueStatuses as any },
                 NOT: { status: 'fundraiser_hold' as any }
             },
