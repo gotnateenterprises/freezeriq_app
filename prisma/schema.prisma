@@ -335,6 +335,11 @@ model Order {
   delivery_zone_name     String?             // Zone name for reporting (e.g. "Local", "Extended")
   canceled_at            DateTime?           // Soft-delete: set when coordinator cancels an order
   canceled_by            String?             // Actor who canceled (e.g. "coordinator")
+  // FR-LAUNCH-1E: public submission idempotency. NULL for legacy,
+  // coordinator-entered, and normal storefront orders. A partial unique
+  // index on (business_id, submission_key) is enforced by raw SQL.
+  submission_key         String?
+  submission_fingerprint String?
   items             OrderItem[]
   business          Business?           @relation(fields: [business_id], references: [id])
   campaign          FundraiserCampaign? @relation(fields: [campaign_id], references: [id])

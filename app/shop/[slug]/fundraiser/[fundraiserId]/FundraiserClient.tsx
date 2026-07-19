@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { formatBundleCount, computeBundleUnitsFromItems, type FundraiserProgressResult } from '@/lib/fundraiserMetrics';
 
 // FR-LAUNCH-1B (complete Fable restoration): this page is a full port of the
@@ -123,6 +123,10 @@ export default function FundraiserClient({
     const [submitting, setSubmitting] = useState(false);
     const [submitError, setSubmitError] = useState<string | null>(null);
     const [thanks, setThanks] = useState<ThanksData | null>(null);
+    // Presentation-only: shows once per successful order, dismissed by the
+    // customer. Never re-shown by a replay (no new setThanks call occurs on a
+    // replay) and never tied to any API request of its own.
+    const [showSuccessModal, setShowSuccessModal] = useState(false);
     const [copied, setCopied] = useState(false);
     // Presentation-only: keeps Step 1 of the share guide visibly "complete"
     // after the 2-second `copied` flash resets. No behavioral meaning.
@@ -195,9 +199,23 @@ export default function FundraiserClient({
         return `Only ${remainingTo(t25)} until the 25% milestone!`;
     })();
 
+    // ── FR-LAUNCH-1E: submission key lifecycle ────────────────────────────────
+    // One key identifies one logical submission. It is generated at the first
+    // submit attempt, REUSED across retries (so a lost response replays instead
+    // of creating a second order), cleared after a confirmed success, and
+    // cleared whenever the logical payload changes (so a changed cart can never
+    // collide with the server's fingerprint check).
+    //
+    // Deliberately a ref, not state: it must not trigger a re-render, and it must
+    // not persist across a reload — the cart is component-local with no storage,
+    // so a refresh is already a new logical submission.
+    const submissionKeyRef = useRef<string | null>(null);
+    const resetSubmissionKey = () => { submissionKeyRef.current = null; };
+
     const toggleLine = (bundle: any) => {
         if (!approvedBundleIds.has(bundle.id)) return;
         setSubmitError(null);
+        resetSubmissionKey();
         setOrderLines(prev => {
             const exists = prev.some(l => l.bundleId === bundle.id);
             if (exists) return prev.filter(l => l.bundleId !== bundle.id);
@@ -212,12 +230,14 @@ export default function FundraiserClient({
     };
 
     const changeQty = (bundleId: string, delta: number) => {
+        resetSubmissionKey();
         setOrderLines(prev => prev
             .map(l => l.bundleId === bundleId ? { ...l, quantity: l.quantity + delta } : l)
             .filter(l => l.quantity >= 1));
     };
 
     const removeLine = (bundleId: string) => {
+        resetSubmissionKey();
         setOrderLines(prev => prev.filter(l => l.bundleId !== bundleId));
     };
 
@@ -230,6 +250,11 @@ export default function FundraiserClient({
         if (!canSubmit) return;
         setSubmitting(true);
         setSubmitError(null);
+        // Generated once per logical submission; a retry after a failure reuses it
+        // so the server replays the original order instead of creating a second.
+        if (!submissionKeyRef.current) {
+            submissionKeyRef.current = crypto.randomUUID();
+        }
         try {
             // Same hardened endpoint as before (FR-LAUNCH-1A): the server resolves
             // the campaign, enforces CB-5 eligibility and pricing, and writes
@@ -239,6 +264,7 @@ export default function FundraiserClient({
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                    submissionKey: submissionKeyRef.current,
                     items: orderLines.map(l => ({
                         bundleId: l.bundleId,
                         quantity: l.quantity,
@@ -257,11 +283,20 @@ export default function FundraiserClient({
             });
             const data = await res.json();
             if (!res.ok) {
+                // FR-LAUNCH-1E: a conflict means this key can never succeed again,
+                // so retire it — a retry must start a fresh logical submission.
+                if (data.code === 'SUBMISSION_CONFLICT'
+                    || data.code === 'INVALID_SUBMISSION_KEY'
+                    || data.code === 'CAMPAIGN_CLOSED') {
+                    resetSubmissionKey();
+                }
                 const message = data.code === 'CAMPAIGN_NOT_FOUND'
                     ? 'This fundraiser could not be found — please refresh and try again.'
                     : data.code === 'INVALID_QUANTITY'
                         ? 'Quantities must be whole numbers of 1 or more.'
-                        : (data.error || 'We could not place your order — please try again.');
+                        : data.code === 'CAMPAIGN_CLOSED'
+                            ? 'This fundraiser has closed and is no longer accepting orders.'
+                            : (data.error || 'We could not place your order — please try again.');
                 throw new Error(message);
             }
 
@@ -285,6 +320,13 @@ export default function FundraiserClient({
                 externalPaymentLink: data.paymentData?.externalPaymentLink ?? campaign.external_payment_link ?? null,
                 orgName: data.paymentData?.orgName ?? campaign.organization_name ?? null,
             });
+            // Confirmed order success only — never shown for a failed submission,
+            // a replay conflict, a closed-campaign rejection, or a validation error,
+            // since those all throw below and never reach this line.
+            setShowSuccessModal(true);
+            // Confirmed success — retire the key so any later order is a new
+            // logical submission rather than a replay of this one.
+            resetSubmissionKey();
             // Clear ONLY the fundraiser order state (success path).
             setOrderLines([]);
             if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -450,6 +492,38 @@ export default function FundraiserClient({
                        Swapped in place of the ordering body, exactly as the prototype
                        swaps fundbody → fundthanks (topbar remains). */
                     <section aria-live="polite">
+                        {/* One-time success modal — presentation only. Sits over the
+                            existing confetti/confirmation experience; dismissing it does
+                            not alter anything underneath and triggers no request. */}
+                        {showSuccessModal && (
+                            <div
+                                style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(59,42,47,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
+                                onClick={() => setShowSuccessModal(false)}
+                            >
+                                <div
+                                    role="dialog"
+                                    aria-modal="true"
+                                    aria-labelledby="fr-success-modal-title"
+                                    onClick={e => e.stopPropagation()}
+                                    style={{ background: '#fff', border: '1px solid #eee2d6', borderRadius: 20, boxShadow: '0 20px 45px rgba(59,42,47,.25)', padding: '1.5rem 1.3rem', maxWidth: '22rem', width: '100%', textAlign: 'center' }}
+                                >
+                                    <div style={{ fontSize: '2rem' }} aria-hidden="true">🎉</div>
+                                    <h2 id="fr-success-modal-title" style={{ fontFamily: SERIF, fontWeight: 400, fontSize: '1.15rem', margin: '.4rem 0 .5rem', color: '#3b2a2f' }}>
+                                        Order received! 🎉
+                                    </h2>
+                                    <p style={{ margin: '0 0 1.1rem', fontSize: '.78rem', color: '#7a6258', lineHeight: 1.5 }}>
+                                        Check your inbox for your order details and payment instructions. If you don&rsquo;t see the email in a few minutes, check your spam folder. Your order is still safely confirmed.
+                                    </p>
+                                    <button
+                                        onClick={() => setShowSuccessModal(false)}
+                                        style={{ width: '100%', background: primaryColor, color: '#fff', border: 0, borderRadius: 11, fontSize: '.76rem', fontWeight: 800, padding: '.7rem', cursor: 'pointer', fontFamily: 'inherit' }}
+                                    >
+                                        View my order summary
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
                         <div style={{ padding: '1.4rem .2rem .6rem', textAlign: 'center' }}>
                             <div style={{ fontSize: '2.4rem' }}>🎉</div>
                             <h2 style={{ fontFamily: SERIF, fontWeight: 400, fontSize: '1.35rem', margin: '.3rem 0 .2rem', color: '#3b2a2f' }}>
@@ -786,19 +860,19 @@ export default function FundraiserClient({
                                 )}
 
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.5rem', marginTop: '.6rem' }}>
-                                    <input placeholder="Your name" aria-label="Your name" value={buyerName} onChange={e => setBuyerName(e.target.value)} style={fableInput} />
+                                    <input placeholder="Your name" aria-label="Your name" value={buyerName} onChange={e => { resetSubmissionKey(); setBuyerName(e.target.value); }} style={fableInput} />
                                     <input placeholder="Phone" aria-label="Phone" value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)} style={fableInput} />
                                 </div>
                                 {/* Email is required by the order API (customer record + confirmation
                                     email); Fable's prototype form omitted it — same input style, reported. */}
-                                <input type="email" placeholder="Email (for your confirmation)" aria-label="Email" value={buyerEmail} onChange={e => setBuyerEmail(e.target.value)} style={{ ...fableInput, marginTop: '.5rem' }} />
+                                <input type="email" placeholder="Email (for your confirmation)" aria-label="Email" value={buyerEmail} onChange={e => { resetSubmissionKey(); setBuyerEmail(e.target.value); }} style={{ ...fableInput, marginTop: '.5rem' }} />
 
                                 <label style={{ display: 'block', marginTop: '.55rem', fontSize: '.64rem', fontWeight: 800, color: '#9a8075', textTransform: 'uppercase', letterSpacing: '.05em' }}>
                                     Who are you supporting? 🏅
                                     <input
                                         placeholder={`${campaign.participant_label || 'Participant'} name (optional)`}
                                         value={participant}
-                                        onChange={e => setParticipant(e.target.value)}
+                                        onChange={e => { resetSubmissionKey(); setParticipant(e.target.value); }}
                                         style={{ ...fableInput, marginTop: '.25rem', textTransform: 'none', letterSpacing: 'normal' }}
                                     />
                                 </label>
