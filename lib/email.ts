@@ -107,6 +107,30 @@ export async function sendPasswordResetEmail(email: string, tempPassword: string
     }
 }
 
+// --- HTML safety ---
+
+/**
+ * Escapes text before it is interpolated into an email HTML body.
+ * Names, campaign/organization names, item names and phone numbers are
+ * user- or database-controlled and must never be injected as raw markup.
+ */
+function escapeHtml(value: unknown): string {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+/** Presentation-only label for a variant size ("serves_5" → "Serves 5"). */
+function formatVariantLabel(variantSize: string | null | undefined): string {
+    const raw = (variantSize || '').trim();
+    if (!raw) return '';
+    const spaced = raw.replace(/_/g, ' ');
+    return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 // --- Tenant-branded emails ---
 
 export async function sendOrderConfirmationEmail(
@@ -182,8 +206,17 @@ export async function sendOrderConfirmationEmail(
     `;
 
     try {
+        // FR-LAUNCH-1D: the customer confirmation goes to the CUSTOMER ONLY.
+        // The campaign organization contact was previously appended to this same
+        // recipient array, which (a) exposed the supporter's and coordinator's
+        // addresses to each other in one To header and (b) sent the coordinator a
+        // buyer-shaped "Order Received!" copy with no fundraiser context. The
+        // coordinator now receives a separate, purpose-built notification —
+        // sendFundraiserCoordinatorNotification below.
+        //
+        // orgContactEmail is intentionally retained in the signature (positional
+        // compatibility for existing and future callers) but is no longer a recipient.
         const recipients = [toEmail];
-        if (orgContactEmail) recipients.push(orgContactEmail);
 
         const { data, error } = await resend.emails.send({
             from: sender.from,
@@ -204,6 +237,113 @@ export async function sendOrderConfirmationEmail(
         console.error('[EMAIL EXCEPTION]', e);
         return false;
     }
+}
+
+// ── FR-LAUNCH-1D: fundraiser coordinator order notification ──────────────────
+
+export interface FundraiserCoordinatorNotificationItem {
+    item_name?: string | null;
+    quantity?: number | null;
+    variant_size?: string | null;
+}
+
+export interface FundraiserCoordinatorNotificationInput {
+    /** The ONLY recipient. Campaign → Customer.contact_email, tenant-validated by the caller. */
+    coordinatorEmail: string;
+    campaignName?: string | null;
+    organizationName?: string | null;
+    supporterName?: string | null;
+    /** Included so the coordinator can contact the supporter to collect payment. */
+    supporterPhone?: string | null;
+    participantName?: string | null;
+    items: FundraiserCoordinatorNotificationItem[];
+    /** Persisted server-authoritative order total — never a client-supplied value. */
+    totalAmount: number;
+    /** Safe external order reference (Order.external_id), not a raw database id. */
+    orderReference: string;
+    /** Enables the existing tenant-aware sender (from = tenant name, replyTo = tenant contact). */
+    businessId?: string;
+}
+
+/**
+ * Sends the fundraiser coordinator a purpose-built notification for one new
+ * held order. Transactional and operational — NOT marketing automation.
+ *
+ * Exactly one recipient (the coordinator). The supporter is never included, and
+ * this never carries the private coordinator portal_token, delivery address,
+ * provider details, or loyalty data.
+ *
+ * Delivery is best-effort: returns the existing boolean convention from
+ * sendEmail() and never throws for provider failures. Callers must treat a
+ * false result as a delivery failure only — never as an order failure.
+ */
+export async function sendFundraiserCoordinatorNotification(
+    input: FundraiserCoordinatorNotificationInput
+): Promise<boolean> {
+    const {
+        coordinatorEmail,
+        campaignName,
+        organizationName,
+        supporterName,
+        supporterPhone,
+        participantName,
+        items,
+        totalAmount,
+        orderReference,
+        businessId,
+    } = input;
+
+    if (!coordinatorEmail || coordinatorEmail.trim().length === 0) return false;
+
+    const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+    const total = currency.format(Number(totalAmount) || 0);
+    const supporter = supporterName || 'A supporter';
+
+    const itemsHtml = (items || []).map(i => {
+        const variantLabel = formatVariantLabel(i.variant_size);
+        return `
+        <div style="border-bottom: 1px solid #e5e7eb; padding: 8px 0;">
+            <p style="margin: 0; font-weight: bold; color: #1f2937;">${escapeHtml(i.quantity ?? 0)}x ${escapeHtml(i.item_name || 'Item')}</p>
+            ${variantLabel ? `<p style="margin: 2px 0 0 0; font-size: 12px; color: #6b7280;">${escapeHtml(variantLabel)}</p>` : ''}
+        </div>
+    `;
+    }).join('');
+
+    const htmlContent = `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+            <h1 style="color: #4f46e5; font-size: 22px;">New fundraiser order</h1>
+            <p style="color: #374151;">
+                <strong>${escapeHtml(supporter)}</strong> just placed an order
+                ${campaignName ? `for <strong>${escapeHtml(campaignName)}</strong>` : ''}
+                ${organizationName ? `(${escapeHtml(organizationName)})` : ''}.
+            </p>
+
+            <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <p style="margin: 0; color: #6b7280;">Order reference: ${escapeHtml(orderReference)}</p>
+                ${supporterPhone ? `<p style="margin: 5px 0 0 0; color: #374151;"><strong>Phone:</strong> ${escapeHtml(supporterPhone)}</p>` : ''}
+                ${participantName ? `<p style="margin: 5px 0 0 0; color: #374151;"><strong>Supporting:</strong> ${escapeHtml(participantName)}</p>` : ''}
+                <div style="margin-top: 15px;">
+                    ${itemsHtml}
+                </div>
+                <div style="margin-top: 15px; border-top: 2px solid #d1d5db; padding-top: 10px;">
+                    <strong style="color: #111827;">Total to collect: ${escapeHtml(total)}</strong>
+                </div>
+            </div>
+
+            <p style="font-size: 13px; color: #6b7280;">
+                This order is held for the fundraiser. It stays in the fundraiser workflow
+                until the campaign is closed out, and payment is collected by you directly —
+                no online payment was taken.
+            </p>
+        </div>
+    `;
+
+    return sendEmail({
+        to: coordinatorEmail.trim(),
+        subject: `New fundraiser order — ${supporter} · ${total} to collect`,
+        html: htmlContent,
+        businessId,
+    });
 }
 
 export async function sendLeadNotificationEmail(

@@ -292,6 +292,49 @@ export async function POST(req: Request) {
             externalPaymentLink
         );
 
+        // 6. FR-LAUNCH-1D: coordinator notification (transactional, best-effort).
+        // Gated to a SERVER-RESOLVED, tenant-validated campaign, so a normal
+        // storefront order can never reach it. Runs only after the order and its
+        // nested items are durable and the stock decrements have completed.
+        //
+        // Wrapped in its own try/catch: tenant sender resolution happens OUTSIDE
+        // the email utility's internal provider catch, so an unexpected throw here
+        // would otherwise fall into this route's outer catch and report a 500 for
+        // an order that was already saved. A notification must never do that.
+        if (campaign) {
+            const coordinatorEmail = orgContactEmail?.trim();
+            if (coordinatorEmail) {
+                try {
+                    const { sendFundraiserCoordinatorNotification } = await import('@/lib/email');
+                    const notified = await sendFundraiserCoordinatorNotification({
+                        coordinatorEmail,
+                        campaignName: campaign.name,
+                        organizationName: orgName,
+                        supporterName: order.customer_name,
+                        supporterPhone: customer.phone || null,
+                        participantName: order.participant_name,
+                        items: (order as any).items || [],
+                        // Persisted server-authoritative total — never recomputed here.
+                        totalAmount: Number(order.total_amount),
+                        orderReference: order.external_id,
+                        businessId,
+                    });
+
+                    if (!notified) {
+                        console.warn(
+                            `[FR-1D] Coordinator notification not delivered for order ${order.external_id} (campaign ${campaign.id})`
+                        );
+                    }
+                } catch (notifyErr) {
+                    console.error('[FR-1D] Coordinator notification threw unexpectedly:', notifyErr);
+                }
+            } else {
+                console.warn(
+                    `[FR-1D] Coordinator notification skipped for order ${order.external_id}: campaign ${campaign.id} has no contact email`
+                );
+            }
+        }
+
         return NextResponse.json({
             success: true,
             orderId: order.id,
