@@ -5,6 +5,7 @@ import {
   isCanonicalFamilyTier,
   isCanonicalServes2Tier,
 } from '@/lib/campaignBundleSelection';
+import { computeBundleUnitsFromItems } from '@/lib/fundraiserMetrics';
 
 
 // Helper to safely serialize BigInt
@@ -416,7 +417,20 @@ export async function GET(req: Request) {
                     // (covers both new fundraiser_hold AND historical pending/completed)
                     orders: {
                         where: { source: 'fundraiser' as any, canceled_at: null },
-                        select: { total_amount: true, status: true }
+                        select: {
+                            total_amount: true,
+                            status: true,
+                            // FR-LAUNCH-1C-1: item-level data for the canonical
+                            // weighted-bundle calculation. variant_size is
+                            // authoritative; bundle.serving_tier is the fallback.
+                            items: {
+                                select: {
+                                    quantity: true,
+                                    variant_size: true,
+                                    bundle: { select: { serving_tier: true } }
+                                }
+                            }
+                        }
                     }
                 } as any // Use 'as any' for select to avoid TS errors on potential missing fields
             });
@@ -439,6 +453,28 @@ export async function GET(req: Request) {
 
                 if (customerCampaigns.length > 0) {
                     for (const fc of customerCampaigns) {
+                        // ── FR-LAUNCH-1C-1: weighted bundle progress ──────────
+                        // Bundle progress is derived from the ACTIVE (non-canceled)
+                        // fundraiser ORDER ITEMS through the single canonical
+                        // weighting source — never from denormalized dollars
+                        // (total_sales / sales_total) or goal_amount.
+                        const activeFundraiserOrders: any[] = (fc as any).orders || [];
+                        const weightedBundlesSold = activeFundraiserOrders.reduce(
+                            (sum: number, o: any) => sum + computeBundleUnitsFromItems(
+                                (o.items || []).map((i: any) => ({
+                                    quantity: Number(i.quantity) || 0,
+                                    variant_size: i.variant_size,
+                                    serving_tier: i.bundle?.serving_tier ?? null,
+                                }))
+                            ),
+                            0
+                        );
+                        const bundleGoalValue = Number((fc as any).bundle_goal || 0);
+                        // Safe for zero, missing, or invalid goals; capped at 100%.
+                        const progressPercent = Number.isFinite(bundleGoalValue) && bundleGoalValue > 0
+                            ? Math.min((weightedBundlesSold / bundleGoalValue) * 100, 100)
+                            : 0;
+
                         results.push({
                             id: fc.id,
                             name: fc.name,
@@ -456,9 +492,14 @@ export async function GET(req: Request) {
                             group_label: (fc as any).group_label,
                             is_group_enabled: (fc as any).is_group_enabled,
                             portal_token: (fc as any).portal_token,
-                            // Settlement visibility — held order counts
-                            held_order_count: ((fc as any).orders || []).length,
-                            held_order_total: ((fc as any).orders || []).reduce((sum: number, o: any) => sum + Number(o.total_amount || 0), 0)
+                            // Settlement visibility — held order counts.
+                            // These three metrics measure DIFFERENT things and are
+                            // intentionally independent: order rows, dollars, and
+                            // weighted bundle units.
+                            held_order_count: activeFundraiserOrders.length,
+                            held_order_total: activeFundraiserOrders.reduce((sum: number, o: any) => sum + Number(o.total_amount || 0), 0),
+                            weighted_bundles_sold: weightedBundlesSold,
+                            progress_percent: progressPercent
                         });
                     }
                 } else {
@@ -473,7 +514,10 @@ export async function GET(req: Request) {
                         business_slug: businessSlug,
                         goal_amount: 0,
                         bundle_goal: 0,
-                        sales_total: 0
+                        sales_total: 0,
+                        // A lead placeholder has no campaign and therefore no orders.
+                        weighted_bundles_sold: 0,
+                        progress_percent: 0
                     });
                 }
             }

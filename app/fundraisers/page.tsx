@@ -25,6 +25,7 @@ import { format } from 'date-fns';
 import { useSession } from 'next-auth/react';
 import UpgradeRequired from '@/components/UpgradeRequired';
 import { StartFundraiserWizard } from '@/components/crm2/StartFundraiserWizard';
+import { formatBundleCount } from '@/lib/fundraiserMetrics';
 
 interface Fundraiser {
     id: string;
@@ -45,6 +46,11 @@ interface Fundraiser {
     portal_token?: string;
     held_order_count?: number;
     held_order_total?: number;
+    // FR-LAUNCH-1C-1: server-computed weighted bundle progress. These measure
+    // different things than held_order_count / held_order_total and are never
+    // derived from each other or from dollar sales.
+    weighted_bundles_sold?: number;
+    progress_percent?: number;
     // Phase 7E closeout fields (may not be present until prisma generate runs)
     closed_at?: string | null;
     settlement_total?: number | null;
@@ -349,23 +355,28 @@ export default function FundraisersPage() {
                                     </td>
                                     <td className="px-4 py-4">
                                         <div className="flex flex-col items-end gap-1">
+                                            {/* FR-LAUNCH-1C-1: weighted bundle progress from the
+                                                server (weighted_bundles_sold / bundle_goal). The
+                                                legacy sales_total ÷ goal_amount dollar calculation
+                                                is gone — it always read 0 because total_sales is a
+                                                denormalized field public orders never write. */}
                                             <div className="flex justify-between w-full text-[10px] font-black font-mono">
-                                                <span className="text-indigo-600">${item.sales_total || 0}</span>
+                                                <span className="text-indigo-600">
+                                                    {item.bundle_goal > 0
+                                                        ? `${formatBundleCount(item.weighted_bundles_sold || 0)} of ${formatBundleCount(item.bundle_goal)} bundles`
+                                                        : `${formatBundleCount(item.weighted_bundles_sold || 0)} bundles`}
+                                                </span>
                                                 <span className="text-slate-400">
-                                                    {item.bundle_goal > 0 && item.goal_amount > 0
-                                                        ? `Goal: $${item.goal_amount} · ${item.bundle_goal} bundles`
-                                                        : item.bundle_goal > 0
-                                                            ? `Goal: ${item.bundle_goal} bundles`
-                                                            : item.goal_amount > 0
-                                                                ? `Goal: $${item.goal_amount}`
-                                                                : 'No goal set'
+                                                    {item.bundle_goal > 0
+                                                        ? `${Math.round(Math.min(Math.max(item.progress_percent || 0, 0), 100))}%`
+                                                        : 'No bundle goal set'
                                                     }
                                                 </span>
                                             </div>
                                             <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-900 rounded-full overflow-hidden">
                                                 <div
                                                     className="h-full bg-indigo-600 transition-all duration-1000"
-                                                    style={{ width: `${Math.min(((item.sales_total || 0) / (item.goal_amount || item.bundle_goal || 1)) * 100, 100)}%` }}
+                                                    style={{ width: `${Math.min(Math.max(item.progress_percent || 0, 0), 100)}%` }}
                                                 />
                                             </div>
                                         </div>

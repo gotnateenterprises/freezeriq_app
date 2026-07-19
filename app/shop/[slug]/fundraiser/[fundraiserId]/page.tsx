@@ -166,9 +166,12 @@ async function getData(slug: string, fundraiserId: string) {
 
     if (!campaign) return null;
 
-    // 4. Fetch Orders with items for weighted bundle progress
+    // 4. Fetch Orders with items for weighted bundle progress.
+    // FR-LAUNCH-1C-1: canceled orders must never count toward public progress
+    // (cancellation is the soft canceled_at timestamp, not an OrderStatus).
     const orders: any[] = await prisma.$queryRaw`
-        SELECT o.id, o.total_amount FROM orders o WHERE o.campaign_id = ${fundraiserId}
+        SELECT o.id, o.total_amount FROM orders o
+        WHERE o.campaign_id = ${fundraiserId} AND o.canceled_at IS NULL
     `;
     const orderIds = orders.map((o: any) => o.id);
 
