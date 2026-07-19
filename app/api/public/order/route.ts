@@ -502,6 +502,7 @@ export async function POST(req: Request) {
                         campaignName: campaign.name,
                         organizationName: orgName,
                         supporterName: order.customer_name,
+                        supporterEmail: customer.email || null,
                         supporterPhone: customer.phone || null,
                         participantName: order.participant_name,
                         items: (order as any).items || [],

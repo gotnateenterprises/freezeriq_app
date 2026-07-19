@@ -254,6 +254,7 @@ export interface FundraiserCoordinatorNotificationInput {
     organizationName?: string | null;
     supporterName?: string | null;
     /** Included so the coordinator can contact the supporter to collect payment. */
+    supporterEmail?: string | null;
     supporterPhone?: string | null;
     participantName?: string | null;
     items: FundraiserCoordinatorNotificationItem[];
@@ -285,6 +286,7 @@ export async function sendFundraiserCoordinatorNotification(
         campaignName,
         organizationName,
         supporterName,
+        supporterEmail,
         supporterPhone,
         participantName,
         items,
@@ -320,6 +322,7 @@ export async function sendFundraiserCoordinatorNotification(
 
             <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
                 <p style="margin: 0; color: #6b7280;">Order reference: ${escapeHtml(orderReference)}</p>
+                ${supporterEmail ? `<p style="margin: 5px 0 0 0; color: #374151;"><strong>Email:</strong> <a href="mailto:${escapeHtml(supporterEmail)}" style="color: #4f46e5;">${escapeHtml(supporterEmail)}</a></p>` : ''}
                 ${supporterPhone ? `<p style="margin: 5px 0 0 0; color: #374151;"><strong>Phone:</strong> ${escapeHtml(supporterPhone)}</p>` : ''}
                 ${participantName ? `<p style="margin: 5px 0 0 0; color: #374151;"><strong>Supporting:</strong> ${escapeHtml(participantName)}</p>` : ''}
                 <div style="margin-top: 15px;">
