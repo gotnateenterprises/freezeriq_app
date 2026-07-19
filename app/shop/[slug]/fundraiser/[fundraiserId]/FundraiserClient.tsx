@@ -1,9 +1,94 @@
 "use client";
 
 import React, { useState, useMemo } from 'react';
-import { Heart, Info, ChevronRight, ChevronDown, UtensilsCrossed, Mail, CalendarDays, MapPin, Clock, Timer } from 'lucide-react';
-import BundleDetailsModal from '@/components/shop/BundleDetailsModal';
-import { formatBundleCount, type FundraiserProgressResult } from '@/lib/fundraiserMetrics';
+import { formatBundleCount, computeBundleUnitsFromItems, type FundraiserProgressResult } from '@/lib/fundraiserMetrics';
+
+// FR-LAUNCH-1B (complete Fable restoration): this page is a full port of the
+// APPROVED fundraiser buyer design — the "FUNDRAISER BUYER PAGE" screen of
+// docs/ai/prototypes/storefront_prototype.html (markup lines 502-596, shared
+// styles lines 2-120, interaction script lines 754-766) as routed by
+// docs/ai/STOREFRONT_REDESIGN_HANDOFF.md's FR track (spec §10):
+//
+//   Topbar (campaign identity · "by {tenant}") → ProgressHero → PayBadge
+//     → Fable .bcard bundles ("Add" toggles into the order)
+//     → inline OrderForm card → POST /api/public/order
+//     → ThanksState (PaymentCard / ShareRow / FounderNote), swapped in place.
+//
+// No cart drawer, no checkout modal, no mailto ordering, no Stripe/Square.
+// The page is the prototype's "warm light world" — cream #faf5ef, ink #3b2a2f,
+// line #eee2d6, sage #7d8f72 — with primaryColor standing in for the berry
+// accent as the SF-1 token bridge the handoff prescribes (note for SF-1 cleanup).
+
+const SERIF = "Georgia,'Iowan Old Style','Times New Roman',serif";
+
+const fableInput: React.CSSProperties = {
+    border: '1px solid #e9d9cb',
+    borderRadius: 10,
+    padding: '.55rem .7rem',
+    fontFamily: 'inherit',
+    fontSize: '.76rem',
+    background: '#faf5ef',
+    color: '#3b2a2f',
+    width: '100%',
+};
+
+const qtyBtn: React.CSSProperties = {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    border: '1px solid #e9d9cb',
+    background: '#faf5ef',
+    color: '#3b2a2f',
+    fontWeight: 800,
+    cursor: 'pointer',
+    lineHeight: 1,
+};
+
+const fableCard: React.CSSProperties = {
+    background: '#fff',
+    border: '1px solid #eee2d6',
+    borderRadius: 20,
+    padding: '1rem 1.05rem',
+};
+
+// One-time confirmation confetti. Ten small pieces in the Fable palette
+// ('primary' resolves to the tenant primary color at render). Hand-tuned so the
+// stagger reads as a soft scatter rather than a uniform burst; every animation
+// runs exactly once and ends transparent.
+const CONFETTI_PIECES: {
+    left: string; top: string; w: number; h: number; round?: boolean;
+    color: string; delay: string; duration: string;
+    drift: string; fall: string; spin: string;
+}[] = [
+    { left: '8%',  top: '4%',  w: 6, h: 9, color: 'primary', delay: '0s',    duration: '1.15s', drift: '-10px', fall: '74px', spin: '210deg' },
+    { left: '18%', top: '0%',  w: 5, h: 5, round: true, color: '#7d8f72', delay: '.09s', duration: '1.3s',  drift: '8px',   fall: '82px', spin: '-160deg' },
+    { left: '27%', top: '7%',  w: 7, h: 4, color: '#eccfd4', delay: '.18s', duration: '1.05s', drift: '-6px',  fall: '66px', spin: '260deg' },
+    { left: '38%', top: '2%',  w: 5, h: 8, color: 'primary', delay: '.05s', duration: '1.25s', drift: '12px',  fall: '78px', spin: '-220deg' },
+    { left: '48%', top: '6%',  w: 4, h: 4, round: true, color: '#e5b8c1', delay: '.24s', duration: '1.1s',  drift: '-9px',  fall: '70px', spin: '180deg' },
+    { left: '58%', top: '1%',  w: 6, h: 9, color: '#d8c3b5', delay: '.13s', duration: '1.35s', drift: '10px',  fall: '84px', spin: '-190deg' },
+    { left: '68%', top: '5%',  w: 5, h: 5, color: '#7d8f72', delay: '.3s',  duration: '1.0s',  drift: '-7px',  fall: '64px', spin: '240deg' },
+    { left: '77%', top: '0%',  w: 7, h: 4, color: 'primary', delay: '.2s',  duration: '1.2s',  drift: '9px',   fall: '76px', spin: '-250deg' },
+    { left: '86%', top: '8%',  w: 4, h: 7, color: '#eccfd4', delay: '.36s', duration: '1.1s',  drift: '-11px', fall: '68px', spin: '170deg' },
+    { left: '93%', top: '3%',  w: 5, h: 5, round: true, color: 'primary', delay: '.28s', duration: '1.28s', drift: '6px',   fall: '80px', spin: '-200deg' },
+];
+
+interface OrderLine {
+    bundleId: string;
+    name: string;
+    price: number;
+    quantity: number;
+    serving_tier: string;
+}
+
+interface ThanksData {
+    orderRef: string;
+    total: number;
+    unitsAdded: number;
+    participant: string;
+    paymentInstructions: string | null;
+    externalPaymentLink: string | null;
+    orgName: string | null;
+}
 
 export default function FundraiserClient({
     business,
@@ -14,47 +99,291 @@ export default function FundraiserClient({
     fundraiserId
 }: any) {
 
-    const { totalBundlesSold, bundleGoal, progressPercent } = bundleProgress as FundraiserProgressResult;
+    const { totalBundlesSold, bundleGoal } = bundleProgress as FundraiserProgressResult;
 
-
-    const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
-    const [selectedBundle, setSelectedBundle] = useState<any>(null);
     const primaryColor = business.branding?.primary_color || '#4f46e5';
-    const coordinatorEmail = campaign.coordinator_email || '';
+    const tenantName = (business.branding?.business_name
+        && business.branding.business_name !== 'FreezerIQ'
+        && business.branding.business_name !== 'Freezer IQ')
+        ? business.branding.business_name
+        : (business.name || 'Freezer Chef');
+    const tenantLogo = business.branding?.logo_url || business.logo_url || null;
+    const campaignTitle = campaign.name || `${campaign.organization_name} Fundraiser`;
 
-    const buildMailtoUrl = (bundleName?: string, bundlePrice?: number) => {
-        if (!coordinatorEmail) return '';
-        const subject = encodeURIComponent(
-            bundleName
-                ? `Fundraiser Bundle Order - ${bundleName}`
-                : 'Freezer Meal Fundraiser Order'
-        );
-        const priceStr = bundlePrice && bundlePrice > 0 ? `$${bundlePrice.toFixed(2)}` : 'See coordinator';
-        const body = encodeURIComponent(
-            `Hi!\n\nI'd like to place an order for the fundraiser.\n\n` +
-            `Bundle: ${bundleName || ''}\n` +
-            `Price: ${priceStr}\n\n` +
-            `Quantity: \n` +
-            `Name: \n` +
-            `Phone: \n\n` +
-            `Please let me know the next steps for payment and pickup.\n\nThanks!`
-        );
-        return `mailto:${coordinatorEmail}?subject=${subject}&body=${body}`;
-    };
-
-
+    // ── Fundraiser order state (Fable's inline "order engine") ────────────────
+    // Component-local and fully isolated: never reads or writes the shared
+    // regular-store cart (context/CartContext.tsx / localStorage 'freezeriq_cart'),
+    // so regular-store items can't enter a fundraiser order, fundraiser items
+    // can't leak into the storefront cart, and nothing persists across campaigns.
+    const [orderLines, setOrderLines] = useState<OrderLine[]>([]);
+    const [buyerName, setBuyerName] = useState('');
+    const [buyerEmail, setBuyerEmail] = useState('');
+    const [buyerPhone, setBuyerPhone] = useState('');
+    const [participant, setParticipant] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+    const [submitError, setSubmitError] = useState<string | null>(null);
+    const [thanks, setThanks] = useState<ThanksData | null>(null);
+    const [copied, setCopied] = useState(false);
+    // Presentation-only: keeps Step 1 of the share guide visibly "complete"
+    // after the 2-second `copied` flash resets. No behavioral meaning.
+    const [step1Done, setStep1Done] = useState(false);
+    const [shareStatus, setShareStatus] = useState<string | null>(null);
 
     const bundles = business.bundles || [];
-    const mainBundle = bundles[0];
+    // Defense-in-depth: only the exact coordinator-approved bundle ids this page
+    // was given can ever enter the order (the server enforces CB-5 regardless).
+    const approvedBundleIds = useMemo(
+        () => new Set(bundles.map((b: any) => b.id)),
+        [bundles]
+    );
 
-    // Fundraiser date helpers
+    const orderTotal = orderLines.reduce((sum, l) => sum + l.price * l.quantity, 0);
+
+    // One derived bundle total drives every progress display so the hero and the
+    // confirmation can never disagree after a submission.
+    const displayBundlesSold = totalBundlesSold + (thanks?.unitsAdded ?? 0);
+    const displayProgressPercent = bundleGoal > 0
+        ? Math.min((displayBundlesSold / bundleGoal) * 100, 100)
+        : 0;
+
+    // Truthful motivational copy derived only from the displayed bundle values.
+    const remainingBundles = Math.max(bundleGoal - displayBundlesSold, 0);
+    const progressMotivation = displayBundlesSold >= bundleGoal
+        ? 'Goal reached — thank you!'
+        : displayProgressPercent >= 75
+            ? 'Almost at the goal!'
+            : displayProgressPercent >= 50
+                ? 'Halfway there!'
+                : `Only ${formatBundleCount(remainingBundles)} bundle${remainingBundles === 1 ? '' : 's'} to go`;
+
+    // Near-term milestone for the confirmation impact panel — derived ONLY from
+    // displayBundlesSold and bundleGoal (no dollars, never beyond the goal).
+    // Weighted progress can only land on 0.5-bundle increments (serves_5 = 1.0,
+    // serves_2 = 0.5), so a raw 25/50/75% target — e.g. 18.75 of a 75-bundle
+    // goal — may not be reachable. Each raw percentage target is rounded UP to
+    // the first attainable half-bundle value before it's used as a boundary or
+    // displayed, so the campaign can always actually reach the named milestone
+    // and no .25/.75 fraction ever appears in customer-facing copy.
+    const milestoneMessage = (() => {
+        if (bundleGoal <= 0) return null;
+
+        const EPSILON = 0.0001;
+        const isAt = (a: number, b: number) => Math.abs(a - b) < EPSILON;
+        // Subtracting EPSILON before ceiling keeps an already-attainable value
+        // (e.g. 12.5) from being pushed up to 13 by floating-point drift.
+        const toAttainableHalf = (rawTarget: number) => Math.ceil((rawTarget - EPSILON) * 2) / 2;
+        const remainingTo = (target: number) => {
+            // target and displayBundlesSold are both on the 0.5 grid here, so
+            // this only clears float drift — it can no longer misround a raw
+            // quarter-bundle fraction such as 8.75 into 9.
+            const remaining = Math.max(Math.round((target - displayBundlesSold) * 2) / 2, 0);
+            return `${formatBundleCount(remaining)} more bundle${remaining === 1 ? '' : 's'}`;
+        };
+
+        const t25 = toAttainableHalf(bundleGoal * 0.25);
+        const t50 = toAttainableHalf(bundleGoal * 0.5);
+        const t75 = toAttainableHalf(bundleGoal * 0.75);
+        const tGoal = toAttainableHalf(bundleGoal);
+
+        if (displayBundlesSold >= tGoal - EPSILON) return 'Goal reached — thank you!';
+        if (isAt(displayBundlesSold, t75)) return `75% milestone reached — only ${remainingTo(tGoal)} until the fundraiser goal!`;
+        if (isAt(displayBundlesSold, t50)) return `Halfway there — only ${remainingTo(t75)} until the 75% milestone!`;
+        if (isAt(displayBundlesSold, t25)) return `25% milestone reached — only ${remainingTo(t50)} until halfway!`;
+        if (displayBundlesSold > t75) return `Only ${remainingTo(tGoal)} until the fundraiser goal!`;
+        if (displayBundlesSold > t50) return `Only ${remainingTo(t75)} until the 75% milestone!`;
+        if (displayBundlesSold > t25) return `Only ${remainingTo(t50)} until halfway!`;
+        return `Only ${remainingTo(t25)} until the 25% milestone!`;
+    })();
+
+    const toggleLine = (bundle: any) => {
+        if (!approvedBundleIds.has(bundle.id)) return;
+        setSubmitError(null);
+        setOrderLines(prev => {
+            const exists = prev.some(l => l.bundleId === bundle.id);
+            if (exists) return prev.filter(l => l.bundleId !== bundle.id);
+            return [...prev, {
+                bundleId: bundle.id,
+                name: bundle.name,
+                price: Number(bundle.price || 0),
+                quantity: 1,
+                serving_tier: bundle.serving_tier || 'family',
+            }];
+        });
+    };
+
+    const changeQty = (bundleId: string, delta: number) => {
+        setOrderLines(prev => prev
+            .map(l => l.bundleId === bundleId ? { ...l, quantity: l.quantity + delta } : l)
+            .filter(l => l.quantity >= 1));
+    };
+
+    const removeLine = (bundleId: string) => {
+        setOrderLines(prev => prev.filter(l => l.bundleId !== bundleId));
+    };
+
+    const canSubmit = orderLines.length > 0
+        && buyerName.trim().length > 0
+        && buyerEmail.trim().length > 0
+        && !submitting;
+
+    const submitOrder = async () => {
+        if (!canSubmit) return;
+        setSubmitting(true);
+        setSubmitError(null);
+        try {
+            // Same hardened endpoint as before (FR-LAUNCH-1A): the server resolves
+            // the campaign, enforces CB-5 eligibility and pricing, and writes
+            // source='fundraiser' / status='fundraiser_hold'. No Stripe or Square
+            // path exists anywhere in this component.
+            const res = await fetch('/api/public/order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    items: orderLines.map(l => ({
+                        bundleId: l.bundleId,
+                        quantity: l.quantity,
+                        serving_tier: l.serving_tier,
+                        name: l.name,
+                    })),
+                    customer: {
+                        name: buyerName.trim(),
+                        email: buyerEmail.trim(),
+                        phone: buyerPhone.trim(),
+                        participantCode: participant.trim() || undefined,
+                    },
+                    slug,
+                    campaignId: campaign.id,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                const message = data.code === 'CAMPAIGN_NOT_FOUND'
+                    ? 'This fundraiser could not be found — please refresh and try again.'
+                    : data.code === 'INVALID_QUANTITY'
+                        ? 'Quantities must be whole numbers of 1 or more.'
+                        : (data.error || 'We could not place your order — please try again.');
+                throw new Error(message);
+            }
+
+            const unitsAdded = computeBundleUnitsFromItems(
+                orderLines.map(l => ({ quantity: l.quantity, serving_tier: l.serving_tier }))
+            );
+            // The amount shown to the buyer (and owed to the coordinator) is the
+            // SERVER-persisted order total, not the browser's running figure. The
+            // client total is only a fallback if an older response omits it.
+            const serverTotal = Number(data.total);
+            const authoritativeTotal = Number.isFinite(serverTotal) ? serverTotal : orderTotal;
+            setThanks({
+                // Fable's orderRef format is last-6-uppercased; the API returns the
+                // internal order id (not external_id), so the same format is applied
+                // to the id we do have.
+                orderRef: String(data.orderId || '').slice(-6).toUpperCase(),
+                total: authoritativeTotal,
+                unitsAdded,
+                participant: participant.trim(),
+                paymentInstructions: data.paymentData?.paymentInstructions ?? campaign.payment_instructions ?? null,
+                externalPaymentLink: data.paymentData?.externalPaymentLink ?? campaign.external_payment_link ?? null,
+                orgName: data.paymentData?.orgName ?? campaign.organization_name ?? null,
+            });
+            // Clear ONLY the fundraiser order state (success path).
+            setOrderLines([]);
+            if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch (e: any) {
+            // Failure preserves the order lines untouched.
+            setSubmitError(e?.message || 'We could not place your order — please try again.');
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    // ── ShareRow actions ──────────────────────────────────────────────────────
+    // One suggested caption drives Text / Facebook / Copy. Facebook does not
+    // permit prefilling the user's post text, so the caption is copied to the
+    // clipboard and the URL Share Dialog is opened with the fundraiser URL; the
+    // link PREVIEW itself comes from the page's Open Graph metadata and can only
+    // be built by Facebook from a public HTTPS URL (never from localhost).
+    const pageUrl = () => (typeof window !== 'undefined' ? window.location.href : '');
+    const isLocalhost = () => typeof window !== 'undefined'
+        && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
+    const shareCaption = () =>
+        `Help ${campaign.organization_name} reach ${formatBundleCount(bundleGoal)} bundles!\n\n` +
+        `We're currently at ${formatBundleCount(displayBundlesSold)} bundles. Choose delicious freezer meal ` +
+        `bundles and support the fundraiser. Payment is collected separately by the coordinator.\n\n` +
+        `Order here:\n${pageUrl()}`;
+
+    const handleTextIt = () => {
+        window.location.href = `sms:?&body=${encodeURIComponent(shareCaption())}`;
+    };
+
+    // Guards browsers/contexts (e.g. non-HTTPS, older WebViews) where
+    // navigator.clipboard or writeText is missing entirely, so calling it
+    // can't throw synchronously and block the Facebook share below.
+    const copyShareCaption = (): Promise<boolean> => {
+        if (
+            typeof navigator === 'undefined'
+            || !navigator.clipboard
+            || typeof navigator.clipboard.writeText !== 'function'
+        ) {
+            return Promise.resolve(false);
+        }
+
+        return navigator.clipboard
+            .writeText(shareCaption())
+            .then(() => true)
+            .catch(() => false);
+    };
+
+    const handleFacebook = async () => {
+        // Start the clipboard write from the click itself, BEFORE any await, so the
+        // browser's user-activation is still valid when window.open runs (awaiting
+        // first would let the popup blocker cancel it).
+        const captionCopyPromise = copyShareCaption();
+
+        // Localhost can't produce a real link preview, so opening the sharer only
+        // yields an empty-looking composer — copy the caption and stop here.
+        if (isLocalhost()) {
+            const copiedLocally = await captionCopyPromise;
+            setShareStatus(copiedLocally
+                ? 'Facebook previews require the public Vercel or live page. Caption copied — test Facebook after deployment.'
+                : 'Facebook previews require the public Vercel or live page, and the caption could not be copied. Use Copy or Text it instead.');
+            return;
+        }
+
+        window.open(
+            `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(pageUrl())}`,
+            '_blank',
+            'noopener,noreferrer'
+        );
+
+        const captionCopied = await captionCopyPromise;
+        setShareStatus(captionCopied
+            ? 'Caption copied — paste it into your Facebook post.'
+            : 'Facebook opened. Add a short message before sharing.');
+    };
+
+    const handleCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(shareCaption());
+            setCopied(true);
+            setStep1Done(true);
+            setShareStatus('Caption copied — ready to paste anywhere.');
+            setTimeout(() => setCopied(false), 2000);
+        } catch {
+            try {
+                await navigator.clipboard.writeText(pageUrl());
+                setShareStatus('Caption copy failed — the link was copied instead.');
+            } catch {
+                setShareStatus('Copy is unavailable in this browser — long-press the address bar to share the link.');
+            }
+        }
+    };
+
+    // ── Fundraiser date helpers (pre-existing) ────────────────────────────────
     // Anchor date-only values to noon to prevent timezone drift.
-    // Without this, "2026-04-17T00:00:00.000Z" renders as April 16 in UTC-5 timezones.
     const formatDate = (dateVal: any) => {
         if (!dateVal) return null;
         try {
             const str = dateVal instanceof Date ? dateVal.toISOString() : String(dateVal);
-            // Extract YYYY-MM-DD from ISO strings or date-only strings
             const dateOnly = str.match(/^(\d{4}-\d{2}-\d{2})/)?.[1];
             const d = dateOnly ? new Date(dateOnly + 'T12:00:00') : new Date(str);
             if (isNaN(d.getTime())) return null;
@@ -91,378 +420,496 @@ export default function FundraiserClient({
     const endDateStr = formatDate(campaign.end_date);
 
     // Fallback: CRM stores these in customer.fundraiser_info (JSONB).
-    // The sync to campaign columns may not have run for older campaigns.
     const fi = campaign.customer_fundraiser_info || {};
     const deliveryDateStr = formatDate(campaign.delivery_date) || formatDate(fi.delivery_date);
     const deliveryTimeStr = formatTime(campaign.delivery_date) || (campaign.delivery_time ? String(campaign.delivery_time) : null) || (fi.delivery_time ? String(fi.delivery_time) : null);
     const pickupLocation = campaign.pickup_location || fi.pickup_location || null;
 
-    const handleOpenBundleModal = (bundle: any) => {
-        setSelectedBundle(bundle);
-        setIsBundleModalOpen(true);
-    };
+    const blocked = orderMode?.mode === 'closed' || orderMode?.mode === 'pending'
+        || orderMode?.mode === 'invalid' || (orderMode?.mode === 'selected' && bundles.length === 0);
 
     return (
-        <div className="min-h-screen bg-brand-cream dark:bg-slate-950 pb-24 sm:pb-32">
-            {/* === Hero Header === */}
-            <div
-                className="relative pt-10 sm:pt-16 pb-24 sm:pb-32 px-3 sm:px-4 overflow-hidden min-h-[40vh] sm:min-h-[50vh] flex flex-col justify-center"
-                style={{ background: `linear-gradient(135deg, ${primaryColor} 0%, #ec4899 100%)` }}
-            >
-                {/* Background image overlay */}
-                <div className="absolute inset-0 z-0">
-                    {mainBundle?.image_url && (
-                        <img
-                            src={mainBundle.image_url}
-                            alt=""
-                            className="w-full h-full object-cover opacity-20 mix-blend-overlay scale-110 blur-xl pointer-events-none"
-                        />
-                    )}
-                    <div className="absolute inset-0 bg-white/10 backdrop-blur-[2px]" />
-                    <div className="absolute inset-0 opacity-[0.1]" style={{
-                        backgroundImage: 'radial-gradient(circle at 2px 2px, #ffffff 1px, transparent 0)',
-                        backgroundSize: '32px 32px'
-                    }} />
-                    <div className="absolute inset-0 bg-gradient-to-t from-brand-cream dark:from-slate-950 to-transparent" />
-                </div>
+        <div style={{ minHeight: '100vh', background: '#faf5ef', color: '#3b2a2f', paddingBottom: '4rem', fontSize: 14, lineHeight: 1.5 }}>
 
-                <div className="max-w-6xl mx-auto relative z-10 w-full">
-                    <div className="flex flex-col items-center text-center space-y-4 sm:space-y-6">
+            {/* ── Topbar (prototype lines 504-507): campaign identity + tenant chip ── */}
+            <div style={{ position: 'sticky', top: 0, zIndex: 30, display: 'flex', alignItems: 'center', gap: '.55rem', background: 'rgba(250,245,239,.92)', backdropFilter: 'blur(8px)', padding: '.75rem 1rem .6rem', borderBottom: '1px solid #eee2d6' }}>
+                <span style={{ width: 30, height: 30, borderRadius: 99, background: primaryColor, color: '#fff', display: 'grid', placeItems: 'center', fontSize: '.85rem', flex: 'none', overflow: 'hidden' }} aria-hidden="true">
+                    {tenantLogo
+                        ? <img src={tenantLogo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        : '🍲'}
+                </span>
+                <b style={{ fontFamily: SERIF, fontSize: '1rem', letterSpacing: '.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{campaignTitle}</b>
+                <span style={{ marginLeft: 'auto', flex: 'none', fontSize: '.66rem', fontWeight: 800, background: '#fdf3ee', color: primaryColor, borderRadius: 99, padding: '.3rem .6rem' }}>by {tenantName}</span>
+            </div>
 
-                        <div className="space-y-3 sm:space-y-4 max-w-2xl px-1 sm:px-4">
-                            <span className="inline-flex items-center gap-2 bg-[#EEDF5D] text-slate-800 px-3 sm:px-4 py-1.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] animate-pulse border-2 border-[#EEDF5D] shadow-lg shadow-[#EEDF5D]/40">
-                                <Heart size={11} className="fill-slate-800" />
-                                Live Fundraiser
-                            </span>
-                            <h1 className="text-3xl sm:text-4xl md:text-6xl font-black tracking-tight text-white leading-[1.1] drop-shadow-md">
-                                Help us support <br />
-                                <span className="text-yellow-200">{campaign.organization_name}</span>
-                            </h1>
-                            <p className="text-white/90 text-sm sm:text-lg md:text-xl font-medium leading-relaxed drop-shadow-sm pb-2 sm:pb-4">
-                                Every delicious meal you buy directly funds our mission.
+            {/* ── Page column (the prototype is a single warm editorial column) ── */}
+            <div style={{ maxWidth: '36rem', margin: '0 auto', padding: '0 1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+                {thanks ? (
+                    /* ============ ThanksState (prototype lines 570-594) ============
+                       Swapped in place of the ordering body, exactly as the prototype
+                       swaps fundbody → fundthanks (topbar remains). */
+                    <section aria-live="polite">
+                        <div style={{ padding: '1.4rem .2rem .6rem', textAlign: 'center' }}>
+                            <div style={{ fontSize: '2.4rem' }}>🎉</div>
+                            <h2 style={{ fontFamily: SERIF, fontWeight: 400, fontSize: '1.35rem', margin: '.3rem 0 .2rem', color: '#3b2a2f' }}>
+                                You just backed {thanks.orgName || campaign.organization_name}!
+                            </h2>
+                            <p style={{ margin: 0, fontSize: '.78rem', color: '#7a6258' }}>
+                                That's <b>{formatBundleCount(displayBundlesSold)} of {formatBundleCount(bundleGoal)} bundles</b>
+                                {thanks.participant ? <> — {thanks.participant} gets the credit 🏅</> : null}
                             </p>
                         </div>
 
-                        {/* === Progress Card === */}
-                        {orderMode?.mode !== 'pending' && orderMode?.mode !== 'invalid' && orderMode?.mode !== 'closed' && (
-                        <div className="bg-white/10 backdrop-blur-2xl p-5 sm:p-8 md:p-10 rounded-2xl sm:rounded-[3rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)] max-w-xl w-full border-2 border-white/40 overflow-hidden relative">
-                            <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent pointer-events-none" />
+                        {/* One-time celebration: gentle entrance on the impact panel plus a
+                            short confetti fall over the heading/impact area. Both play once
+                            (forwards fill, no iteration count) and end fully transparent.
+                            prefers-reduced-motion disables the entrance and hides confetti. */}
+                        <style>{`
+                            .fr-impact { animation: frImpactIn .5s ease both; }
+                            .fr-confetti-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+                            .fr-confetti { position: absolute; opacity: 0; will-change: transform, opacity;
+                                animation-name: frConfetti; animation-timing-function: cubic-bezier(.25,.6,.4,1);
+                                animation-iteration-count: 1; animation-fill-mode: forwards; }
+                            @keyframes frImpactIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+                            @keyframes frConfetti {
+                                0%   { opacity: 0; transform: translate3d(0, -10px, 0) rotate(0deg) scale(.85); }
+                                18%  { opacity: 1; }
+                                75%  { opacity: 1; }
+                                100% { opacity: 0; transform: translate3d(var(--fr-drift, 0px), var(--fr-fall, 70px), 0) rotate(var(--fr-spin, 200deg)) scale(1); }
+                            }
+                            @media (prefers-reduced-motion: reduce) {
+                                .fr-impact { animation: none; }
+                                .fr-confetti-layer { display: none; }
+                            }
+                        `}</style>
 
-                            <div className="flex justify-between items-end mb-4 sm:mb-6 relative z-10">
-                                <div className="text-left">
-                                    <p className="text-[9px] sm:text-[10px] font-black text-white/70 uppercase tracking-[0.2em] mb-1 drop-shadow-sm">Bundles Sold</p>
-                                    <p className="text-3xl sm:text-5xl font-black text-white tracking-tight drop-shadow-md">{formatBundleCount(totalBundlesSold)}</p>
-                                </div>
-                                <div className="text-right">
-                                    <p className="text-[9px] sm:text-[10px] font-black text-white/70 uppercase tracking-[0.2em] mb-1 drop-shadow-sm">Goal</p>
-                                    <p className="text-base sm:text-xl font-black text-slate-100 drop-shadow-md">{formatBundleCount(bundleGoal)} Bundles</p>
-                                </div>
+                        {/* ImpactPanel — personal contribution + live confirmation progress.
+                            Reuses displayBundlesSold / displayProgressPercent / bundleGoal
+                            (the single derived progress source) — no second formula. */}
+                        <div className="fr-impact" style={{ position: 'relative', margin: '.2rem 0 .8rem', background: '#fff', border: '1px solid #eee2d6', borderRadius: 18, padding: '.95rem 1.05rem' }}>
+                            {/* Confetti — 10 small pieces in the Fable palette, staggered,
+                                each drifting/rotating once then fading out. Decorative only. */}
+                            <div className="fr-confetti-layer" aria-hidden="true" style={{ borderRadius: 18 }}>
+                                {CONFETTI_PIECES.map((p, i) => (
+                                    <span
+                                        key={i}
+                                        className="fr-confetti"
+                                        style={{
+                                            left: p.left,
+                                            top: p.top,
+                                            width: p.w,
+                                            height: p.h,
+                                            borderRadius: p.round ? 99 : 2,
+                                            background: p.color === 'primary' ? primaryColor : p.color,
+                                            boxShadow: '0 1px 2px rgba(59,42,47,.18)',
+                                            animationDelay: p.delay,
+                                            animationDuration: p.duration,
+                                            ['--fr-drift' as any]: p.drift,
+                                            ['--fr-fall' as any]: p.fall,
+                                            ['--fr-spin' as any]: p.spin,
+                                        } as React.CSSProperties}
+                                    />
+                                ))}
                             </div>
 
-                            {/* Progress Bar */}
-                            <div className="h-5 sm:h-6 bg-black/40 rounded-full overflow-hidden shadow-inner p-1 relative z-10 border border-white/10">
-                                <div
-                                    className="h-full rounded-full transition-all duration-1000 ease-out relative shadow-[0_4px_12px_rgba(255,255,255,0.2)]"
-                                    style={{ width: `${progressPercent}%`, backgroundColor: primaryColor }}
-                                >
-                                    <div className="absolute inset-0 bg-gradient-to-r from-white/30 via-transparent to-transparent animate-[shimmer_2s_infinite]"></div>
-                                </div>
+                            <b style={{ display: 'block', fontFamily: SERIF, fontWeight: 400, fontSize: '1rem', color: '#3b2a2f', textAlign: 'center' }}>
+                                Your order added {formatBundleCount(thanks.unitsAdded)} bundle{thanks.unitsAdded === 1 ? '' : 's'} 🎉
+                            </b>
+
+                            {/* Same visual language as the ordering-page hero bar: warm
+                                #eee2d6 track, primary fill with soft glow, rounded ends. */}
+                            <div
+                                style={{ position: 'relative', height: 10, borderRadius: 99, background: '#eee2d6', overflow: 'hidden', margin: '.7rem 0 .4rem' }}
+                                role="progressbar"
+                                aria-label="Fundraiser bundle progress"
+                                aria-valuenow={Math.round(displayProgressPercent)}
+                                aria-valuemin={0}
+                                aria-valuemax={100}
+                            >
+                                <i style={{ display: 'block', height: '100%', width: `${displayProgressPercent}%`, background: primaryColor, borderRadius: 99, boxShadow: `0 0 10px ${primaryColor}55`, transition: 'width .8s ease' }} />
                             </div>
 
-                            <div className="mt-5 sm:mt-8 flex items-center justify-center gap-2 py-3 sm:py-4 bg-white/40 rounded-xl sm:rounded-2xl border border-white/50 relative z-10 backdrop-blur-md shadow-inner px-3">
-                                <Heart className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-pink-600 fill-pink-600 drop-shadow-sm shrink-0" />
-                                <p className="text-[9px] sm:text-[10px] font-black text-pink-700 uppercase tracking-widest drop-shadow-sm">
-                                    {totalBundlesSold > 0
-                                        ? `${formatBundleCount(totalBundlesSold)} out of ${formatBundleCount(bundleGoal)} bundles purchased`
-                                        : 'Place an order to help us reach our bundle goal!'}
-                                </p>
+                            <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', fontSize: '.7rem', fontWeight: 700, color: '#6b4d3f', fontVariantNumeric: 'tabular-nums' }}>
+                                <span>{formatBundleCount(displayBundlesSold)} of {formatBundleCount(bundleGoal)} bundles</span>
+                                {milestoneMessage && <span style={{ marginLeft: 'auto', color: primaryColor }}>{milestoneMessage}</span>}
                             </div>
 
-                            {/* Order by Email CTA */}
-                            {coordinatorEmail && (
+                            <p style={{ margin: '.55rem 0 0', fontSize: '.7rem', color: '#7a6258', textAlign: 'center', lineHeight: 1.4 }}>
+                                You moved this fundraiser closer to its goal. Share it and help keep the momentum going.
+                            </p>
+                        </div>
+
+                        {/* PaymentCard — 2px primary border per the FR handoff */}
+                        <div style={{ margin: '.8rem 0', background: '#fff', border: `2px solid ${primaryColor}`, borderRadius: 18, padding: '.95rem 1.05rem', overflowWrap: 'anywhere' }}>
+                            <b style={{ fontSize: '.82rem', color: '#3b2a2f' }}>💵 One last step — pay your coordinator</b>
+                            <p style={{ margin: '.35rem 0 .5rem', fontSize: '.76rem', color: '#5d463d' }}>
+                                {thanks.paymentInstructions
+                                    ? <>{thanks.paymentInstructions} — <b>${thanks.total.toFixed(2)}</b> for order <b>#{thanks.orderRef}</b>.</>
+                                    : <>Please pay {thanks.orgName || 'your coordinator'} directly — <b>${thanks.total.toFixed(2)}</b> for order <b>#{thanks.orderRef}</b>. They'll confirm the easiest way to pay.</>}
+                            </p>
+                            {thanks.externalPaymentLink && (
                                 <a
-                                    href={buildMailtoUrl()}
-                                    className="mt-4 sm:mt-6 w-full flex items-center justify-center gap-2.5 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl font-black text-xs sm:text-sm uppercase tracking-widest transition-all hover:scale-[1.02] active:scale-95 shadow-lg relative z-10"
-                                    style={{ backgroundColor: '#fff', color: primaryColor, border: `2px solid rgba(255,255,255,0.5)` }}
+                                    href={thanks.externalPaymentLink}
+                                    target="_blank" rel="noopener noreferrer"
+                                    style={{ display: 'inline-block', background: '#f6ede2', color: primaryColor, borderRadius: 10, fontSize: '.7rem', fontWeight: 800, padding: '.5rem .8rem', textDecoration: 'none', maxWidth: '100%' }}
                                 >
-                                    <Mail size={16} strokeWidth={3} />
-                                    Order by Email
+                                    Open payment link →
                                 </a>
                             )}
                         </div>
-                        )}
-                    </div>
-                </div>
-            </div>
 
-            {/* === Main Content Area === */}
-            <main className="max-w-4xl mx-auto px-3 sm:px-6 -mt-8 sm:-mt-12 relative z-20">
-                <div className="flex flex-col gap-8 sm:gap-12">
+                        {/* ShareGuide — guided step-by-step replacement for the compact
+                            three-button ShareRow. Same warm Fable card shell; each step is
+                            a numbered row (pill + heading + one sentence + one action).
+                            All three handlers are the existing hardened ones — the steps
+                            are guidance only and none is a prerequisite for another. */}
+                        <div style={{ margin: '0 0 .8rem', background: '#fff', border: '1px solid #eee2d6', borderRadius: 18, padding: '1rem 1.05rem .9rem' }}>
+                            <b style={{ display: 'block', fontFamily: SERIF, fontWeight: 400, fontSize: '.95rem', color: '#3b2a2f' }}>Help us keep the momentum going</b>
+                            <p style={{ margin: '.3rem 0 .85rem', fontSize: '.72rem', color: '#7a6258', lineHeight: 1.45 }}>
+                                Every share can bring in another order and help {campaign.organization_name} move
+                                closer to its {formatBundleCount(bundleGoal)}-bundle goal.
+                            </p>
 
-                    {/* Main Content */}
-                    <div className="w-full space-y-10 sm:space-y-16">
-
-                        {/* === Bundle Cards Section === */}
-                        {orderMode?.mode === 'closed' ? (
-                            <section className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm p-8 sm:p-12 text-center">
-                                <div className="mx-auto w-16 h-16 rounded-2xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-slate-400 mb-6">
-                                    <Info size={32} />
-                                </div>
-                                <h2 className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight uppercase mb-4">Campaign Closed</h2>
-                                <p className="text-base sm:text-lg text-slate-500 dark:text-slate-400 font-medium max-w-lg mx-auto">
-                                    {orderMode.safeMessage || 'This campaign is closed. Order changes are no longer permitted.'}
-                                </p>
-                            </section>
-                        ) : orderMode?.mode === 'pending' ? (
-                            <section className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm p-8 sm:p-12 text-center">
-                                <div className="mx-auto w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600 mb-6">
-                                    <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                                    </svg>
-                                </div>
-                                <h2 className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight uppercase mb-4">Bundle Selection Pending</h2>
-                                <p className="text-base sm:text-lg text-slate-500 dark:text-slate-400 font-medium max-w-lg mx-auto">
-                                    {orderMode.safeMessage || 'The coordinator is currently selecting the bundles for this fundraiser. Please check back later to place your order.'}
-                                </p>
-                            </section>
-                        ) : orderMode?.mode === 'invalid' || (orderMode?.mode === 'selected' && bundles.length === 0) ? (
-                            <section className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm p-8 sm:p-12 text-center">
-                                <div className="mx-auto w-16 h-16 rounded-2xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-slate-400 mb-6">
-                                    <Info size={32} />
-                                </div>
-                                <h2 className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight uppercase mb-4">Temporarily Unavailable</h2>
-                                <p className="text-base sm:text-lg text-slate-500 dark:text-slate-400 font-medium max-w-lg mx-auto">
-                                    {orderMode.safeMessage || "This fundraiser's bundle configuration is being updated. Please check back shortly."}
-                                </p>
-                            </section>
-                        ) : bundles.length > 0 ? (
-                            <section className="space-y-4 sm:space-y-6">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600">
-                                        <UtensilsCrossed size={18} />
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '.75rem' }}>
+                                {/* Step 1 — copy the message. Each pill column carries a thin
+                                    warm connector line down to the next step (sage once the
+                                    step completes); the last step has none. */}
+                                <div style={{ display: 'flex', gap: '.65rem', alignItems: 'stretch' }}>
+                                    <span aria-hidden="true" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 'none' }}>
+                                        <span style={{ width: 24, height: 24, borderRadius: 99, display: 'grid', placeItems: 'center', fontSize: '.66rem', fontWeight: 800, background: step1Done ? '#e8ede2' : '#f6ede2', color: step1Done ? '#4f6142' : primaryColor }}>
+                                            {step1Done ? '✓' : '1'}
+                                        </span>
+                                        <span style={{ flex: 1, width: 2, marginTop: 4, borderRadius: 99, background: step1Done ? '#7d8f72' : '#eee2d6' }} />
+                                    </span>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <b style={{ fontSize: '.76rem', color: step1Done ? '#4f6142' : '#3b2a2f' }}>Copy the fundraiser message</b>
+                                        <p style={{ margin: '.15rem 0 .45rem', fontSize: '.68rem', color: '#7a6258', lineHeight: 1.4 }}>
+                                            We've written a short message and included the fundraiser ordering link.
+                                        </p>
+                                        <button onClick={handleCopy} aria-label="Copy the fundraiser share message and link" style={{ width: '100%', background: '#f6ede2', color: primaryColor, border: 0, borderRadius: 11, fontSize: '.7rem', fontWeight: 800, padding: '.6rem', cursor: 'pointer', fontFamily: 'inherit' }}>
+                                            {step1Done ? '✓ Message copied' : '🔗 Copy share message'}
+                                        </button>
                                     </div>
-                                    <h2 className="text-lg sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight uppercase">Order a Bundle to Support Us</h2>
                                 </div>
-                                <p className="text-sm sm:text-base text-slate-500 dark:text-slate-400 font-medium -mt-1">
-                                    Tap a bundle below to start your order by email.
-                                </p>
 
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-                                    {bundles.map((bundle: any) => (
-                                        <BundleCard
-                                            key={bundle.id}
-                                            bundle={bundle}
-                                            primaryColor={primaryColor}
-                                            onViewDetails={() => handleOpenBundleModal(bundle)}
-                                            mailtoUrl={coordinatorEmail ? buildMailtoUrl(bundle.name, Number(bundle.price || 0)) : undefined}
-                                        />
+                                {/* Step 2 — Facebook (still copies the caption itself, so this
+                                    works even when Step 1 was skipped) */}
+                                <div style={{ display: 'flex', gap: '.65rem', alignItems: 'stretch' }}>
+                                    <span aria-hidden="true" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 'none' }}>
+                                        <span style={{ width: 24, height: 24, borderRadius: 99, display: 'grid', placeItems: 'center', fontSize: '.66rem', fontWeight: 800, background: '#f6ede2', color: primaryColor }}>2</span>
+                                        <span style={{ flex: 1, width: 2, marginTop: 4, borderRadius: 99, background: '#eee2d6' }} />
+                                    </span>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <b style={{ fontSize: '.76rem', color: '#3b2a2f' }}>Share it on Facebook</b>
+                                        <p style={{ margin: '.15rem 0 .45rem', fontSize: '.68rem', color: '#7a6258', lineHeight: 1.4 }}>
+                                            Open Facebook, paste the message, and share it with friends and family.
+                                        </p>
+                                        <button onClick={handleFacebook} aria-label="Open Facebook to share the fundraiser (copies the caption first)" style={{ width: '100%', background: '#3b5998', color: '#fff', border: 0, borderRadius: 11, fontSize: '.7rem', fontWeight: 800, padding: '.6rem', cursor: 'pointer', fontFamily: 'inherit' }}>
+                                            📘 Open Facebook
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Step 3 — text friends */}
+                                <div style={{ display: 'flex', gap: '.65rem', alignItems: 'flex-start' }}>
+                                    <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 99, flex: 'none', display: 'grid', placeItems: 'center', fontSize: '.66rem', fontWeight: 800, background: '#f6ede2', color: primaryColor }}>3</span>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <b style={{ fontSize: '.76rem', color: '#3b2a2f' }}>Text a few friends</b>
+                                        <p style={{ margin: '.15rem 0 .45rem', fontSize: '.68rem', color: '#7a6258', lineHeight: 1.4 }}>
+                                            Send the fundraiser directly to people who would enjoy an easy freezer meal.
+                                        </p>
+                                        <button onClick={handleTextIt} aria-label="Text the fundraiser message to friends" style={{ width: '100%', background: '#3b2a2f', color: '#fff', border: 0, borderRadius: 11, fontSize: '.7rem', fontWeight: 800, padding: '.6rem', cursor: 'pointer', fontFamily: 'inherit' }}>
+                                            💬 Text friends
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Shared status region — announces copy/Facebook/localhost outcomes */}
+                            <div aria-live="polite">
+                                {shareStatus && (
+                                    <p style={{ margin: '.7rem 0 0', fontSize: '.66rem', fontWeight: 700, color: '#7a6258' }}>{shareStatus}</p>
+                                )}
+                            </div>
+
+                            <p style={{ margin: '.75rem 0 0', fontFamily: SERIF, fontStyle: 'italic', fontSize: '.72rem', color: '#9a8075', textAlign: 'center' }}>
+                                Even one additional order helps the fundraiser raise more. Thank you for spreading the word. 🧡
+                            </p>
+                        </div>
+
+                        {/* FounderNote (tenant variant — founder identity is not in the data,
+                            so the tenant display name signs the approved thank-you note) */}
+                        <div style={{ margin: '0 0 .9rem', background: '#fff', border: '1px solid #eee2d6', borderRadius: 20, padding: '1rem 1.05rem', display: 'flex', gap: '.8rem' }}>
+                            <span style={{ width: 44, height: 44, borderRadius: 99, flex: 'none', background: 'linear-gradient(135deg,#eccfd4,#e5b8c1)', display: 'grid', placeItems: 'center', fontSize: '1.2rem' }} aria-hidden="true">👩‍🍳</span>
+                            <p style={{ margin: 0, fontFamily: SERIF, fontStyle: 'italic', fontSize: '.82rem', color: '#5d463d', lineHeight: 1.5 }}>
+                                "Thank you for supporting {thanks.orgName || campaign.organization_name} — and if your freezer ever needs a refill after the fundraiser, we're here all year."
+                                <span style={{ display: 'block', marginTop: '.3rem', fontFamily: 'system-ui,sans-serif', fontStyle: 'normal', fontSize: '.66rem', fontWeight: 700, color: '#9a8075' }}>
+                                    — {tenantName} · <a href={`/shop/${slug}`} style={{ color: 'inherit' }}><u>visit our storefront →</u></a>
+                                </span>
+                            </p>
+                        </div>
+                    </section>
+                ) : (
+                <>
+                    {/* ── ProgressHero card (prototype lines 510-520, with the approved
+                         emphasis pass: live badge, display-scale sold count, warm stat
+                         pills, thicker milestone bar). md:-mx-12 lets the hero breathe
+                         slightly wider than the order column on desktop only. ── */}
+                    {!blocked && (
+                        <div className="md:-mx-12">
+                            <div style={{ ...fableCard, padding: '1.05rem 1.15rem 1rem' }}>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem', background: '#fdf3ee', color: primaryColor, borderRadius: 99, padding: '.28rem .6rem', fontSize: '.58rem', fontWeight: 800, letterSpacing: '.12em' }}>
+                                    <span style={{ width: 6, height: 6, borderRadius: 99, background: primaryColor }} aria-hidden="true" />
+                                    LIVE FUNDRAISER
+                                </span>
+
+                                <h1 style={{ fontFamily: SERIF, fontWeight: 400, fontSize: '1.45rem', lineHeight: 1.2, margin: '.55rem 0 0', color: '#3b2a2f' }}>
+                                    Help us hit <em style={{ fontStyle: 'italic', color: primaryColor }}>{formatBundleCount(bundleGoal)} bundles</em> 🧡
+                                </h1>
+
+                                <div style={{ display: 'flex', alignItems: 'flex-end', gap: '.9rem', flexWrap: 'wrap', margin: '.75rem 0 .6rem' }}>
+                                    <div>
+                                        <p style={{ margin: 0, fontFamily: SERIF, fontWeight: 400, fontSize: '2.7rem', lineHeight: 1, color: primaryColor, fontVariantNumeric: 'tabular-nums' }}>
+                                            {formatBundleCount(displayBundlesSold)}
+                                        </p>
+                                        <p style={{ margin: '.2rem 0 0', fontSize: '.6rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.12em', color: '#9a8075' }}>Bundles Sold</p>
+                                    </div>
+                                    <div style={{ marginLeft: 'auto', display: 'flex', gap: '.45rem', flexWrap: 'wrap' }}>
+                                        <div style={{ background: '#faf5ef', border: '1px solid #e9d9cb', borderRadius: 12, padding: '.4rem .7rem', textAlign: 'center' }}>
+                                            <b style={{ display: 'block', fontSize: '.9rem', color: '#3b2a2f', fontVariantNumeric: 'tabular-nums' }}>{formatBundleCount(bundleGoal)}</b>
+                                            <span style={{ fontSize: '.55rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.1em', color: '#9a8075' }}>Bundle Goal</span>
+                                        </div>
+                                        {daysLeft !== null && (
+                                            <div style={{ background: '#faf5ef', border: '1px solid #e9d9cb', borderRadius: 12, padding: '.4rem .7rem', textAlign: 'center' }}>
+                                                <b style={{ display: 'block', fontSize: '.9rem', color: '#3b2a2f', fontVariantNumeric: 'tabular-nums' }}>{daysLeft}</b>
+                                                <span style={{ fontSize: '.55rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.1em', color: '#9a8075' }}>Day{daysLeft !== 1 ? 's' : ''} Left</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div
+                                    style={{ position: 'relative', height: 14, borderRadius: 99, background: '#eee2d6', overflow: 'hidden' }}
+                                    role="progressbar"
+                                    aria-label="Fundraiser bundle progress"
+                                    aria-valuenow={Math.round(displayProgressPercent)}
+                                    aria-valuemin={0}
+                                    aria-valuemax={100}
+                                >
+                                    <i style={{ display: 'block', height: '100%', width: `${displayProgressPercent}%`, background: primaryColor, borderRadius: 99, boxShadow: `0 0 10px ${primaryColor}55`, transition: 'width .8s ease' }} />
+                                    {/* Milestone ticks at 25 / 50 / 75 and the goal edge */}
+                                    {[25, 50, 75].map(m => (
+                                        <span key={m} aria-hidden="true" style={{ position: 'absolute', top: 0, bottom: 0, left: `${m}%`, width: 2, background: 'rgba(59,42,47,.15)' }} />
                                     ))}
+                                    <span aria-hidden="true" style={{ position: 'absolute', top: 0, bottom: 0, right: 2, width: 2, background: 'rgba(59,42,47,.25)' }} />
                                 </div>
-                            </section>
-                        ) : null}
 
-                        {/* === Fundraiser Details (replaces On The Menu) === */}
-                        {(endDateStr || deliveryDateStr || pickupLocation) && (
-                            <section className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm p-5 sm:p-8">
-                                <div className="flex items-center gap-2 mb-5 sm:mb-6">
-                                    <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600">
-                                        <CalendarDays size={18} />
+                                <div style={{ display: 'flex', gap: '.5rem', margin: '.5rem 0 0', fontSize: '.7rem', fontWeight: 700, color: '#6b4d3f', flexWrap: 'wrap' }}>
+                                    <span>{formatBundleCount(displayBundlesSold)} of {formatBundleCount(bundleGoal)} bundles</span>
+                                    <span style={{ marginLeft: 'auto' }}>🧡 {progressMotivation}</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ── Blocked states (functional gating unchanged; warm neutrals) ── */}
+                    {orderMode?.mode === 'closed' ? (
+                        <section style={{ ...fableCard, padding: '2rem 1.2rem', textAlign: 'center' }}>
+                            <h2 style={{ fontFamily: SERIF, fontWeight: 400, fontSize: '1.25rem', margin: '0 0 .5rem', color: '#3b2a2f' }}>Campaign Closed</h2>
+                            <p style={{ margin: 0, fontSize: '.8rem', color: '#7a6258' }}>
+                                {orderMode.safeMessage || 'This campaign is closed. Order changes are no longer permitted.'}
+                            </p>
+                        </section>
+                    ) : orderMode?.mode === 'pending' ? (
+                        <section style={{ ...fableCard, padding: '2rem 1.2rem', textAlign: 'center' }}>
+                            <h2 style={{ fontFamily: SERIF, fontWeight: 400, fontSize: '1.25rem', margin: '0 0 .5rem', color: '#3b2a2f' }}>Bundle Selection Pending</h2>
+                            <p style={{ margin: 0, fontSize: '.8rem', color: '#7a6258' }}>
+                                {orderMode.safeMessage || 'The coordinator is currently selecting the bundles for this fundraiser. Please check back later to place your order.'}
+                            </p>
+                        </section>
+                    ) : orderMode?.mode === 'invalid' || (orderMode?.mode === 'selected' && bundles.length === 0) ? (
+                        <section style={{ ...fableCard, padding: '2rem 1.2rem', textAlign: 'center' }}>
+                            <h2 style={{ fontFamily: SERIF, fontWeight: 400, fontSize: '1.25rem', margin: '0 0 .5rem', color: '#3b2a2f' }}>Temporarily Unavailable</h2>
+                            <p style={{ margin: 0, fontSize: '.8rem', color: '#7a6258' }}>
+                                {orderMode.safeMessage || "This fundraiser's bundle configuration is being updated. Please check back shortly."}
+                            </p>
+                        </section>
+                    ) : bundles.length > 0 ? (
+                        <>
+                            {/* PayBadge — prototype lines 523-525, ported verbatim */}
+                            <div style={{ background: '#e8ede2', borderRadius: 14, padding: '.6rem .85rem', fontSize: '.72rem', fontWeight: 700, color: '#4f6142' }}>
+                                💵 No card needed here — you'll pay your coordinator directly (Venmo or check). We'll show you how after you order.
+                            </div>
+
+                            {/* Bundle cards — prototype .cards / .bcard (single warm column) */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '.85rem' }}>
+                                {bundles.map((bundle: any) => (
+                                    <BundleCard
+                                        key={bundle.id}
+                                        bundle={bundle}
+                                        primaryColor={primaryColor}
+                                        inOrder={orderLines.some(l => l.bundleId === bundle.id)}
+                                        onToggle={() => toggleLine(bundle)}
+                                    />
+                                ))}
+                            </div>
+
+                            {/* OrderForm card — prototype lines 554-567 */}
+                            <div style={fableCard}>
+                                <b style={{ fontFamily: SERIF, fontWeight: 400, fontSize: '1rem', color: '#3b2a2f' }}>
+                                    Your order · <span>${orderTotal.toFixed(2)}</span>
+                                </b>
+
+                                {orderLines.length === 0 ? (
+                                    <p style={{ margin: '.6rem 0 0', fontSize: '.72rem', color: '#9a8075' }}>
+                                        Tap "Add" on a bundle above to start your order.
+                                    </p>
+                                ) : (
+                                    <div style={{ marginTop: '.6rem' }}>
+                                        {orderLines.map(line => (
+                                            <div key={line.bundleId} style={{ display: 'flex', alignItems: 'center', gap: '.6rem', padding: '.55rem 0', borderBottom: '1px dashed #eee2d6' }}>
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <b style={{ fontSize: '.76rem', color: '#3b2a2f', display: 'block' }}>{line.name}</b>
+                                                    <span style={{ fontSize: '.66rem', color: '#9a8075' }}>${line.price.toFixed(2)} each</span>
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '.45rem' }}>
+                                                    <button aria-label={`Decrease ${line.name} quantity`} onClick={() => changeQty(line.bundleId, -1)} style={qtyBtn}>−</button>
+                                                    <span style={{ fontSize: '.8rem', fontWeight: 800, minWidth: '1rem', textAlign: 'center', color: '#3b2a2f' }}>{line.quantity}</span>
+                                                    <button aria-label={`Increase ${line.name} quantity`} onClick={() => changeQty(line.bundleId, +1)} style={qtyBtn}>+</button>
+                                                </div>
+                                                <b style={{ fontSize: '.8rem', color: '#3b2a2f', fontVariantNumeric: 'tabular-nums' }}>${(line.price * line.quantity).toFixed(2)}</b>
+                                                <button aria-label={`Remove ${line.name}`} onClick={() => removeLine(line.bundleId)} style={{ color: '#d8c3b5', background: 'none', border: 0, cursor: 'pointer', padding: '0 .2rem', fontSize: '.8rem' }}>✕</button>
+                                            </div>
+                                        ))}
                                     </div>
-                                    <h2 className="text-lg sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight uppercase">Fundraiser Details</h2>
-                                </div>
+                                )}
 
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
-                                    {/* Order Deadline */}
-                                    <div className="flex items-start gap-3 p-3 sm:p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl sm:rounded-2xl">
-                                        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${primaryColor}15` }}>
-                                            <CalendarDays size={16} style={{ color: primaryColor }} />
-                                        </div>
-                                        <div>
-                                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Order Deadline</p>
-                                            <p className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">{endDateStr || 'TBD'}</p>
-                                        </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.5rem', marginTop: '.6rem' }}>
+                                    <input placeholder="Your name" aria-label="Your name" value={buyerName} onChange={e => setBuyerName(e.target.value)} style={fableInput} />
+                                    <input placeholder="Phone" aria-label="Phone" value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)} style={fableInput} />
+                                </div>
+                                {/* Email is required by the order API (customer record + confirmation
+                                    email); Fable's prototype form omitted it — same input style, reported. */}
+                                <input type="email" placeholder="Email (for your confirmation)" aria-label="Email" value={buyerEmail} onChange={e => setBuyerEmail(e.target.value)} style={{ ...fableInput, marginTop: '.5rem' }} />
+
+                                <label style={{ display: 'block', marginTop: '.55rem', fontSize: '.64rem', fontWeight: 800, color: '#9a8075', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                                    Who are you supporting? 🏅
+                                    <input
+                                        placeholder={`${campaign.participant_label || 'Participant'} name (optional)`}
+                                        value={participant}
+                                        onChange={e => setParticipant(e.target.value)}
+                                        style={{ ...fableInput, marginTop: '.25rem', textTransform: 'none', letterSpacing: 'normal' }}
+                                    />
+                                </label>
+
+                                <button
+                                    onClick={submitOrder}
+                                    disabled={!canSubmit}
+                                    style={{ width: '100%', marginTop: '.8rem', background: primaryColor, color: '#fff', border: 0, borderRadius: 14, padding: '.85rem', fontSize: '.9rem', fontWeight: 800, cursor: canSubmit ? 'pointer' : 'default', fontFamily: 'inherit', opacity: canSubmit ? 1 : .55 }}
+                                >
+                                    {submitting ? 'Placing your order…' : 'Place my order →'}
+                                </button>
+                                {submitError && (
+                                    <p role="alert" style={{ margin: '.5rem 0 0', textAlign: 'center', fontSize: '.7rem', fontWeight: 700, color: primaryColor }}>{submitError}</p>
+                                )}
+                                <p style={{ margin: '.5rem 0 0', textAlign: 'center', fontSize: '.62rem', color: '#b09484' }}>
+                                    No payment taken online · your order counts toward the goal instantly
+                                </p>
+                            </div>
+                        </>
+                    ) : null}
+
+                    {/* ── Fundraiser details (required campaign data, in Fable's card idiom) ── */}
+                    {(endDateStr || deliveryDateStr || pickupLocation) && (
+                        <section style={fableCard}>
+                            <b style={{ fontFamily: SERIF, fontWeight: 400, fontSize: '.95rem', color: '#3b2a2f' }}>Fundraiser details</b>
+                            <div style={{ marginTop: '.45rem' }}>
+                                {endDateStr && (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '.6rem', padding: '.4rem 0', borderBottom: '1px dashed #eee2d6', fontSize: '.74rem' }}>
+                                        <span style={{ color: '#9a8075', fontWeight: 700 }}>Order deadline</span>
+                                        <b style={{ color: '#3b2a2f', textAlign: 'right' }}>{endDateStr}</b>
                                     </div>
-
-                                    {/* Pickup / Delivery Date */}
-                                    <div className="flex items-start gap-3 p-3 sm:p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl sm:rounded-2xl">
-                                        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${primaryColor}15` }}>
-                                            <MapPin size={16} style={{ color: primaryColor }} />
-                                        </div>
-                                        <div>
-                                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Pickup / Delivery Date</p>
-                                            <p className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">{deliveryDateStr || 'TBD'}</p>
-                                        </div>
+                                )}
+                                {deliveryDateStr && (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '.6rem', padding: '.4rem 0', borderBottom: '1px dashed #eee2d6', fontSize: '.74rem' }}>
+                                        <span style={{ color: '#9a8075', fontWeight: 700 }}>Pickup / delivery</span>
+                                        <b style={{ color: '#3b2a2f', textAlign: 'right' }}>{deliveryDateStr}{deliveryTimeStr ? ` · ${deliveryTimeStr}` : ''}</b>
                                     </div>
+                                )}
+                                {pickupLocation && (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '.6rem', padding: '.4rem 0', fontSize: '.74rem' }}>
+                                        <span style={{ color: '#9a8075', fontWeight: 700 }}>Location</span>
+                                        <b style={{ color: '#3b2a2f', textAlign: 'right' }}>{pickupLocation}</b>
+                                    </div>
+                                )}
+                            </div>
+                        </section>
+                    )}
 
-                                    {/* Time */}
-                                    {deliveryTimeStr && (
-                                        <div className="flex items-start gap-3 p-3 sm:p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl sm:rounded-2xl">
-                                            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${primaryColor}15` }}>
-                                                <Clock size={16} style={{ color: primaryColor }} />
-                                            </div>
-                                            <div>
-                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Time</p>
-                                                <p className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">{deliveryTimeStr}</p>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Pickup Location */}
-                                    {pickupLocation && (
-                                        <div className="flex items-start gap-3 p-3 sm:p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl sm:rounded-2xl">
-                                            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${primaryColor}15` }}>
-                                                <MapPin size={16} style={{ color: primaryColor }} />
-                                            </div>
-                                            <div>
-                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Pickup Location</p>
-                                                <p className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">{pickupLocation}</p>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Days Left */}
-                                    {daysLeft !== null && (
-                                        <div className="flex items-start gap-3 p-3 sm:p-4 rounded-xl sm:rounded-2xl sm:col-span-2" style={{ backgroundColor: daysLeft > 0 ? `${primaryColor}10` : '#fef2f2' }}>
-                                            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: daysLeft > 0 ? `${primaryColor}20` : '#fee2e2' }}>
-                                                <Timer size={16} style={{ color: daysLeft > 0 ? primaryColor : '#ef4444' }} />
-                                            </div>
-                                            <div>
-                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Days Left</p>
-                                                <p className="text-lg sm:text-xl font-black" style={{ color: daysLeft > 0 ? primaryColor : '#ef4444' }}>
-                                                    {daysLeft > 0 ? `${daysLeft} day${daysLeft !== 1 ? 's' : ''} left` : 'Ended'}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            </section>
-                        )}
-
-                        {/* === About Section === */}
-                        {campaign.about_text && (
-                            <section className="bg-indigo-50/30 dark:bg-slate-900/50 p-6 sm:p-12 rounded-2xl sm:rounded-[3.5rem] border border-indigo-100/50 dark:border-slate-800">
-                                <div className="flex items-center gap-3 mb-4 sm:mb-6 font-black uppercase tracking-[0.2em] text-[10px] text-indigo-600">
-                                    <Info size={16} />
-                                    About This Fundraiser
-                                </div>
-                                <div className="prose prose-sm sm:prose-lg dark:prose-invert max-w-none text-slate-600 dark:text-slate-300 font-medium leading-relaxed">
-                                    <p className="whitespace-pre-wrap">{campaign.about_text}</p>
-                                </div>
-                            </section>
-                        )}
-                    </div>
-                </div>
-            </main>
-
-            {selectedBundle && (
-                <BundleDetailsModal
-                    isOpen={isBundleModalOpen}
-                    onClose={() => { setIsBundleModalOpen(false); setSelectedBundle(null); }}
-                    bundle={selectedBundle}
-                    primaryColor={primaryColor}
-                    fundraiserMode={true}
-                    coordinatorEmail={coordinatorEmail}
-                    campaignName={campaign.organization_name || campaign.name || ''}
-                />
-            )}
+                    {/* ── About (required campaign data, in Fable's card idiom) ── */}
+                    {campaign.about_text && (
+                        <section style={fableCard}>
+                            <b style={{ fontFamily: SERIF, fontWeight: 400, fontSize: '.95rem', color: '#3b2a2f' }}>About this fundraiser</b>
+                            <p style={{ whiteSpace: 'pre-wrap', margin: '.45rem 0 0', fontSize: '.78rem', color: '#5d463d', lineHeight: 1.55 }}>{campaign.about_text}</p>
+                        </section>
+                    )}
+                </>
+                )}
+            </div>
         </div>
     );
 }
 
-// ─── Bundle Card with Meal Listing ───────────────────────────
-function BundleCard({ bundle, primaryColor, onViewDetails, mailtoUrl }: {
+// ─── Fable bundle card (prototype .bcard, lines 79-95 / 529-551) ─────────────
+function BundleCard({ bundle, primaryColor, inOrder, onToggle }: {
     bundle: any;
     primaryColor: string;
-    onViewDetails: () => void;
-    mailtoUrl?: string;
+    inOrder: boolean;
+    onToggle: () => void;
 }) {
-    const [expanded, setExpanded] = useState(false);
     const meals = (bundle.items || [])
         .map((i: any) => i.recipe)
         .filter((r: any) => r && r.name);
+    // Fable's .inside line lists what's in the bundle; meal names when we have
+    // them, otherwise the bundle description.
+    const inside = meals.length > 0
+        ? meals.map((m: any) => m.name).join(' · ')
+        : (bundle.description || '');
+    const servesLabel = bundle.serving_tier === 'family' ? 'serves 5' : 'serves 2';
+    const hasPrice = Number(bundle.price || 0) > 0;
 
     return (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-lg transition-all overflow-hidden group">
-            {/* Bundle image */}
-            {bundle.image_url && (
-                <div className="aspect-[16/9] overflow-hidden">
-                    <img
-                        src={bundle.image_url}
-                        alt={bundle.name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                    />
-                </div>
-            )}
-
-            <div className="p-4 sm:p-6">
-                <h3 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white mb-1">{bundle.name}</h3>
-                {bundle.description && (
-                    <p className="text-xs sm:text-sm text-slate-500 mb-3 line-clamp-2">{bundle.description}</p>
+        <div style={{ background: '#fff', border: '1px solid #eee2d6', borderRadius: 20, overflow: 'hidden' }}>
+            {/* .img band — real bundle photo fills the prototype's image slot;
+                warm gradient placeholder when none exists */}
+            <div style={{ height: 120, display: 'grid', placeItems: 'center', fontSize: '2.2rem', background: 'linear-gradient(135deg,#f3d8c8,#eec3ad)', position: 'relative' }}>
+                {bundle.image_url
+                    ? <img src={bundle.image_url} alt={bundle.name} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+                    : <span aria-hidden="true">🍲</span>}
+            </div>
+            <div style={{ padding: '.8rem .95rem .9rem' }}>
+                <h3 style={{ margin: 0, fontFamily: SERIF, fontWeight: 400, fontSize: '1.05rem', color: '#3b2a2f' }}>{bundle.name}</h3>
+                {inside && (
+                    <p style={{ margin: '.25rem 0 .4rem', fontSize: '.7rem', color: '#9a8075', lineHeight: 1.45 }}>{inside}</p>
                 )}
-
-                <div className="flex items-center justify-between mb-4">
-                    <span className="text-xl sm:text-2xl font-black" style={{ color: primaryColor }}>
-                        {Number(bundle.price || 0) > 0 ? `$${Number(bundle.price).toFixed(2)}` : 'Contact for Price'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem' }}>
+                    <span>
+                        <span style={{ fontSize: '.95rem', fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: '#3b2a2f' }}>
+                            {hasPrice ? `$${Number(bundle.price).toFixed(2)}` : 'Contact for price'}
+                        </span>{' '}
+                        <span style={{ fontSize: '.66rem', color: '#9a8075' }}>· {servesLabel}</span>
                     </span>
-                    {bundle.serving_tier && (
-                        <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-50 dark:bg-slate-800 px-3 py-1 rounded-full">
-                            {bundle.serving_tier === 'family' ? 'Serves 5-6' : 'Serves 2-3'}
-                        </span>
-                    )}
-                </div>
-
-                {/* Included meals */}
-                {meals.length > 0 && (
-                    <div className="border-t border-slate-100 dark:border-slate-800 pt-3 mt-1">
-                        <button
-                            onClick={() => setExpanded(!expanded)}
-                            className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-indigo-500 hover:text-indigo-700 transition-colors w-full"
-                        >
-                            <UtensilsCrossed size={12} />
-                            {meals.length} Meal{meals.length !== 1 ? 's' : ''} Included
-                            <ChevronDown size={12} className={`ml-auto transition-transform ${expanded ? 'rotate-180' : ''}`} />
-                        </button>
-
-                        {expanded && (
-                            <ul className="mt-2 space-y-1.5">
-                                {meals.map((meal: any, i: number) => (
-                                    <li key={i} className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
-                                        {meal.image_url ? (
-                                            <img src={meal.image_url} alt="" className="w-6 h-6 rounded-md object-cover shrink-0 mt-0.5" />
-                                        ) : (
-                                            <div className="w-6 h-6 rounded-md bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center shrink-0 mt-0.5">
-                                                <UtensilsCrossed size={10} className="text-indigo-400" />
-                                            </div>
-                                        )}
-                                        <span className="font-semibold">{meal.name}</span>
-                                    </li>
-                                ))}
-                            </ul>
-                        )}
-                    </div>
-                )}
-
-                {mailtoUrl ? (
-                    <a
-                        href={mailtoUrl}
-                        className="w-full mt-4 py-3.5 rounded-xl sm:rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 text-white hover:shadow-lg hover:scale-[1.02] active:scale-95"
-                        style={{ backgroundColor: primaryColor }}
+                    <button
+                        onClick={onToggle}
+                        disabled={!hasPrice}
+                        aria-pressed={inOrder}
+                        aria-label={inOrder ? `Remove ${bundle.name} from your order` : `Add ${bundle.name} to your order`}
+                        style={{ marginLeft: 'auto', background: inOrder ? '#7d8f72' : primaryColor, color: '#fff', border: 0, borderRadius: 12, fontSize: '.74rem', fontWeight: 800, padding: '.55rem .95rem', cursor: hasPrice ? 'pointer' : 'default', fontFamily: 'inherit', opacity: hasPrice ? 1 : .55 }}
                     >
-                        <Mail size={14} strokeWidth={3} />
-                        Order This Bundle
-                    </a>
-                ) : (
-                    <div className="w-full mt-4 py-3 rounded-xl sm:rounded-2xl font-bold text-[10px] sm:text-xs text-center text-slate-400 bg-slate-50 dark:bg-slate-800">
-                        Coordinator contact coming soon
-                    </div>
-                )}
-
-                <button
-                    onClick={onViewDetails}
-                    className="w-full mt-2 py-2.5 rounded-xl sm:rounded-2xl font-bold text-[10px] sm:text-xs transition-all border hover:shadow-sm flex items-center justify-center gap-1.5 text-slate-500 hover:text-slate-700 border-slate-200 dark:border-slate-700 dark:hover:bg-slate-800"
-                >
-                    View Menu
-                </button>
+                        {inOrder ? '✓ Added' : 'Add'}
+                    </button>
+                </div>
             </div>
         </div>
     );

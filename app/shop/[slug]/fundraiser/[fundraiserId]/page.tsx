@@ -6,20 +6,26 @@ import { computeFundraiserProgress } from '@/lib/fundraiserMetrics';
 import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
 import type { Metadata } from 'next';
 
-// ── OG Metadata (controls Facebook link preview) ───────────
+// ── OG Metadata (controls the Facebook/Twitter link preview) ───────────
+// FR-LAUNCH-1B share polish: campaign-specific title/description, canonical
+// public fundraiser URL, and the best available existing public image.
+// Site URL follows the repo's authoritative pattern (NEXT_PUBLIC_BASE_URL, as
+// used by the auth callback routes) → Vercel deployment URL → omit
+// canonical/URL/image fields when no reliable absolute base exists.
+// No domain is hardcoded and no localhost URL is ever emitted explicitly.
 export async function generateMetadata({ params }: { params: Promise<{ slug: string; fundraiserId: string }> }): Promise<Metadata> {
     const { slug, fundraiserId } = await params;
 
     const business = await prisma.business.findUnique({
         where: { slug },
-        select: { id: true, name: true },
+        select: { id: true, name: true, logo_url: true },
     });
 
     if (!business) return { title: 'Fundraiser Not Found' };
 
-    // Get tenant branding name
+    // Tenant branding (display name + shareable logo)
     const brandingRecords: any[] = await prisma.$queryRaw`
-        SELECT b.business_name FROM tenant_branding b
+        SELECT b.business_name, b.logo_url FROM tenant_branding b
         JOIN users u ON b.user_id = u.id
         WHERE u.business_id = ${business.id} AND u.role = 'ADMIN'
         LIMIT 1
@@ -30,28 +36,88 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
         ? brandingRecords[0].business_name
         : business.name || 'Freezer Chef';
 
-    // Get campaign org name
+    // Campaign org name — TENANT-SCOPED. The campaign must belong to the business
+    // resolved from the slug, so a mismatched slug/fundraiserId URL can never leak
+    // another tenant's organization name, title, description, or image. A campaign
+    // owned by a different tenant is indistinguishable from one that doesn't exist.
     const campaigns: any[] = await prisma.$queryRaw`
-        SELECT fc.name, c.name as organization_name
+        SELECT fc.id, fc.name, c.name as organization_name
         FROM fundraiser_campaigns fc
         JOIN customers c ON fc.customer_id = c.id
-        WHERE fc.id = ${fundraiserId}
+        WHERE fc.id = ${fundraiserId} AND c.business_id = ${business.id}
         LIMIT 1
     `;
     const campaign = campaigns[0];
-    const orgName = campaign?.organization_name || 'Fundraiser';
+    if (!campaign) return { title: 'Fundraiser Not Found' };
+    const orgName = campaign.organization_name || 'Fundraiser';
 
-    const title = `${orgName} Fundraiser — ${tenantName}`;
-    const description = `Support ${orgName} with easy freezer meals from ${tenantName}! Browse meal bundles, place your order online, and stock your freezer while making a difference.`;
+    // Best existing public image, in the required preference order:
+    // 1. a campaign-selected bundle photo (campaign-specific public image)
+    // 2. tenant branding logo   3. business logo   4. public FreezerIQ fallback.
+    // The bundle query is keyed on the tenant-owned campaign id and additionally
+    // requires the campaign's customer AND the bundle to belong to this business.
+    let ogImage: string = '/freezer-chef-logo.png';
+    let ogImageIsPhoto = false;
+    const bundleImages: any[] = await prisma.$queryRaw`
+        SELECT bu.image_url
+        FROM campaign_bundles cb
+        JOIN bundles bu ON cb.bundle_id = bu.id
+        JOIN fundraiser_campaigns fc ON cb.campaign_id = fc.id
+        JOIN customers c ON fc.customer_id = c.id
+        WHERE cb.campaign_id = ${campaign.id}
+          AND c.business_id = ${business.id}
+          AND bu.business_id = ${business.id}
+          AND cb.state = 'active'
+          AND bu.image_url IS NOT NULL
+        LIMIT 1
+    `;
+    if (bundleImages[0]?.image_url) {
+        ogImage = bundleImages[0].image_url;
+        ogImageIsPhoto = true;
+    } else if (brandingRecords[0]?.logo_url) {
+        ogImage = brandingRecords[0].logo_url;
+    } else if (business.logo_url) {
+        ogImage = business.logo_url;
+    }
 
+    // Base URL follows the repo's existing convention (NEXT_PUBLIC_BASE_URL, as used
+    // by the auth callback routes) → VERCEL_URL → none. Trailing slashes are stripped
+    // so paths can never compose as "https://example.com//shop/...". No production
+    // domain is hardcoded.
+    const rawSiteUrl = process.env.NEXT_PUBLIC_BASE_URL
+        || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
+    const siteUrl = rawSiteUrl ? rawSiteUrl.replace(/\/+$/, '') : null;
+    const canonicalUrl = siteUrl ? `${siteUrl}/shop/${slug}/fundraiser/${fundraiserId}` : null;
+    const absoluteOgImage = ogImage.startsWith('http')
+        ? ogImage
+        : (siteUrl ? `${siteUrl}${ogImage.startsWith('/') ? '' : '/'}${ogImage}` : null);
+
+    const title = `Support ${orgName} | ${tenantName}`;
+    const description = `Help ${orgName} reach its bundle goal. Choose freezer meal bundles, support the fundraiser, and pay the coordinator directly.`;
+
+    // The app defines no metadataBase, so a relative URL cannot be resolved into the
+    // absolute form these fields require. When no base URL is configured (local dev),
+    // title/description are still emitted but canonical/url/images are omitted rather
+    // than emitting a relative or falsely production-looking value.
     return {
         title,
         description,
+        ...(canonicalUrl ? { alternates: { canonical: canonicalUrl } } : {}),
         openGraph: {
             title,
             description,
+            ...(canonicalUrl ? { url: canonicalUrl } : {}),
             siteName: tenantName,
             type: 'website',
+            ...(absoluteOgImage ? { images: [{ url: absoluteOgImage }] } : {}),
+        },
+        twitter: {
+            // summary_large_image only when the image is a real photo — a small
+            // logo must not be claimed as a 1200×630 sharing image.
+            card: ogImageIsPhoto ? 'summary_large_image' : 'summary',
+            title,
+            description,
+            ...(absoluteOgImage ? { images: [absoluteOgImage] } : {}),
         },
     };
 }

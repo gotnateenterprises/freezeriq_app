@@ -295,6 +295,11 @@ export async function POST(req: Request) {
         return NextResponse.json({
             success: true,
             orderId: order.id,
+            // FR-LAUNCH-1B: response-only addition. The server-authoritative total
+            // as PERSISTED on the order row — never a client-supplied value — so a
+            // confirmation screen can show the same amount the coordinator will
+            // collect. No order-creation, pricing, or side-effect behavior changes.
+            total: Number(order.total_amount),
             paymentData: {
                 paymentInstructions,
                 externalPaymentLink,
