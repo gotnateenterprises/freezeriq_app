@@ -6,12 +6,8 @@ import { ShoppingBag, Users, ArrowRight, ArrowLeft, MessageSquare, Tag, X } from
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import JsonLd from '@/components/JsonLd';
-import { useSession } from 'next-auth/react';
-import DealsPopup from '@/components/shop/DealsPopup';
 import { useCart } from '@/context/CartContext';
 import CartDrawer from '@/components/shop/CartDrawer';
-import StorefrontHero from '@/components/shop/StorefrontHero';
-import StorefrontHowItWorks from '@/components/shop/StorefrontHowItWorks';
 import StickyCategoryBar from '@/components/shop/StickyCategoryBar';
 import StorefrontFooter from '@/components/shop/StorefrontFooter';
 import StorefrontProductCard from '@/components/shop/StorefrontProductCard';
@@ -20,10 +16,17 @@ import SurplusWaitlist from '@/components/shop/SurplusWaitlist';
 import PurchaseSidebar from '@/components/shop/PurchaseSidebar';
 import PublicRecipeDetail from '@/components/shop/PublicRecipeDetail';
 import FreezerIQLandingPage from '@/components/shop/FreezerIQLandingPage';
-import CountdownBanner from '@/components/shop/CountdownBanner';
-import TestimonialWall from '@/components/shop/TestimonialWall';
 import MobileStickyCart from '@/components/shop/MobileStickyCart';
 import { buildBrandVars } from '@/lib/storefront/brandTokens';
+// SF-2 landing components — regular storefront only
+import { WeekStrip } from '@/components/storefront/WeekStrip';
+import { HowItWorksChips } from '@/components/storefront/HowItWorksChips';
+import { GreetingCard } from '@/components/storefront/GreetingCard';
+import { FounderNote } from '@/components/storefront/FounderNote';
+import { QuoteBlock } from '@/components/storefront/QuoteBlock';
+import { EmailCaptureCard } from '@/components/storefront/EmailCaptureCard';
+import { StorefrontTopbar } from '@/components/storefront/StorefrontTopbar';
+import { LandingHero } from '@/components/storefront/LandingHero';
 
 interface Bundle {
     id: string;
@@ -97,11 +100,12 @@ interface TenantData {
 
 interface StorefrontClientProps {
     overrideSlug?: string;
+    /** SF-2: true only when the server proved the customer session belongs to THIS tenant. */
+    hasCustomerSession?: boolean;
 }
 
-export default function StorefrontClient({ overrideSlug }: StorefrontClientProps = {}) {
+export default function StorefrontClient({ overrideSlug, hasCustomerSession = false }: StorefrontClientProps = {}) {
     const params = useParams();
-    const { status } = useSession();
     const slug = overrideSlug || params?.slug;
     const { addToCart } = useCart();
     const [data, setData] = useState<TenantData | null>(null);
@@ -112,6 +116,38 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
     const [showPurchaseModal, setShowPurchaseModal] = useState(false);
     const [purchaseModalBundle, setPurchaseModalBundle] = useState<any>(null);
     const [mealsPopupBundle, setMealsPopupBundle] = useState<any | null>(null);
+    // SF-2: cookieless returning detection from the sf_last_order marker.
+    const [hasReturnMarker, setHasReturnMarker] = useState(false);
+
+    // SF-2: validate the sf_last_order marker. It is a returning-visitor
+    // MARKER only — never bundle/history data. Valid iff it parses, slug
+    // matches THIS storefront, orderId is a non-empty string, and ts is a
+    // finite number. Malformed or wrong-slug markers are ignored and removed.
+    useEffect(() => {
+        if (typeof window === 'undefined' || !slug) return;
+        try {
+            const raw = localStorage.getItem('sf_last_order');
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            const valid = parsed
+                && typeof parsed === 'object'
+                && parsed.slug === slug
+                && typeof parsed.orderId === 'string'
+                && parsed.orderId.length > 0
+                && Number.isFinite(parsed.ts);
+            if (valid) {
+                setHasReturnMarker(true);
+            } else {
+                localStorage.removeItem('sf_last_order');
+            }
+        } catch {
+            try { localStorage.removeItem('sf_last_order'); } catch { /* storage unavailable */ }
+        }
+    }, [slug]);
+
+    // SF-2: a visitor is "returning" via a tenant-proven customer session OR a
+    // valid cookieless marker for this slug.
+    const isReturning = hasCustomerSession || hasReturnMarker;
 
     useEffect(() => {
         async function fetchStorefront() {
@@ -279,6 +315,13 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
         }
     };
 
+    // SF-2: single best REAL testimonial for QuoteBlock. The current
+    // testimonial config carries no rating field, so "highest rating" cannot
+    // apply — the first valid quote is used and no rating is fabricated.
+    const bestTestimonial = (storefrontConfig?.testimonials || []).find(
+        (t: any) => t && typeof t.quote === 'string' && t.quote.trim().length > 0
+    ) || null;
+
     if (slug === 'freezeriq') {
         return <FreezerIQLandingPage />;
     }
@@ -296,17 +339,9 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
             </div>
 
             <div className="relative z-10 font-sans flex flex-col min-h-screen w-full max-w-[100vw] overflow-x-hidden">
-                <CountdownBanner
-                    targetDate={globalCutoffDate}
-                    primaryColor={branding.primary_color}
-                />
-
-                <DealsPopup
-                    businessName={(business.branding.business_name && business.branding.business_name !== 'FreezerIQ' && business.branding.business_name !== 'Freezer IQ') ? business.branding.business_name : 'Freezer Chef'}
-                    primaryColor={branding.primary_color}
-                    isAuthenticated={status === 'authenticated'}
-                    onCapture={(email, name) => console.log('Lead captured:', { email, name })}
-                />
+                {/* SF-2: CountdownBanner and DealsPopup are DELETED FROM THE RENDER
+                    per spec §9 ("persuasion by invitation, never pressure") — their
+                    component files remain in the repository untouched. */}
 
                 <CartDrawer
                     primaryColor={branding.primary_color}
@@ -470,52 +505,68 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                     }))
                 }} />
 
-                {/* Immersive Header */}
-                <StorefrontHero
-                    headline={storefrontConfig?.hero_headline || "Delicious Freezer Meals Made for Your Busy Life"}
-                    subheadline={storefrontConfig?.hero_subheadline || "Home-cooked flavor. Zero dinner stress. Stock your freezer. Gather around the table."}
+                {/* ── SF-2A landing shell: faithful Fable port ─────────────────────
+                    Prototype order — Topbar → WeekStrip → compact text hero — on
+                    the warm token ground. The legacy full-screen photographic
+                    StorefrontHero no longer renders here (its file is untouched
+                    and still serves app/start-a-business). No landing photograph,
+                    card, badge, trust row, or hero CTA — per the prototype. */}
+                <StorefrontTopbar
                     businessName={(business.branding.business_name && business.branding.business_name !== 'FreezerIQ') ? business.branding.business_name : 'Freezer Chef'}
-                    primaryColor={business.branding.primary_color}
-                    heroImage={storefrontConfig?.hero_image_url || "/images/nostalgic-hero.jpg"}
                     logoUrl={business.branding.logo_url}
                     slug={business.slug}
                 />
 
-                {/* Main Content Flow */}
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 -mt-24 relative z-20 space-y-16 sm:space-y-24 mb-16">
+                {/* SF-2: order-week strip — earliest real future cutoff, hidden when
+                    none. SF-2A width ruling: editorial elements sit in a max-w-2xl
+                    column. (This wrapper lives in a plain flex column — when WeekStrip
+                    self-returns null it collapses to zero height with no gap.) */}
+                <div className="max-w-2xl mx-auto w-full">
+                    <WeekStrip bundles={regularBundles} />
+                </div>
 
-                    {/* Our Story / Mission */}
-                    <section className="bg-white/40 dark:bg-slate-900/60 backdrop-blur-3xl p-6 sm:p-12 md:p-20 rounded-[2rem] sm:rounded-[4rem] border border-white dark:border-white/5 shadow-[0_48px_96px_-24px_rgba(244,114,182,0.1)] relative overflow-hidden">
-                        <div className="absolute top-0 right-0 w-64 h-64 bg-amber-50 rounded-full blur-3xl opacity-50 -z-10" />
+                {/* SF-2A: compact Fable hero. Tenant-configured headline/subheadline
+                    always win (rendered as plain text); the prototype's first-visit
+                    and returning default hooks apply only when no config exists. */}
+                <div className="max-w-2xl mx-auto w-full">
+                    <LandingHero
+                        headline={storefrontConfig?.hero_headline}
+                        subheadline={storefrontConfig?.hero_subheadline}
+                        isReturning={isReturning}
+                    />
+                </div>
 
-                        <div className="flex items-center gap-3 mb-8 font-black uppercase tracking-[0.25em] text-[10px] text-brand-teal">
-                            <div className="w-8 h-px bg-brand-teal/30" />
-                            Our Heritage
+                {/* Main Content Flow — SF-2 re-orchestration. The legacy inline
+                    "Our Story" section, StorefrontHowItWorks, and TestimonialWall no
+                    longer render (files remain): FounderNote and QuoteBlock below the
+                    bundles now own the story and testimonial regions, so nothing is
+                    duplicated. */}
+                {/* SF-2A rhythm: space-y-10 sm:space-y-14 (was 16/24) + mb-8 (was 16)
+                    — the old spacing was tuned for the removed dense legacy sections
+                    and left screen-height empty bands between the small editorial
+                    cards. Width ruling: each editorial element is constrained to a
+                    max-w-2xl column; wrappers share the exact render condition of
+                    their child, so nothing leaves an empty band when content is
+                    absent. */}
+                {/* SF-2A: -mt-24 removed — it existed to overlap the old full-screen
+                    photo hero and would pull content over the compact Fable hero. */}
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 relative z-20 space-y-10 sm:space-y-14 mb-8">
+
+                    {/* SF-2: first-visit-only how-it-works chips */}
+                    {!isReturning && (
+                        <div className="max-w-2xl mx-auto w-full">
+                            <HowItWorksChips />
                         </div>
+                    )}
 
-                        <h2 className="font-serif text-3xl sm:text-4xl md:text-5xl text-slate-900 dark:text-white mb-8 sm:mb-10 leading-tight">
-                            {storefrontConfig?.our_story_headline || (
-                                <>The Heart of <span className="text-brand-teal">{(!business.branding.business_name || business.branding.business_name === 'FreezerIQ' || business.branding.business_name === 'Freezer IQ') ? 'Freezer Chef' : business.branding.business_name}</span></>
-                            )}
-                        </h2>
-
-                        <div className="prose prose-lg sm:prose-xl dark:prose-invert max-w-none text-slate-600 dark:text-slate-300 font-medium leading-[1.8] opacity-90">
-                            {storefrontConfig?.our_story_content ? (
-                                <p className="whitespace-pre-wrap">{storefrontConfig.our_story_content}</p>
-                            ) : (
-                                <div className="space-y-6 sm:space-y-8">
-                                    <p>At <strong>{(!business.branding.business_name || business.branding.business_name === 'FreezerIQ' || business.branding.business_name === 'Freezer IQ') ? 'Freezer Chef' : business.branding.business_name}</strong>, we bring over 10 years of experience in freezer meal preparation to your table—taking the stress out of dinnertime and replacing it with comforting, crave-worthy flavors your whole family will love.</p>
-                                    <p>Our freezer-ready meals are handcrafted with care and packed with nostalgia—from hearty casseroles and slow-simmered soups to warm, oven-baked favorites and cozy crockpot classics that taste just like Grandma used to make.</p>
-                                </div>
-                            )}
+                    {/* SF-2: returning-only TRUTHFUL generic greeting — no usual bundle,
+                        no order count, no reorder, no points. CTA scrolls to the
+                        existing bundle region. */}
+                    {isReturning && (
+                        <div className="max-w-2xl mx-auto w-full">
+                            <GreetingCard onBrowseMenu={scrollToBundles} />
                         </div>
-                    </section>
-
-                    {/* The Process (Now below Story) */}
-                    <StorefrontHowItWorks content={storefrontConfig?.how_it_works_content} />
-
-                    {/* Customer Feedback Wall */}
-                    <TestimonialWall testimonials={storefrontConfig?.testimonials as any} />
+                    )}
 
                     {/* Marketing Video Section */}
                     {storefrontConfig?.marketing_video_url && (
@@ -532,8 +583,18 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                         </section>
                     )}
 
-                    {/* Lower Section: Bundles */}
-                    <div className="pb-20 w-full overflow-hidden">
+                    {/* Sticky Navigation — SF-2: render moved ahead of the bundle/card
+                        content per the approved order. Component is byte-unchanged
+                        (fixed-position overlay, so its visual behavior is identical). */}
+                    <StickyCategoryBar
+                        primaryColor={branding.primary_color}
+                        hasFundraisers={fundraisers.length > 0}
+                        hasBundles={regularBundles.length > 0}
+                    />
+
+                    {/* Lower Section: Bundles (SF-2A: pb-20 → pb-8 — it stacked with
+                        the container gap into a large empty band) */}
+                    <div className="pb-8 w-full overflow-hidden">
                         <div className="w-full max-w-full">
 
                             {/* Monthly Bundles Container */}
@@ -553,16 +614,39 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                             </div>
                         </div>
                     </div>
+
+                    {/* SF-2: grounded founder/story note (renders nothing without real
+                        config story text) followed by the single best REAL testimonial.
+                        SF-2A: each wrapper is gated on the SAME condition its child
+                        uses to self-null, so no empty space-y band can appear when
+                        the tenant has no story or testimonial content. */}
+                    {Boolean((storefrontConfig?.our_story_content || '').trim()) && (
+                        <div className="max-w-2xl mx-auto w-full">
+                            <FounderNote
+                                storyText={storefrontConfig?.our_story_content}
+                                attribution={(branding.business_name && branding.business_name !== 'FreezerIQ' && branding.business_name !== 'Freezer IQ') ? branding.business_name : 'Freezer Chef'}
+                                logoUrl={branding.logo_url}
+                            />
+                        </div>
+                    )}
+                    {bestTestimonial && (
+                        <div className="max-w-2xl mx-auto w-full">
+                            <QuoteBlock quote={bestTestimonial.quote} author={bestTestimonial.author} />
+                        </div>
+                    )}
+
+                    {/* SF-2: first-visit-only soft menu-email capture */}
+                    {!isReturning && (
+                        <div className="max-w-2xl mx-auto w-full">
+                            <EmailCaptureCard slug={String(slug || '')} />
+                        </div>
+                    )}
                 </div>
 
-                {/* Sticky Navigation */}
-                <StickyCategoryBar
-                    primaryColor={branding.primary_color}
-                    hasFundraisers={fundraisers.length > 0}
-                    hasBundles={regularBundles.length > 0}
-                />
-
-                <div className="max-w-6xl mx-auto px-6 relative z-20 py-24 space-y-32">
+                {/* SF-2A rhythm: py-24 space-y-32 → py-16 sm:py-20 space-y-16 sm:space-y-20
+                    — the legacy padding produced multi-screen empty bands once the dense
+                    sections above were replaced, especially with zero fundraisers. */}
+                <div className="max-w-6xl mx-auto px-6 relative z-20 py-16 sm:py-20 space-y-16 sm:space-y-20">
                     {/* Fundraisers Section - Refined Cards */}
                     {fundraisers.length > 0 && (
                         <section id="fundraisers" className="space-y-12">

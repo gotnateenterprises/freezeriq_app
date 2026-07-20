@@ -48,6 +48,22 @@ export default function CheckoutSuccessPage() {
                     setOrderId(data.orderId);
                     setConfirmed(data.confirmed ?? true); // Stripe has no confirmed field → default true
                     clearCart();
+
+                    // SF-2: cookieless returning-visitor marker. Written ONLY after a
+                    // confirmed successful order with a real order id. This is a
+                    // returning MARKER, not an order-history record — it must never
+                    // be read as bundle or "usual" data. Defensive: storage failure
+                    // (private mode, quota) must never break the success page.
+                    if ((data.confirmed ?? true) && data.orderId) {
+                        try {
+                            localStorage.setItem(
+                                'sf_last_order',
+                                JSON.stringify({ slug, orderId: String(data.orderId), ts: Date.now() })
+                            );
+                        } catch {
+                            // Ignore browser-storage failures entirely.
+                        }
+                    }
                 } else {
                     toast.error(data.error || 'Failed to verify payment status.');
                 }

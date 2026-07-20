@@ -1,5 +1,7 @@
 import { Metadata } from 'next';
 import StorefrontClient from './StorefrontClient';
+import { getCustomerSession } from '@/lib/customerAuth';
+import { prisma } from '@/lib/db';
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
     const { slug } = await params;
@@ -41,6 +43,27 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     }
 }
 
-export default function StorefrontPage() {
-    return <StorefrontClient />;
+export default async function StorefrontPage({ params }: { params: Promise<{ slug: string }> }) {
+    const { slug } = await params;
+
+    // SF-2: authenticated returning detection. The existing customer session
+    // carries businessId, so tenant ownership is PROVEN by comparing it to the
+    // business resolved from this slug — a session from another tenant's shop
+    // never counts as returning here. Only a boolean crosses to the client:
+    // no email, customer id, token, or balance.
+    let hasCustomerSession = false;
+    try {
+        const session = await getCustomerSession();
+        if (session?.businessId) {
+            const business = await prisma.business.findFirst({
+                where: { slug: { equals: slug, mode: 'insensitive' } },
+                select: { id: true },
+            });
+            hasCustomerSession = Boolean(business && business.id === session.businessId);
+        }
+    } catch {
+        hasCustomerSession = false;
+    }
+
+    return <StorefrontClient hasCustomerSession={hasCustomerSession} />;
 }
