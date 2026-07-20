@@ -23,6 +23,7 @@ import FreezerIQLandingPage from '@/components/shop/FreezerIQLandingPage';
 import CountdownBanner from '@/components/shop/CountdownBanner';
 import TestimonialWall from '@/components/shop/TestimonialWall';
 import MobileStickyCart from '@/components/shop/MobileStickyCart';
+import { buildBrandVars } from '@/lib/storefront/brandTokens';
 
 interface Bundle {
     id: string;
@@ -282,8 +283,12 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
         return <FreezerIQLandingPage />;
     }
 
+    // SF-1: one branding read (already fetched above) → CSS custom properties.
+    // Every storefront descendant consumes var(--sf-*); never raw tenant hex.
+    const brandVars = buildBrandVars(branding.primary_color, branding.accent_color);
+
     return (
-        <div className="relative min-h-screen bg-brand-cream dark:bg-slate-950 pb-32 noise-grain w-full max-w-[100vw] overflow-x-clip overflow-x-hidden">
+        <div style={brandVars as React.CSSProperties} className="relative min-h-screen bg-[var(--sf-ground)] text-[var(--sf-ink)] dark:bg-slate-950 pb-32 noise-grain w-full max-w-[100vw] overflow-x-clip overflow-x-hidden">
             {/* Global Background Blobs for Glass Look - Warm Feminine Energy */}
             <div className="fixed inset-0 pointer-events-none z-0">
                 <div className="absolute top-[5%] -right-[5%] w-[60%] h-[60%] bg-brand-rose/10 rounded-full blur-[160px] animate-pulse" />
@@ -347,7 +352,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
                                 </button>
                                 <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl rounded-[2.5rem] shadow-2xl relative overflow-hidden">
-                                    <div className="absolute top-0 left-0 w-full h-2 z-10" style={{ backgroundColor: branding.primary_color || '#4f46e5' }} />
+                                    <div className="absolute top-0 left-0 w-full h-2 z-10 bg-[var(--sf-primary)]" />
                                     <PurchaseSidebar
                                         bundle={purchaseModalBundle}
                                         primaryColor={branding.primary_color}
@@ -381,7 +386,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                                     {/* Header */}
                                     <div className="sticky top-0 z-10 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 px-5 py-4 flex items-center justify-between">
                                         <div className="min-w-0">
-                                            <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-0.5" style={{ color: branding.primary_color }}>What&apos;s Inside</p>
+                                            <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-0.5 text-[var(--sf-primary)]">What&apos;s Inside</p>
                                             <h3 className="text-lg font-black text-slate-900 dark:text-white truncate">{mealsPopupBundle.name}</h3>
                                         </div>
                                         <button
@@ -401,7 +406,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                                                         key={idx}
                                                         className="flex items-start gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800"
                                                     >
-                                                        <span className="shrink-0 w-6 h-6 rounded-full text-[10px] font-black flex items-center justify-center text-white mt-0.5" style={{ backgroundColor: branding.primary_color }}>
+                                                        <span className="shrink-0 w-6 h-6 rounded-full text-[10px] font-black flex items-center justify-center text-[var(--sf-on-primary)] mt-0.5 bg-[var(--sf-primary)]">
                                                             {item.quantity || 1}
                                                         </span>
                                                         <div className="min-w-0">
@@ -436,8 +441,7 @@ export default function StorefrontClient({ overrideSlug }: StorefrontClientProps
                                                 setPurchaseModalBundle(mealsPopupBundle);
                                                 setShowPurchaseModal(true);
                                             }}
-                                            className="w-full py-3.5 rounded-2xl text-white font-black text-sm uppercase tracking-widest shadow-lg hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
-                                            style={{ backgroundColor: branding.primary_color }}
+                                            className="w-full py-3.5 rounded-2xl bg-[var(--sf-primary)] text-[var(--sf-on-primary)] active:bg-[var(--sf-primary-press)] font-black text-sm uppercase tracking-widest shadow-lg hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
                                         >
                                             <ShoppingBag size={16} />
                                             Add to Cart

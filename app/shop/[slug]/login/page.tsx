@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { Mail, ArrowRight, Loader2, CheckCircle, Store } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { buildBrandVars } from "@/lib/storefront/brandTokens";
 
 export default function CustomerLoginPage() {
     const params = useParams();
@@ -69,8 +70,12 @@ export default function CustomerLoginPage() {
         }
     };
 
+    // SF-1: tokens from the primaryColor state this page already fetches —
+    // no additional branding request.
+    const brandVars = buildBrandVars(primaryColor);
+
     return (
-        <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center p-4">
+        <div style={brandVars as React.CSSProperties} className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center p-4">
             <div className="max-w-md w-full">
 
                 {/* Back Link */}
@@ -86,8 +91,7 @@ export default function CustomerLoginPage() {
 
                     {/* Header Block */}
                     <div
-                        className="p-8 text-center text-white relative overflow-hidden"
-                        style={{ backgroundColor: primaryColor }}
+                        className="p-8 text-center text-[var(--sf-on-primary)] relative overflow-hidden bg-[var(--sf-primary)]"
                     >
                         <div className="absolute inset-0 bg-black/10"></div>
                         <div className="relative z-10">
@@ -139,8 +143,7 @@ export default function CustomerLoginPage() {
                                 <button
                                     type="submit"
                                     disabled={isLoading || !email || !businessId}
-                                    style={{ backgroundColor: primaryColor }}
-                                    className="w-full py-3 px-4 flex items-center justify-center gap-2 rounded-xl text-white font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
+                                    className="w-full py-3 px-4 flex items-center justify-center gap-2 rounded-xl bg-[var(--sf-primary)] text-[var(--sf-on-primary)] font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
                                 >
                                     {isLoading ? (
                                         <Loader2 size={20} className="animate-spin" />

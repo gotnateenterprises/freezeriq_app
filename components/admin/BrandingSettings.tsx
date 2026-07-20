@@ -10,6 +10,19 @@ import {
     QrCode,
     ExternalLink
 } from 'lucide-react';
+import { DEFAULT_PRIMARY } from '@/lib/storefront/brandTokens';
+
+// SF-1 curated storefront palettes: six approved swatches that write the
+// tenant's primary_color through the existing branding save flow. Berry is
+// the storefront default and is imported — never hardcoded here.
+const CURATED_PALETTES: { name: string; value: string }[] = [
+    { name: 'Berry', value: DEFAULT_PRIMARY },
+    { name: 'Sage', value: '#6c7f5e' },
+    { name: 'Navy', value: '#33506b' },
+    { name: 'Terracotta', value: '#b0603f' },
+    { name: 'Plum', value: '#6d4467' },
+    { name: 'Charcoal', value: '#3d4045' },
+];
 
 interface BrandingSettingsProps {
     isSuperAdmin?: boolean;
@@ -266,6 +279,28 @@ export default function BrandingSettings({ isSuperAdmin }: BrandingSettingsProps
 
                         <div className="space-y-4 flex-1">
                             <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">Theme Colors</label>
+
+                            {/* SF-1: curated storefront palettes — six presets that set the
+                                primary color; saved through the existing branding form. The
+                                custom color inputs below remain the custom mode. */}
+                            <div className="space-y-1">
+                                <div className="flex flex-wrap gap-2" role="group" aria-label="Curated storefront palettes">
+                                    {CURATED_PALETTES.map(p => (
+                                        <button
+                                            key={p.name}
+                                            type="button"
+                                            onClick={() => setPrimaryColor(p.value)}
+                                            title={p.name}
+                                            aria-label={`Use the ${p.name} palette`}
+                                            aria-pressed={primaryColor.toLowerCase() === p.value.toLowerCase()}
+                                            className={`w-8 h-8 rounded-full border-2 transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 ${primaryColor.toLowerCase() === p.value.toLowerCase() ? 'border-slate-900 dark:border-white scale-110' : 'border-transparent hover:scale-105'}`}
+                                            style={{ backgroundColor: p.value }}
+                                        />
+                                    ))}
+                                </div>
+                                <p className="text-[8px] font-black text-slate-500 uppercase tracking-wider">Storefront Palettes</p>
+                            </div>
+
                             <div className="flex flex-wrap gap-4">
                                 <div className="space-y-1">
                                     <input type="color" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} className="w-10 h-10 rounded-lg cursor-pointer border-none p-0 overflow-hidden" title="Primary" />

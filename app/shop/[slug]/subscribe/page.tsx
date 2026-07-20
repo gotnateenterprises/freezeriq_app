@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 import { notFound } from 'next/navigation';
 import SubscribeClient from './SubscribeClient';
+import { buildBrandVars } from '@/lib/storefront/brandTokens';
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
     const { slug } = await params;
@@ -41,8 +42,12 @@ export default async function SubscribePage({ params }: { params: Promise<{ slug
 
     const primaryColor = branding?.primary_color || '#4f46e5';
 
+    // SF-1: emit the storefront tokens from the branding this page already
+    // loads — no extra query. SubscribeClient consumes the inherited vars.
+    const brandVars = buildBrandVars(branding?.primary_color, branding?.accent_color);
+
     return (
-        <div className="min-h-screen bg-brand-cream dark:bg-slate-950">
+        <div style={brandVars as React.CSSProperties} className="min-h-screen bg-brand-cream dark:bg-slate-950">
             {/* Header */}
             <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-100 dark:border-slate-800 sticky top-0 z-50">
                 <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
@@ -70,7 +75,7 @@ export default async function SubscribePage({ params }: { params: Promise<{ slug
             <main className="max-w-4xl mx-auto px-6 py-20 pb-40">
                 <div className="text-center space-y-6 mb-20 relative">
                     {/* Ambient Glow */}
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full max-w-lg blur-[120px] opacity-20 pointer-events-none" style={{ backgroundColor: primaryColor }} />
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full max-w-lg blur-[120px] opacity-20 pointer-events-none bg-[var(--sf-primary)]" />
 
                     <div className="inline-flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 px-5 py-2 rounded-full border border-indigo-100 dark:border-indigo-800/50 mb-4 relative z-10">
                         <Sparkles size={14} className="text-indigo-600 dark:text-indigo-400" />
@@ -79,7 +84,7 @@ export default async function SubscribePage({ params }: { params: Promise<{ slug
                         </span>
                     </div>
                     <h1 className="text-5xl md:text-7xl font-black text-slate-900 dark:text-white tracking-tight leading-[1.1] relative z-10">
-                        Subscribe & <span style={{ color: primaryColor }}>Save 10%</span>
+                        Subscribe & <span className="text-[var(--sf-primary)]">Save 10%</span>
                     </h1>
                     <p className="text-xl md:text-2xl text-slate-600 dark:text-slate-400 font-medium max-w-2xl mx-auto relative z-10">
                         Become a VIP member to unlock the "Build-A-Box" experience. Pick your favorite meals, save money, and never stress about dinner again.
@@ -97,7 +102,7 @@ export default async function SubscribePage({ params }: { params: Promise<{ slug
                     </div>
 
                     <div className="bg-white dark:bg-slate-900 p-8 rounded-[2rem] shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-800 text-center relative overflow-hidden">
-                        <div className="absolute top-0 inset-x-0 h-1" style={{ backgroundColor: primaryColor }} />
+                        <div className="absolute top-0 inset-x-0 h-1 bg-[var(--sf-primary)]" />
                         <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-slate-800 flex items-center justify-center mx-auto mb-6 text-indigo-600">
                             <Gift size={32} />
                         </div>

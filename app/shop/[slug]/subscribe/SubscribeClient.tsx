@@ -84,7 +84,7 @@ export default function SubscribeClient({ businessId, slug, primaryColor, tiers 
                     <div className="p-8 flex-1 flex flex-col bg-slate-50/50 dark:bg-slate-800/20">
                         <ul className="space-y-4 mb-8 flex-1">
                             <li className="flex items-start gap-3">
-                                <div className="mt-1 w-5 h-5 rounded-full flex items-center justify-center text-white" style={{ backgroundColor: primaryColor }}>
+                                <div className="mt-1 w-5 h-5 rounded-full flex items-center justify-center text-[var(--sf-on-primary)] bg-[var(--sf-primary)]">
                                     <Check size={12} strokeWidth={4} />
                                 </div>
                                 <span className="font-bold text-slate-900 dark:text-white">{tier.meal_credits_per_cycle} Meals per month</span>
@@ -102,10 +102,9 @@ export default function SubscribeClient({ businessId, slug, primaryColor, tiers 
                         <button
                             onClick={() => handleSubscribeOptions(tier)}
                             disabled={isProcessing !== null}
-                            className="w-full py-4 rounded-xl font-black text-white transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                            className="w-full py-4 rounded-xl font-black bg-[var(--sf-primary)] text-[var(--sf-on-primary)] transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
                             style={{
-                                backgroundColor: primaryColor,
-                                boxShadow: isProcessing ? 'none' : `0 10px 15px -3px ${primaryColor}40`
+                                boxShadow: isProcessing ? 'none' : '0 10px 15px -3px color-mix(in srgb, var(--sf-primary) 25%, transparent)'
                             }}
                         >
                             {isProcessing === tier.id ? (

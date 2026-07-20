@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Store, User, LogOut, Package, CreditCard } from 'lucide-react';
 // @ts-ignore
 import { LogoutButton } from './LogoutButton';
+import { buildBrandVars } from '@/lib/storefront/brandTokens';
 
 export default async function CustomerAccountLayout({
     children,
@@ -35,10 +36,12 @@ export default async function CustomerAccountLayout({
         // @ts-ignore
         JSON.parse(business.storefrontConfig.branding as string) : {};
 
-    const primaryColor = branding.primary_color || '#4F46E5';
+    // SF-1: emit the storefront tokens from the branding this layout already
+    // loads — no extra query. Descendants consume var(--sf-*).
+    const brandVars = buildBrandVars(branding.primary_color, branding.accent_color);
 
     return (
-        <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col md:flex-row">
+        <div style={brandVars as React.CSSProperties} className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col md:flex-row">
             {/* Sidebar Navigation */}
             <aside className="w-full md:w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col pt-6 flex-shrink-0">
                 <div className="px-6 mb-8 flex items-center justify-between">
@@ -46,7 +49,7 @@ export default async function CustomerAccountLayout({
                         {branding.logo_url ? (
                             <img src={branding.logo_url} alt="Logo" className="w-10 h-10 object-contain" />
                         ) : (
-                            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white" style={{ backgroundColor: primaryColor }}>
+                            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-[var(--sf-on-primary)] bg-[var(--sf-primary)]">
                                 <Store size={20} />
                             </div>
                         )}

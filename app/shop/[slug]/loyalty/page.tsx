@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { Tag, Sparkles, History, ArrowLeft, Loader2, Trophy } from 'lucide-react';
 import Link from 'next/link';
+import { buildBrandVars } from '@/lib/storefront/brandTokens';
 
 interface LoyaltyData {
     balance: number;
@@ -54,8 +55,12 @@ export default function LoyaltyDashboard() {
     const pointsToNextReward = data ? 100 - (data.balance % 100) : 100;
     const rewardProgress = data ? (data.balance % 100) : 0;
 
+    // SF-1: tokens from the branding color already present in the loaded
+    // loyalty data — cosmetic only, no loyalty behavior involved.
+    const brandVars = buildBrandVars(data?.primary_color);
+
     return (
-        <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors pb-20">
+        <div style={brandVars as React.CSSProperties} className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors pb-20">
             {/* Header */}
             <div className="bg-white dark:bg-slate-800 border-b border-slate-100 dark:border-slate-800 px-6 py-12">
                 <div className="max-w-4xl mx-auto text-center">
@@ -101,8 +106,7 @@ export default function LoyaltyDashboard() {
                         {/* Summary Card */}
                         <div className="bg-white dark:bg-slate-800 p-10 rounded-[40px] shadow-xl border border-slate-100 dark:border-slate-700 relative overflow-hidden">
                             <div
-                                className="absolute top-0 right-0 w-64 h-64 opacity-5 pointer-events-none -mr-32 -mt-32 rounded-full"
-                                style={{ backgroundColor: data.primary_color }}
+                                className="absolute top-0 right-0 w-64 h-64 opacity-5 pointer-events-none -mr-32 -mt-32 rounded-full bg-[var(--sf-primary)]"
                             ></div>
 
                             <div className="flex flex-col md:flex-row md:items-center justify-between gap-8 relative z-10">
