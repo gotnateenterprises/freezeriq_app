@@ -4,6 +4,21 @@
 **Pixel reference:** `docs/ai/prototypes/storefront_prototype.html` — open in a browser; 6 screens (First visit / Returning / Bundle / Bag / Confirmation / Fundraiser). Match it whenever look, spacing, or copy is ambiguous.
 **Phases:** SF-1 → SF-12 per spec. Each phase = its own reviewable diff.
 
+**SF-1 status: ✅ Complete — commit `a96b7f4`.** `lib/storefront/brandTokens.ts` ships the
+14 `--sf-*` color/surface variables; the regular storefront routes (StorefrontClient,
+account, login, loyalty, subscribe) inject them from branding each route already loads;
+all 13 eligible inline `primary_color`/`primaryColor` styles under `app/shop/**` were
+converted. Six curated primary-color presets were added in
+`components/admin/BrandingSettings.tsx` (the actual existing branding-color component —
+not `StorefrontSettings.tsx` as originally named below), writing through the existing
+`primary_color` state and the existing `POST /api/tenant/branding` save flow; the existing
+custom color inputs remain available alongside the presets. **Unsaved-draft live preview
+is explicitly deferred** — the repository has no approved seam for previewing colors
+before Save (no preview query parameter, `postMessage`, temporary/global preview state,
+new API, server action, or persistence was introduced to build one). The saved
+`/shop/{slug}` storefront remains the available post-save visual verification path. This
+deferral does not block SF-1 closure. **SF-2 is the next active storefront phase.**
+
 ## HARD RULES
 
 1. **Locked and untouchable:** `app/api/checkout/**`, `app/api/webhooks/**`, `app/api/public/order/route.ts`, `app/api/stripe/**`, `prisma/schema.prisma` (except the SF-6 proposal), `middleware.ts`, `auth.ts`. The CheckoutModal's details/payment/confirm steps are UNTOUCHED — SF re-skins the bag step and the pages around checkout only.
@@ -85,7 +100,7 @@ return (
 
 **Refactor pass:** replace all 19 existing inline `style={{ backgroundColor: primary_color }}` usages under `app/shop/**` with `bg-[var(--sf-primary)] text-[var(--sf-on-primary)]` etc. Behavior-identical, verified page by page.
 
-**Curated palettes** (StorefrontSettings additive UI): six swatches writing `primary_color` — Berry `#a64d66` (default), Sage `#6c7f5e`, Navy `#33506b`, Terracotta `#b0603f`, Plum `#6d4467`, Charcoal `#3d4045` — plus the existing custom color inputs, with a live preview iframe of the storefront.
+**Curated palettes** — ✅ implemented in `components/admin/BrandingSettings.tsx` (additive UI, the actual existing branding-color component): six swatches writing `primary_color` — Berry `#a64d66` (default, imported as `DEFAULT_PRIMARY`), Sage `#6c7f5e`, Navy `#33506b`, Terracotta `#b0603f`, Plum `#6d4467`, Charcoal `#3d4045` — plus the existing custom color inputs. The live preview iframe described here would require previewing *unsaved* draft colors; no approved seam for that exists in the repository (it would need a preview query parameter, `postMessage`, temporary/global preview state, a new API, or a server action — none of which is authorized). **Deferred, not built.** The saved `/shop/{slug}` storefront is the available post-save preview.
 
 ---
 

@@ -529,11 +529,17 @@ payment. No Stripe/Square logic changes anywhere (SF-12 is dashboard config, ver
 proposal-first).
 
 ### Phases
-- **SF-1 — Brand token system.** Storefront layout reads TenantBranding once and emits
-  CSS custom properties (`--brand-primary/-ink/-soft/-ground` + derived tints with
-  WCAG contrast guard). Replace the 19 scattered inline `primary_color` styles with
-  tokens. Curated palettes (6, berry/linen default) + custom mode in StorefrontSettings
-  with live preview.
+- **SF-1 — Brand token system. ✅ Complete — commit `a96b7f4`.** Storefront layout reads
+  TenantBranding once and emits CSS custom properties (`--brand-primary/-ink/-soft/-ground`
+  + derived tints with WCAG contrast guard). Replace the 19 scattered inline `primary_color`
+  styles with tokens. Curated palettes (6, berry/linen default) + custom mode in
+  StorefrontSettings with live preview.
+  Implementation note: shipped as 14 `--sf-*` variables in `lib/storefront/brandTokens.ts`;
+  the 13 eligible inline styles actually present under `app/shop/**` were converted; the
+  six curated palette presets were added to `components/admin/BrandingSettings.tsx` (the
+  repository's actual branding-color component). Unsaved-draft live preview is explicitly
+  deferred — no approved preview seam exists; the saved `/shop/{slug}` storefront is the
+  post-save verification path. This deferral does not block SF-1 closure. SF-2 is next.
 - **SF-2 — Landing re-orchestration.** New/returning conditional (session/customer
   cookie): first visit = hook hero, 3-chip how-it-works, auto-applied welcome offer,
   most-loved badges, founder note, soft menu-email capture (writes BusinessLead,

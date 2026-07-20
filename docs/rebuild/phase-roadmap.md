@@ -111,7 +111,8 @@ See CLAUDE.md for full details.
 | GE-6 – GE-9 | NOT STARTED | Independent extensions of GE-1..5 |
 | GE-10 – GE-11 | NOT STARTED | GE-11 optional CB connection ready (CB-1 ✅) |
 | PF-1 – PF-6 | NOT STARTED | DEPENDENCY-GATED — after CRM (✅) **and** GE-1..5 stable |
-| SF-1 – SF-12 | NOT STARTED | SF-1 first (tokens); SF-3 wants CB-1 `family_id` ✅; SF-8/SF-10 want GE-5 cron |
+| SF-1 — Brand token system | ✅ Complete | `a96b7f4` — 14 `--sf-*` variables (`lib/storefront/brandTokens.ts`); regular storefront routes tokened; 6 curated palette presets in `components/admin/BrandingSettings.tsx`; unsaved-draft live preview deferred (no approved preview seam — saved `/shop/{slug}` is the verification path) |
+| SF-2 – SF-12 | NOT STARTED | SF-2 next; SF-3 wants CB-1 `family_id` ✅; SF-8/SF-10 want GE-5 cron |
 | FR-1 – FR-4 | NOT STARTED | FR-1 PROPOSAL-FIRST; wants SF-1 tokens; CB gates ✅ |
 | VP-1 – VP-3 | NOT STARTED | VP-2 synergy with FB-3 (not a hard dependency) |
 | VP-F1, VP-F2 | REGISTERED — FUTURE | Do not build as part of VP-1..3 |
