@@ -14,7 +14,7 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { geocodeAddress, resolveDeliveryZone } from '@/lib/delivery/zones';
+import { geocodeAddressDetailed, resolveDeliveryZone } from '@/lib/delivery/zones';
 
 export async function POST(req: Request) {
     try {
@@ -86,13 +86,27 @@ export async function POST(req: Request) {
         }
 
         // Geocode customer address
+        // FIX-DELIVERY-1A: the classified result distinguishes a genuinely
+        // unresolvable address from a missing API key or a provider fault —
+        // the latter two are server-side problems and must not be presented
+        // to the customer as an address error.
         const fullAddress = `${address}, ${city}, ${state} ${zip}`;
-        const geo = await geocodeAddress(fullAddress);
+        const geo = await geocodeAddressDetailed(fullAddress);
 
-        if (!geo) {
+        if (!geo.ok) {
+            if (geo.reason === 'not_found') {
+                return NextResponse.json(
+                    { deliverable: false, error: 'We couldn\'t verify this address. Please check and try again.' },
+                    { status: 200 }
+                );
+            }
+
+            // 'not_configured' or 'provider_error' — a server/config fault,
+            // not an address problem. Never silently mark delivery as
+            // available, and never blame the customer's input for this.
             return NextResponse.json(
-                { deliverable: false, error: 'We couldn\'t verify this address. Please check and try again.' },
-                { status: 200 }
+                { deliverable: false, error: "We're having trouble checking delivery addresses right now. Please try again shortly." },
+                { status: 503 }
             );
         }
 
@@ -108,8 +122,8 @@ export async function POST(req: Request) {
         const result = resolveDeliveryZone(
             Number(config.origin_lat),
             Number(config.origin_lng),
-            geo.lat,
-            geo.lng,
+            geo.latitude,
+            geo.longitude,
             zones
         );
 

@@ -12,6 +12,21 @@ interface GeoResult {
     lng: number;
 }
 
+/**
+ * FIX-DELIVERY-1A: classified geocoding outcome. Distinguishes WHY an address
+ * could not be verified so callers can respond honestly instead of blaming
+ * the customer for a missing API key or a provider outage.
+ *
+ *   not_configured — GOOGLE_MAPS_API_KEY is unset.
+ *   not_found      — the provider ran and found no matching address
+ *                     (e.g. ZERO_RESULTS) — a genuine address problem.
+ *   provider_error — REQUEST_DENIED / OVER_QUERY_LIMIT / UNKNOWN_ERROR / a
+ *                     malformed response / a network failure or thrown fetch.
+ */
+export type GeocodeResult =
+    | { ok: true; latitude: number; longitude: number }
+    | { ok: false; reason: 'not_configured' | 'not_found' | 'provider_error' };
+
 interface DeliveryZoneInput {
     id: string;
     name: string;
@@ -37,14 +52,16 @@ interface ZoneRejection {
 export type ZoneResult = ZoneMatch | ZoneRejection;
 
 /**
- * Geocode an address string to lat/lng using Google Maps Geocoding API.
- * Returns null if the address can't be resolved.
+ * FIX-DELIVERY-1A: geocode an address with a classified result — the caller
+ * learns WHY a lookup failed (missing config / no matching address / provider
+ * fault) rather than a bare failure signal. Never logs the full address, the
+ * API key, or a provider URL (which embeds the key).
  */
-export async function geocodeAddress(address: string): Promise<GeoResult | null> {
+export async function geocodeAddressDetailed(address: string): Promise<GeocodeResult> {
     const apiKey = process.env.GOOGLE_MAPS_API_KEY;
     if (!apiKey) {
-        console.error('[DELIVERY_ZONES] GOOGLE_MAPS_API_KEY not configured');
-        return null;
+        console.error('[DELIVERY_ZONES] Geocoding unavailable: GOOGLE_MAPS_API_KEY is not configured');
+        return { ok: false, reason: 'not_configured' };
     }
 
     try {
@@ -52,20 +69,39 @@ export async function geocodeAddress(address: string): Promise<GeoResult | null>
         const res = await fetch(url);
         const data = await res.json();
 
+        if (data.status === 'ZERO_RESULTS') {
+            console.warn('[DELIVERY_ZONES] Geocoding found no matching address (status: ZERO_RESULTS)');
+            return { ok: false, reason: 'not_found' };
+        }
+
         if (data.status !== 'OK' || !data.results?.length) {
-            console.warn('[DELIVERY_ZONES] Geocoding failed for address:', address, 'status:', data.status);
-            return null;
+            console.error('[DELIVERY_ZONES] Geocoding provider returned status:', data.status);
+            return { ok: false, reason: 'provider_error' };
         }
 
         const location = data.results[0].geometry.location;
-        return {
-            lat: location.lat,
-            lng: location.lng,
-        };
+        return { ok: true, latitude: location.lat, longitude: location.lng };
     } catch (error) {
-        console.error('[DELIVERY_ZONES] Geocoding API error:', error);
-        return null;
+        console.error('[DELIVERY_ZONES] Geocoding provider request failed');
+        return { ok: false, reason: 'provider_error' };
     }
+}
+
+/**
+ * Geocode an address string to lat/lng using Google Maps Geocoding API.
+ * Returns null if the address can't be resolved for ANY reason.
+ *
+ * Legacy coarse contract — preserved unchanged for existing callers
+ * (app/api/admin/storefront-config/route.ts, app/api/checkout/session/route.ts)
+ * that only need a success/failure signal. Callers that must distinguish WHY
+ * a lookup failed (e.g. to avoid blaming the customer for a config/provider
+ * fault) should use geocodeAddressDetailed() instead — see
+ * app/api/checkout/validate-delivery/route.ts.
+ */
+export async function geocodeAddress(address: string): Promise<GeoResult | null> {
+    const result = await geocodeAddressDetailed(address);
+    if (!result.ok) return null;
+    return { lat: result.latitude, lng: result.longitude };
 }
 
 /**
