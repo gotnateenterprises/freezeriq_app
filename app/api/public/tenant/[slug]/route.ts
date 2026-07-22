@@ -227,6 +227,10 @@ export async function GET(
                 return {
                     ...b,
                     price,
+                    // SF-3: explicit, contractual family pairing key for the storefront
+                    // Serves-5/Serves-2 single-card presentation. Real nullable DB value,
+                    // no derivation — additive to the existing response shape.
+                    family_id: b.family_id ?? null,
                     order_cutoff_date: bundleCutoffs[b.id] || null,
                     stock_on_hand: Number(b.stock_on_hand),
                     contents: safeContents.map((c: any) => ({

@@ -8,15 +8,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import JsonLd from '@/components/JsonLd';
 import { useCart } from '@/context/CartContext';
 import CartDrawer from '@/components/shop/CartDrawer';
-import StickyCategoryBar from '@/components/shop/StickyCategoryBar';
 import StorefrontFooter from '@/components/shop/StorefrontFooter';
 import StorefrontProductCard from '@/components/shop/StorefrontProductCard';
-import WeeklyBundles from '@/components/shop/WeeklyBundles';
 import SurplusWaitlist from '@/components/shop/SurplusWaitlist';
 import PurchaseSidebar from '@/components/shop/PurchaseSidebar';
 import PublicRecipeDetail from '@/components/shop/PublicRecipeDetail';
 import FreezerIQLandingPage from '@/components/shop/FreezerIQLandingPage';
-import MobileStickyCart from '@/components/shop/MobileStickyCart';
 import { buildBrandVars } from '@/lib/storefront/brandTokens';
 // SF-2 landing components — regular storefront only
 import { WeekStrip } from '@/components/storefront/WeekStrip';
@@ -27,6 +24,12 @@ import { QuoteBlock } from '@/components/storefront/QuoteBlock';
 import { EmailCaptureCard } from '@/components/storefront/EmailCaptureCard';
 import { StorefrontTopbar } from '@/components/storefront/StorefrontTopbar';
 import { LandingHero } from '@/components/storefront/LandingHero';
+// SF-3 shopping components — regular storefront only
+import { BundleCard, isServes2Tier } from '@/components/storefront/BundleCard';
+import { BundleDetail } from '@/components/storefront/BundleDetail';
+import { CategoryChips } from '@/components/storefront/CategoryChips';
+import { StickyCartBar } from '@/components/storefront/StickyCartBar';
+import { FreeDeliveryBar } from '@/components/storefront/FreeDeliveryBar';
 
 interface Bundle {
     id: string;
@@ -39,6 +42,10 @@ interface Bundle {
     sku: string;
     is_surplus?: boolean;
     order_cutoff_date?: string | null;
+    // SF-3: additive real payload field (app/api/public/tenant/[slug]/route.ts).
+    // Optional to tolerate any cached/older response shape, matching the
+    // existing optional convention used for order_cutoff_date above.
+    family_id?: string | null;
     contents?: {
         recipe: {
             name: string;
@@ -107,7 +114,9 @@ interface StorefrontClientProps {
 export default function StorefrontClient({ overrideSlug, hasCustomerSession = false }: StorefrontClientProps = {}) {
     const params = useParams();
     const slug = overrideSlug || params?.slug;
-    const { addToCart } = useCart();
+    // SF-3: cart READS for ✓ Added state and the mobile bag bar — the mutation
+    // contract (addToCart / dedup / toasts / drawer auto-open) is untouched.
+    const { items: cartItems, addToCart, cartTotal, cartCount, setIsCartOpen } = useCart();
     const [data, setData] = useState<TenantData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<{ message: string, slugs?: { name: string, slug: string }[] } | null>(null);
@@ -116,6 +125,8 @@ export default function StorefrontClient({ overrideSlug, hasCustomerSession = fa
     const [showPurchaseModal, setShowPurchaseModal] = useState(false);
     const [purchaseModalBundle, setPurchaseModalBundle] = useState<any>(null);
     const [mealsPopupBundle, setMealsPopupBundle] = useState<any | null>(null);
+    // SF-3: Fable bundle detail selection — { family: 1-2 REAL tiers, initialId }.
+    const [detailSelection, setDetailSelection] = useState<{ family: any[]; initialId: string } | null>(null);
     // SF-2: cookieless returning detection from the sf_last_order marker.
     const [hasReturnMarker, setHasReturnMarker] = useState(false);
 
@@ -322,6 +333,82 @@ export default function StorefrontClient({ overrideSlug, hasCustomerSession = fa
         (t: any) => t && typeof t.quote === 'string' && t.quote.trim().length > 0
     ) || null;
 
+    // ── SF-3: presentation-only bundle-family adapter ─────────────────────────
+    // Grouping uses ONLY exact non-null family_id from the payload — never
+    // names, prices, SKUs, or similarity. A COMPLETE family (exactly one
+    // Serves-5 tier + exactly one Serves-2 tier) renders as ONE card whose
+    // default is the canonical Serves-5 tier (CB family semantics), with both
+    // real tiers handed to the detail view. Anything else — null family_id,
+    // missing sibling, duplicate tiers — renders each real bundle as its own
+    // normal card. No sibling is ever synthesized; no real bundle is hidden.
+    // Original payload order is preserved (family card sits at the first
+    // member's position).
+    const familyGroups = new Map<string, any[]>();
+    for (const b of regularBundles) {
+        if (b.family_id) {
+            const g = familyGroups.get(b.family_id) || [];
+            g.push(b);
+            familyGroups.set(b.family_id, g);
+        }
+    }
+    const consumedIds = new Set<string>();
+    const displayEntries: { key: string; primary: any; family: any[] }[] = [];
+    for (const b of regularBundles) {
+        if (consumedIds.has(b.id)) continue;
+        const group = b.family_id ? familyGroups.get(b.family_id) : null;
+        if (group && group.length >= 2) {
+            const fives = group.filter(m => !isServes2Tier(m.serving_tier));
+            const twos = group.filter(m => isServes2Tier(m.serving_tier));
+            if (fives.length === 1 && twos.length === 1) {
+                const five = fives[0], two = twos[0];
+                consumedIds.add(five.id);
+                consumedIds.add(two.id);
+                displayEntries.push({ key: five.id, primary: five, family: [five, two] });
+                continue;
+            }
+        }
+        consumedIds.add(b.id);
+        displayEntries.push({ key: b.id, primary: b, family: [b] });
+    }
+
+    // SF-3 badges — max one per card, truthful only:
+    // 'CUSTOMER FAVORITE' is NEVER rendered (no real order tally exists in the
+    // public payload; heuristics are off per the handoff).
+    // 'PERFECT FIRST TRY' = the single lowest-priced multi-meal entry, shown to
+    // first-time visitors only.
+    let firstTryBadgeId: string | null = null;
+    if (!isReturning && displayEntries.length > 0) {
+        const eligible = displayEntries.filter(
+            d => Array.isArray(d.primary.contents) && d.primary.contents.length >= 2 && Number(d.primary.price) > 0
+        );
+        if (eligible.length > 0) {
+            firstTryBadgeId = eligible.reduce(
+                (min, d) => Number(d.primary.price) < Number(min.primary.price) ? d : min,
+                eligible[0]
+            ).primary.id;
+        }
+    }
+
+    // SF-3 pairing candidate — grounded only: the tenant-configured
+    // upsell_bundle_id resolved against the CURRENT payload. The manual-upsell
+    // sentinel is deliberately excluded (it carries no serving_tier, which the
+    // cart contract requires) and no side/dessert fallback exists (bundles have
+    // no category field) — so absent a configured real bundle, no pairing shows.
+    const pairingCandidate = storefrontConfig?.upsell_bundle_id
+        ? bundles.find(b => b.id === storefrontConfig.upsell_bundle_id) || null
+        : null;
+
+    // SF-3 direct add — EXACT existing cart contract; dedup/toasts/drawer
+    // auto-open all come from the untouched CartContext.
+    const addBundleToCart = (b: any) => addToCart({
+        bundleId: b.id,
+        name: b.name,
+        price: Number(b.price),
+        image_url: b.image_url || undefined,
+        serving_tier: b.serving_tier,
+    });
+    const isInCart = (bundleId: string) => cartItems.some(i => i.bundleId === bundleId);
+
     if (slug === 'freezeriq') {
         return <FreezerIQLandingPage />;
     }
@@ -338,7 +425,14 @@ export default function StorefrontClient({ overrideSlug, hasCustomerSession = fa
                 <div className="absolute bottom-[5%] -left-[5%] w-[60%] h-[60%] bg-amber-100/20 rounded-full blur-[160px] animate-pulse" style={{ animationDelay: '2s' }} />
             </div>
 
-            <div className="relative z-10 font-sans flex flex-col min-h-screen w-full max-w-[100vw] overflow-x-hidden">
+            {/* Correction: bottom clearance for the viewport-fixed mobile
+                StickyCartBar, applied ONLY while the bag actually has items
+                (cartCount >= 1) and only below the lg: breakpoint where the
+                bar renders — so nothing is reserved when the bag is empty or
+                on desktop. This keeps the bar from permanently covering the
+                end of Extra Meals, the fundraiser CTA, or the footer without
+                touching any of that content directly. */}
+            <div className={`relative z-10 font-sans flex flex-col min-h-screen w-full max-w-[100vw] overflow-x-hidden ${cartCount >= 1 ? 'pb-20 lg:pb-0' : ''}`}>
                 {/* SF-2: CountdownBanner and DealsPopup are DELETED FROM THE RENDER
                     per spec §9 ("persuasion by invitation, never pressure") — their
                     component files remain in the repository untouched. */}
@@ -350,10 +444,25 @@ export default function StorefrontClient({ overrideSlug, hasCustomerSession = fa
                     storefrontConfig={storefrontConfig}
                 />
 
-                <MobileStickyCart
-                    bundle={featuredBundle}
-                    primaryColor={branding.primary_color}
-                />
+                {/* SF-3: legacy MobileStickyCart render removed (file untouched) —
+                    the prototype StickyCartBar at the end of the page replaces it. */}
+
+                {/* SF-3: Fable bundle detail (image · serif title · meta chips ·
+                    ServingToggle for complete real families · meal rows · direct
+                    Add · at most one grounded pairing). Replaces the legacy
+                    regular-bundle meals popup composition. */}
+                {detailSelection && (
+                    <BundleDetail
+                        family={detailSelection.family}
+                        initialId={detailSelection.initialId}
+                        onClose={() => setDetailSelection(null)}
+                        onAdd={addBundleToCart}
+                        isAdded={isInCart}
+                        pairing={pairingCandidate && !detailSelection.family.some(f => f.id === pairingCandidate.id) ? pairingCandidate : null}
+                        onAddPairing={pairingCandidate ? () => addBundleToCart(pairingCandidate) : undefined}
+                        pairingAdded={pairingCandidate ? isInCart(pairingCandidate.id) : false}
+                    />
+                )}
 
                 <PublicRecipeDetail
                     isOpen={!!selectedPublicRecipe}
@@ -399,94 +508,8 @@ export default function StorefrontClient({ overrideSlug, hasCustomerSession = fa
                     )}
                 </AnimatePresence>
 
-                {/* Bundle Meals Popup */}
-                <AnimatePresence>
-                    {mealsPopupBundle && (
-                        <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center">
-                            <motion.div
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                onClick={() => setMealsPopupBundle(null)}
-                                className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-                            />
-                            <motion.div
-                                initial={{ opacity: 0, y: 40 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: 40 }}
-                                transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-                                className="relative w-full max-w-lg z-10 max-h-[85vh] flex flex-col"
-                            >
-                                <div className="bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
-                                    {/* Header */}
-                                    <div className="sticky top-0 z-10 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 px-5 py-4 flex items-center justify-between">
-                                        <div className="min-w-0">
-                                            <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-0.5 text-[var(--sf-primary)]">What&apos;s Inside</p>
-                                            <h3 className="text-lg font-black text-slate-900 dark:text-white truncate">{mealsPopupBundle.name}</h3>
-                                        </div>
-                                        <button
-                                            onClick={() => setMealsPopupBundle(null)}
-                                            className="shrink-0 w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center justify-center text-slate-500 transition-colors ml-3"
-                                        >
-                                            <X size={18} />
-                                        </button>
-                                    </div>
-
-                                    {/* Meal list */}
-                                    <div className="flex-1 overflow-y-auto px-5 py-4">
-                                        {mealsPopupBundle.contents && mealsPopupBundle.contents.length > 0 ? (
-                                            <ul className="space-y-3">
-                                                {mealsPopupBundle.contents.map((item: any, idx: number) => (
-                                                    <li
-                                                        key={idx}
-                                                        className="flex items-start gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800"
-                                                    >
-                                                        <span className="shrink-0 w-6 h-6 rounded-full text-[10px] font-black flex items-center justify-center text-[var(--sf-on-primary)] mt-0.5 bg-[var(--sf-primary)]">
-                                                            {item.quantity || 1}
-                                                        </span>
-                                                        <div className="min-w-0">
-                                                            <p className="font-bold text-sm text-slate-900 dark:text-white leading-snug">{item.recipe?.name || 'Meal'}</p>
-                                                            {item.recipe?.description && (
-                                                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">{item.recipe.description}</p>
-                                                            )}
-                                                            {item.recipe?.container_type && (
-                                                                <span className="inline-block text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">{item.recipe.container_type}</span>
-                                                            )}
-                                                        </div>
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        ) : (
-                                            <div className="text-center py-8 text-slate-400">
-                                                <ShoppingBag size={24} className="mx-auto mb-2 opacity-50" />
-                                                <p className="text-sm font-medium">Meal details coming soon</p>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Footer CTA */}
-                                    <div className="sticky bottom-0 z-10 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 px-5 py-4">
-                                        <div className="flex items-center justify-between mb-3">
-                                            <span className="text-sm text-slate-500 font-medium">{mealsPopupBundle.serving_tier?.replace(/_/g, ' ')}</span>
-                                            <span className="text-xl font-black text-slate-900 dark:text-white">${Number(mealsPopupBundle.price).toFixed(2)}</span>
-                                        </div>
-                                        <button
-                                            onClick={() => {
-                                                setMealsPopupBundle(null);
-                                                setPurchaseModalBundle(mealsPopupBundle);
-                                                setShowPurchaseModal(true);
-                                            }}
-                                            className="w-full py-3.5 rounded-2xl bg-[var(--sf-primary)] text-[var(--sf-on-primary)] active:bg-[var(--sf-primary-press)] font-black text-sm uppercase tracking-widest shadow-lg hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
-                                        >
-                                            <ShoppingBag size={16} />
-                                            Add to Cart
-                                        </button>
-                                    </div>
-                                </div>
-                            </motion.div>
-                        </div>
-                    )}
-                </AnimatePresence>
+                {/* SF-3: the legacy regular-bundle meals popup composition no longer
+                    renders — BundleDetail above owns the detail view. */}
 
                 <JsonLd data={{
                     "@context": "https://schema.org",
@@ -549,8 +572,14 @@ export default function StorefrontClient({ overrideSlug, hasCustomerSession = fa
                     their child, so nothing leaves an empty band when content is
                     absent. */}
                 {/* SF-2A: -mt-24 removed — it existed to overlap the old full-screen
-                    photo hero and would pull content over the compact Fable hero. */}
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 relative z-20 space-y-10 sm:space-y-14 mb-8">
+                    photo hero and would pull content over the compact Fable hero.
+                    Correction A: the trailing mb-8 was removed — it stacked with
+                    the lower section's own py-16/py-20 top padding (mb-8 + py-16
+                    with nothing between = ~7-8rem of empty space, worse when no
+                    fundraisers render). The lower container's padding alone is
+                    the intentional gap; EmailCaptureCard's own my-4 still adds a
+                    small amount of natural breathing room above it. */}
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 relative z-20 space-y-10 sm:space-y-14">
 
                     {/* SF-2: first-visit-only how-it-works chips */}
                     {!isReturning && (
@@ -583,35 +612,30 @@ export default function StorefrontClient({ overrideSlug, hasCustomerSession = fa
                         </section>
                     )}
 
-                    {/* Sticky Navigation — SF-2: render moved ahead of the bundle/card
-                        content per the approved order. Component is byte-unchanged
-                        (fixed-position overlay, so its visual behavior is identical). */}
-                    <StickyCategoryBar
-                        primaryColor={branding.primary_color}
+                    {/* SF-3: inline Fable category chips replace the fixed legacy
+                        StickyCategoryBar render (file untouched) — no overlap with
+                        the SF-2A sticky topbar. Same destinations, same section ids. */}
+                    <CategoryChips
                         hasFundraisers={fundraisers.length > 0}
                         hasBundles={regularBundles.length > 0}
                     />
 
-                    {/* Lower Section: Bundles (SF-2A: pb-20 → pb-8 — it stacked with
-                        the container gap into a large empty band) */}
+                    {/* SF-3: Fable bundle-card shopping grid (replaces the legacy
+                        WeeklyBundles render — file untouched). One card per real
+                        complete family (Serves-5 default), separate cards otherwise.
+                        Grid per ruling: 1 / 2 / 3 columns inside max-w-7xl. */}
                     <div className="pb-8 w-full overflow-hidden">
-                        <div className="w-full max-w-full">
-
-                            {/* Monthly Bundles Container */}
-                            <div id="shop-bundles" className="scroll-mt-32 w-full max-w-full">
-                                <WeeklyBundles
-                                    bundles={monthlyBundles}
-                                    primaryColor={branding.primary_color}
-                                    onAddToCart={(params) => {
-                                        const bundle = monthlyBundles.find(b => b.id === params.bundleId);
-                                        setPurchaseModalBundle(bundle);
-                                        setShowPurchaseModal(true);
-                                    }}
-                                    onSelect={(bundleId) => setActiveBundleId(bundleId)}
-                                    activeBundleId={activeBundleId || ''}
-                                    onViewMeals={handleViewMeals}
+                        <div id="shop-bundles" className="scroll-mt-32 grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                            {displayEntries.map(entry => (
+                                <BundleCard
+                                    key={entry.key}
+                                    b={entry.primary}
+                                    badge={entry.primary.id === firstTryBadgeId ? '👋 PERFECT FIRST TRY' : null}
+                                    onOpen={() => setDetailSelection({ family: entry.family, initialId: entry.primary.id })}
+                                    onAdd={() => addBundleToCart(entry.primary)}
+                                    added={isInCart(entry.primary.id)}
                                 />
-                            </div>
+                            ))}
                         </div>
                     </div>
 
@@ -753,6 +777,15 @@ export default function StorefrontClient({ overrideSlug, hasCustomerSession = fa
                     primaryColor={branding.primary_color}
                     footerText={storefrontConfig?.footer_text}
                 />
+
+                {/* SF-3: mobile bag bars. FreeDeliveryBar is passed threshold={null}
+                    because NO free-delivery threshold exists in tenant delivery
+                    settings — per the handoff truthfulness rule it therefore renders
+                    nothing (no invented amount, no false promise). StickyCartBar is
+                    mobile-only, shows the REAL bag count/total, and opens the
+                    existing CartDrawer. */}
+                <FreeDeliveryBar subtotal={cartTotal} threshold={null} />
+                <StickyCartBar count={cartCount} total={cartTotal} onCta={() => setIsCartOpen(true)} />
             </div>
         </div>
     );
