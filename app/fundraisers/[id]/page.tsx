@@ -41,7 +41,7 @@ export default function FundraiserProfilePage({ params }: { params: Promise<{ id
             .then(data => {
                 if (data.slug) setBusinessSlug(data.slug);
             })
-            .catch(err => console.error("[CustomerProfile] Failed to fetch business:", err));
+            .catch(err => console.error("[FundraiserOrgProfile] Failed to fetch business:", err));
 
         // Fetch bundles for order modal
         fetch('/api/bundles')
@@ -223,11 +223,15 @@ export default function FundraiserProfilePage({ params }: { params: Promise<{ id
     return (
         <div className="max-w-6xl mx-auto space-y-5 pb-32">
 
-            {/* ── Back link ── */}
-            <Link href="/fundraisers"
-                className="inline-flex items-center gap-1.5 text-sm font-bold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors">
-                <ArrowLeft size={15} />← All fundraisers
-            </Link>
+            {/* ── Breadcrumb ── */}
+            <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm font-bold text-slate-500 dark:text-slate-400">
+                <Link href="/fundraisers"
+                    className="inline-flex items-center gap-1.5 text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors">
+                    <ArrowLeft size={15} /> Fundraisers
+                </Link>
+                <span aria-hidden="true">/</span>
+                <span className="truncate text-slate-700 dark:text-slate-300">{customer.name || '—'}</span>
+            </nav>
 
             {/* ── CRM-2: Org Profile Header ── */}
             <div className="relative flex items-start gap-4 rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
@@ -241,8 +245,11 @@ export default function FundraiserProfilePage({ params }: { params: Promise<{ id
                     <h1 className="text-xl font-black leading-tight text-slate-900 dark:text-white tracking-tight">
                         {customer.name || '—'}
                     </h1>
-                    <p className="mt-0.5 text-[0.72rem] text-slate-500">
-                        Organization · {campaigns.length} campaign{campaigns.length !== 1 ? 's' : ''}
+                    <p className="mt-0.5 flex items-center gap-2 text-[0.72rem] text-slate-500">
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 font-bold uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                            Fundraiser Organization
+                        </span>
+                        <span>{campaigns.length} campaign{campaigns.length !== 1 ? 's' : ''}</span>
                     </p>
                     {/* Contact links */}
                     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">

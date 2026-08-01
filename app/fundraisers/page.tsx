@@ -427,7 +427,8 @@ export default function FundraisersPage() {
                                             <Link
                                                 href={`/fundraisers/${item.customer_id}`}
                                                 className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-indigo-600 transition-all"
-                                                title="Manage"
+                                                title="View organization"
+                                                aria-label={`View organization for ${item.name}`}
                                             >
                                                 <ChevronRight size={15} />
                                             </Link>

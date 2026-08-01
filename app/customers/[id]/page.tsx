@@ -199,6 +199,15 @@ export default function CustomerProfilePage({ params }: { params: Promise<{ id: 
 
     return (
         <div className="max-w-6xl mx-auto space-y-8 pb-32">
+            {/* ── Breadcrumb ── */}
+            <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm font-bold text-slate-500 dark:text-slate-400">
+                <Link href="/customers" className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors">
+                    Customers
+                </Link>
+                <span aria-hidden="true">/</span>
+                <span className="truncate text-slate-700 dark:text-slate-300">{customer.name}</span>
+            </nav>
+
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-6">
@@ -206,6 +215,9 @@ export default function CustomerProfilePage({ params }: { params: Promise<{ id: 
                         <ArrowLeft size={24} />
                     </Link>
                     <div>
+                        <p className="mb-1 text-[0.68rem] font-bold uppercase tracking-wide text-slate-400">
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800 dark:text-slate-400">Customer</span>
+                        </p>
                         <h1 className="text-4xl font-black text-slate-900 dark:text-white flex items-center gap-4 tracking-tight">
                             {customer.name}
                             <span className={`text-sm px-4 py-1.5 rounded-full uppercase font-bold tracking-wide 
