@@ -1,6 +1,6 @@
 # FreezerIQ Rebuild — Phase Roadmap
 
-> **Created:** July 2, 2026 · **Reconciled:** July 17, 2026
+> **Created:** July 2, 2026 · **Reconciled:** August 1, 2026
 > **Owner:** Nathan
 > **Rule:** No phase proceeds without Nathan's approval.
 
@@ -8,7 +8,7 @@
 > **Current source of truth:** [`docs/ai/UI_REDESIGN_SPEC.md`](../ai/UI_REDESIGN_SPEC.md) is the design and phase authority. This file is the **implementation ledger and dependency sequence** — it tracks what's done, what's next, and what's parked. **The spec wins on any conflict.**
 
 > [!NOTE]
-> **NEXT TASK: DD-0.1 — Released fundraiser orders must reach the kitchen.** See [`docs/ai/KITCHEN_DELIVERY_HANDOFF.md`](../ai/KITCHEN_DELIVERY_HANDOFF.md#dd-01). Not implemented as part of this reconciliation.
+> **NEXT STOREFRONT PHASE: SF-4 — Bag redesign.** See [`docs/ai/STOREFRONT_REDESIGN_HANDOFF.md`](../ai/STOREFRONT_REDESIGN_HANDOFF.md). DD-0.1 through DD-0.5 and KB-1A/1B are complete. SF-1 through SF-3 (including SF-3E) are complete and validated.
 
 ---
 
@@ -16,10 +16,11 @@
 
 | | |
 |---|---|
-| **Last formally completed phase** | CRM-4 — Start a Fundraiser wizard (`025d217`) |
-| **Current task** | Roadmap reconciliation (this document) |
-| **Next implementation phase** | DD-0.1 (independently shippable, no prerequisites) |
-| **CB-7 Meal Preview** | Registered — may begin only **after** DD-0.1 |
+| **Last formally completed storefront phase** | SF-3 (including SF-3E) — Fable bundle shopping + empty state (`4234c93`, `a1a94c9`) |
+| **Last formally completed pipeline phase** | DD-0.5 + KB-1B |
+| **Last launch-readiness phase** | FR-LAUNCH-1E |
+| **Next storefront phase** | SF-4 — Bag redesign (per STOREFRONT_REDESIGN_HANDOFF.md) |
+| **CB-7 Meal Preview** | Registered — may begin (DD-0.1 prerequisite satisfied) |
 | **Password reset** | Parked — see [Parked Work](#parked-work) |
 | **Migration-history reconciliation** | Parked — separate future phase |
 
@@ -83,25 +84,90 @@ See CLAUDE.md for full details.
 | CB candidate/active constraint correction (post-CB-5 hardening) | ✅ Complete | `926dbce` — widened `campaign_bundles` uniqueness to `(campaign_id, bundle_id, state)` |
 | CB-5 strict serving-tier correction | ✅ Complete | `364377f` — replaced raw tier comparison with `normalizeStrictServingTier` |
 | Selected-bundle flyer/packet labels | ✅ Complete | `1463dff` |
-| **CB-7 — Coordinator Bundle Meal Preview** | 🔒 Registered — not started | **May begin only after DD-0.1** |
+| **CB-7 — Coordinator Bundle Meal Preview** | 🔒 Registered — not started | DD-0.1 prerequisite now satisfied; may begin when queued |
+
+### Kitchen/Delivery Pipeline (DD-0, KB-1)
+
+| Item | Status | Evidence |
+|---|---|---|
+| DD-0.1 — Released fundraiser orders reach production | ✅ Complete | `8cf9564` |
+| DD-0.2 — `order_count` counts distinct orders | ✅ Complete | `9ba3f98` |
+| DD-0.3A — Order-week escape hatches bounded | ✅ Complete | `a1e3216` — DD-0.3B backfill **rejected** (completed ≠ delivered; no evidence) |
+| DD-0.4 — Delivery run restricted to `ready_to_ship` | ✅ Complete | `5a80b30` |
+| DD-0.5 — Illegal order-status transitions guarded | ✅ Complete | `feb3730` |
+| KB-1A — Legacy kitchen workflow bridged | ✅ Complete | `ef05e80` |
+| KB-1B — Safe kitchen batch transitions enforced | ✅ Complete | `5316ad9` |
+
+### Launch Readiness (FR-LAUNCH)
+
+| Item | Status | Evidence |
+|---|---|---|
+| FR-LAUNCH-1A — Public fundraiser order lifecycle aligned | ✅ Complete | `033de7e` |
+| FR-LAUNCH-1B — Public fundraiser cart + submission UI (Fable) | ✅ Complete | `20ce683` |
+| FR-LAUNCH-1C-1 — Fundraiser dashboard weighted progress fix | ✅ Complete | `e7ef40c` |
+| FR-LAUNCH-1D — Coordinator transactional order notification | ✅ Complete | `d3dd7aa` |
+| FR-LAUNCH-1E — Submission idempotency + concurrency hardening | ✅ Complete | `32d9610` |
+
+### Loyalty Cleanup (LOY-P0)
+
+| Item | Status | Evidence |
+|---|---|---|
+| LOY-P0a — New loyalty accrual paused behind a shared gate | ✅ Complete | `cadcf0f` |
+| LOY-P0b — Loyalty messaging corrected while accrual is paused | ✅ Complete | `011cf3f` |
+
+### Infrastructure Hardening
+
+| Item | Status | Evidence |
+|---|---|---|
+| Prisma/Vercel build hardening | ✅ Complete | `a8e6d6b` — regenerate Prisma Client before builds |
+| Fundraiser supporter-email polish | ✅ Complete | `0473731` |
+| Delivery geocoding fix | ✅ Complete | `fa113ce` — classifies not_configured / not_found / provider_error |
+
+### Storefront Redesign (SF)
+
+| Item | Status | Evidence |
+|---|---|---|
+| SF-1 — Brand token system | ✅ Complete | `a96b7f4` |
+| SF-1 documentation closeout | ✅ Complete | `855d4b1` |
+| SF-2A — Fable storefront landing shell | ✅ Complete | `717840c` |
+| SF-3 — Fable bundle shopping experience | ✅ Complete | `4234c93` |
+| SF-3E — Zero-bundle storefront empty state | ✅ Complete | `a1a94c9` |
+| SF-2/SF-3 accepted deferrals | 9 data-dependent deferrals recorded | See STOREFRONT_REDESIGN_HANDOFF.md |
+
+**SF-2/SF-3 validation evidence (closeout):** `npx tsc --noEmit` passed · Prisma Client
+generation passed · Next.js 16.1.1 production build passed · static generation 166/166
+pages · storefront reviewed at runtime on `/shop/my-freezer-chef` (first-visit UI, bundle
+cards, cart access, checkout reachability) · returning-state behavior **code-verified**,
+not live-tested · no relevant SF-2/SF-3 console or network regressions observed.
+
+> **Scope note:** SF-1 → SF-3E are closed. The storefront redesign as a whole is **not**
+> complete — SF-4 through SF-12 remain outstanding.
 
 ---
 
 ## Active Remaining Sequence
 
-1. **Roadmap reconciliation** — this documentation task
-2. **DD-0.1** — Released fundraiser orders must reach the kitchen *(next)*
-3. DD-0.2 — `order_count` counts distinct orders, not line items
-4. DD-0.3 — Week-filter leak fix (+ proposal-first backfill script)
-5. DD-0.4 — Run page delivers only `ready_to_ship`
-6. DD-0.5 — Orders PATCH transition guard — **PROPOSAL-FIRST**
-7. KB-1 and DD-1 — either order (both depend only on DD-0)
-8. DD-2 — Fundraiser Handoff Kit (needs closeout ✅ + DD-0.1)
-9. DD-3 — Scan-to-deliver (needs DD-0.5's guard)
-10. DD-4 — Delivery/pickup notifications
-11. DD-5 — Cleanup + cost visibility
+### Storefront redesign (current track)
 
-**CB-7 slots after DD-0.1**, not before — per the locked sequence.
+1. **SF-4** — Bag redesign *(next storefront phase)*
+2. SF-5 — Confirmation retention page
+3. SF-6 — Schema proposal (PROPOSAL-FIRST)
+4. SF-7 — Gifting
+5. SF-8 — Review loop (wants GE-5 cron)
+6. SF-9 — Label QR loop
+7. SF-10 — "Usual box" email + cart prefill (wants GE-5 cron)
+8. SF-11 — PWA
+9. SF-12 — Express wallets (PROPOSAL-FIRST)
+
+### Kitchen/Delivery pipeline (remaining)
+
+1. DD-1 — Kitchen Board advanced (DD-0 complete ✅)
+2. DD-2 — Fundraiser Handoff Kit (DD-0.1 ✅ + closeout ✅)
+3. DD-3 — Scan-to-deliver (DD-0.5 guard ✅)
+4. DD-4 — Delivery/pickup notifications
+5. DD-5 — Cleanup + cost visibility
+
+**CB-7** may now begin (DD-0.1 prerequisite satisfied).
 
 ### Remaining program tracks (status by source evidence, no invented ordering)
 
@@ -111,9 +177,8 @@ See CLAUDE.md for full details.
 | GE-6 – GE-9 | NOT STARTED | Independent extensions of GE-1..5 |
 | GE-10 – GE-11 | NOT STARTED | GE-11 optional CB connection ready (CB-1 ✅) |
 | PF-1 – PF-6 | NOT STARTED | DEPENDENCY-GATED — after CRM (✅) **and** GE-1..5 stable |
-| SF-1 — Brand token system | ✅ Complete | `a96b7f4` — 14 `--sf-*` variables (`lib/storefront/brandTokens.ts`); regular storefront routes tokened; 6 curated palette presets in `components/admin/BrandingSettings.tsx`; unsaved-draft live preview deferred (no approved preview seam — saved `/shop/{slug}` is the verification path) |
-| SF-2 – SF-12 | NOT STARTED | SF-2 next; SF-3 wants CB-1 `family_id` ✅; SF-8/SF-10 want GE-5 cron |
-| FR-1 – FR-4 | NOT STARTED | FR-1 PROPOSAL-FIRST; wants SF-1 tokens; CB gates ✅ |
+| SF-4 – SF-12 | NOT STARTED | SF-4 next; SF-8/SF-10 want GE-5 cron |
+| FR-1 – FR-4 | NOT STARTED | FR-1 PROPOSAL-FIRST; wants SF-1 tokens ✅; CB gates ✅ |
 | VP-1 – VP-3 | NOT STARTED | VP-2 synergy with FB-3 (not a hard dependency) |
 | VP-F1, VP-F2 | REGISTERED — FUTURE | Do not build as part of VP-1..3 |
 | BP-1 – BP-5 | NOT STARTED | BP-1 needs a **new** schema proposal — see [Missed Shared-Migration Note](#missed-shared-migration-note) |

@@ -17,7 +17,49 @@ is explicitly deferred** — the repository has no approved seam for previewing 
 before Save (no preview query parameter, `postMessage`, temporary/global preview state,
 new API, server action, or persistence was introduced to build one). The saved
 `/shop/{slug}` storefront remains the available post-save visual verification path. This
-deferral does not block SF-1 closure. **SF-2 is the next active storefront phase.**
+deferral does not block SF-1 closure.
+
+**SF-2 status: ✅ Complete — commit `717840c`.** Fable storefront landing shell ported to
+`StorefrontClient.tsx` with 8 new `components/storefront/` files: `StorefrontTopbar`,
+`LandingHero`, `HowItWorksChips`, `GreetingCard`, `FounderNote`, `QuoteBlock`,
+`EmailCaptureCard`, `WeekStrip`. `CountdownBanner` and `DealsPopup` removed from render
+(files left in place). First-visit / returning-visit conditional rendering via
+`localStorage sf_last_order` with malformed-input sanitization. Category chips, founder
+note, and quote block render only when real tenant data exists — no invented content.
+Accepted data-dependent deferrals (not missing features):
+
+1. WelcomeOfferCard deferred until a real tenant discount and automatic-application path exist.
+2. YourUsualCard deferred until grounded customer order-history and reorder data exist.
+3. CUSTOMER FAVORITE badge deferred until real tenant-scoped order-tally data exist.
+4. QuoteBlock stars render only when real rating data exist (truthfulness deviation from prototype's illustrative ★★★★★).
+5. FreeDeliveryBar renders nothing without a configured threshold.
+6. Topbar retains a discoverable My Account link (no points chip without live loyalty).
+7. Real tenant images replace prototype placeholder treatments.
+8. Category chips map to real storefront sections (not prototype's illustrative labels).
+9. Bundle detail uses a modal rather than a full-page transition.
+
+SF-2 validation: `npx tsc --noEmit` passed; production build passed (166/166 pages);
+storefront runtime reviewed at `localhost:3001/shop/my-freezer-chef`; first-visit UI
+confirmed functional; returning-visit logic code-verified. SF-1 docs closeout: `855d4b1`.
+
+**SF-3 status: ✅ Complete — commit `4234c93`.** Fable bundle shopping experience ported
+with 7 new `components/storefront/` files: `BundleCard`, `BundleDetail`, `CategoryChips`,
+`ServingToggle`, `PairingSuggestion`, `StickyCartBar`, `FreeDeliveryBar`. Family pairing
+uses only exact non-null `family_id` (CB-1) — no name/price/SKU heuristics. Bundle cards
+render with real recipe names, emoji fallback for missing images, and a PERFECT FIRST TRY
+badge on the lowest-priced multi-meal entry for first-visit users. Cart integration uses
+the existing `CartContext` contract unchanged. BundleDetail dialog with `role="dialog"`,
+`aria-modal`, Escape close. Responsive grid: 1 / 2 / 3 columns at mobile / sm / lg.
+
+**SF-3E status: ✅ Complete — commit `a1a94c9`.** Zero-regular-bundles empty state added
+inline in the `#shop-bundles` grid. When `displayEntries.length === 0`, a calm editorial
+card renders: "This week's menu is being prepared." / "Check back soon for new menu
+options." Uses `--sf-*` tokens, `col-span-full`, no fabricated dates or promises.
+
+SF-3 validation: `npx tsc --noEmit` passed; production build passed (166/166 pages);
+bundle-card shopping, cart access, and checkout reachability confirmed at runtime; serving
+toggle, category chips, pairing suggestion, sticky cart bar all verified; no relevant
+browser-console or network failures. **SF-4 is the next active storefront phase.**
 
 ## HARD RULES
 
