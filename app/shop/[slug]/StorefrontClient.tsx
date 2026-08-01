@@ -623,10 +623,19 @@ export default function StorefrontClient({ overrideSlug, hasCustomerSession = fa
                     {/* SF-3: Fable bundle-card shopping grid (replaces the legacy
                         WeeklyBundles render — file untouched). One card per real
                         complete family (Serves-5 default), separate cards otherwise.
-                        Grid per ruling: 1 / 2 / 3 columns inside max-w-7xl. */}
+                        Grid per ruling: 1 / 2 / 3 columns inside max-w-7xl.
+                        SF-3E: when no regular bundles exist, a calm editorial
+                        empty state renders in place of the grid — approved copy,
+                        SF-1 tokens, no fabricated dates or promises. */}
                     <div className="pb-8 w-full overflow-hidden">
                         <div id="shop-bundles" className="scroll-mt-32 grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                            {displayEntries.map(entry => (
+                            {displayEntries.length === 0 ? (
+                                <div className="col-span-full flex flex-col items-center gap-2 rounded-2xl border border-[var(--sf-line)] bg-[var(--sf-card)] px-6 py-10 text-center">
+                                    <span className="text-3xl" aria-hidden="true">🍲</span>
+                                    <p className="text-[15px] font-semibold text-[var(--sf-ink)]">This week&rsquo;s menu is being prepared.</p>
+                                    <p className="text-[13px] text-[var(--sf-muted)]">Check back soon for new menu options.</p>
+                                </div>
+                            ) : displayEntries.map(entry => (
                                 <BundleCard
                                     key={entry.key}
                                     b={entry.primary}
