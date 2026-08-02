@@ -508,7 +508,7 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
                         </div>
 
                         {/* ── Three-pane layout ── */}
-                        <div className={`grid gap-4 ${view === 'list' ? 'lg:grid-cols-[220px_1fr_380px]' : 'lg:grid-cols-[220px_1fr]'}`}>
+                        <div className={`grid gap-4 ${view === 'list' ? 'lg:grid-cols-[220px_1fr_380px] lg:max-h-[calc(100vh-14rem)] lg:overflow-y-auto lg:overflow-x-hidden' : 'lg:grid-cols-[220px_1fr]'}`}>
                             {/* Left: Category tree (desktop only) */}
                             <div className="hidden lg:block">
                                 <CategoryTree
@@ -635,7 +635,7 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
 
                             {/* Right: Quick view panel (list view + desktop only) */}
                             {view === 'list' && (
-                                <div className="hidden lg:block">
+                                <div className="hidden lg:block self-start sticky top-0">
                                     <RecipeQuickView
                                         recipe={selectedRecipe}
                                         onClose={() => setSelectedRecipeId(null)}
