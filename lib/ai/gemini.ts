@@ -14,15 +14,10 @@ export async function getGeminiApiKey(businessId: string): Promise<string | null
 }
 
 export async function callGemini(apiKey: string, prompt: string, options: { temperature?: number, maxTokens?: number, responseMimeType?: string } = {}) {
-    // Corrected to use the exact string found in our diagnostic script
-    const model = "gemini-2.0-flash-lite";
+    const model = process.env.GEMINI_TEXT_MODEL?.trim() || "gemini-3.5-flash-lite";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-    if (apiKey) {
-        console.log(`[Gemini Utility] Calling ${model} with key ending in: ...${apiKey.slice(-4)}`);
-    }
-
-    console.log(`[Gemini Utility] Calling API: ${url.split('?')[0]}`);
+    console.log(`[Gemini Utility] Calling text model: ${model}`);
 
     const body: any = {
         contents: [{
