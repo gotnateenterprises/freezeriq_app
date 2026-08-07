@@ -1,0 +1,938 @@
+<title>FR-RETENTION — Visual Prototype (1A.7)</title>
+<style>
+  :root {
+    --bg: #f1f5f9; --page: #ffffff; --surface: #f8fafc; --surface-2: #f1f5f9;
+    --line: #e2e8f0; --line-soft: #eef2f7;
+    --ink: #0f172a; --ink-2: #334155; --muted: #64748b; --faint: #94a3b8;
+    --accent: #4f46e5; --accent-hi: #4338ca; --accent-wash: #eef2ff;
+    --ok: #059669; --ok-wash: #ecfdf5;
+    --warn: #d97706; --warn-wash: #fffbeb;
+    --info: #7c3aed; --info-wash: #f5f3ff;
+    --bad: #e11d48; --bad-wash: #fff1f2;
+    --shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px -12px rgba(15,23,42,.12);
+    --radius: 22px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #020617; --page: #0f172a; --surface: #1e293b; --surface-2: #172033;
+      --line: #1e293b; --line-soft: #172033;
+      --ink: #f8fafc; --ink-2: #cbd5e1; --muted: #94a3b8; --faint: #64748b;
+      --accent: #818cf8; --accent-hi: #a5b4fc; --accent-wash: #1e1b4b;
+      --ok: #34d399; --ok-wash: #052e23;
+      --warn: #fbbf24; --warn-wash: #3a2708;
+      --info: #a78bfa; --info-wash: #241a4d;
+      --bad: #fb7185; --bad-wash: #3f1220;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px -14px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #020617; --page: #0f172a; --surface: #1e293b; --surface-2: #172033;
+    --line: #1e293b; --line-soft: #172033;
+    --ink: #f8fafc; --ink-2: #cbd5e1; --muted: #94a3b8; --faint: #64748b;
+    --accent: #818cf8; --accent-hi: #a5b4fc; --accent-wash: #1e1b4b;
+    --ok: #34d399; --ok-wash: #052e23;
+    --warn: #fbbf24; --warn-wash: #3a2708;
+    --info: #a78bfa; --info-wash: #241a4d;
+    --bad: #fb7185; --bad-wash: #3f1220;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px -14px rgba(0,0,0,.7);
+  }
+  :root[data-theme="light"] {
+    --bg: #f1f5f9; --page: #ffffff; --surface: #f8fafc; --surface-2: #f1f5f9;
+    --line: #e2e8f0; --line-soft: #eef2f7;
+    --ink: #0f172a; --ink-2: #334155; --muted: #64748b; --faint: #94a3b8;
+    --accent: #4f46e5; --accent-hi: #4338ca; --accent-wash: #eef2ff;
+    --ok: #059669; --ok-wash: #ecfdf5;
+    --warn: #d97706; --warn-wash: #fffbeb;
+    --info: #7c3aed; --info-wash: #f5f3ff;
+    --bad: #e11d48; --bad-wash: #fff1f2;
+    --shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px -12px rgba(15,23,42,.12);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 40px 20px 88px; display: flex; flex-direction: column; gap: 44px; }
+
+  .doc-head { display: flex; flex-direction: column; gap: 12px; }
+  .kicker { font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+  h1 { font-size: clamp(28px, 4vw, 40px); font-weight: 900; letter-spacing: -.03em; margin: 0; text-wrap: balance; line-height: 1.1; }
+  .lede { margin: 0; color: var(--muted); max-width: 68ch; font-size: 16px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .meta { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+          background: var(--page); border: 1px solid var(--line); padding: 5px 11px; border-radius: 999px; }
+
+  .section { display: flex; flex-direction: column; gap: 14px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .sec-head h2 { font-size: 13px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; margin: 0; }
+  .sec-head .ref { font-size: 11px; font-weight: 700; color: var(--faint); }
+  .sec-note { margin: 0; color: var(--muted); font-size: 14px; max-width: 74ch; }
+
+  .frame { background: var(--page); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+  .chrome { display: flex; align-items: center; gap: 8px; padding: 11px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); flex: none; }
+  .url { margin-left: 8px; font-size: 11.5px; color: var(--muted); font-weight: 600; font-family: ui-monospace, Menlo, monospace; }
+  .stage { padding: 22px; display: flex; flex-direction: column; gap: 18px; }
+  @media (max-width: 640px) { .stage { padding: 14px; } }
+  .phone { max-width: 380px; margin: 0 auto; }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-radius: 14px; border: 1px solid transparent;
+         font-size: 13px; font-weight: 800; padding: 10px 16px; cursor: pointer; white-space: nowrap; font-family: inherit; min-height: 44px; }
+  .btn-primary { background: var(--accent); color: #fff; box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--accent) 65%, transparent); }
+  .btn-primary:hover { background: var(--accent-hi); }
+  .btn-ghost { background: var(--page); color: var(--ink-2); border-color: var(--line); }
+  .btn-ghost:hover { background: var(--surface); }
+  .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 11px; min-height: 36px; }
+  .btn-danger { background: var(--bad-wash); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
+  .btn:focus-visible, .chip-btn:focus-visible, .tab:focus-visible, .orgopt:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-color-scheme: dark) { .btn-primary { color: #0f172a; } }
+  :root[data-theme="dark"] .btn-primary { color: #0f172a; }
+  :root[data-theme="light"] .btn-primary { color: #fff; }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+  .tab { padding: 9px 15px; font-size: 13px; font-weight: 800; color: var(--muted); background: none; border: none;
+         border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; font-family: inherit; }
+  .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip-btn { font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; padding: 8px 14px;
+              border-radius: 999px; border: 1px solid var(--line); background: var(--page); color: var(--muted);
+              cursor: pointer; font-family: inherit; min-height: 36px; }
+  .chip-btn[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
+  @media (prefers-color-scheme: dark) { .chip-btn[aria-pressed="true"] { color: #0f172a; } }
+  :root[data-theme="dark"] .chip-btn[aria-pressed="true"] { color: #0f172a; }
+  :root[data-theme="light"] .chip-btn[aria-pressed="true"] { color: #fff; }
+  .chip-btn .n { opacity: .65; margin-left: 5px; font-variant-numeric: tabular-nums; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .stat { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 16px; padding: 13px 15px; }
+  .stat .lab { font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+  .stat .val { font-size: 25px; font-weight: 900; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .stat .val.accent { color: var(--accent); } .stat .val.ok { color: var(--ok); } .stat .val.warn { color: var(--warn); }
+
+  .st { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 900; letter-spacing: .07em;
+        text-transform: uppercase; padding: 4px 9px; border-radius: 8px; border: 1px solid transparent; white-space: nowrap; }
+  .st::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; }
+  .st-neutral { background: var(--surface-2); color: var(--muted); border-color: var(--line); }
+  .st-info { background: var(--info-wash); color: var(--info); border-color: color-mix(in srgb, var(--info) 26%, transparent); }
+  .st-ok { background: var(--ok-wash); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
+  .st-warn { background: var(--warn-wash); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 32%, transparent); }
+  .st-bad { background: var(--bad-wash); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
+  .st-accent { background: var(--accent-wash); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 28%, transparent); }
+
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 18px; }
+  table { width: 100%; border-collapse: collapse; min-width: 900px; }
+  thead th { text-align: left; font-size: 10px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase;
+             color: var(--faint); padding: 11px 14px; background: var(--surface); border-bottom: 1px solid var(--line); white-space: nowrap; }
+  tbody td { padding: 13px 14px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; font-size: 13.5px; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.dim { background: color-mix(in srgb, var(--bad) 4%, transparent); }
+  .org-name { font-weight: 800; letter-spacing: -.01em; }
+  .sub { font-size: 11px; color: var(--faint); font-weight: 600; margin-top: 1px; }
+  .money { font-variant-numeric: tabular-nums; font-weight: 800; }
+  .multi-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 900;
+                 text-transform: uppercase; letter-spacing: .06em; color: var(--info); background: var(--info-wash);
+                 padding: 2px 7px; border-radius: 6px; margin-left: 6px; }
+
+  .strip { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+           background: var(--accent-wash); border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+           border-radius: 16px; padding: 13px 16px; }
+  .strip .s-main { font-size: 13.5px; font-weight: 800; color: var(--ink); }
+  .strip .s-sub { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .strip.quiet { background: var(--surface); border-color: var(--line-soft); }
+  .strip.warnline { background: var(--warn-wash); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+
+  .drawer { background: var(--page); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+  .drawer-head { padding: 15px 18px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between;
+                 align-items: center; gap: 12px; background: var(--surface); flex-wrap: wrap; }
+  .drawer-head h4 { margin: 0; font-size: 16px; font-weight: 900; letter-spacing: -.02em; }
+  .drawer-body { padding: 18px; display: flex; flex-direction: column; gap: 15px; }
+  .panel { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; padding: 14px; }
+  .panel-lab { font-size: 10px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin-bottom: 9px; }
+  .mrow { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field label, fieldset legend { font-size: 11px; font-weight: 900; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+  .input { border: 1px solid var(--line); background: var(--page); border-radius: 12px; padding: 11px 12px;
+           font-size: 13.5px; color: var(--ink); font-weight: 600; min-height: 44px; display: flex; align-items: center; }
+  .input.ph { color: var(--faint); font-weight: 500; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 560px) { .two { grid-template-columns: 1fr; } }
+  fieldset { border: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+
+  .fam-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+  .fam { border: 2px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); cursor: pointer; }
+  .fam.sel { border-color: var(--accent); }
+  .fam .art { height: 58px; display: grid; place-items: center; font-size: 22px; }
+  .fam .nm { padding: 7px 9px; font-size: 11px; font-weight: 800; line-height: 1.3; border-top: 1px solid var(--line-soft); }
+  .fam.sel .nm::after { content: " ✓"; color: var(--accent); }
+
+  details.adv { border: 1px solid var(--line); border-radius: 13px; background: var(--page); }
+  details.adv summary { cursor: pointer; list-style: none; padding: 11px 14px; font-size: 12.5px; font-weight: 800; color: var(--muted); min-height: 44px; display: flex; align-items: center; }
+  details.adv summary::before { content: "▸ "; margin-right: 6px; }
+  details.adv[open] summary::before { content: "▾ "; }
+  details.adv .adv-body { padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+
+  .recip { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
+  .recip:last-child { border-bottom: none; }
+  .box { width: 18px; height: 18px; border-radius: 5px; border: 2px solid var(--accent); background: var(--accent); flex: none; display: grid; place-items: center; }
+  .box.off { background: transparent; border-color: var(--line); }
+  .recip-main { flex: 1; min-width: 0; }
+  .recip-name { font-weight: 800; font-size: 13.5px; }
+  .recip-sub { font-size: 11.5px; color: var(--faint); font-weight: 600; }
+
+  .mail { background: var(--page); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .mail-head { padding: 11px 15px; border-bottom: 1px solid var(--line-soft); background: var(--surface); }
+  .mail-line { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .mail-line b { color: var(--ink-2); }
+  .mail-body { padding: 18px; display: flex; flex-direction: column; gap: 13px; }
+  .mail-brand { display: flex; align-items: center; gap: 9px; font-weight: 900; font-size: 15px; }
+  .mail-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 900; flex: none; }
+  .mail-h { font-size: 20px; font-weight: 900; letter-spacing: -.025em; margin: 0; text-wrap: balance; }
+  .mail-p { margin: 0; font-size: 14px; color: var(--ink-2); }
+  .unsub { font-size: 11px; color: var(--faint); border-top: 1px solid var(--line-soft); padding-top: 10px; }
+  .unsub a { color: var(--muted); }
+
+  .dialog { max-width: 420px; margin: 0 auto; background: var(--page); border: 1px solid var(--line); border-radius: 18px;
+            box-shadow: var(--shadow); padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+  .dialog h5 { margin: 0; font-size: 17px; font-weight: 900; letter-spacing: -.02em; }
+  .dialog p { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+  .dialog .d-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+
+  .orgpick { display: flex; flex-direction: column; gap: 7px; }
+  .orgopt { display: flex; align-items: center; gap: 9px; border: 1px solid var(--line); background: var(--page);
+            border-radius: 12px; padding: 12px; font-size: 13.5px; font-weight: 700; min-height: 48px; cursor: pointer; }
+  .orgopt.sel { border-color: var(--accent); background: var(--accent-wash); color: var(--accent); }
+  .tick { width: 18px; height: 18px; border-radius: 5px; border: 2px solid var(--line); flex: none; display: grid; place-items: center; background: var(--page); }
+  .orgopt.sel .tick { border-color: var(--accent); background: var(--accent); }
+  .org-expand { border-left: 2px solid var(--accent); margin: 2px 0 4px 9px; padding: 9px 0 6px 13px; display: flex; flex-direction: column; gap: 8px; }
+  .radio-row { display: flex; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 12px;
+               padding: 11px 12px; font-size: 13px; font-weight: 700; min-height: 46px; cursor: pointer; background: var(--page); }
+  .radio-row.sel { border-color: var(--accent); background: var(--accent-wash); color: var(--accent); }
+  .rdot { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line); flex: none; background: var(--page); }
+  .radio-row.sel .rdot { border-width: 5px; border-color: var(--accent); }
+  .hint { margin: 0; font-size: 11.5px; color: var(--muted); font-weight: 600; }
+  .hint.count { color: var(--accent); font-weight: 800; }
+
+  .pub { background: linear-gradient(180deg, var(--accent-wash), var(--page) 46%); padding: 24px 20px 20px; }
+  .pub-inner { max-width: 460px; margin: 0 auto; display: flex; flex-direction: column; gap: 15px; }
+  .pub h3 { margin: 0; font-size: 23px; font-weight: 900; letter-spacing: -.03em; line-height: 1.15; text-wrap: balance; }
+  .eyebrow { font-size: 11px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+
+  .state-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+  .state-card { background: var(--page); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .state-card h6 { margin: 0; font-size: 10.5px; font-weight: 900; letter-spacing: .09em; text-transform: uppercase; color: var(--faint); }
+  .state-card .msg { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+  .state-card .body { font-size: 12.5px; color: var(--muted); }
+
+  .rev-card { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--page); }
+  .rev-card.approved { border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+  .rev-card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 11px 14px;
+                   background: var(--surface); border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; }
+  .rev-card-body { padding: 13px 14px; display: flex; flex-direction: column; gap: 11px; }
+  .kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 11px; }
+  .kv { display: flex; flex-direction: column; gap: 2px; }
+  .kv .k { font-size: 10px; font-weight: 900; letter-spacing: .09em; text-transform: uppercase; color: var(--faint); }
+  .kv .v { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .kv .vs { font-size: 10.5px; color: var(--faint); font-weight: 600; }
+  .quote { border-left: 2px solid var(--line); padding-left: 11px; font-size: 13px; color: var(--ink-2); font-style: italic; }
+  .card-actions { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+  .mini { border: 1px solid var(--line); background: var(--page); border-radius: 10px; padding: 8px 10px;
+          font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .mini.edited { border-color: var(--accent); color: var(--accent); background: var(--accent-wash); }
+  .seq { display: flex; align-items: center; gap: 9px; font-size: 12.5px; font-weight: 700; color: var(--muted);
+         background: var(--surface); border: 1px solid var(--line-soft); border-radius: 12px; padding: 11px 13px; }
+  .seq .n { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 900;
+            background: var(--surface-2); color: var(--muted); flex: none; }
+  .seq .n.done { background: var(--ok); color: #fff; }
+  .seq .n.now { background: var(--accent); color: #fff; }
+
+  .notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); gap: 12px; }
+  .note { background: var(--page); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 12px; padding: 12px 14px; }
+  .note h5 { margin: 0 0 4px; font-size: 12px; font-weight: 900; }
+  .note p { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+  .note.warnline { border-left-color: var(--warn); }
+  .note.infoline { border-left-color: var(--info); }
+  .note.okline { border-left-color: var(--ok); }
+
+  .spinner { width: 15px; height: 15px; border-radius: 50%; border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+             border-top-color: currentColor; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+  .foot { border-top: 1px solid var(--line); padding-top: 20px; color: var(--faint); font-size: 12.5px; }
+  .hiddenpane { display: none; }
+</style>
+
+<div class="wrap">
+
+<header class="doc-head">
+  <div class="kicker">FR-RETENTION-1A.7 · Visual Prototype</div>
+  <h1>Seasonal rebooking — every screen, every state</h1>
+  <p class="lede">The complete tenant, main-contact, and coordinator experience from the approved 1A.6 specification. All organizations, people, emails, and dollar amounts are fictional sample data — no live records or credentials. Where a control is deferred (scheduling, automation), it simply does not exist here.</p>
+  <div class="meta-row">
+    <span class="meta">17 surfaces</span><span class="meta">Existing design system</span>
+    <span class="meta">Light + dark</span><span class="meta">Prototype only</span>
+  </div>
+</header>
+
+<!-- ════════ 1. REBOOKING DASHBOARD ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>1 · Rebooking dashboard</h2><span class="ref">tenant home · Needs action is the default</span></div>
+  <p class="sec-note">Third tab on the existing Fundraiser Dashboard. One row per <strong>person</strong> — Sam and Alex Rivera share one office address and remain two rows. The address merge happens later, at send time, not here.</p>
+  <div class="frame">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">/fundraisers?tab=rebooking</span></div>
+    <div class="stage">
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" aria-selected="false">Campaigns</button>
+        <button class="tab" role="tab" aria-selected="false">Organizations</button>
+        <button class="tab" role="tab" aria-selected="true">Rebooking</button>
+      </div>
+
+      <div class="strip">
+        <div>
+          <div class="s-main">Sent Tuesday to 7 people · 2 responses · waiting on 5</div>
+          <div class="s-sub">Fall 2026 Lineup · 1 didn't send</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm">Retry 1 failed</button>
+          <button class="btn btn-primary btn-sm">Review request</button>
+        </div>
+      </div>
+
+      <div class="mrow" style="align-items:center">
+        <div class="stats" style="flex:1;min-width:280px">
+          <div class="stat"><div class="lab">Ready to invite</div><div class="val accent">4</div></div>
+          <div class="stat"><div class="lab">Waiting</div><div class="val">5</div></div>
+          <div class="stat"><div class="lab">Needs action</div><div class="val warn">3</div></div>
+          <div class="stat"><div class="lab">Rebooked</div><div class="val ok">1</div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+          <button class="btn btn-primary">Send Seasonal Update</button>
+          <span class="hint">Last update sent Jan 14 to 7 people</span>
+        </div>
+      </div>
+
+      <div class="filters">
+        <button class="chip-btn" aria-pressed="false">All <span class="n">12</span></button>
+        <button class="chip-btn" aria-pressed="false">Ready to invite <span class="n">4</span></button>
+        <button class="chip-btn" aria-pressed="false">Waiting <span class="n">5</span></button>
+        <button class="chip-btn" aria-pressed="true">Needs action <span class="n">3</span></button>
+        <button class="chip-btn" aria-pressed="false">Done <span class="n">1</span></button>
+      </div>
+
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Main contact</th><th>Organizations</th><th>Last fundraiser</th><th>Status</th><th>Next step</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><div class="org-name">Kim Parker</div><div class="sub">k•••@pinevalleypto.org</div></td>
+              <td>Pine Valley PTO</td>
+              <td><span class="money">$300 kept</span><div class="sub">Spring 2026</div></td>
+              <td><span class="st st-warn">Needs review</span></td>
+              <td><button class="btn btn-primary btn-sm">Review request</button></td>
+            </tr>
+            <tr>
+              <td><div class="org-name">Riley Marsh</div><div class="sub">r•••@grovemail.org</div></td>
+              <td>Maple Grove <span class="multi-badge">3 groups</span><div class="sub">Cedar Ridge · Willow Creek</div></td>
+              <td><span class="sub">—</span></td>
+              <td><span class="st st-info">Update sent</span></td>
+              <td><span class="sub">Awaiting reply</span></td>
+            </tr>
+            <tr>
+              <td><div class="org-name">Morgan Lee</div><div class="sub">m•••@oakdalesoccer.org</div></td>
+              <td>Oakdale Youth Soccer</td>
+              <td><span class="money">$410 kept</span><div class="sub">Spring 2026</div></td>
+              <td><span class="st st-ok">Ready to create</span></td>
+              <td><button class="btn btn-primary btn-sm">Create fundraiser</button></td>
+            </tr>
+            <tr>
+              <td><div class="org-name">Sam Rivera</div><div class="sub">office@cassfb.org · shared with Alex Rivera</div></td>
+              <td>Cass County Community Club</td>
+              <td><span class="sub">First fundraiser</span></td>
+              <td><span class="st st-warn">Needs a coordinator</span></td>
+              <td><button class="btn btn-primary btn-sm">Assign coordinator</button></td>
+            </tr>
+            <tr>
+              <td><div class="org-name">Alex Rivera</div><div class="sub">office@cassfb.org · shared with Sam Rivera</div></td>
+              <td>Cass County 4-H Club</td>
+              <td><span class="sub">First fundraiser</span></td>
+              <td><span class="st st-neutral">Ready to invite</span></td>
+              <td><span class="sub">Included in next update</span></td>
+            </tr>
+            <tr>
+              <td><div class="org-name">Jamie Brooks</div><div class="sub">j•••@birchwoodpta.org</div></td>
+              <td>Birchwood Elementary PTA</td>
+              <td><span class="money">$180 kept</span><div class="sub">Feb 2026</div></td>
+              <td><span class="st st-ok">Rebooked</span></td>
+              <td><button class="btn btn-ghost btn-sm">View campaign</button></td>
+            </tr>
+            <tr class="dim">
+              <td><div class="org-name">Pat Reilly</div><div class="sub">No email on file</div></td>
+              <td>Sunrise 4-H Club</td>
+              <td><span class="sub">3 prior campaigns</span></td>
+              <td><span class="st st-bad">Can't email — no email</span></td>
+              <td><button class="btn btn-ghost btn-sm">Fix contact info</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="notes">
+        <div class="note infoline"><h5>People stay separate</h5><p>Sam and Alex share office@cassfb.org and remain two rows. Nothing here implies one address equals one person — that grouping appears only in the send review, where it's about inboxes, not identities.</p></div>
+        <div class="note"><h5>Status lives in the row, not the nav</h5><p>Five chips navigate; the precise state ("Needs a coordinator," "Update sent") reads per row with its own next-step button.</p></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame phone">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">Rebooking · mobile</span></div>
+    <div class="stage">
+      <div class="strip" style="padding:11px 13px"><div><div class="s-main" style="font-size:12.5px">Sent Tue to 7 · 2 responses</div></div><button class="btn btn-primary btn-sm">Review</button></div>
+      <div class="rev-card">
+        <div class="rev-card-head"><div><div class="org-name">Kim Parker</div><div class="sub">Pine Valley PTO</div></div><span class="st st-warn">Needs review</span></div>
+        <div class="rev-card-body"><button class="btn btn-primary" style="width:100%">Review request</button></div>
+      </div>
+      <div class="rev-card">
+        <div class="rev-card-head"><div><div class="org-name">Sam Rivera</div><div class="sub">Cass County Community Club</div></div><span class="st st-warn">Needs a coordinator</span></div>
+        <div class="rev-card-body"><button class="btn btn-primary" style="width:100%">Assign coordinator</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════ 2. EMPTY NEEDS ACTION ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>2 · Empty Needs-action state</h2><span class="ref">never silently shows All</span></div>
+  <div class="frame" id="empty-demo">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">Rebooking — nothing pending</span></div>
+    <div class="stage">
+      <div class="filters">
+        <button class="chip-btn ed-all" aria-pressed="false" onclick="edShowAll()">All <span class="n">12</span></button>
+        <button class="chip-btn" aria-pressed="false">Ready to invite <span class="n">12</span></button>
+        <button class="chip-btn" aria-pressed="false">Waiting <span class="n">0</span></button>
+        <button class="chip-btn ed-needs" aria-pressed="true">Needs action <span class="n">0</span></button>
+        <button class="chip-btn" aria-pressed="false">Done <span class="n">0</span></button>
+      </div>
+      <div class="panel ed-empty" style="text-align:center;padding:34px 20px">
+        <p style="margin:0 0 4px;font-weight:900;font-size:16px">Nothing needs your attention right now.</p>
+        <p class="hint" style="margin:0 0 14px">New responses and requests will appear here.</p>
+        <button class="btn btn-ghost" onclick="edShowAll()">View all rebooking contacts</button>
+      </div>
+      <div class="panel ed-all-list hiddenpane">
+        <div class="panel-lab">All contacts (12)</div>
+        <div class="recip"><span class="recip-main"><span class="recip-name">Kim Parker</span><div class="recip-sub">Pine Valley PTO</div></span><span class="st st-neutral">Ready to invite</span></div>
+        <div class="recip"><span class="recip-main"><span class="recip-name">Riley Marsh</span><div class="recip-sub">3 groups</div></span><span class="st st-neutral">Ready to invite</span></div>
+        <div class="recip"><span class="recip-main"><span class="recip-name">Jamie Brooks</span><div class="recip-sub">Birchwood Elementary PTA</div></span><span class="st st-neutral">Ready to invite</span></div>
+      </div>
+    </div>
+  </div>
+  <p class="sec-note">The chip flips to <strong>All</strong> only when the button is pressed — try it above. Needs action never silently displays other records.</p>
+</section>
+
+<!-- ════════ 3. SEASONAL LINEUP FORM ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>3 · Seasonal Lineup</h2><span class="ref">four fields · advanced collapsed · no automation controls exist</span></div>
+  <div class="frame">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">Seasonal Lineup</span></div>
+    <div class="stage">
+      <div class="drawer">
+        <div class="drawer-head"><h4>Seasonal Lineup</h4><span class="hint">Step 1 of 4</span></div>
+        <div class="drawer-body">
+          <div class="field"><label for="ln">Lineup name</label><div class="input" id="ln">Fall 2026</div></div>
+          <div class="two">
+            <div class="field"><label>Starts</label><div class="input">Sep 1, 2026</div></div>
+            <div class="field"><label>Ends</label><div class="input">Nov 30, 2026</div></div>
+          </div>
+          <fieldset>
+            <legend>Bundles for this season · 4 selected</legend>
+            <div class="fam-grid">
+              <div class="fam sel"><div class="art" style="background:var(--warn-wash)">🥘</div><div class="nm">Hearty Meals</div></div>
+              <div class="fam sel"><div class="art" style="background:var(--ok-wash)">🍲</div><div class="nm">Soups &amp; Casseroles</div></div>
+              <div class="fam sel"><div class="art" style="background:var(--info-wash)">🍝</div><div class="nm">Family Pasta</div></div>
+              <div class="fam sel"><div class="art" style="background:var(--accent-wash)">🥧</div><div class="nm">Comfort Classics</div></div>
+              <div class="fam"><div class="art" style="background:var(--surface-2)">🌮</div><div class="nm">Taco Night</div></div>
+            </div>
+          </fieldset>
+          <div class="field">
+            <label>How many bundles does the coordinator choose?</label>
+            <div class="card-actions"><button class="btn btn-ghost btn-sm" aria-label="Decrease">−</button><span class="mini" style="min-width:44px;text-align:center">2</span><button class="btn btn-ghost btn-sm" aria-label="Increase">+</button></div>
+          </div>
+          <details class="adv">
+            <summary>Advanced</summary>
+            <div class="adv-body">
+              <div class="field"><label>Subject override</label><div class="input ph">Fall 2026 fundraising is open — pick your dates</div></div>
+              <div class="field"><label>Email sales letter</label><div class="input ph" style="min-height:64px;align-items:flex-start;padding-top:10px">Uses the standard seasonal letter unless you write your own…</div></div>
+              <div class="field"><label>Internal notes</label><div class="input ph">Only you see this</div></div>
+            </div>
+          </details>
+          <div class="mrow" style="align-items:center">
+            <button class="btn btn-ghost">Cancel</button>
+            <button class="btn btn-primary">Save lineup</button>
+          </div>
+        </div>
+      </div>
+      <div class="notes">
+        <div class="note warnline"><h5>Nothing to disable</h5><p>Scheduling and automatic sending are deferred, so no toggle, no greyed control, no "coming soon" appears. The controls will exist when the feature does.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════ 4. RECIPIENT REVIEW ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>4 · Recipient review</h2><span class="ref">one row per delivery address · included first</span></div>
+  <p class="sec-note">Here — and only here — rows are inboxes, not people. Sam and Alex become one row because one email reaches both; the row says so plainly.</p>
+  <div class="frame">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">Send Seasonal Update — Step 2 of 4</span></div>
+    <div class="stage">
+      <div class="drawer">
+        <div class="drawer-head"><h4>Who gets this update</h4><span class="hint">Sending to <b>7 addresses</b> · covering 11 organizations</span></div>
+        <div class="drawer-body">
+          <div class="panel">
+            <div class="recip">
+              <span class="box" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+              <span class="recip-main"><span class="recip-name">Kim Parker</span><div class="recip-sub">k•••@pinevalleypto.org · Pine Valley PTO</div></span>
+            </div>
+            <div class="recip">
+              <span class="box" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+              <span class="recip-main"><span class="recip-name">Riley Marsh <span class="multi-badge">3 groups</span></span><div class="recip-sub">r•••@grovemail.org · Maple Grove, Cedar Ridge &amp; Willow Creek</div></span>
+            </div>
+            <div class="recip">
+              <span class="box" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+              <span class="recip-main"><span class="recip-name">office@cassfb.org <span class="multi-badge">2 people</span></span><div class="recip-sub">Reaches Sam Rivera &amp; Alex Rivera · 2 organizations · one email</div></span>
+            </div>
+            <div class="recip">
+              <span class="box off" aria-hidden="true"></span>
+              <span class="recip-main"><span class="recip-name">Jamie Brooks</span><div class="recip-sub">Unchecked — you're skipping this one</div></span>
+            </div>
+          </div>
+          <details class="adv">
+            <summary>6 not receiving this — see why</summary>
+            <div class="adv-body">
+              <div class="recip"><span class="recip-main"><span class="recip-name" style="opacity:.65">J. Alvarez</span></span><span class="st st-warn">Paused until Jan 2027</span></div>
+              <div class="recip"><span class="recip-main"><span class="recip-name" style="opacity:.65">Marta Ellis</span></span><span class="st st-bad">Unsubscribed</span><button class="btn btn-ghost btn-sm">Re-subscribe with permission</button></div>
+              <div class="recip"><span class="recip-main"><span class="recip-name" style="opacity:.65">Joe Templin</span><div class="recip-sub">Someone at this address unsubscribed, so marketing is paused for everyone using it.</div></span><span class="st st-bad">Shared address unsubscribed</span></div>
+              <div class="recip"><span class="recip-main"><span class="recip-name" style="opacity:.65">Dee Otten</span></span><span class="st st-neutral">Not interested until Mar 2027</span></div>
+              <div class="recip"><span class="recip-main"><span class="recip-name" style="opacity:.65">R. Calloway</span></span><span class="st st-bad">Invalid email</span><button class="btn btn-ghost btn-sm">Fix contact info</button></div>
+              <div class="recip"><span class="recip-main"><span class="recip-name" style="opacity:.65">Pat Reilly</span></span><span class="st st-bad">No email</span><button class="btn btn-ghost btn-sm">Fix contact info</button></div>
+            </div>
+          </details>
+          <div class="mrow" style="align-items:center">
+            <button class="btn btn-ghost">Back</button>
+            <button class="btn btn-primary">Continue · 6 recipients</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="dialog" role="dialog" aria-labelledby="rs-t">
+        <h5 id="rs-t">Re-subscribe Marta Ellis?</h5>
+        <p>Only re-subscribe if Marta gave you permission. Add a note explaining when and how they gave permission.</p>
+        <div class="field"><label for="rs-n">Permission note · required</label><div class="input ph" id="rs-n">e.g. "Called the office Aug 4 — asked to get seasonal updates again"</div></div>
+        <div class="d-actions"><button class="btn btn-ghost">Cancel</button><button class="btn btn-primary">Re-subscribe</button></div>
+      </div>
+      <div class="notes">
+        <div class="note warnline"><h5>Re-subscribing is deliberate</h5><p>The action lives on the excluded row, requires a written permission note, and records who did it. Opt-out follows the person — it isn't lifted by an address change.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════ 5. EMAIL PREVIEW ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>5 · Email preview</h2><span class="ref">group-share framing mandatory · no invented numbers</span></div>
+  <div class="frame">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">Send Seasonal Update — Step 3 of 4</span></div>
+    <div class="stage">
+      <div class="filters" role="tablist" aria-label="Sample recipient">
+        <button class="chip-btn" aria-pressed="true">Kim's version</button>
+        <button class="chip-btn" aria-pressed="false">Pat's version</button>
+        <button class="chip-btn" aria-pressed="false">Riley's version</button>
+      </div>
+
+      <div class="mail">
+        <div class="mail-head">
+          <div class="mail-line"><b>From</b> My Freezer Chef via FreezerIQ</div>
+          <div class="mail-line"><b>Subject</b> Fall 2026 fundraising is open — pick your dates</div>
+        </div>
+        <div class="mail-body">
+          <div class="mail-brand"><span class="mail-mark">MF</span> My Freezer Chef</div>
+          <h3 class="mail-h">Our Fall 2026 lineup is ready</h3>
+          <p class="mail-p">Hi Kim — last season <b>Pine Valley PTO kept $300 for your group</b>. Here's what families can order this fall.</p>
+          <div class="fam-grid">
+            <div class="fam"><div class="art" style="background:var(--warn-wash)">🥘</div><div class="nm">Hearty Meals</div></div>
+            <div class="fam"><div class="art" style="background:var(--ok-wash)">🍲</div><div class="nm">Soups &amp; Casseroles</div></div>
+            <div class="fam"><div class="art" style="background:var(--info-wash)">🍝</div><div class="nm">Family Pasta</div></div>
+            <div class="fam"><div class="art" style="background:var(--accent-wash)">🥧</div><div class="nm">Comfort Classics</div></div>
+          </div>
+          <button class="btn btn-primary" style="align-self:flex-start">Plan another fundraiser</button>
+          <div class="unsub">My Freezer Chef · Peoria, IL · <a href="#u">Unsubscribe from fundraiser updates</a><br>This won't affect order confirmations or a fundraiser you're already running.</div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <div class="note okline"><h5>Kim — verified earnings</h5><p>"Kept $300 for your group" — the 20% share, never gross sales alone.</p></div>
+        <div class="note"><h5>Pat — no verified figure</h5><p>Her campaigns have no settlement recorded, so her version opens: <em>"Your group raised funds with us before."</em> No amount is invented.</p></div>
+        <div class="note infoline"><h5>Riley — three groups</h5><p>No dollar figures at all: one number can't be attributed safely across organizations. Neutral copy: <em>"Your groups have raised funds with us before."</em></p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════ 6. SEND CONFIRMATION ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>6 · Send confirmation &amp; result</h2><span class="ref">no typed confirmation · plain-language failure</span></div>
+  <div class="frame">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">Send Seasonal Update — Step 4 of 4</span></div>
+    <div class="stage">
+      <div class="dialog" role="dialog" aria-labelledby="sd-t">
+        <h5 id="sd-t">Send Seasonal Update?</h5>
+        <p>This will email <b>6 people</b>.<br>Subject: "Fall 2026 fundraising is open — pick your dates."</p>
+        <p class="hint">You last emailed these contacts 12 days ago.</p>
+        <div class="d-actions"><button class="btn btn-ghost">Back</button><button class="btn btn-primary">Send now</button></div>
+      </div>
+      <div class="state-grid">
+        <div class="state-card"><h6>Sending</h6><div class="msg" style="display:flex;align-items:center;gap:8px"><span class="spinner"></span> Sending…</div><div class="body">Button locks instantly. A second click does nothing.</div></div>
+        <div class="state-card"><h6>Success</h6><div class="msg">Sent ✓</div><div class="body">"We'll show replies here as they arrive." Closes to the waiting strip.</div></div>
+        <div class="state-card"><h6>Partial failure</h6><div class="msg">5 sent · 2 didn't send</div><div class="body">Per-person rows: "Couldn't deliver — check the address." Each has <b>Retry</b> and <b>Fix contact info</b>.</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════ 7. WAITING ON REPLIES ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>7 · Waiting on replies</h2><span class="ref">the post-send resting state</span></div>
+  <div class="frame"><div class="stage">
+    <div class="strip">
+      <div><div class="s-main">Sent Tuesday to 7 people · 2 responses · waiting on 5</div><div class="s-sub">Fall 2026 Lineup</div></div>
+      <button class="btn btn-primary btn-sm">Review request</button>
+    </div>
+    <div class="strip quiet">
+      <div><div class="s-main">Sent Tuesday to 7 people · no responses yet</div><div class="s-sub">Most replies arrive within a week.</div></div>
+    </div>
+    <div class="strip warnline">
+      <div><div class="s-main">Sent Tuesday to 7 people · 1 didn't send</div><div class="s-sub">Couldn't deliver to R. Calloway — check the address.</div></div>
+      <div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm">Fix contact info</button><button class="btn btn-ghost btn-sm">Retry</button></div>
+    </div>
+    <div class="notes"><div class="note"><h5>Repeat sends warn, never block</h5><p>The Send button keeps its "Last update sent Jan 14" note and the confirm dialog adds "You last emailed these contacts 12 days ago." Sending again is allowed.</p></div></div>
+  </div></div>
+</section>
+
+<!-- ════════ 8. MAIN-CONTACT LANDING PAGE ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>8 · Plan another fundraiser — landing page</h2><span class="ref">mobile-first · no account · coordinator asked per organization</span></div>
+  <div class="frame phone">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">/rebook/•••</span></div>
+    <div class="pub"><div class="pub-inner">
+      <div class="eyebrow">Fall 2026 · My Freezer Chef</div>
+      <h3>Let's plan your next fundraiser</h3>
+      <div class="fam-grid">
+        <div class="fam"><div class="art" style="background:var(--warn-wash)">🥘</div><div class="nm">Hearty Meals</div></div>
+        <div class="fam"><div class="art" style="background:var(--ok-wash)">🍲</div><div class="nm">Soups &amp; Casseroles</div></div>
+        <div class="fam"><div class="art" style="background:var(--info-wash)">🍝</div><div class="nm">Family Pasta</div></div>
+        <div class="fam"><div class="art" style="background:var(--accent-wash)">🥧</div><div class="nm">Comfort Classics</div></div>
+      </div>
+
+      <fieldset>
+        <legend>Which groups are you booking?</legend>
+        <div class="orgpick">
+          <div class="orgopt sel" tabindex="0"><span class="tick"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span> Maple Grove Boosters</div>
+          <div class="org-expand">
+            <span class="hint">Will you be the coordinator for the Maple Grove Boosters fundraiser?</span>
+            <div class="radio-row sel" tabindex="0"><span class="rdot"></span> Yes, I'll coordinate it</div>
+            <div class="radio-row" tabindex="0"><span class="rdot"></span> No, someone else will</div>
+          </div>
+          <div class="orgopt" tabindex="0"><span class="tick"></span> Cedar Ridge Boosters</div>
+          <div class="orgopt sel" tabindex="0"><span class="tick"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span> Willow Creek Boosters</div>
+          <div class="org-expand">
+            <span class="hint">Will you be the coordinator for the Willow Creek Boosters fundraiser?</span>
+            <div class="radio-row" tabindex="0"><span class="rdot"></span> Yes, I'll coordinate it</div>
+            <div class="radio-row sel" tabindex="0"><span class="rdot"></span> No, someone else will</div>
+            <div class="two">
+              <div class="field"><label>Their name</label><div class="input">Dana Whitcomb</div></div>
+              <div class="field"><label>Their email</label><div class="input ph">Leave blank if you're not sure yet</div></div>
+            </div>
+          </div>
+        </div>
+        <p class="hint count">2 of 3 selected — each becomes its own fundraiser</p>
+      </fieldset>
+
+      <div class="two">
+        <div class="field"><label>Preferred start</label><div class="input">Oct 6, 2026</div></div>
+        <div class="field"><label>Alternate start</label><div class="input ph">Pick a backup date</div></div>
+      </div>
+      <a href="#end" style="font-size:12px;font-weight:700;color:var(--accent)">+ add an end date</a>
+      <div class="field"><label>About how many participants?</label><div class="input">45</div></div>
+      <div class="field"><label>Anything we should know?</label><div class="input ph" style="min-height:60px;align-items:flex-start;padding-top:10px">Optional</div></div>
+      <details class="adv"><summary>Is your contact info still right? Update it</summary>
+        <div class="adv-body"><div class="field"><label>Name</label><div class="input">Riley Marsh</div></div><div class="field"><label>Email</label><div class="input">r•••@grovemail.org</div></div><div class="field"><label>Phone</label><div class="input">•••-•••-4144</div></div></div>
+      </details>
+      <button class="btn btn-primary" style="width:100%;padding:14px">Send my request for 2 groups</button>
+      <p class="hint" style="text-align:center">Nothing is booked until My Freezer Chef confirms your dates.<br>We'll only use this to plan your fundraiser.</p>
+    </div></div>
+  </div>
+  <div class="notes">
+    <div class="note infoline"><h5>Asked even for one group</h5><p>A single-organization respondent gets the same "Will you be the coordinator?" question — helping with rebooking is not volunteering to run it.</p></div>
+    <div class="note"><h5>Dates don't have to match</h5><p>Shared dates apply to all selected groups; the tenant confirms each separately and can move them independently.</p></div>
+  </div>
+</section>
+
+<!-- ════════ 9. LANDING EXCEPTIONAL STATES ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>9 · Landing-page exceptional states</h2><span class="ref">a new link is never auto-issued</span></div>
+  <div class="state-grid">
+    <div class="state-card"><h6>Expired</h6><div class="msg">This invitation has expired.</div><div class="body"><button class="btn btn-ghost btn-sm">Request a new link</button><br><br>Confirmation: "We've let My Freezer Chef know. They'll send you a fresh link." Creates a Needs-action item for the tenant — nothing sends automatically.</div></div>
+    <div class="state-card"><h6>Revoked / replaced</h6><div class="msg">This link was replaced.</div><div class="body">"Check your email for the newer one."</div></div>
+    <div class="state-card"><h6>Already submitted</h6><div class="msg">Your request is in ✓</div><div class="body">Shows what they asked for, plus <b>Update my request</b> — reopens the form pre-filled; updating never creates a duplicate.</div></div>
+    <div class="state-card"><h6>Group added on update</h6><div class="msg">Willow Creek added</div><div class="body">The tenant sees a new organization card on the same request.</div></div>
+    <div class="state-card"><h6>Group removed on update</h6><div class="msg">Cedar Ridge removed</div><div class="body">"We'll let them know Cedar Ridge is sitting this season out." The tenant sees <em>Canceled by contact</em> — history kept.</div></div>
+    <div class="state-card"><h6>Invalid link</h6><div class="msg">This link isn't valid.</div><div class="body">"Contact My Freezer Chef for a new invitation."</div></div>
+    <div class="state-card"><h6>Submission error</h6><div class="msg">Something went wrong.</div><div class="body">"Your answers are still here — try again."</div></div>
+    <div class="state-card"><h6>Offline</h6><div class="msg">No connection.</div><div class="body">"Check your connection — your answers are saved on this page."</div></div>
+  </div>
+</section>
+
+<!-- ════════ 10. REQUEST CONFIRMATION ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>10 · Request confirmation</h2><span class="ref">main contact · post-submit</span></div>
+  <div class="frame phone">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">/rebook/••• — sent</span></div>
+    <div class="pub"><div class="pub-inner">
+      <h3>Request sent for 2 groups ✓</h3>
+      <div class="panel"><div class="panel-lab">Maple Grove Boosters</div><div class="kv-grid">
+        <div class="kv"><span class="k">Dates</span><span class="v">Oct 6 → Oct 24</span></div>
+        <div class="kv"><span class="k">Coordinator</span><span class="v" style="font-size:12.5px">You</span></div>
+      </div></div>
+      <div class="panel"><div class="panel-lab">Willow Creek Boosters</div><div class="kv-grid">
+        <div class="kv"><span class="k">Dates</span><span class="v">Oct 6 → Oct 24</span></div>
+        <div class="kv"><span class="k">Coordinator</span><span class="v" style="font-size:12.5px">Dana Whitcomb</span></div>
+      </div></div>
+      <div class="kv"><span class="k">Participants</span><span class="v">~45</span></div>
+      <button class="btn btn-ghost" style="width:100%">Update my request</button>
+      <p class="hint" style="text-align:center">What happens next: My Freezer Chef will confirm dates by email.<br><b>Nothing is booked until My Freezer Chef confirms your dates.</b></p>
+    </div></div>
+  </div>
+</section>
+
+<!-- ════════ 11. TENANT REVIEW REQUEST ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>11 · Review request</h2><span class="ref">bulk approval changes status only · campaigns created one at a time</span></div>
+  <div class="frame">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">Review request — Riley Marsh</span></div>
+    <div class="stage">
+      <div class="drawer">
+        <div class="drawer-head"><div><h4>Riley Marsh</h4><div class="sub">Fall 2026 Lineup · submitted Aug 1 · 2 groups requested</div></div><span class="st st-warn">Needs review</span></div>
+        <div class="drawer-body">
+          <div class="panel">
+            <div class="panel-lab">What she asked for</div>
+            <div class="kv-grid">
+              <div class="kv"><span class="k">Preferred</span><span class="v">Oct 6 → Oct 24</span></div>
+              <div class="kv"><span class="k">Alternate</span><span class="v">Oct 13</span></div>
+              <div class="kv"><span class="k">Participants</span><span class="v">~45</span></div>
+            </div>
+            <p class="quote" style="margin-top:9px">"Both counties want to run at the same time if you can manage it."</p>
+            <div class="mrow" style="align-items:center;margin-top:8px">
+              <div class="kv"><span class="k">Contact correction</span><span class="v" style="font-size:12.5px">Phone updated · ends 4144</span></div>
+              <div class="card-actions"><button class="btn btn-ghost btn-sm">Reject</button><button class="btn btn-primary btn-sm">Accept</button></div>
+            </div>
+          </div>
+
+          <div class="rev-card approved">
+            <div class="rev-card-head"><div><div class="org-name">Maple Grove Boosters</div><div class="sub">First fundraiser</div></div><span class="st st-ok">Approved</span></div>
+            <div class="rev-card-body">
+              <div class="card-actions"><span class="mini">Oct 6</span><span style="color:var(--faint)">→</span><span class="mini">Oct 24</span><span class="hint">as requested</span></div>
+              <div class="kv"><span class="k">Coordinator</span><span class="v" style="font-size:12.5px">Riley Marsh (she said yes)</span></div>
+              <div class="card-actions"><button class="btn btn-ghost btn-sm">Adjust dates</button><button class="btn btn-ghost btn-sm">Leave pending</button><button class="btn btn-ghost btn-sm">Not this season</button></div>
+            </div>
+          </div>
+
+          <div class="rev-card">
+            <div class="rev-card-head"><div><div class="org-name">Willow Creek Boosters</div><div class="sub">First fundraiser</div></div><span class="st st-warn">Pending</span></div>
+            <div class="rev-card-body">
+              <div class="card-actions"><span class="mini edited">Oct 20</span><span style="color:var(--faint)">→</span><span class="mini edited">Nov 7</span><span class="hint" style="color:var(--accent)">moved — delivery capacity</span></div>
+              <div class="kv"><span class="k">Coordinator</span><span class="v" style="font-size:12.5px">Dana Whitcomb <span class="multi-badge">new</span></span><span class="vs">She'll get her own link — Riley won't need to forward anything.</span></div>
+              <div class="card-actions"><button class="btn btn-primary btn-sm">Approve</button><button class="btn btn-ghost btn-sm">Assign coordinator</button><button class="btn btn-ghost btn-sm">Not this season</button></div>
+            </div>
+          </div>
+
+          <p class="hint">"Not this season" closes this request only — it won't unsubscribe Riley or affect future updates.</p>
+          <div class="mrow" style="align-items:center;border-top:1px solid var(--line);padding-top:12px">
+            <span class="hint">1 of 2 approved · Cedar Ridge wasn't requested and stays Ready to invite</span>
+            <button class="btn btn-primary">Approve selected</button>
+          </div>
+
+          <div class="panel">
+            <div class="panel-lab">Create each fundraiser</div>
+            <div class="seq"><span class="n done">✓</span><span><b style="color:var(--ink)">Maple Grove Boosters</b> — created · Send bundle selection</span></div>
+            <div class="seq" style="margin-top:8px"><span class="n now">2</span><span><b style="color:var(--ink)">Willow Creek Boosters</b> — approved · waiting</span></div>
+            <div class="mrow" style="align-items:center;margin-top:10px">
+              <span class="hint">Each opens the fundraiser wizard prefilled for that group.</span>
+              <button class="btn btn-primary btn-sm">Create next fundraiser</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════ 12. WIZARD TRANSITION ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>12 · Create Fundraiser — wizard prefill</h2><span class="ref">existing modal · nothing re-entered · no tokens copied</span></div>
+  <div class="frame">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">Start a Fundraiser — Step 2 (prefilled)</span></div>
+    <div class="stage">
+      <div class="drawer">
+        <div class="drawer-head"><h4>Willow Creek Boosters — Fall 2026</h4><span class="hint">Organization confirmed · Step 1 skipped</span></div>
+        <div class="drawer-body">
+          <div class="strip quiet"><div class="s-sub">From Riley's request: "Both counties want to run at the same time if you can manage it."</div></div>
+          <div class="two">
+            <div class="field"><label>Campaign name</label><div class="input">Willow Creek Boosters Fall 2026 Fundraiser</div></div>
+            <div class="field"><label>End date</label><div class="input">Nov 7, 2026</div></div>
+          </div>
+          <fieldset><legend>Bundle pool · from Fall 2026 Lineup · coordinator picks 2</legend>
+            <div class="fam-grid">
+              <div class="fam sel"><div class="art" style="background:var(--warn-wash)">🥘</div><div class="nm">Hearty Meals</div></div>
+              <div class="fam sel"><div class="art" style="background:var(--ok-wash)">🍲</div><div class="nm">Soups &amp; Casseroles</div></div>
+              <div class="fam sel"><div class="art" style="background:var(--info-wash)">🍝</div><div class="nm">Family Pasta</div></div>
+              <div class="fam sel"><div class="art" style="background:var(--accent-wash)">🥧</div><div class="nm">Comfort Classics</div></div>
+            </div>
+          </fieldset>
+          <div class="field"><label>Bundle goal</label><div class="input">20</div></div>
+          <div class="mrow" style="align-items:center"><button class="btn btn-ghost">Back</button><button class="btn btn-primary">Create fundraiser</button></div>
+        </div>
+      </div>
+      <div class="strip"><div><div class="s-main">Created ✓ · Willow Creek Boosters</div><div class="s-sub">Coordinator: Dana Whitcomb</div></div><button class="btn btn-primary btn-sm">Send bundle selection</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════ 13. COORDINATOR ASSIGNMENT ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>13 · Coordinator assignment</h2><span class="ref">one question · five answers</span></div>
+  <div class="frame" style="max-width:560px">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">Assign coordinator — Cass County Community Club</span></div>
+    <div class="stage">
+      <fieldset><legend>Who runs this fundraiser day to day?</legend>
+        <div class="radio-row" tabindex="0"><span class="rdot"></span> Sam Rivera — the person who replied</div>
+        <div class="radio-row" tabindex="0"><span class="rdot"></span> Contact on file</div>
+        <div class="radio-row" tabindex="0"><span class="rdot"></span> Another existing contact…</div>
+        <div class="radio-row" tabindex="0"><span class="rdot"></span> Someone else (name + email)</div>
+        <div class="radio-row sel" tabindex="0"><span class="rdot"></span> Not decided yet</div>
+      </fieldset>
+      <div class="strip warnline"><div><div class="s-main">Needs a coordinator</div><div class="s-sub">Dates can be approved and the fundraiser prepared — the setup link is held until someone is named. No invitation is sent.</div></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════ 14. CAMPAIGN-CONTACT PANEL ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>14 · Campaign contacts</h2><span class="ref">post-creation · no permission matrix</span></div>
+  <div class="frame" style="max-width:640px">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">Willow Creek Boosters — People</span></div>
+    <div class="stage">
+      <div class="rev-card">
+        <div class="rev-card-head"><div><div class="org-name">Dana Whitcomb</div><div class="sub">Coordinator · Invited Tue — not opened yet</div></div><span class="st st-info">Invited</span></div>
+        <div class="rev-card-body"><div class="card-actions">
+          <button class="btn btn-ghost btn-sm">Resend invitation</button>
+          <button class="btn btn-ghost btn-sm">Replace</button>
+          <button class="btn btn-danger btn-sm">Remove access</button>
+        </div>
+        <p class="hint">Removing or replacing stops their link immediately. Bundle picks and orders stay with the campaign.</p></div>
+      </div>
+      <details class="adv"><summary>Add another person</summary>
+        <div class="adv-body">
+          <div class="rev-card"><div class="rev-card-body">
+            <div class="org-name" style="font-size:13.5px">Co-coordinator</div>
+            <p class="hint">Helps run this fundraiser, with the access you choose:</p>
+            <div class="recip"><span class="box off"></span><span class="recip-main"><span class="recip-name" style="font-weight:700">Can see supporter contact info</span></span></div>
+            <div class="recip"><span class="box off"></span><span class="recip-main"><span class="recip-name" style="font-weight:700">Gets new-order emails</span></span></div>
+            <div class="recip"><span class="box off"></span><span class="recip-main"><span class="recip-name" style="font-weight:700">Can pick bundles</span></span></div>
+          </div></div>
+          <div class="rev-card"><div class="rev-card-body">
+            <div class="org-name" style="font-size:13.5px">Progress updates only</div>
+            <p class="hint">They receive totals and milestones by email — never supporter names or contact information. No portal link.</p>
+          </div></div>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ════════ 15. COORDINATOR INVITATION ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>15 · Coordinator invitation email</h2><span class="ref">organization-specific · personal link</span></div>
+  <div class="frame" style="max-width:640px">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">Email — to Dana</span></div>
+    <div class="mail" style="border:none;border-radius:0">
+      <div class="mail-head">
+        <div class="mail-line"><b>From</b> My Freezer Chef via FreezerIQ</div>
+        <div class="mail-line"><b>Subject</b> You're coordinating the Willow Creek Boosters fundraiser</div>
+      </div>
+      <div class="mail-body">
+        <div class="mail-brand"><span class="mail-mark">MF</span> My Freezer Chef</div>
+        <p class="mail-p">Hi Dana — My Freezer Chef set up the Fall 2026 fundraiser for <b>Willow Creek Boosters</b>, and you're the coordinator.</p>
+        <p class="mail-p"><b>What happens next:</b><br>1 · Pick your fundraiser bundles<br>2 · Share your group's order page<br>3 · Track orders as they come in</p>
+        <button class="btn btn-primary" style="align-self:flex-start">Open Fundraiser Portal</button>
+        <p class="mail-p" style="font-size:12.5px;color:var(--muted)">No password needed — this link is yours. It works through Dec 7, 2026.<br>Use this personal link going forward. Older shared links may remain available temporarily while we complete the transition.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════ 16. ACCEPTANCE INTERSTITIAL ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>16 · Continue as Coordinator</h2><span class="ref">opening the link records nothing</span></div>
+  <div class="frame phone">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">/coordinator/•••</span></div>
+    <div class="pub"><div class="pub-inner" style="text-align:center;gap:12px">
+      <div class="eyebrow">My Freezer Chef · Fall 2026</div>
+      <h3>Willow Creek Boosters fundraiser</h3>
+      <p class="hint" style="font-size:13px">You've been named coordinator for this fundraiser.</p>
+      <button class="btn btn-primary" style="width:100%;padding:14px">Continue as Coordinator</button>
+      <p class="hint">This confirms you're coordinating this fundraiser.</p>
+    </div></div>
+  </div>
+  <p class="sec-note">Email scanners and previews open links automatically — so a GET records nothing. Only this deliberate button confirms the assignment, then the existing coordinator portal opens.</p>
+</section>
+
+<!-- ════════ 17. COORDINATOR ENTRY STATES ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>17 · Coordinator entry states</h2><span class="ref">no credential language anywhere</span></div>
+  <div class="state-grid">
+    <div class="state-card"><h6>Valid, not yet accepted</h6><div class="msg">Continue as Coordinator</div><div class="body">The interstitial above.</div></div>
+    <div class="state-card"><h6>Active</h6><div class="msg">Straight to the portal</div><div class="body">No interstitial after first acceptance.</div></div>
+    <div class="state-card"><h6>Expired</h6><div class="msg">This link has expired.</div><div class="body">"Ask My Freezer Chef to resend it."</div></div>
+    <div class="state-card"><h6>Removed</h6><div class="msg">Your access was removed.</div><div class="body">"Contact My Freezer Chef with questions."</div></div>
+    <div class="state-card"><h6>Replaced</h6><div class="msg">This fundraiser has a different coordinator now.</div><div class="body">Shown to the previous coordinator's link.</div></div>
+    <div class="state-card"><h6>Legacy shared link</h6><div class="msg">Works normally</div><div class="body">No banner, no warning — the transition is invisible to coordinators.</div></div>
+    <div class="state-card"><h6>System error</h6><div class="msg">Something went wrong on our end.</div><div class="body">"Try again in a minute."</div></div>
+  </div>
+</section>
+
+<!-- ════════ STATE INVENTORY ════════ -->
+<section class="section">
+  <div class="sec-head"><h2>Visible-state inventory</h2><span class="ref">everything a user can ever see</span></div>
+  <div class="notes">
+    <div class="note"><h5>Navigation chips (5)</h5><p>All · Ready to invite · Waiting · Needs action · Done</p></div>
+    <div class="note"><h5>Row statuses (10)</h5><p>Ready to invite · Update sent · Interested · Needs review · Needs a coordinator · Ready to create · Rebooked · Can't email — [reason] · Paused until [date] · Archived</p></div>
+    <div class="note"><h5>Exclusion reasons (6)</h5><p>Unsubscribed · Shared address unsubscribed · Paused until [date] · Not interested until [date] · Invalid email · No email</p></div>
+    <div class="note"><h5>Invitation states (5)</h5><p>Not sent · Invited · Active · Expired · Removed</p></div>
+    <div class="note okline"><h5>Hidden by design</h5><p>Batches, executions, messages, delivery attempts, provider events, normalized emails, preference scopes, contact points, token hashes, access grants, supersession, revisions, deduplication keys — none of these words appear on any surface above.</p></div>
+  </div>
+</section>
+
+<p class="foot">FR-RETENTION visual prototype · built to the 1A.6 specification · all organizations, people, email addresses, and dollar amounts are fictional illustrative sample data. Nothing here is application code.</p>
+
+</div>
+
+<script>
+function edShowAll() {
+  var f = document.getElementById('empty-demo');
+  f.querySelector('.ed-empty').style.display = 'none';
+  f.querySelector('.ed-all-list').classList.remove('hiddenpane');
+  f.querySelector('.ed-needs').setAttribute('aria-pressed', 'false');
+  f.querySelector('.ed-all').setAttribute('aria-pressed', 'true');
+}
+</script>
