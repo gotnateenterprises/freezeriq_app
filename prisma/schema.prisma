@@ -46,6 +46,11 @@ model Business {
   users                  User[]
   // FR-RETENTION-1B-1
   fundraiser_contacts    FundraiserContact[] @relation("BusinessFundraiserContacts")
+  // FR-RETENTION-2
+  seasonal_offerings     SeasonalOffering[]      @relation("BusinessSeasonalOfferings")
+  outreach_batches       OutreachBatch[]         @relation("BusinessOutreachBatches")
+  marketing_preferences  MarketingPreference[]   @relation("BusinessMarketingPreferences")
+  suppression_events     EmailSuppressionEvent[] @relation("BusinessSuppressionEvents")
 
   @@map("businesses")
 }
@@ -310,6 +315,8 @@ model Customer {
   orders           Order[]
   // FR-RETENTION-1: durable person↔organization relationship history.
   org_contacts     FundraiserOrganizationContact[] @relation("OrgRelationship")
+  // FR-RETENTION-2: organizations an audience address represented.
+  outreach_orgs    OutreachRecipientOrg[]          @relation("OrgOutreachLinks")
 
   // FR-RETENTION-1: composite parent key so tenant-scoped children can reference
   // (business_id, customer_id) and have Postgres enforce same-tenant ownership.
@@ -868,6 +875,9 @@ model FundraiserContact {
   business         Business  @relation("BusinessFundraiserContacts", fields: [business_id], references: [id], onDelete: Cascade)
   contact_points   FundraiserContactPoint[]        @relation("ContactPoints")
   org_contacts     FundraiserOrganizationContact[] @relation("ContactRelationships")
+  // FR-RETENTION-2
+  outreach_links   OutreachRecipientContact[]      @relation("ContactOutreachLinks")
+  marketing_prefs  MarketingPreference[]           @relation("ContactMarketingPreferences")
 
   @@unique([business_id, id])
   @@index([business_id, archived_at])
@@ -968,4 +978,280 @@ enum RelationshipEndReason {
   replaced
   left
   tenant_ended
+}
+
+
+// ── FR-RETENTION-2 · Seasonal Lineup and audience ───────────────────────────
+// Appended at end-of-file so the parked PasswordResetToken hunk above is never
+// touched. Tenant naming note: the model is SeasonalOffering, but ordinary
+// tenant UI must always say "Seasonal Lineup".
+//
+// AUDIENCE MODEL — the important distinction:
+//   CRM identity  : one FundraiserContact per durable PERSON. Never merged.
+//   Audience      : one OutreachRecipient per DELIVERY ADDRESS.
+// Two people sharing an inbox stay two contacts and become one recipient, with
+// OutreachRecipientContact / OutreachRecipientOrg recording everyone the single
+// email represents. Sharing an address never rewrites durable identity.
+
+model SeasonalOffering {
+  id                       String    @id @default(uuid())
+  business_id              String
+  name                     String
+  starts_at                DateTime
+  ends_at                  DateTime
+  status                   SeasonalOfferingStatus @default(draft)
+  coordinator_bundle_limit Int       @default(2)
+  // "Advanced" fields from the approved prototype. Optional throughout.
+  subject_override         String?
+  sales_letter             String?
+  internal_notes           String?
+  // Nullable plain column, following the FundraiserCampaign.closed_by
+  // precedent — deliberately not an FK so removing a user cannot block or
+  // cascade into lineup history.
+  created_by_user_id       String?
+  created_at               DateTime  @default(now())
+  updated_at               DateTime  @updatedAt
+  archived_at              DateTime?
+
+  business                 Business  @relation("BusinessSeasonalOfferings", fields: [business_id], references: [id], onDelete: Cascade)
+  families                 SeasonalOfferingFamily[] @relation("OfferingFamilies")
+  outreach_batches         OutreachBatch[]          @relation("OfferingBatches")
+
+  @@unique([business_id, id])
+  @@index([business_id, status])
+  @@map("seasonal_offerings")
+}
+
+// One selected bundle FAMILY on a lineup — family identity, never a raw SKU.
+// family_id intentionally has NO foreign key: bundles.family_id is shared by
+// the Serves-5 and Serves-2 siblings, so it is not unique in `bundles` and
+// cannot be referenced. Eligibility is validated on write through the CB-4
+// resolver (lib/campaignBundleSelection.resolveEligibleBundleFamilies).
+model SeasonalOfferingFamily {
+  id                   String   @id @default(uuid())
+  business_id          String
+  seasonal_offering_id String
+  family_id            String
+  position             Int      @default(0)
+  created_at           DateTime @default(now())
+
+  offering             SeasonalOffering @relation("OfferingFamilies", fields: [business_id, seasonal_offering_id], references: [business_id, id], onDelete: Cascade)
+
+  @@unique([seasonal_offering_id, family_id])
+  @@index([business_id, family_id])
+  @@map("seasonal_offering_families")
+}
+
+// One audience workflow for one lineup. In Checkpoint 2 this is an audience
+// SNAPSHOT only — nothing here asserts that a message was ever sent.
+model OutreachBatch {
+  id                    String    @id @default(uuid())
+  business_id           String
+  seasonal_offering_id  String
+  status                OutreachBatchStatus @default(draft)
+  audience_calculated_at DateTime?
+  recipient_count       Int       @default(0)
+  included_count        Int       @default(0)
+  excluded_count        Int       @default(0)
+  needs_review_count    Int       @default(0)
+  created_by_user_id    String?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  business              Business  @relation("BusinessOutreachBatches", fields: [business_id], references: [id], onDelete: Cascade)
+  offering              SeasonalOffering @relation("OfferingBatches", fields: [business_id, seasonal_offering_id], references: [business_id, id], onDelete: Restrict)
+  recipients            OutreachRecipient[] @relation("BatchRecipients")
+
+  // One audience per lineup — the double-click guarantee, enforced by the
+  // database rather than trusted to the caller.
+  @@unique([seasonal_offering_id])
+  @@unique([business_id, id])
+  @@index([business_id, status])
+  @@map("outreach_batches")
+}
+
+// One DELIVERY ADDRESS in one audience. Snapshot-bearing: the display fields
+// are frozen at calculation time so a later contact edit cannot silently
+// rewrite an audience the tenant already reviewed.
+model OutreachRecipient {
+  id                        String   @id @default(uuid())
+  business_id               String
+  outreach_batch_id         String
+  // Internal only. Never returned to tenant UI and never used as a
+  // tenant-visible identifier.
+  normalized_email          String?
+  display_name              String
+  email_masked              String?
+  is_shared_inbox           Boolean  @default(false)
+  represented_contact_count Int      @default(1)
+  represented_org_count     Int      @default(0)
+  represented_org_names     String[] @default([])
+  eligibility               RecipientEligibility
+  exclusion_reason          RecipientExclusionReason?
+  exclusion_detail          String?
+  excluded_until            DateTime?
+  // Tenant may deselect an otherwise-included address before continuing.
+  is_selected               Boolean  @default(true)
+  snapshot_at               DateTime @default(now())
+  created_at                DateTime @default(now())
+  updated_at                DateTime @updatedAt
+
+  batch                     OutreachBatch @relation("BatchRecipients", fields: [business_id, outreach_batch_id], references: [business_id, id], onDelete: Cascade)
+  contacts                  OutreachRecipientContact[] @relation("RecipientContacts")
+  orgs                      OutreachRecipientOrg[]     @relation("RecipientOrgs")
+
+  // NOTE: the deduplication guarantee — one deliverable row per normalized
+  // address per audience — is a PARTIAL unique index created in raw SQL
+  // (outreach_recipients_batch_one_email, WHERE normalized_email IS NOT NULL).
+  // It is partial so that several "no email" recipients may coexist, which a
+  // Prisma @@unique cannot express.
+  @@unique([business_id, id])
+  @@index([business_id, outreach_batch_id, eligibility])
+  @@map("outreach_recipients")
+}
+
+// Every durable person this one address reaches. Restrict: an address that
+// carries audience history must not be able to erase the contact behind it.
+model OutreachRecipientContact {
+  id                    String   @id @default(uuid())
+  business_id           String
+  outreach_recipient_id String
+  contact_id            String
+  contact_display_name  String
+  created_at            DateTime @default(now())
+
+  recipient             OutreachRecipient @relation("RecipientContacts", fields: [business_id, outreach_recipient_id], references: [business_id, id], onDelete: Cascade)
+  contact               FundraiserContact @relation("ContactOutreachLinks", fields: [business_id, contact_id], references: [business_id, id], onDelete: Restrict)
+
+  @@unique([outreach_recipient_id, contact_id])
+  @@index([business_id, contact_id])
+  @@map("outreach_recipient_contacts")
+}
+
+// Every organization this one address represents.
+model OutreachRecipientOrg {
+  id                    String   @id @default(uuid())
+  business_id           String
+  outreach_recipient_id String
+  customer_id           String
+  organization_name     String
+  created_at            DateTime @default(now())
+
+  recipient             OutreachRecipient @relation("RecipientOrgs", fields: [business_id, outreach_recipient_id], references: [business_id, id], onDelete: Cascade)
+  customer              Customer          @relation("OrgOutreachLinks", fields: [business_id, customer_id], references: [business_id, id], onDelete: Restrict)
+
+  @@unique([outreach_recipient_id, customer_id])
+  @@index([business_id, customer_id])
+  @@map("outreach_recipient_orgs")
+}
+
+// Marketing preference. Two scopes, per the approved rule:
+//   contact       — belongs to the PERSON and survives an email change.
+//   email_address — belongs to the ADDRESS; suppresses everyone using it.
+// Unsubscribing never deletes contact history, and never affects
+// transactional or operational mail.
+model MarketingPreference {
+  id                 String   @id @default(uuid())
+  business_id        String
+  scope              MarketingPreferenceScope
+  contact_id         String?
+  normalized_email   String?
+  status             MarketingPreferenceStatus
+  reason             String?
+  effective_at       DateTime @default(now())
+  // Used by paused / not_interested statuses.
+  effective_until    DateTime?
+  source             PreferenceSource @default(tenant)
+  // Required by policy when re-subscribing. Free text, written by the tenant.
+  permission_note    String?
+  recorded_by_user_id String?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  business           Business @relation("BusinessMarketingPreferences", fields: [business_id], references: [id], onDelete: Cascade)
+  contact            FundraiserContact? @relation("ContactMarketingPreferences", fields: [business_id, contact_id], references: [business_id, id], onDelete: Cascade)
+
+  @@index([business_id, normalized_email])
+  @@index([business_id, contact_id])
+  @@map("marketing_preferences")
+}
+
+// Append-only suppression history. Rows are never updated or deleted, so the
+// reason a person or address was suppressed stays auditable forever.
+model EmailSuppressionEvent {
+  id                  String   @id @default(uuid())
+  business_id         String
+  event_type          SuppressionEventType
+  contact_id          String?
+  normalized_email    String?
+  reason              String?
+  effective_until     DateTime?
+  source              PreferenceSource @default(tenant)
+  permission_note     String?
+  recorded_by_user_id String?
+  created_at          DateTime @default(now())
+
+  business            Business @relation("BusinessSuppressionEvents", fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id, normalized_email])
+  @@index([business_id, contact_id])
+  @@index([business_id, created_at])
+  @@map("email_suppression_events")
+}
+
+enum SeasonalOfferingStatus {
+  draft
+  ready
+  in_use
+  archived
+}
+
+enum OutreachBatchStatus {
+  draft
+  audience_ready
+}
+
+enum RecipientEligibility {
+  included
+  excluded
+  needs_review
+}
+
+enum RecipientExclusionReason {
+  unsubscribed
+  shared_address_unsubscribed
+  paused_until
+  not_interested_until
+  invalid_email
+  no_email
+  needs_review
+}
+
+enum MarketingPreferenceScope {
+  contact
+  email_address
+}
+
+enum MarketingPreferenceStatus {
+  subscribed
+  unsubscribed
+  paused
+  not_interested
+}
+
+enum PreferenceSource {
+  tenant
+  contact_request
+  system
+  import
+}
+
+enum SuppressionEventType {
+  unsubscribe
+  resubscribe
+  invalid_address
+  hard_bounce
+  shared_address_suppression
+  tenant_pause
+  not_interested_until
 }

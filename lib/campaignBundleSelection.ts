@@ -396,6 +396,75 @@ export function dateToIso(value: Date | null | undefined): string | null {
   return value.toISOString();
 }
 
+// ── CB-4 eligible bundle families (shared resolver) ──────────────────────────
+
+export interface EligibleFamilyVariant {
+  id: string;
+  name: string;
+  sku: string | null;
+  price: number | null;
+}
+
+export interface EligibleBundleFamily {
+  familyId: string;
+  serves5: EligibleFamilyVariant;
+  serves2: EligibleFamilyVariant;
+}
+
+/**
+ * The single source of truth for "which bundle families may a coordinator be
+ * offered". A family is eligible when the tenant has exactly one active
+ * canonical Serves-5 variant and exactly one active canonical Serves-2 sibling.
+ *
+ * Pairing uses family_id + normalized serving tier ONLY — no SKU or name
+ * matching. Malformed families (missing sibling, ambiguous duplicates) are
+ * silently excluded rather than guessed at.
+ *
+ * Extracted from /api/campaigns/bundle-families so the Seasonal Lineup can
+ * validate family selections against exactly the same rule the coordinator
+ * wizard uses. Both callers share this implementation; neither reimplements it.
+ */
+export async function resolveEligibleBundleFamilies(
+  businessId: string,
+): Promise<EligibleBundleFamily[]> {
+  const allBundles = await prisma.bundle.findMany({
+    where: { business_id: businessId, is_active: true, family_id: { not: null } },
+    select: { id: true, name: true, sku: true, price: true, serving_tier: true, family_id: true },
+  });
+
+  const familyMap = new Map<
+    string,
+    { s5: typeof allBundles[number] | null; s5Count: number; s2: typeof allBundles[number] | null; s2Count: number }
+  >();
+
+  for (const b of allBundles) {
+    if (!b.family_id) continue;
+    const entry = familyMap.get(b.family_id) ?? { s5: null, s5Count: 0, s2: null, s2Count: 0 };
+    if (isCanonicalFamilyTier(b.serving_tier)) {
+      entry.s5 = b;
+      entry.s5Count += 1;
+    } else if (isCanonicalServes2Tier(b.serving_tier)) {
+      entry.s2 = b;
+      entry.s2Count += 1;
+    }
+    familyMap.set(b.family_id, entry);
+  }
+
+  const families: EligibleBundleFamily[] = [];
+  for (const [familyId, entry] of familyMap) {
+    if (entry.s5Count === 1 && entry.s2Count === 1 && entry.s5 !== null && entry.s2 !== null) {
+      families.push({
+        familyId,
+        serves5: { id: entry.s5.id, name: entry.s5.name, sku: entry.s5.sku, price: decimalToNumber(entry.s5.price) },
+        serves2: { id: entry.s2.id, name: entry.s2.name, sku: entry.s2.sku, price: decimalToNumber(entry.s2.price) },
+      });
+    }
+  }
+
+  families.sort((a, b) => a.serves5.name.localeCompare(b.serves5.name));
+  return families;
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 function bundleToVariantInfo(b: {

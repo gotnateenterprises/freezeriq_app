@@ -11,12 +11,14 @@
  *  · one row per durable PERSON; people sharing an address stay separate rows
  *  · no scheduling / automatic-send control exists anywhere on this surface
  *  · "Send Seasonal Update" opens a UI-only Seasonal Lineup shell — it sends no
- *    email, calls no API, and persists nothing. See SeasonalLineupDrawer.
+ *    email and issues no token. It saves a real Seasonal Lineup, then opens the
+ *    audience review. See SeasonalLineupDrawer / AudienceReviewDrawer.
  */
 
 import { useEffect, useState } from 'react';
 import { Users, AlertCircle, Loader2, Send } from 'lucide-react';
-import { SeasonalLineupDrawer, type LineupDraft } from './SeasonalLineupDrawer';
+import { SeasonalLineupDrawer, type SavedLineup } from './SeasonalLineupDrawer';
+import { AudienceReviewDrawer } from './AudienceReviewDrawer';
 
 type Filter = 'all' | 'ready_to_invite' | 'waiting' | 'needs_action' | 'done';
 
@@ -69,7 +71,25 @@ export function RebookingTab() {
     const [error, setError] = useState<string | null>(null);
     // Seasonal Lineup shell state. Local only — never fetched, never persisted.
     const [lineupOpen, setLineupOpen] = useState(false);
-    const [lineupDraft, setLineupDraft] = useState<LineupDraft | null>(null);
+    const [audienceOpen, setAudienceOpen] = useState(false);
+    const [savedLineup, setSavedLineup] = useState<SavedLineup | null>(null);
+    const [audienceSaved, setAudienceSaved] = useState(false);
+
+    // Reload the most recent saved lineup so the tenant can come back to it
+    // after a refresh instead of starting over.
+    useEffect(() => {
+        let alive = true;
+        fetch('/api/rebooking/seasonal-lineups', { cache: 'no-store' })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+                if (!alive || !data?.lineups?.length) return;
+                const latest: SavedLineup = data.lineups[0];
+                setSavedLineup(latest);
+                setAudienceSaved(Boolean(latest.hasAudience));
+            })
+            .catch(() => { /* the dashboard still works without a saved lineup */ });
+        return () => { alive = false; };
+    }, []);
 
     useEffect(() => {
         let alive = true;
@@ -138,15 +158,23 @@ export function RebookingTab() {
 
                 <div className="flex flex-col items-stretch lg:items-end gap-1.5 flex-none">
                     <button
-                        onClick={() => setLineupOpen(true)}
+                        onClick={() => {
+                            // Once a lineup has a reviewed audience it can no longer be
+                            // edited, so go straight back to the audience rather than
+                            // opening an editor that would only refuse.
+                            if (savedLineup?.hasAudience || audienceSaved) setAudienceOpen(true);
+                            else setLineupOpen(true);
+                        }}
                         className="inline-flex items-center justify-center gap-2 px-5 min-h-[44px] rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700 transition-colors"
                     >
                         <Send size={15} /> Send Seasonal Update
                     </button>
                     <span className="text-[11px] font-bold text-slate-400 lg:text-right">
-                        {lineupDraft
-                            ? `Draft lineup: ${lineupDraft.name} · coordinators choose ${lineupDraft.coordinatorPicks}`
-                            : 'No updates sent yet.'}
+                        {audienceSaved && savedLineup
+                            ? `${savedLineup.name} · audience ready to preview`
+                            : savedLineup
+                                ? `Saved lineup: ${savedLineup.name} · coordinators choose ${savedLineup.coordinatorBundleLimit}`
+                                : 'No updates sent yet.'}
                     </span>
                 </div>
             </div>
@@ -295,13 +323,27 @@ export function RebookingTab() {
                 </div>
             )}
 
-            {/* UI-only shell. onSave updates local preview state and closes; it
-                does not send, call an API, or persist anything. */}
+            {/* Step 1 — the lineup itself. Saving persists it, then hands off
+                to the audience review. Neither step sends email. */}
             <SeasonalLineupDrawer
                 open={lineupOpen}
-                initial={lineupDraft}
+                initial={savedLineup}
                 onCancel={() => setLineupOpen(false)}
-                onSave={(draft) => { setLineupDraft(draft); setLineupOpen(false); }}
+                onSaved={(lineup) => {
+                    setSavedLineup(lineup);
+                    setAudienceSaved(false);
+                    setLineupOpen(false);
+                    setAudienceOpen(true);
+                }}
+            />
+
+            {/* Step 2 — who gets this update. */}
+            <AudienceReviewDrawer
+                open={audienceOpen}
+                lineupId={savedLineup?.id ?? null}
+                lineupName={savedLineup?.name ?? ''}
+                onClose={() => setAudienceOpen(false)}
+                onFinalized={() => { setAudienceSaved(true); setAudienceOpen(false); }}
             />
         </div>
     );

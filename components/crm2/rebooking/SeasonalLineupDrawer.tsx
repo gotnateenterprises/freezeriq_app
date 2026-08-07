@@ -1,59 +1,147 @@
 "use client";
 
 /**
- * FR-RETENTION-1B-1 — Seasonal Lineup shell.
+ * FR-RETENTION-2 — Seasonal Lineup.
  * Visual source of truth: docs/ai/prototypes/fr_retention_prototype.html (Screen 3).
  *
- * SCOPE — READ BEFORE EXTENDING:
- * This is a UI-only shell. It exists to establish the shape of the seasonal
- * flow so the next checkpoints have somewhere to land. Deliberately, it:
+ * Now backed by real persistence. The bundle families offered here are the
+ * tenant's OWN eligible families, resolved by the CB-4 resolver — never
+ * invented placeholders. Saving writes a real lineup the tenant can reopen.
+ *
+ * Still true, and deliberately so:
  *   · sends no email
- *   · calls no API and issues no network request of any kind
- *   · writes nothing to the database and persists nothing anywhere
- *   · holds every value in local component state, discarded on unmount
- *   · never claims an update was sent
- *
- * There is also NO scheduling and NO automatic-send control — not disabled,
- * not greyed out, not "coming soon". Per the approved ruling, the control
- * appears when the feature exists. Nothing here should be read as a promise
- * that a send happened.
- *
- * The bundle area is intentionally an empty placeholder rather than a grid of
- * invented bundle families: showing fabricated tenant data would be worse than
- * showing the shape and letting real selection arrive with the API.
+ *   · issues no rebooking or coordinator token
+ *   · has NO scheduling and NO automatic-send control anywhere — not disabled,
+ *     not greyed out, not "coming soon". The control appears when the feature
+ *     does.
  */
 
-import { useState } from 'react';
-import { X, Minus, Plus, CalendarRange } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, Minus, Plus, CalendarRange, Loader2, AlertCircle } from 'lucide-react';
 
-/** What the shell hands back to the parent for local preview only. */
-export interface LineupDraft {
+export interface EligibleFamily {
+    familyId: string;
+    serves5: { name: string; sku: string | null };
+    serves2: { name: string; sku: string | null };
+}
+
+export interface SavedLineup {
+    id: string;
     name: string;
-    startsOn: string;
-    endsOn: string;
-    coordinatorPicks: number;
+    startsAt: string;
+    endsAt: string;
+    coordinatorBundleLimit: number;
+    familyIds: string[];
+    subjectOverride: string | null;
+    salesLetter: string | null;
+    internalNotes: string | null;
+    hasAudience: boolean;
 }
 
 interface Props {
     open: boolean;
-    initial: LineupDraft | null;
+    /** Existing lineup being reopened, or null to start a new one. */
+    initial: SavedLineup | null;
     onCancel: () => void;
-    /** Parent stores this in local state only. Nothing leaves the browser. */
-    onSave: (draft: LineupDraft) => void;
+    /** Called after the lineup is persisted. */
+    onSaved: (lineup: SavedLineup) => void;
 }
 
 const MIN_PICKS = 1;
-const MAX_PICKS = 6;
 
-export function SeasonalLineupDrawer({ open, initial, onCancel, onSave }: Props) {
-    const [name, setName] = useState(initial?.name ?? '');
-    const [startsOn, setStartsOn] = useState(initial?.startsOn ?? '');
-    const [endsOn, setEndsOn] = useState(initial?.endsOn ?? '');
-    const [coordinatorPicks, setCoordinatorPicks] = useState(initial?.coordinatorPicks ?? 2);
+/** yyyy-mm-dd for a date input, from an ISO timestamp. */
+function toDateInput(iso: string | null | undefined): string {
+    if (!iso) return '';
+    return new Date(iso).toISOString().slice(0, 10);
+}
+
+export function SeasonalLineupDrawer({ open, initial, onCancel, onSaved }: Props) {
+    const [name, setName] = useState('');
+    const [startsOn, setStartsOn] = useState('');
+    const [endsOn, setEndsOn] = useState('');
+    const [coordinatorPicks, setCoordinatorPicks] = useState(2);
+    const [selectedFamilies, setSelectedFamilies] = useState<string[]>([]);
+    const [subjectOverride, setSubjectOverride] = useState('');
+    const [salesLetter, setSalesLetter] = useState('');
+    const [internalNotes, setInternalNotes] = useState('');
+
+    const [families, setFamilies] = useState<EligibleFamily[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [errors, setErrors] = useState<string[]>([]);
+
+    // Load the tenant's real eligible families, and hydrate a reopened lineup.
+    useEffect(() => {
+        if (!open) return;
+        let alive = true;
+        setLoading(true);
+        setErrors([]);
+        fetch('/api/rebooking/seasonal-lineups', { cache: 'no-store' })
+            .then(async (res) => {
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to load');
+                return data;
+            })
+            .then((data) => {
+                if (!alive) return;
+                setFamilies(data.eligibleFamilies || []);
+                setName(initial?.name ?? '');
+                setStartsOn(toDateInput(initial?.startsAt));
+                setEndsOn(toDateInput(initial?.endsAt));
+                setCoordinatorPicks(initial?.coordinatorBundleLimit ?? 2);
+                setSelectedFamilies(initial?.familyIds ?? []);
+                setSubjectOverride(initial?.subjectOverride ?? '');
+                setSalesLetter(initial?.salesLetter ?? '');
+                setInternalNotes(initial?.internalNotes ?? '');
+                setLoading(false);
+            })
+            .catch((e) => { if (alive) { setErrors([e.message]); setLoading(false); } });
+        return () => { alive = false; };
+    }, [open, initial]);
 
     if (!open) return null;
 
-    const canSave = name.trim().length > 0;
+    const maxPicks = Math.max(MIN_PICKS, selectedFamilies.length);
+    const canSave = name.trim().length > 0 && selectedFamilies.length > 0 && !saving;
+
+    const toggleFamily = (familyId: string) => {
+        setSelectedFamilies((prev) =>
+            prev.includes(familyId) ? prev.filter((f) => f !== familyId) : [...prev, familyId],
+        );
+    };
+
+    const handleSave = async () => {
+        setSaving(true);
+        setErrors([]);
+        try {
+            const res = await fetch('/api/rebooking/seasonal-lineups', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: initial?.id,
+                    name,
+                    startsAt: startsOn,
+                    endsAt: endsOn,
+                    familyIds: selectedFamilies,
+                    coordinatorBundleLimit: coordinatorPicks,
+                    subjectOverride: subjectOverride || null,
+                    salesLetter: salesLetter || null,
+                    internalNotes: internalNotes || null,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                setErrors(data.errors || [data.error || 'Could not save this lineup.']);
+                setSaving(false);
+                return;
+            }
+            setSaving(false);
+            onSaved(data.lineup);
+        } catch {
+            setErrors(['Could not save this lineup. Please try again.']);
+            setSaving(false);
+        }
+    };
 
     return (
         <div
@@ -64,7 +152,6 @@ export function SeasonalLineupDrawer({ open, initial, onCancel, onSave }: Props)
         >
             <div className="bg-white dark:bg-slate-900 w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl border border-slate-200 dark:border-slate-700 shadow-xl max-h-[92vh] flex flex-col">
 
-                {/* Head */}
                 <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100 dark:border-slate-700">
                     <div className="min-w-0">
                         <h4 id="seasonal-lineup-title" className="font-black text-slate-900 dark:text-white">Seasonal Lineup</h4>
@@ -79,8 +166,17 @@ export function SeasonalLineupDrawer({ open, initial, onCancel, onSave }: Props)
                     </button>
                 </div>
 
-                {/* Body */}
                 <div className="px-5 py-4 space-y-5 overflow-y-auto">
+
+                    {errors.length > 0 && (
+                        <div className="rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-4 py-3 space-y-1">
+                            {errors.map((e, i) => (
+                                <p key={i} className="text-sm font-bold text-rose-700 dark:text-rose-400 flex items-start gap-2">
+                                    <AlertCircle size={15} className="flex-none mt-0.5" /> {e}
+                                </p>
+                            ))}
+                        </div>
+                    )}
 
                     <div className="space-y-1.5">
                         <label htmlFor="lineup-name" className="block text-[11px] font-black uppercase tracking-wide text-slate-500">
@@ -122,12 +218,56 @@ export function SeasonalLineupDrawer({ open, initial, onCancel, onSave }: Props)
                     <fieldset className="space-y-2">
                         <legend className="text-[11px] font-black uppercase tracking-wide text-slate-500">
                             Bundles for this season
+                            {selectedFamilies.length > 0 && (
+                                <span className="ml-1.5 text-indigo-600 dark:text-indigo-400">· {selectedFamilies.length} selected</span>
+                            )}
                         </legend>
-                        <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 px-4 py-6 text-center">
-                            <CalendarRange size={22} className="mx-auto text-slate-300 mb-2" />
-                            <p className="text-sm font-bold text-slate-500">Pick the bundle families for this season.</p>
-                            <p className="text-[11px] font-bold text-slate-400 mt-1">Your bundle families will appear here to choose from.</p>
-                        </div>
+
+                        {loading ? (
+                            <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 px-4 py-6 text-center">
+                                <Loader2 size={20} className="mx-auto text-slate-300 animate-spin" />
+                            </div>
+                        ) : families.length === 0 ? (
+                            <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 px-4 py-6 text-center">
+                                <CalendarRange size={22} className="mx-auto text-slate-300 mb-2" />
+                                <p className="text-sm font-bold text-slate-500">No paired bundles are ready yet.</p>
+                                <p className="text-[11px] font-bold text-slate-400 mt-1">
+                                    A bundle needs both a Serves-5 and a Serves-2 version before coordinators can choose it.
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 gap-2">
+                                {families.map((f) => {
+                                    const selected = selectedFamilies.includes(f.familyId);
+                                    return (
+                                        <button
+                                            key={f.familyId}
+                                            type="button"
+                                            onClick={() => toggleFamily(f.familyId)}
+                                            aria-pressed={selected}
+                                            className={`w-full text-left px-4 min-h-[44px] py-2.5 rounded-xl border transition-colors flex items-center gap-3 ${selected
+                                                ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-500 dark:border-indigo-500'
+                                                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+                                                }`}
+                                        >
+                                            <span
+                                                aria-hidden="true"
+                                                className={`flex-none w-5 h-5 rounded-md border-2 flex items-center justify-center ${selected ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300 dark:border-slate-600'
+                                                    }`}
+                                            >
+                                                {selected && <span className="text-white text-[11px] font-black leading-none">✓</span>}
+                                            </span>
+                                            <span className="min-w-0">
+                                                <span className="block text-sm font-black text-slate-900 dark:text-white truncate">{f.serves5.name}</span>
+                                                <span className="block text-[11px] font-bold text-slate-400 truncate">
+                                                    Serves 5 &amp; Serves 2 ready
+                                                </span>
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </fieldset>
 
                     <div className="space-y-2">
@@ -150,13 +290,18 @@ export function SeasonalLineupDrawer({ open, initial, onCancel, onSave }: Props)
                             <button
                                 type="button"
                                 aria-label="Increase"
-                                onClick={() => setCoordinatorPicks((n) => Math.min(MAX_PICKS, n + 1))}
-                                disabled={coordinatorPicks >= MAX_PICKS}
+                                onClick={() => setCoordinatorPicks((n) => Math.min(maxPicks, n + 1))}
+                                disabled={coordinatorPicks >= maxPicks}
                                 className="w-11 h-11 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-center font-black disabled:opacity-40"
                             >
                                 <Plus size={16} />
                             </button>
                         </div>
+                        {selectedFamilies.length > 0 && (
+                            <p className="text-[11px] font-bold text-slate-400">
+                                Up to {maxPicks}, because {maxPicks} bundle{maxPicks === 1 ? ' is' : 's are'} in this lineup.
+                            </p>
+                        )}
                     </div>
 
                     <details className="rounded-2xl border border-slate-200 dark:border-slate-700">
@@ -169,6 +314,8 @@ export function SeasonalLineupDrawer({ open, initial, onCancel, onSave }: Props)
                                 <input
                                     id="lineup-subject"
                                     type="text"
+                                    value={subjectOverride}
+                                    onChange={(e) => setSubjectOverride(e.target.value)}
                                     placeholder="Fall 2026 fundraising is open — pick your dates"
                                     className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold placeholder:text-slate-300 dark:placeholder:text-slate-600"
                                 />
@@ -178,6 +325,8 @@ export function SeasonalLineupDrawer({ open, initial, onCancel, onSave }: Props)
                                 <textarea
                                     id="lineup-letter"
                                     rows={3}
+                                    value={salesLetter}
+                                    onChange={(e) => setSalesLetter(e.target.value)}
                                     placeholder="Uses the standard seasonal letter unless you write your own…"
                                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold placeholder:text-slate-300 dark:placeholder:text-slate-600"
                                 />
@@ -187,6 +336,8 @@ export function SeasonalLineupDrawer({ open, initial, onCancel, onSave }: Props)
                                 <input
                                     id="lineup-notes"
                                     type="text"
+                                    value={internalNotes}
+                                    onChange={(e) => setInternalNotes(e.target.value)}
                                     placeholder="Only you see this"
                                     className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold placeholder:text-slate-300 dark:placeholder:text-slate-600"
                                 />
@@ -195,7 +346,6 @@ export function SeasonalLineupDrawer({ open, initial, onCancel, onSave }: Props)
                     </details>
                 </div>
 
-                {/* Foot */}
                 <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-100 dark:border-slate-700">
                     <button
                         onClick={onCancel}
@@ -204,10 +354,11 @@ export function SeasonalLineupDrawer({ open, initial, onCancel, onSave }: Props)
                         Cancel
                     </button>
                     <button
-                        onClick={() => onSave({ name: name.trim(), startsOn, endsOn, coordinatorPicks })}
+                        onClick={handleSave}
                         disabled={!canSave}
-                        className="px-5 min-h-[44px] rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-indigo-600"
+                        className="px-5 min-h-[44px] rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-indigo-600 inline-flex items-center gap-2"
                     >
+                        {saving && <Loader2 size={15} className="animate-spin" />}
                         Save lineup
                     </button>
                 </div>
