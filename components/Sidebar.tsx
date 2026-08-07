@@ -32,6 +32,7 @@ import {
     Mail,
     GraduationCap,
     Truck,
+    X,
 } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 import TenantSwitcher from './admin/TenantSwitcher';
@@ -117,7 +118,15 @@ const navSections: NavSection[] = [
     },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+    // Off-canvas drawer state for phone/tablet widths (below the `lg`
+    // breakpoint). Ignored at `lg` and above, where the sidebar stays
+    // persistent regardless of these props.
+    isOpen?: boolean;
+    onClose?: () => void;
+}
+
+export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     const pathname = usePathname();
     const [logo, setLogo] = useState<string | null>(null);
     const [appName, setAppName] = useState('FreezerIQ');
@@ -186,7 +195,7 @@ export default function Sidebar() {
     // Wait for session to be ready to avoid "flicker" of missing items
     if (status === 'loading') {
         return (
-            <aside className="w-[280px] h-screen fixed left-0 top-0 glass-sidebar z-50 flex flex-col transition-all duration-300 print:hidden dark:bg-slate-900/80 dark:border-slate-800">
+            <aside className={`w-[280px] h-screen fixed left-0 top-0 glass-sidebar z-50 flex flex-col transition-all duration-300 print:hidden dark:bg-slate-900/80 dark:border-slate-800 ${isOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
                 <div className="p-8 pb-4 animate-pulse">
                     <div className="flex items-center gap-3">
                         <div className="w-14 h-14 bg-slate-200 dark:bg-slate-800 rounded-xl" />
@@ -272,7 +281,15 @@ export default function Sidebar() {
     };
 
     return (
-        <aside className="w-[280px] h-screen fixed left-0 top-0 glass-sidebar z-50 flex flex-col transition-all duration-300 print:hidden dark:bg-slate-900/80 dark:border-slate-800">
+        <aside className={`w-[280px] h-screen fixed left-0 top-0 glass-sidebar z-50 flex flex-col transition-all duration-300 print:hidden dark:bg-slate-900/80 dark:border-slate-800 ${isOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
+            <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close navigation menu"
+                className="lg:hidden absolute top-4 right-4 w-11 h-11 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            >
+                <X size={20} />
+            </button>
             <div className="p-8 pb-4">
                 <div className="flex items-center gap-3">
                     {/* Header Logo Option - Always show if businessLogo exists, otherwise follow setting */}
