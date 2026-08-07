@@ -6,10 +6,23 @@
  * already live on `customers` (contact_name / contact_email / contact_phone /
  * secondary_phone).
  *
- * USAGE
+ * USAGE — LOCAL (the default, and the only mode without explicit authorization)
  *   npx tsx scripts/fr-retention-contact-backfill.ts            # dry run (default)
  *   npx tsx scripts/fr-retention-contact-backfill.ts --apply    # write
  *   npx tsx scripts/fr-retention-contact-backfill.ts --business=<id>
+ *
+ * USAGE — PRODUCTION (five independent gates, all required together)
+ *   FR_RETENTION_PRODUCTION_BACKFILL_CONFIRM=YES \
+ *   DATABASE_URL='<production direct url>' \
+ *   npx tsx scripts/fr-retention-contact-backfill.ts \
+ *     --allow-production \
+ *     --business=<business uuid> \
+ *     --expected-host=aws-1-us-east-1.pooler.supabase.com \
+ *     [--apply]
+ *
+ *   Omit --apply for a dry run. Production runs are ALWAYS scoped to exactly one
+ *   business: there is no tenant-wide production mode, by design. A missing gate
+ *   is a refusal, never a prompt and never a default.
  *
  * The connection string is read from process.env.DATABASE_URL and passed to
  * PrismaClient EXPLICITLY via `datasources`. This is deliberate: the Prisma
@@ -17,13 +30,22 @@
  * never silently inherit whatever `.env` happens to say.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * SAFETY: LOOPBACK ONLY
+ * SAFETY: LOOPBACK BY DEFAULT, PRODUCTION ONLY BY EXPLICIT INTENT
  *
- * The script refuses to run unless the database host is 127.0.0.1 / localhost.
- * There is intentionally NO command-line flag to bypass this. Targeting a
- * remote database requires a deliberate source change to ALLOW_NON_LOOPBACK
- * below, reviewed like any other code change. Making production one typo away
- * was not an acceptable design.
+ * With no production authorization the script refuses any host that is not
+ * 127.0.0.1 / localhost, and defaults to a dry run. That default is unchanged.
+ *
+ * Production requires FIVE independent gates in one invocation:
+ *   1. --allow-production
+ *   2. --business=<exact business uuid>     (no tenant-wide production mode)
+ *   3. --expected-host=<the production host, stated by the caller>
+ *   4. FR_RETENTION_PRODUCTION_BACKFILL_CONFIRM=YES in the environment
+ *   5. --apply, for writes only — without it production still dry-runs
+ *
+ * The resolved host must then match the approved production host exactly and
+ * the database must be `postgres`. Any missing or mismatched gate is a hard
+ * refusal. The point of five gates is that no single typo, stale shell
+ * variable, or half-copied command can reach production.
  * ─────────────────────────────────────────────────────────────────────────────
  *
  * IDENTITY RULES (these are product rules, not implementation details)
@@ -71,26 +93,51 @@ import type { PrismaClient as PrismaClientType } from '@prisma/client';
 // script exists to prevent, so the snapshot is load-order critical.
 const EXPLICIT_DATABASE_URL = process.env.DATABASE_URL;
 
-// Deliberate constant, not a CLI flag. See SAFETY note above.
-const ALLOW_NON_LOOPBACK = false;
-
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+
+// The ONLY non-loopback host this script will ever accept, and only then with
+// every gate below satisfied. Anything else is refused outright.
+const PRODUCTION_HOST = 'aws-1-us-east-1.pooler.supabase.com';
+const PRODUCTION_DB = 'postgres';
+const CONFIRM_ENV = 'FR_RETENTION_PRODUCTION_BACKFILL_CONFIRM';
+const CONFIRM_VALUE = 'YES';
 
 interface Args {
     apply: boolean;
     businessId: string | null;
+    allowProduction: boolean;
+    expectedHost: string | null;
 }
 
 function parseArgs(argv: string[]): Args {
-    const businessArg = argv.find((a) => a.startsWith('--business='));
+    const get = (prefix: string) => {
+        const a = argv.find((x) => x.startsWith(prefix));
+        return a ? a.slice(prefix.length) || null : null;
+    };
     return {
         apply: argv.includes('--apply'),
-        businessId: businessArg ? businessArg.split('=')[1] || null : null,
+        businessId: get('--business='),
+        allowProduction: argv.includes('--allow-production'),
+        expectedHost: get('--expected-host='),
     };
 }
 
-/** Refuses anything that is not an explicitly-provided loopback URL. */
-function resolveDatabaseUrl(): string {
+export interface ResolvedTarget {
+    url: string;
+    host: string;
+    database: string;
+    isProduction: boolean;
+}
+
+/**
+ * Loopback by default. Production only through five independent gates that must
+ * ALL be satisfied in the same invocation — a flag, a named business, a declared
+ * expected host, an environment confirmation, and (for writes) --apply.
+ *
+ * Each gate is something a person has to mean. None of them can be satisfied by
+ * a stray shell variable or a copied command fragment on its own.
+ */
+function resolveTarget(args: Args): ResolvedTarget {
     const raw = EXPLICIT_DATABASE_URL;
     if (!raw) {
         throw new Error(
@@ -100,23 +147,64 @@ function resolveDatabaseUrl(): string {
     }
 
     let host: string;
+    let database: string;
     try {
-        host = new URL(raw).hostname;
+        const u = new URL(raw);
+        host = u.hostname;
+        database = u.pathname.replace(/^\//, '');
     } catch {
         throw new Error('DATABASE_URL is not a parseable connection URL.');
     }
 
-    if (!LOOPBACK_HOSTS.has(host) && !ALLOW_NON_LOOPBACK) {
+    const isLoopback = LOOPBACK_HOSTS.has(host);
+
+    if (isLoopback) {
+        // Refuse the ambiguity of production authorization aimed at a local
+        // database — that combination always means someone mixed up two runs.
+        if (args.allowProduction) {
+            throw new Error(
+                `REFUSED: --allow-production was passed but the target host "${host}" is loopback. ` +
+                'Refusing rather than guessing which run was intended.',
+            );
+        }
+        console.log(`  target      : ${host} / ${database} (local)`);
+        return { url: raw, host, database, isProduction: false };
+    }
+
+    // ── Non-loopback: every gate below is mandatory ──────────────────────────
+    const missing: string[] = [];
+    if (!args.allowProduction) missing.push('--allow-production');
+    if (!args.businessId) missing.push('--business=<business uuid>');
+    if (!args.expectedHost) missing.push(`--expected-host=${PRODUCTION_HOST}`);
+    if (process.env[CONFIRM_ENV] !== CONFIRM_VALUE) missing.push(`${CONFIRM_ENV}=${CONFIRM_VALUE}`);
+
+    if (missing.length > 0) {
         throw new Error(
-            `REFUSED: database host "${host}" is not loopback.\n` +
-            'This script only runs against 127.0.0.1 / localhost. Targeting any ' +
-            'other host requires editing ALLOW_NON_LOOPBACK in this file.',
+            `REFUSED: host "${host}" is not loopback, so production mode is required.\n` +
+            'Missing:\n  ' + missing.join('\n  ') + '\n' +
+            'All of them are required in the same invocation.',
+        );
+    }
+    if (args.expectedHost !== PRODUCTION_HOST) {
+        throw new Error(
+            `REFUSED: --expected-host "${args.expectedHost}" is not the approved production host.`,
+        );
+    }
+    if (host !== PRODUCTION_HOST) {
+        throw new Error(
+            `REFUSED: target host "${host}" is neither loopback nor the approved production host.`,
+        );
+    }
+    if (database !== PRODUCTION_DB) {
+        throw new Error(
+            `REFUSED: production database must be "${PRODUCTION_DB}", got "${database}".`,
         );
     }
 
-    // Host only — never log the full URL.
-    console.log(`  target host : ${host}`);
-    return raw;
+    console.log(`  target      : ${host} / ${database} (PRODUCTION)`);
+    console.log(`  scope       : single business ${args.businessId}`);
+    console.log(`  gates       : --allow-production, --business, --expected-host, ${CONFIRM_ENV}`);
+    return { url: raw, host, database, isProduction: true };
 }
 
 /** Lowercase + trim. Used for grouping only; the original value is stored. */
@@ -135,13 +223,28 @@ async function main(): Promise<void> {
     console.log('FR-RETENTION contact backfill');
     console.log(`  mode        : ${args.apply ? 'APPLY (writes)' : 'DRY RUN (no writes)'}`);
 
-    const url = resolveDatabaseUrl();
+    const target = resolveTarget(args);
 
     // Deferred value import — see EXPLICIT_DATABASE_URL above.
     const { PrismaClient } = await import('@prisma/client');
-    const prisma: PrismaClientType = new PrismaClient({ datasources: { db: { url } } });
+    const prisma: PrismaClientType = new PrismaClient({ datasources: { db: { url: target.url } } });
 
     try {
+        if (target.isProduction) {
+            // Belt and braces: production must never run tenant-wide, and the
+            // named business has to actually exist before anything is created.
+            if (!args.businessId) {
+                throw new Error('REFUSED: production runs require --business=<business uuid>.');
+            }
+            const exists = await prisma.business.count({ where: { id: args.businessId } });
+            if (exists !== 1) {
+                throw new Error(
+                    `REFUSED: business ${args.businessId} was not found in this database.`,
+                );
+            }
+            console.log('  business    : verified present');
+        }
+
         const organizations = await prisma.customer.findMany({
             where: {
                 type: 'fundraiser_org',
