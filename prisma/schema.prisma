@@ -44,6 +44,8 @@ model Business {
   settings               SystemSetting[]
   training_resources     TrainingResource[]
   users                  User[]
+  // FR-RETENTION-1B-1
+  fundraiser_contacts    FundraiserContact[] @relation("BusinessFundraiserContacts")
 
   @@map("businesses")
 }
@@ -306,7 +308,12 @@ model Customer {
   invoices         Invoice[]
   loyalty_points   LoyaltyPoint[]
   orders           Order[]
+  // FR-RETENTION-1: durable person↔organization relationship history.
+  org_contacts     FundraiserOrganizationContact[] @relation("OrgRelationship")
 
+  // FR-RETENTION-1: composite parent key so tenant-scoped children can reference
+  // (business_id, customer_id) and have Postgres enforce same-tenant ownership.
+  @@unique([business_id, id])
   @@map("customers")
 }
 
@@ -526,7 +533,10 @@ model FundraiserCampaign {
   bundle_selection_limit   Int        @default(2) // Number of families coordinator must choose
   // ─────────────────────────────────────────────────────────────────────────
   documents             Document[]
-  customer              Customer   @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  // FR-RETENTION-0R: campaign history must survive normal organization lifecycle.
+  // Restrict (was Cascade) — deleting an organization that owns campaigns is refused
+  // at the database. Normal CRM lifecycle archives the organization instead.
+  customer              Customer   @relation(fields: [customer_id], references: [id], onDelete: Restrict)
   orders                Order[]
   campaign_bundles      CampaignBundle[]
   coordinator_actions   CoordinatorActionEvent[]
@@ -834,4 +844,128 @@ enum InvoiceStatus {
   PAID
   OVERDUE
   CANCELED
+}
+
+// ── FR-RETENTION-1B-1 · Durable fundraiser contact foundation ───────────────
+// Appended after the parked PasswordResetToken block so hunks never interleave.
+// A fundraiser organization is a Customer; these models add the durable PEOPLE
+// behind it. Customer.contact_* remains the org record; it cannot hold history.
+
+model FundraiserContact {
+  id               String    @id @default(uuid())
+  business_id      String
+  display_name     String
+  identity_status  IdentityStatus @default(provisional)
+  needs_review     Boolean   @default(false)
+  review_reason    String?
+  history_starts_at DateTime?
+  source           ContactSource  @default(backfill)
+  archived_at      DateTime?
+  archive_reason   ArchiveReason?
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+
+  business         Business  @relation("BusinessFundraiserContacts", fields: [business_id], references: [id], onDelete: Cascade)
+  contact_points   FundraiserContactPoint[]        @relation("ContactPoints")
+  org_contacts     FundraiserOrganizationContact[] @relation("ContactRelationships")
+
+  @@unique([business_id, id])
+  @@index([business_id, archived_at])
+  @@index([business_id, needs_review])
+  @@map("fundraiser_contacts")
+}
+
+model FundraiserContactPoint {
+  id                String   @id @default(uuid())
+  business_id       String
+  contact_id        String
+  type              ContactPointType
+  label             ContactPointLabel @default(work)
+  value             String
+  normalized_value  String
+  is_primary        Boolean  @default(true)
+  is_current        Boolean  @default(true)
+  is_shared_inbox   Boolean  @default(false)
+  valid_from        DateTime @default(now())
+  valid_to          DateTime?
+  verified_at       DateTime?
+  invalidated_at    DateTime?
+  invalidation_reason String?
+  source            ContactSource @default(backfill)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  contact           FundraiserContact @relation("ContactPoints", fields: [business_id, contact_id], references: [business_id, id], onDelete: Cascade)
+
+  @@index([business_id, normalized_value])
+  @@index([contact_id, type, is_current])
+  @@map("fundraiser_contact_points")
+}
+
+model FundraiserOrganizationContact {
+  id                      String   @id @default(uuid())
+  business_id             String
+  contact_id              String
+  customer_id             String
+  role                    RelationshipRole @default(coordinator)
+  is_primary_relationship Boolean  @default(true)
+  started_at              DateTime @default(now())
+  ended_at                DateTime?
+  ended_reason            RelationshipEndReason?
+  source                  ContactSource @default(backfill)
+  tenant_notes            String?
+  created_at              DateTime @default(now())
+  updated_at              DateTime @updatedAt
+
+  contact                 FundraiserContact @relation("ContactRelationships", fields: [business_id, contact_id], references: [business_id, id], onDelete: Restrict)
+  customer                Customer          @relation("OrgRelationship", fields: [business_id, customer_id], references: [business_id, id], onDelete: Restrict)
+
+  @@index([business_id, customer_id])
+  @@index([business_id, contact_id])
+  @@map("fundraiser_organization_contacts")
+}
+
+enum IdentityStatus {
+  provisional
+  confirmed
+}
+
+enum ContactSource {
+  backfill
+  tenant
+  coordinator_link
+  import
+}
+
+enum ContactPointType {
+  email
+  phone
+}
+
+enum ContactPointLabel {
+  work
+  personal
+  mobile
+  office
+  other
+}
+
+enum ArchiveReason {
+  inactive
+  duplicate
+  left_organization
+  tenant_request
+}
+
+enum RelationshipRole {
+  coordinator
+  relationship_contact
+  billing
+  other
+}
+
+enum RelationshipEndReason {
+  replaced
+  left
+  tenant_ended
 }

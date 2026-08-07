@@ -466,6 +466,25 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
             return NextResponse.json({ error: "Cannot delete customer with existing orders. Mark as Churned instead." }, { status: 400 });
         }
 
+        // FR-RETENTION-0R: fundraiser history must survive normal lifecycle.
+        // The database also enforces this (fundraiser_campaigns_customer_id_fkey is
+        // ON DELETE RESTRICT); this check exists so the tenant gets a clear,
+        // actionable message instead of a raw foreign-key error.
+        const campaignCount = await prisma.fundraiserCampaign.count({ where: { customer_id: id } });
+        if (campaignCount > 0) {
+            return NextResponse.json({
+                error: `This organization has ${campaignCount} fundraiser campaign${campaignCount === 1 ? '' : 's'} and cannot be deleted. Archive it instead — archiving keeps the campaigns, orders, and contact history.`,
+            }, { status: 400 });
+        }
+
+        // Contact relationship history is likewise retained rather than destroyed.
+        const relationshipCount = await prisma.fundraiserOrganizationContact.count({ where: { customer_id: id } });
+        if (relationshipCount > 0) {
+            return NextResponse.json({
+                error: "This organization has contact history and cannot be deleted. Archive it instead.",
+            }, { status: 400 });
+        }
+
         await prisma.customer.delete({ where: { id } });
 
         return NextResponse.json({ success: true });

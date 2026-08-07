@@ -26,6 +26,7 @@ import { useSession } from 'next-auth/react';
 import UpgradeRequired from '@/components/UpgradeRequired';
 import { StartFundraiserWizard } from '@/components/crm2/StartFundraiserWizard';
 import { formatBundleCount } from '@/lib/fundraiserMetrics';
+import { RebookingTab } from '@/components/crm2/rebooking/RebookingTab';
 
 interface Fundraiser {
     id: string;
@@ -75,6 +76,9 @@ export default function FundraisersPage() {
 
     // ── CRM-4: Start a Fundraiser wizard modal ───────────────────────────
     const [showWizard, setShowWizard] = useState(false);
+
+    // FR-RETENTION-1B-1: primary tab state (Campaigns / Organizations / Rebooking)
+    const [activeTab, setActiveTab] = useState<'campaigns' | 'organizations' | 'rebooking'>('campaigns');
 
     // ── Phase 7E-3: Closeout modal state ──────────────────────────────────
     const [closeoutTarget, setCloseoutTarget] = useState<Fundraiser | null>(null);
@@ -217,6 +221,42 @@ export default function FundraisersPage() {
                 </button>
             </div>
 
+            {/* FR-RETENTION-1B-1: primary navigation — Campaigns / Organizations / Rebooking */}
+            <div className="flex gap-2 border-b border-slate-200 dark:border-slate-700 pb-1 overflow-x-auto" role="tablist">
+                {([
+                    { key: 'campaigns' as const, label: 'Campaigns' },
+                    { key: 'organizations' as const, label: 'Organizations' },
+                    { key: 'rebooking' as const, label: 'Rebooking' },
+                ]).map(t => (
+                    <button
+                        key={t.key}
+                        role="tab"
+                        aria-selected={activeTab === t.key}
+                        onClick={() => setActiveTab(t.key)}
+                        className={`px-5 py-2.5 rounded-t-xl font-bold text-sm whitespace-nowrap transition-all min-h-[44px] ${
+                            activeTab === t.key
+                                ? 'bg-slate-100 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border-b-2 border-indigo-500'
+                                : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-700 dark:hover:text-slate-300'
+                        }`}
+                    >
+                        {t.label}
+                    </button>
+                ))}
+            </div>
+
+            {activeTab === 'rebooking' && <RebookingTab />}
+
+            {activeTab === 'organizations' && (
+                <div className="glass-panel rounded-3xl border border-slate-100 dark:border-slate-700 py-14 px-6 text-center">
+                    <p className="font-bold text-slate-500">Organizations view lives in the Customers area today.</p>
+                    <a href="/customers?type=organization" className="inline-block mt-3 px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 min-h-[44px]">
+                        Open Organizations
+                    </a>
+                </div>
+            )}
+
+            {activeTab === 'campaigns' && (
+            <>
             {/* Quick Stats */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="glass-panel p-6 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm">
@@ -440,6 +480,8 @@ export default function FundraisersPage() {
                     </table>
                 </div>
             </div>
+            </>
+            )}
         </div>
 
         {/* ── Phase 7E-3: Close Campaign Confirmation Modal ──────────────────── */}
