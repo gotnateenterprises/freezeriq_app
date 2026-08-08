@@ -104,8 +104,16 @@ export function maskEmail(email: string | null): string | null {
     return `${user.slice(0, 1)}•••@${domain}`;
 }
 
+/**
+ * "Jan 2027" for a pause / not-interested window.
+ *
+ * Reads UTC fields deliberately: these are calendar dates, and a local-timezone
+ * conversion could shift a 1st-of-the-month boundary back into the previous
+ * month — telling the tenant "Paused until Jan" when it is really February.
+ */
 function formatMonthYear(d: Date): string {
-    return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
 // ── Suppression evaluation ───────────────────────────────────────────────────

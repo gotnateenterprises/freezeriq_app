@@ -19,6 +19,7 @@ import { useEffect, useState } from 'react';
 import { Users, AlertCircle, Loader2, Send } from 'lucide-react';
 import { SeasonalLineupDrawer, type SavedLineup } from './SeasonalLineupDrawer';
 import { AudienceReviewDrawer } from './AudienceReviewDrawer';
+import { EmailPreviewDrawer } from './EmailPreviewDrawer';
 
 type Filter = 'all' | 'ready_to_invite' | 'waiting' | 'needs_action' | 'done';
 
@@ -74,6 +75,7 @@ export function RebookingTab() {
     const [audienceOpen, setAudienceOpen] = useState(false);
     const [savedLineup, setSavedLineup] = useState<SavedLineup | null>(null);
     const [audienceSaved, setAudienceSaved] = useState(false);
+    const [previewOpen, setPreviewOpen] = useState(false);
 
     // Reload the most recent saved lineup so the tenant can come back to it
     // after a refresh instead of starting over.
@@ -265,10 +267,19 @@ export function RebookingTab() {
                                             )}
                                         </td>
                                         <td className="px-4 py-4">
+                                            {/* settlement_total is the FINAL CAMPAIGN TOTAL — the closeout
+                                                API freezes it from all non-canceled orders. It is gross, and
+                                                there is no verified calculation in this repository for what
+                                                the organization actually retained. It is therefore labelled
+                                                exactly as the coordinator view labels it, and never presented
+                                                as an amount "kept". */}
                                             {r.organizations[0]?.last_settlement_total != null ? (
-                                                <p className="text-sm font-black tabular-nums">
-                                                    ${Math.round(r.organizations[0].last_settlement_total! * 0.2).toLocaleString()} kept
-                                                </p>
+                                                <>
+                                                    <p className="text-sm font-black tabular-nums">
+                                                        ${Number(r.organizations[0].last_settlement_total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </p>
+                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Final campaign total</p>
+                                                </>
                                             ) : (
                                                 <p className="text-[11px] text-slate-400 font-bold">
                                                     {r.organizations[0]?.campaign_count ? 'No result recorded' : 'First fundraiser'}
@@ -343,7 +354,16 @@ export function RebookingTab() {
                 lineupId={savedLineup?.id ?? null}
                 lineupName={savedLineup?.name ?? ''}
                 onClose={() => setAudienceOpen(false)}
-                onFinalized={() => { setAudienceSaved(true); setAudienceOpen(false); }}
+                onFinalized={() => { setAudienceSaved(true); setAudienceOpen(false); setPreviewOpen(true); }}
+            />
+
+            {/* Step 3 — the real email preview. Sends nothing; the real send stays
+                gated until the rebooking link exists. */}
+            <EmailPreviewDrawer
+                open={previewOpen}
+                lineupId={savedLineup?.id ?? null}
+                onBack={() => { setPreviewOpen(false); setAudienceOpen(true); }}
+                onClose={() => setPreviewOpen(false)}
             />
         </div>
     );

@@ -18,6 +18,7 @@
 
 import { useState, useEffect } from 'react';
 import { X, Minus, Plus, CalendarRange, Loader2, AlertCircle } from 'lucide-react';
+import { toCalendarInputValue } from '@/lib/calendarDate';
 
 export interface EligibleFamily {
     familyId: string;
@@ -49,10 +50,13 @@ interface Props {
 
 const MIN_PICKS = 1;
 
-/** yyyy-mm-dd for a date input, from an ISO timestamp. */
+/**
+ * yyyy-mm-dd for a date input. Uses the shared calendar-date helper so the
+ * value round-trips as the same calendar day regardless of local timezone.
+ */
 function toDateInput(iso: string | null | undefined): string {
     if (!iso) return '';
-    return new Date(iso).toISOString().slice(0, 10);
+    return toCalendarInputValue(new Date(iso));
 }
 
 export function SeasonalLineupDrawer({ open, initial, onCancel, onSaved }: Props) {

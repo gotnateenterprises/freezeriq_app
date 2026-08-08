@@ -51,6 +51,10 @@ model Business {
   outreach_batches       OutreachBatch[]         @relation("BusinessOutreachBatches")
   marketing_preferences  MarketingPreference[]   @relation("BusinessMarketingPreferences")
   suppression_events     EmailSuppressionEvent[] @relation("BusinessSuppressionEvents")
+  // FR-RETENTION-3
+  outreach_messages      OutreachMessage[]       @relation("BusinessOutreachMessages")
+  delivery_attempts      EmailDeliveryAttempt[]  @relation("BusinessDeliveryAttempts")
+  provider_events        EmailProviderEvent[]    @relation("BusinessProviderEvents")
 
   @@map("businesses")
 }
@@ -1061,6 +1065,8 @@ model OutreachBatch {
   business              Business  @relation("BusinessOutreachBatches", fields: [business_id], references: [id], onDelete: Cascade)
   offering              SeasonalOffering @relation("OfferingBatches", fields: [business_id, seasonal_offering_id], references: [business_id, id], onDelete: Restrict)
   recipients            OutreachRecipient[] @relation("BatchRecipients")
+  // FR-RETENTION-3
+  messages              OutreachMessage[]   @relation("BatchMessages")
 
   // One audience per lineup — the double-click guarantee, enforced by the
   // database rather than trusted to the caller.
@@ -1099,6 +1105,8 @@ model OutreachRecipient {
   batch                     OutreachBatch @relation("BatchRecipients", fields: [business_id, outreach_batch_id], references: [business_id, id], onDelete: Cascade)
   contacts                  OutreachRecipientContact[] @relation("RecipientContacts")
   orgs                      OutreachRecipientOrg[]     @relation("RecipientOrgs")
+  // FR-RETENTION-3
+  attempts                  EmailDeliveryAttempt[]     @relation("RecipientAttempts")
 
   // NOTE: the deduplication guarantee — one deliverable row per normalized
   // address per audience — is a PARTIAL unique index created in raw SQL
@@ -1209,6 +1217,13 @@ enum SeasonalOfferingStatus {
 enum OutreachBatchStatus {
   draft
   audience_ready
+  // FR-RETENTION-3 — send lifecycle. `completed_with_issues` exists because a
+  // partial failure is the normal case worth surfacing honestly: some people
+  // were reached, some were not, and the tenant needs to see which.
+  sending
+  completed
+  completed_with_issues
+  failed_before_send
 }
 
 enum RecipientEligibility {
@@ -1254,4 +1269,148 @@ enum SuppressionEventType {
   shared_address_suppression
   tenant_pause
   not_interested_until
+}
+
+
+// ── FR-RETENTION-3 · Email preview, controlled send, delivery tracking ──────
+// Appended at end-of-file; the parked PasswordResetToken hunk above is untouched.
+//
+// STATUS HONESTY — the single most important rule in this block:
+// The provider is Resend. `resend.emails.send()` returning an id proves the
+// provider ACCEPTED the message. It does NOT prove delivery. There is no
+// Resend webhook handler in this repository, so nothing here may claim
+// `delivered`, `opened`, `clicked`, or `bounced`. EmailProviderEvent exists as
+// the foundation for that, and is deliberately left un-ingested rather than
+// populated with invented events.
+
+model OutreachMessage {
+  id                 String   @id @default(uuid())
+  business_id        String
+  outreach_batch_id  String
+  subject            String
+  html_body          String
+  text_body          String
+  // Bumped when the tenant edits and re-approves, so a later send can prove
+  // which wording was actually approved.
+  version            Int      @default(1)
+  status             OutreachMessageStatus @default(draft)
+  created_by_user_id String?
+  approved_at        DateTime?
+  // Only ever set from real send activity — never speculatively.
+  send_started_at    DateTime?
+  send_completed_at  DateTime?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  business           Business      @relation("BusinessOutreachMessages", fields: [business_id], references: [id], onDelete: Cascade)
+  batch              OutreachBatch @relation("BatchMessages", fields: [business_id, outreach_batch_id], references: [business_id, id], onDelete: Cascade)
+  attempts           EmailDeliveryAttempt[] @relation("MessageAttempts")
+
+  // One current message per audience in this checkpoint.
+  @@unique([outreach_batch_id])
+  @@unique([business_id, id])
+  @@map("outreach_messages")
+}
+
+// One send attempt for one delivery address. THE duplicate-prevention record:
+// a partial unique index on (message, recipient) WHERE NOT is_test guarantees
+// one real provider call per recipient per message, however many times Send is
+// clicked.
+model EmailDeliveryAttempt {
+  id                  String   @id @default(uuid())
+  business_id         String
+  outreach_batch_id   String
+  outreach_recipient_id String
+  outreach_message_id String
+  // Stable, deterministic claim key: message + recipient + generation.
+  idempotency_key     String
+  attempt_number      Int      @default(1)
+  status              DeliveryAttemptStatus @default(queued)
+  // Resend's message id. Proves ACCEPTANCE, not delivery.
+  provider_message_id String?
+  accepted_at         DateTime?
+  failed_at           DateTime?
+  skipped_at          DateTime?
+  failure_category    DeliveryFailureCategory?
+  // Sanitized, tenant-safe. Never a raw provider stack trace.
+  failure_detail      String?
+  // Test traffic is recorded separately so it can never be mistaken for a real
+  // coordinator delivery.
+  is_test             Boolean  @default(false)
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  business            Business          @relation("BusinessDeliveryAttempts", fields: [business_id], references: [id], onDelete: Cascade)
+  message             OutreachMessage   @relation("MessageAttempts", fields: [business_id, outreach_message_id], references: [business_id, id], onDelete: Cascade)
+  recipient           OutreachRecipient @relation("RecipientAttempts", fields: [business_id, outreach_recipient_id], references: [business_id, id], onDelete: Restrict)
+  events              EmailProviderEvent[] @relation("AttemptEvents")
+
+  // NOTE: a second guarantee lives in raw SQL as a PARTIAL unique index
+  // (email_delivery_attempts_one_live_per_recipient) on
+  // (outreach_message_id, outreach_recipient_id) WHERE NOT is_test AND
+  // status <> 'failed'. Queued/accepted/skipped block a duplicate send; failed
+  // rows stay retryable. Not expressible as a Prisma @@unique.
+  @@unique([idempotency_key])
+  @@unique([business_id, id])
+  @@index([business_id, outreach_batch_id, status])
+  @@map("email_delivery_attempts")
+}
+
+// Append-only provider event history. FOUNDATION ONLY in Checkpoint 3: no
+// webhook route exists, so no row is written here yet. Rows are never updated
+// or deleted.
+model EmailProviderEvent {
+  id                  String   @id @default(uuid())
+  business_id         String
+  delivery_attempt_id String
+  // Provider's own event id, when the provider supplies one. Unique so replayed
+  // webhook deliveries cannot double-record the same event.
+  provider_event_id   String?
+  event_type          ProviderEventType
+  occurred_at         DateTime?
+  received_at         DateTime @default(now())
+  // Minimal sanitized payload for audit/debugging. Never raw provider secrets,
+  // never unnecessary PII.
+  metadata            Json?
+  created_at          DateTime @default(now())
+
+  business            Business             @relation("BusinessProviderEvents", fields: [business_id], references: [id], onDelete: Cascade)
+  attempt             EmailDeliveryAttempt @relation("AttemptEvents", fields: [business_id, delivery_attempt_id], references: [business_id, id], onDelete: Cascade)
+
+  @@index([business_id, delivery_attempt_id])
+  @@map("email_provider_events")
+}
+
+enum OutreachMessageStatus {
+  draft
+  approved
+  sending
+  sent
+  sent_with_issues
+  failed
+}
+
+enum DeliveryAttemptStatus {
+  queued
+  // The provider accepted the message. This is the honest ceiling without
+  // delivery webhooks — it is NOT proof of delivery.
+  accepted
+  failed
+  // Suppressed between audience review and send.
+  skipped_suppressed
+}
+
+enum DeliveryFailureCategory {
+  provider_rejected_recipient
+  provider_auth
+  transient_transport
+  invalid_address
+  unknown
+}
+
+enum ProviderEventType {
+  delivered
+  bounced
+  complained
+  deferred
 }
