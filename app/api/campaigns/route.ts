@@ -6,6 +6,11 @@ import {
   isCanonicalServes2Tier,
 } from '@/lib/campaignBundleSelection';
 import { computeBundleUnitsFromItems } from '@/lib/fundraiserMetrics';
+import {
+  evaluateConversion,
+  refusalHttpStatus,
+  type ConvertibleOpportunity,
+} from '@/lib/rebookingConversion';
 
 
 // Helper to safely serialize BigInt
@@ -64,9 +69,26 @@ interface CreateCampaignBody {
   groupLabel?: string | null;
   // CB-4: new field — if absent, legacy branch applies
   bundleSelection?: unknown; // We validate this manually at runtime
+  // FR-RETENTION-5: optional. When present this campaign is being created from
+  // an approved rebooking opportunity, which is claimed and linked in the same
+  // transaction as the campaign. Everything else about creation is unchanged.
+  opportunityId?: string | null;
+}
+
+/**
+ * FR-RETENTION-5 — thrown when the opportunity could not be claimed inside the
+ * transaction. Carries no message the tenant sees; the caller re-reads the row
+ * and produces the accurate reason.
+ */
+class OpportunityClaimFailed extends Error {
+    constructor() { super('opportunity_claim_failed'); }
 }
 
 export async function POST(req: Request) {
+    // FR-RETENTION-5: captured outside the try so the claim-failure handler can
+    // report accurately without re-reading an already-consumed request body.
+    let attemptedOpportunityId: string | null = null;
+    let attemptedBusinessId: string | null = null;
     try {
         const session = await auth();
         if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -94,11 +116,15 @@ export async function POST(req: Request) {
             participantLabel,
             groupLabel,
             bundleSelection,
+            opportunityId,
         } = body;
 
         if (!customerId || !name) {
             return NextResponse.json({ error: "Customer ID and Name are required" }, { status: 400 });
         }
+
+        attemptedOpportunityId = opportunityId ?? null;
+        attemptedBusinessId = businessId;
 
         // Verify customer belongs to this tenant before creating any campaign or minting
         // a portal_token. Using findFirst with both id AND business_id in the WHERE clause
@@ -115,6 +141,90 @@ export async function POST(req: Request) {
         if (!customer) {
             return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
         }
+
+        // ── FR-RETENTION-5: rebooking conversion pre-flight ───────────────────
+        //
+        // Only a read at this point, for two reasons: to give an accurate refusal
+        // before doing any work, and to answer a repeated request idempotently
+        // with the campaign that already exists.
+        //
+        // It is NOT the guarantee. The guarantee is the conditional UPDATE inside
+        // the transaction below, which is the only thing that can be trusted when
+        // two requests arrive at once.
+        if (opportunityId) {
+            const existing = await prisma.rebookingOpportunity.findFirst({
+                where: { id: opportunityId, business_id: businessId },
+                select: { id: true, business_id: true, customer_id: true, status: true, campaign_id: true },
+            });
+
+            const shape: ConvertibleOpportunity | null = existing
+                ? {
+                    id: existing.id, businessId: existing.business_id, customerId: existing.customer_id,
+                    status: existing.status, campaignId: existing.campaign_id,
+                }
+                : null;
+
+            const verdict = evaluateConversion(shape, businessId, customerId);
+
+            if (!verdict.ok) {
+                // A repeated request after a successful conversion resolves the
+                // campaign that exists rather than creating a second one.
+                if (verdict.refusal === 'already_converted' && verdict.existingCampaignId) {
+                    const already = await prisma.fundraiserCampaign.findFirst({
+                        where: { id: verdict.existingCampaignId, customer: { business_id: businessId } },
+                    });
+                    if (already) {
+                        return NextResponse.json({ ...already, alreadyConverted: true });
+                    }
+                }
+                return NextResponse.json(
+                    { error: verdict.message, refusal: verdict.refusal },
+                    { status: refusalHttpStatus(verdict.refusal!) },
+                );
+            }
+        }
+
+        /**
+         * FR-RETENTION-5 — run a branch's campaign creation, optionally claiming
+         * and linking a rebooking opportunity in the SAME transaction.
+         *
+         * Every branch below routes its creation through here, so the campaign
+         * data written is byte-for-byte what it was before this checkpoint.
+         *
+         * THE ONE-CAMPAIGN GUARANTEE lives in the conditional UPDATE. It matches
+         * only an approved, unlinked opportunity for this tenant AND this
+         * organization. Two concurrent requests serialize on that row: the loser
+         * re-evaluates the predicate after the winner commits, matches zero rows,
+         * and its whole transaction — campaign included — rolls back. So a failed
+         * or losing attempt cannot leave a stray campaign behind, and cannot
+         * leave the opportunity stranded in `converted` either.
+         */
+        const runCreate = async <T>(create: (tx: typeof prisma) => Promise<T>): Promise<T> => {
+            if (!opportunityId) {
+                return prisma.$transaction(async (tx) => create(tx as unknown as typeof prisma));
+            }
+            return prisma.$transaction(async (tx) => {
+                const claimed = await tx.rebookingOpportunity.updateMany({
+                    where: {
+                        id: opportunityId,
+                        business_id: businessId,
+                        customer_id: customerId,
+                        status: 'approved',
+                        campaign_id: null,
+                    },
+                    data: { status: 'converted' },
+                });
+                if (claimed.count !== 1) throw new OpportunityClaimFailed();
+
+                const created = await create(tx as unknown as typeof prisma);
+
+                await tx.rebookingOpportunity.update({
+                    where: { id: opportunityId },
+                    data: { campaign_id: (created as unknown as { id: string }).id },
+                });
+                return created;
+            });
+        };
 
         // ── CB-4: Determine bundle selection mode ─────────────────────────────
         //
@@ -248,7 +358,10 @@ export async function POST(req: Request) {
                 }
 
                 // ── Atomic transaction: create campaign + candidate rows ────────
-                const campaign = await prisma.$transaction(async (tx) => {
+                // FR-RETENTION-5: routed through runCreate so an optional
+                // rebooking opportunity is claimed and linked in this same
+                // transaction. The campaign data below is unchanged.
+                const campaign = await runCreate(async (tx) => {
                     // Create campaign with pending bundle selection status
                     const newCampaign = await tx.fundraiserCampaign.create({
                         data: {
@@ -299,7 +412,7 @@ export async function POST(req: Request) {
 
             // ── Mode B: not_required (explicit) ───────────────────────────────
             if (bundleSelection.mode === 'not_required') {
-                const campaign = await prisma.fundraiserCampaign.create({
+                const campaign = await runCreate((tx) => tx.fundraiserCampaign.create({
                     data: {
                         customer_id: customerId,
                         name,
@@ -316,7 +429,7 @@ export async function POST(req: Request) {
                         status: 'Active',
                         bundle_selection_status: 'not_required',
                     },
-                });
+                }));
                 return NextResponse.json(campaign);
             }
 
@@ -330,7 +443,7 @@ export async function POST(req: Request) {
         // Pre-CB-4 callers that POST without bundleSelection are treated as not_required.
         // This includes any integrations built before CB-4, or the CRM-4 handoff skeleton.
         // The new wizard always sends an explicit bundleSelection.mode and never reaches here.
-        const campaign = await prisma.fundraiserCampaign.create({
+        const campaign = await runCreate((tx) => tx.fundraiserCampaign.create({
             data: {
                 customer_id: customerId,
                 name,
@@ -350,11 +463,33 @@ export async function POST(req: Request) {
                 status: 'Active',
                 bundle_selection_status: 'not_required',
             }
-        });
+        }));
 
         return NextResponse.json(campaign);
 
     } catch (e: any) {
+        // FR-RETENTION-5: the opportunity could not be claimed, which means a
+        // concurrent request won the race or the state changed underneath us.
+        // The transaction rolled back, so no campaign was created. Re-read and
+        // answer with what is now true rather than a generic error.
+        if (e instanceof OpportunityClaimFailed) {
+            if (attemptedBusinessId && attemptedOpportunityId) {
+                const now = await prisma.rebookingOpportunity.findFirst({
+                    where: { id: attemptedOpportunityId, business_id: attemptedBusinessId },
+                    select: { campaign_id: true },
+                });
+                if (now?.campaign_id) {
+                    const already = await prisma.fundraiserCampaign.findFirst({
+                        where: { id: now.campaign_id, customer: { business_id: attemptedBusinessId } },
+                    });
+                    if (already) return NextResponse.json({ ...already, alreadyConverted: true });
+                }
+            }
+            return NextResponse.json({
+                error: 'A fundraiser for this organization was just created somewhere else. Reload to see it.',
+                refusal: 'already_converted',
+            }, { status: 409 });
+        }
         console.error("Failed to create campaign:", e);
         return NextResponse.json({ error: e.message || "Internal Server Error" }, { status: 500 });
     }

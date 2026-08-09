@@ -1,7 +1,35 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { isPastCalendarDate } from '@/lib/rebookingConversion';
 
 type Prefill = { customerId?: string; orgName?: string; goal?: number };
+
+/**
+ * FR-RETENTION-5 — context carried in from an approved rebooking opportunity.
+ *
+ * This is EVIDENCE the tenant is about to confirm, not settled fact. Nothing
+ * here edits the CRM, and nothing here makes anybody a coordinator: the wizard
+ * shows what was said and the tenant decides. The only value the server trusts
+ * is `opportunityId` — every authoritative id is re-derived from it server-side.
+ */
+export type RebookingHandoff = {
+    opportunityId: string;
+    customerId: string;
+    organizationName: string;
+    lineupName: string;
+    campaignName: string;
+    endDate: string | null;
+    participantEstimate: number | null;
+    candidateFamilyIds: string[];
+    candidateFamilyNames: string[];
+    droppedFamilyIds: string[];
+    selectionLimit: number;
+    coordinatorNote: string;
+    coordinatorKnown: boolean;
+    requestedPreferredStart: string | null;
+    requestedAlternateStart: string | null;
+    respondentNotes: string | null;
+};
 
 // ── generateInfoTemplate ─────────────────────────────────────────────────────
 // Exact copy of the FIX-3 shared pattern from components/crm/FundraiserOverview.tsx
@@ -95,23 +123,40 @@ interface EligibleFamily {
     serves2: { id: string; name: string; sku: string | null; price: number | null };
 }
 
-export function StartFundraiserWizard({ prefill, onClose }: { prefill?: Prefill; onClose: () => void }) {
-    const [step, setStep] = useState(prefill?.customerId ? 2 : 1);
+export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
+    prefill?: Prefill;
+    /** FR-RETENTION-5: present when launched from an approved rebooking request. */
+    rebooking?: RebookingHandoff;
+    onClose: () => void;
+}) {
+    // A rebooking handoff already knows the organization, so Step 1 has nothing
+    // left to ask — same rule the existing `prefill.customerId` path uses.
+    const [step, setStep] = useState(prefill?.customerId || rebooking?.customerId ? 2 : 1);
     const [busy, setBusy] = useState(false);
     // Step 1 state
-    const [org, setOrg] = useState({ name: prefill?.orgName ?? '', contact_name: '', contact_email: '', contact_phone: '' });
+    const [org, setOrg] = useState({ name: prefill?.orgName ?? rebooking?.organizationName ?? '', contact_name: '', contact_email: '', contact_phone: '' });
     const [existing, setExisting] = useState<any>(null);        // dup match
-    const [useExistingId, setUseExistingId] = useState<string | null>(prefill?.customerId ?? null);
-    const [useExistingName, setUseExistingName] = useState<string>(prefill?.orgName ?? '');
+    const [useExistingId, setUseExistingId] = useState<string | null>(prefill?.customerId ?? rebooking?.customerId ?? null);
+    const [useExistingName, setUseExistingName] = useState<string>(prefill?.orgName ?? rebooking?.organizationName ?? '');
     // Step 2 state
     const year = new Date().getFullYear();
-    const [camp, setCamp] = useState({ name: '', endDate: '', bundleGoal: prefill?.goal ?? 0 });
+    const [camp, setCamp] = useState({
+        name: rebooking?.campaignName ?? '',
+        endDate: rebooking?.endDate ?? '',
+        bundleGoal: prefill?.goal ?? 0,
+    });
     // CB-4: eligible families from /api/campaigns/bundle-families
     const [eligibleFamilies, setEligibleFamilies] = useState<EligibleFamily[]>([]);
     const [familiesLoading, setFamiliesLoading] = useState(false);
     // CB-4: picked family IDs (not bundle IDs) + coordinator selection limit
-    const [pickedFamilyIds, setPickedFamilyIds] = useState<Set<string>>(new Set());
-    const [selectionLimit, setSelectionLimit] = useState(2); // default per spec §8 decision 2
+    // FR-RETENTION-5: a rebooking handoff opens with the Seasonal Lineup's own
+    // families and coordinator limit already chosen. The server has already
+    // intersected them with what is currently sellable, so the wizard never
+    // opens holding a family the campaign API would reject.
+    const [pickedFamilyIds, setPickedFamilyIds] = useState<Set<string>>(
+        () => new Set(rebooking?.candidateFamilyIds ?? []),
+    );
+    const [selectionLimit, setSelectionLimit] = useState(rebooking?.selectionLimit ?? 2); // default per spec §8 decision 2
     // Step 3 state
     const [kit, setKit] = useState<any>(null);                  // { campaign, portalUrl, orderUrl, failures: string[] }
     // Branding — fetched same as FundraiserOverview (FIX-3 pattern)
@@ -218,10 +263,20 @@ export function StartFundraiserWizard({ prefill, onClose }: { prefill?: Prefill;
                     bundleGoal: camp.bundleGoal,
                     endDate: camp.endDate,
                     bundleSelection: bundleSelectionPayload,
+                    // FR-RETENTION-5: the ONLY rebooking value the server trusts.
+                    // It re-derives the business, the organization and the state
+                    // from this id, and claims the opportunity in the same
+                    // transaction that creates the campaign.
+                    ...(rebooking ? { opportunityId: rebooking.opportunityId } : {}),
                 }),
             });
             const campaign = await cRes.json();
             if (!cRes.ok) throw new Error(campaign.error || 'Could not create campaign');
+            // A repeated submit after a successful conversion resolves the
+            // campaign that already exists instead of creating a second one.
+            if (campaign.alreadyConverted) {
+                failures.push('This fundraiser already existed, so we opened it instead of creating another.');
+            }
 
             const origin = window.location.origin;
             const portalUrl = campaign.portal_token ? `${origin}/coordinator/${campaign.portal_token}` : null;
@@ -344,13 +399,76 @@ export function StartFundraiserWizard({ prefill, onClose }: { prefill?: Prefill;
                             {useExistingId && <span className="ml-2 text-[11px] font-normal text-indigo-500">existing</span>}
                         </div>
 
+                        {/* FR-RETENTION-5: what the organization actually asked for.
+                            Read-only evidence. Every field below is a starting
+                            point the tenant confirms — none of it has been saved
+                            anywhere, and none of it changed the contact record. */}
+                        {rebooking && (
+                            <section aria-labelledby="wiz-rebooking-heading"
+                                className="rounded-xl border border-violet-200 dark:border-violet-900 bg-violet-50/60 dark:bg-violet-950/30 px-3.5 py-3 space-y-2">
+                                <h4 id="wiz-rebooking-heading" className="text-[11px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                                    From their rebooking request · {rebooking.lineupName}
+                                </h4>
+                                <dl className="grid grid-cols-2 gap-2 text-[12px]">
+                                    <div>
+                                        <dt className="font-bold text-slate-500">Preferred start</dt>
+                                        <dd className="font-black text-slate-800 dark:text-slate-100">{rebooking.requestedPreferredStart ?? '—'}</dd>
+                                    </div>
+                                    <div>
+                                        <dt className="font-bold text-slate-500">Alternate start</dt>
+                                        <dd className="font-black text-slate-800 dark:text-slate-100">{rebooking.requestedAlternateStart ?? '—'}</dd>
+                                    </div>
+                                    {rebooking.participantEstimate != null && (
+                                        <div>
+                                            <dt className="font-bold text-slate-500">Participants</dt>
+                                            <dd className="font-black text-slate-800 dark:text-slate-100 tabular-nums">~{rebooking.participantEstimate}</dd>
+                                        </div>
+                                    )}
+                                </dl>
+                                {rebooking.respondentNotes && (
+                                    <blockquote className="text-[12px] italic text-slate-600 dark:text-slate-300 border-l-2 border-violet-300 dark:border-violet-800 pl-2.5">
+                                        &ldquo;{rebooking.respondentNotes}&rdquo;
+                                    </blockquote>
+                                )}
+                                {/* Reported speech, deliberately. Answering a form
+                                    makes nobody a coordinator, and no login has
+                                    been created for anyone. */}
+                                <p className={`text-[12px] font-bold ${rebooking.coordinatorKnown ? 'text-slate-600 dark:text-slate-300' : 'text-amber-700 dark:text-amber-400'}`}>
+                                    {rebooking.coordinatorNote}
+                                    {!rebooking.coordinatorKnown && ' You can still create the fundraiser and sort the coordinator out afterwards.'}
+                                </p>
+                                {rebooking.droppedFamilyIds.length > 0 && (
+                                    <p className="text-[12px] font-bold text-amber-700 dark:text-amber-400">
+                                        {rebooking.droppedFamilyIds.length} bundle
+                                        {rebooking.droppedFamilyIds.length === 1 ? '' : 's'} from this
+                                        season&apos;s lineup {rebooking.droppedFamilyIds.length === 1 ? 'is' : 'are'} no
+                                        longer available, so {rebooking.droppedFamilyIds.length === 1 ? 'it has' : 'they have'} not been pre-selected.
+                                    </p>
+                                )}
+                            </section>
+                        )}
+
                         {/* Campaign fields — name, end date, bundle goal */}
                         <FieldLabel label="Campaign Name">
                             <input id="wiz-camp-name" className={inputCls} value={camp.name} onChange={e => setCamp(c => ({ ...c, name: e.target.value }))} placeholder="e.g. Lincoln PTA 2026 Fundraiser" />
                         </FieldLabel>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <FieldLabel label="Order Deadline">
-                                <input id="wiz-end-date" type="date" className={inputCls} value={camp.endDate} onChange={e => setCamp(c => ({ ...c, endDate: e.target.value }))} />
+                                <input id="wiz-end-date" type="date" className={inputCls} value={camp.endDate}
+                                    aria-describedby={isPastCalendarDate(camp.endDate) ? 'wiz-end-date-warning' : undefined}
+                                    onChange={e => setCamp(c => ({ ...c, endDate: e.target.value }))} />
+                                {/* FR-RETENTION-5: a rebooking response can sit
+                                    for weeks before review, so a requested date
+                                    is genuinely likely to have gone stale. This
+                                    warns rather than blocks — a tenant who means
+                                    a past deadline can still proceed — but it
+                                    cannot slip through unnoticed. */}
+                                {isPastCalendarDate(camp.endDate) && (
+                                    <p id="wiz-end-date-warning" role="alert"
+                                        className="mt-1 text-[12px] font-bold text-amber-700 dark:text-amber-400">
+                                        That deadline has already passed. Change it unless you meant it.
+                                    </p>
+                                )}
                             </FieldLabel>
                             <FieldLabel label="Bundle Goal">
                                 <input id="wiz-bundle-goal" type="number" min={0} className={inputCls} value={camp.bundleGoal || ''} onChange={e => setCamp(c => ({ ...c, bundleGoal: Number(e.target.value) || 0 }))} placeholder="e.g. 50" />

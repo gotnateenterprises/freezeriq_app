@@ -24,7 +24,7 @@ import { useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
 import { useSession } from 'next-auth/react';
 import UpgradeRequired from '@/components/UpgradeRequired';
-import { StartFundraiserWizard } from '@/components/crm2/StartFundraiserWizard';
+import { StartFundraiserWizard, type RebookingHandoff } from '@/components/crm2/StartFundraiserWizard';
 import { formatBundleCount } from '@/lib/fundraiserMetrics';
 import { RebookingTab } from '@/components/crm2/rebooking/RebookingTab';
 
@@ -76,6 +76,31 @@ export default function FundraisersPage() {
 
     // ── CRM-4: Start a Fundraiser wizard modal ───────────────────────────
     const [showWizard, setShowWizard] = useState(false);
+    // FR-RETENTION-5 — approved rebooking opportunity → existing wizard.
+    const [rebookingHandoff, setRebookingHandoff] = useState<RebookingHandoff | null>(null);
+    const [handoffError, setHandoffError] = useState<string | null>(null);
+
+    /**
+     * Fetches the handoff context for ONE opportunity and opens the existing
+     * wizard with it. The server re-derives the organization and re-checks the
+     * approval state, so this only decides what the tenant SEES first — it
+     * cannot widen what they are allowed to create.
+     */
+    const startFundraiserFromOpportunity = async (opportunityId: string) => {
+        setHandoffError(null);
+        try {
+            const res = await fetch(`/api/rebooking/opportunities/${opportunityId}/handoff`, { cache: 'no-store' });
+            const data = await res.json();
+            if (!res.ok) {
+                setHandoffError(data.error || 'That fundraiser could not be started.');
+                return;
+            }
+            setRebookingHandoff(data as RebookingHandoff);
+            setShowWizard(true);
+        } catch {
+            setHandoffError('That fundraiser could not be started. Please try again.');
+        }
+    };
 
     // FR-RETENTION-1B-1: primary tab state (Campaigns / Organizations / Rebooking)
     const [activeTab, setActiveTab] = useState<'campaigns' | 'organizations' | 'rebooking'>('campaigns');
@@ -244,7 +269,7 @@ export default function FundraisersPage() {
                 ))}
             </div>
 
-            {activeTab === 'rebooking' && <RebookingTab />}
+            {activeTab === 'rebooking' && <RebookingTab onStartFundraiser={startFundraiserFromOpportunity} />}
 
             {activeTab === 'organizations' && (
                 <div className="glass-panel rounded-3xl border border-slate-100 dark:border-slate-700 py-14 px-6 text-center">
@@ -585,15 +610,29 @@ export default function FundraisersPage() {
                 </div>
             </div>
         )}
-        {/* CRM-4 — Start a Fundraiser wizard */}
+        {/* CRM-4 — Start a Fundraiser wizard.
+            FR-RETENTION-5: the same wizard, optionally opened with an approved
+            rebooking request's evidence pre-filled. There is no second creation
+            path — `rebooking` only changes what the wizard OPENS with. */}
         {showWizard && (
             <StartFundraiserWizard
+                rebooking={rebookingHandoff ?? undefined}
                 onClose={() => {
                     setShowWizard(false);
+                    setRebookingHandoff(null);
                     // Reload so the new campaign row appears immediately
                     window.location.reload();
                 }}
             />
+        )}
+        {handoffError && (
+            <div role="alert" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-md rounded-2xl border border-rose-200 dark:border-rose-900 bg-white dark:bg-slate-900 px-4 py-3 shadow-lg">
+                <p className="text-sm font-bold text-rose-700 dark:text-rose-400">{handoffError}</p>
+                <button onClick={() => setHandoffError(null)}
+                    className="mt-2 min-h-[44px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-bold">
+                    Dismiss
+                </button>
+            </div>
         )}
         </>
 

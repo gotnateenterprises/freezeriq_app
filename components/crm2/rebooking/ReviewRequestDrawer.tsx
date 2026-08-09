@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { X, Loader2, AlertCircle, Check, Pencil, History } from 'lucide-react';
+import { X, Loader2, AlertCircle, Check, Pencil, History, Rocket, ExternalLink } from 'lucide-react';
 
 type OppStatus = 'interested' | 'approved' | 'needs_review' | 'canceled' | 'converted';
 
@@ -32,6 +32,9 @@ export interface RequestOrg {
     participantEstimate: number | null;
     canceledAt: string | null;
     reopenedAt: string | null;
+    /** FR-RETENTION-5: set once this organization has become a fundraiser. */
+    campaignId: string | null;
+    fundraiserHref: string | null;
 }
 
 export interface RequestRevision {
@@ -101,12 +104,19 @@ function stamp(iso: string): string {
 }
 
 export function ReviewRequestDrawer({
-    open, request, onClose, onChanged,
+    open, request, onClose, onChanged, onStartFundraiser,
 }: {
     open: boolean;
     request: RebookingRequest | null;
     onClose: () => void;
     onChanged: () => void;
+    /**
+     * FR-RETENTION-5. Passes ONE opportunity id upward. Deliberately not a bulk
+     * action: one organization is one fundraiser, and a single button that
+     * quietly created three campaigns is exactly the thing this product rule
+     * exists to prevent.
+     */
+    onStartFundraiser: (opportunityId: string) => void;
 }) {
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [busy, setBusy] = useState(false);
@@ -368,10 +378,33 @@ export function ReviewRequestDrawer({
                                 {o.status === 'canceled' && o.canceledAt && (
                                     <p className="text-[12px] font-bold text-slate-400">Closed {stamp(o.canceledAt)} — history kept.</p>
                                 )}
+                                {/* FR-RETENTION-5 — converted. "Start Fundraiser"
+                                    is gone, not disabled: offering an action that
+                                    the server will refuse is worse than not
+                                    offering it. */}
                                 {o.status === 'converted' && (
-                                    <p className="text-[12px] font-bold text-indigo-600">
-                                        A fundraiser already exists for this group — manage it from the fundraiser.
-                                    </p>
+                                    <div className="space-y-2">
+                                        <p className="text-[12px] font-bold text-indigo-600 inline-flex items-center gap-1.5">
+                                            <Check size={13} aria-hidden="true" /> Fundraiser created for this group.
+                                        </p>
+                                        {o.fundraiserHref && (
+                                            <a href={o.fundraiserHref}
+                                                className="inline-flex items-center gap-2 px-3.5 min-h-[44px] rounded-xl border border-indigo-200 dark:border-indigo-900 font-bold text-[12px] text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40">
+                                                <ExternalLink size={13} aria-hidden="true" /> Open fundraiser
+                                            </a>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* FR-RETENTION-5 — approved. This does NOT create
+                                    anything; it opens the existing wizard with the
+                                    request's evidence pre-filled, and the tenant
+                                    still confirms every field. */}
+                                {o.status === 'approved' && (
+                                    <button type="button" onClick={() => onStartFundraiser(o.id)}
+                                        className="w-full sm:w-auto px-4 min-h-[44px] rounded-xl bg-indigo-600 text-white font-bold text-[12px] hover:bg-indigo-700 inline-flex items-center justify-center gap-2">
+                                        <Rocket size={14} aria-hidden="true" /> Start Fundraiser
+                                    </button>
                                 )}
 
                                 {!decided && (

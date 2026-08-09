@@ -65,7 +65,15 @@ function statusChipClass(status: string) {
     }
 }
 
-export function RebookingTab() {
+export function RebookingTab({ onStartFundraiser }: {
+    /**
+     * FR-RETENTION-5. The page above owns the StartFundraiserWizard, so the
+     * handoff is one opportunity id passed up in memory. No id travels through a
+     * URL, which keeps respondent notes and rebooking tokens out of query
+     * strings by construction.
+     */
+    onStartFundraiser?: (opportunityId: string) => void;
+} = {}) {
     const [rows, setRows] = useState<ContactRow[]>([]);
     const [counts, setCounts] = useState<Record<Filter, number>>({ all: 0, ready_to_invite: 0, waiting: 0, needs_action: 0, done: 0 });
     const [filter, setFilter] = useState<Filter>('needs_action');
@@ -437,6 +445,10 @@ export function RebookingTab() {
                 request={requests.find((r) => r.id === openRequestId) ?? null}
                 onClose={() => setOpenRequestId(null)}
                 onChanged={() => { void loadRequests(); }}
+                onStartFundraiser={(opportunityId) => {
+                    setOpenRequestId(null);
+                    onStartFundraiser?.(opportunityId);
+                }}
             />
         </div>
     );

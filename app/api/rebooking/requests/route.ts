@@ -63,6 +63,10 @@ export async function GET() {
                         preferred_start_date: true, alternate_start_date: true,
                         participant_estimate: true, canceled_at: true, reopened_at: true,
                         customer_id: true,
+                        // FR-RETENTION-5: set once the opportunity has been
+                        // converted, so the card can offer "Open fundraiser"
+                        // instead of continuing to offer "Start Fundraiser".
+                        campaign_id: true,
                     },
                 },
             },
@@ -169,6 +173,10 @@ export async function GET() {
                     participantEstimate: o.participant_estimate,
                     canceledAt: o.canceled_at?.toISOString() ?? null,
                     reopenedAt: o.reopened_at?.toISOString() ?? null,
+                    campaignId: o.campaign_id,
+                    // The organization page is where a campaign is actually
+                    // viewable — there is no per-campaign route in this app.
+                    fundraiserHref: o.campaign_id ? `/fundraisers/${o.customer_id}` : null,
                 })),
                 needsAction: s.opportunities.some((o) => NEEDS_ACTION.has(o.status)),
             };
