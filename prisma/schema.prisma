@@ -55,6 +55,9 @@ model Business {
   outreach_messages      OutreachMessage[]       @relation("BusinessOutreachMessages")
   delivery_attempts      EmailDeliveryAttempt[]  @relation("BusinessDeliveryAttempts")
   provider_events        EmailProviderEvent[]    @relation("BusinessProviderEvents")
+  // FR-RETENTION-4
+  rebooking_submissions  RebookingSubmission[]    @relation("BusinessRebookingSubmissions")
+  rebooking_opportunities RebookingOpportunity[]  @relation("BusinessRebookingOpportunities")
 
   @@map("businesses")
 }
@@ -321,6 +324,9 @@ model Customer {
   org_contacts     FundraiserOrganizationContact[] @relation("OrgRelationship")
   // FR-RETENTION-2: organizations an audience address represented.
   outreach_orgs    OutreachRecipientOrg[]          @relation("OrgOutreachLinks")
+  // FR-RETENTION-4: rebooking response snapshots and durable opportunities.
+  rebooking_snapshots    RebookingSubmissionRevisionOrg[] @relation("OrgRevisionSnapshots")
+  rebooking_opportunities RebookingOpportunity[]          @relation("OrgOpportunities")
 
   // FR-RETENTION-1: composite parent key so tenant-scoped children can reference
   // (business_id, customer_id) and have Postgres enforce same-tenant ownership.
@@ -1020,6 +1026,8 @@ model SeasonalOffering {
   business                 Business  @relation("BusinessSeasonalOfferings", fields: [business_id], references: [id], onDelete: Cascade)
   families                 SeasonalOfferingFamily[] @relation("OfferingFamilies")
   outreach_batches         OutreachBatch[]          @relation("OfferingBatches")
+  // FR-RETENTION-4
+  opportunities            RebookingOpportunity[]   @relation("OfferingOpportunities")
 
   @@unique([business_id, id])
   @@index([business_id, status])
@@ -1107,6 +1115,36 @@ model OutreachRecipient {
   orgs                      OutreachRecipientOrg[]     @relation("RecipientOrgs")
   // FR-RETENTION-3
   attempts                  EmailDeliveryAttempt[]     @relation("RecipientAttempts")
+
+  // ── FR-RETENTION-4 · secure rebooking credential ───────────────────────────
+  // The credential belongs to the DELIVERY RECIPIENT, not to a person: one
+  // inbox may represent several durable contacts and organizations, and we
+  // cannot know which of them opened the email.
+  //
+  // Only the SHA-256 digest is stored. The raw token exists in memory just long
+  // enough to be rendered into that one recipient's email, and is never
+  // persisted, logged, or written into the message body we retain.
+  //
+  // The unique index is GLOBAL rather than tenant-scoped on purpose: the digest
+  // is the lookup key on a public, unauthenticated route whose URL carries no
+  // business identifier, so it has to be unambiguous across the whole table.
+  rebooking_token_hash       String?   @unique(map: "outreach_recipients_rebooking_token_hash_key")
+  rebooking_token_issued_at  DateTime?
+  rebooking_token_expires_at DateTime?
+  // Revoked and expired credentials are deliberately KEPT resolvable, so the
+  // respondent gets an honest "this link expired" page instead of a bare 404.
+  rebooking_token_revoked_at DateTime?
+  // Set when a respondent asks for a fresh link from an expired page. Surfaces
+  // as tenant "Needs action"; nothing sends automatically.
+  refresh_requested_at       DateTime?
+  submissions                RebookingSubmission[]      @relation("RecipientSubmissions")
+  opportunities              RebookingOpportunity[]     @relation("RecipientOpportunities")
+
+  // NOTE: two more FR-RETENTION-4 artifacts live in raw SQL and are not
+  // expressible here — a partial index on (business_id, refresh_requested_at)
+  // WHERE refresh_requested_at IS NOT NULL that keeps the tenant's "needs a
+  // fresh link" queue cheap, and a CHECK that a credential cannot expire before
+  // it was issued.
 
   // NOTE: the deduplication guarantee — one deliverable row per normalized
   // address per audience — is a PARTIAL unique index created in raw SQL
@@ -1413,4 +1451,190 @@ enum ProviderEventType {
   bounced
   complained
   deferred
+}
+
+
+// ── FR-RETENTION-4 · Rebooking response, revisions, opportunities ───────────
+// Appended at end-of-file; the parked PasswordResetToken hunk above is untouched.
+//
+// THE SHAPE OF THIS, because it is easy to get wrong:
+//   Submission  = one durable response THREAD per delivery recipient.
+//   Revision    = an immutable snapshot of one deliberate submit. Never updated.
+//   RevisionOrg = the state of EVERY represented organization at that revision,
+//                 including the ones NOT selected — that is what makes a later
+//                 deselection legible instead of a silent disappearance.
+//   Opportunity = one durable, reopenable record per (season, organization).
+//
+// One organization becomes at most one future fundraiser. Selecting three
+// organizations creates three opportunities, never one merged booking.
+//
+// Every index below carries an explicit `map:` so the name in this schema and
+// the name in the hand-authored migration are the same string by construction,
+// rather than by hoping Prisma's default naming agrees.
+
+model RebookingSubmission {
+  id                    String   @id @default(uuid())
+  business_id           String
+  seasonal_offering_id  String
+  outreach_recipient_id String
+  // Mirrors the highest revision number. The revisions themselves remain the
+  // source of truth; this exists so a list query does not need an aggregate.
+  current_revision      Int      @default(0)
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  business              Business          @relation("BusinessRebookingSubmissions", fields: [business_id], references: [id], onDelete: Cascade)
+  recipient             OutreachRecipient @relation("RecipientSubmissions", fields: [business_id, outreach_recipient_id], references: [business_id, id], onDelete: Cascade, map: "rebooking_submissions_recipient_fkey")
+  revisions             RebookingSubmissionRevision[] @relation("SubmissionRevisions")
+  opportunities         RebookingOpportunity[]        @relation("SubmissionOpportunities")
+
+  // One response thread per delivery recipient — editing appends a revision
+  // rather than starting a second thread. Also the concurrency guarantee: two
+  // simultaneous first-submits cannot both create a thread.
+  @@unique([outreach_recipient_id], map: "rebooking_submissions_outreach_recipient_id_key")
+  @@unique([business_id, id], map: "rebooking_submissions_business_id_id_key")
+  @@index([business_id, seasonal_offering_id], map: "rebooking_submissions_business_offering_idx")
+  @@map("rebooking_submissions")
+}
+
+// IMMUTABLE. Nothing in the application updates a revision after creation; a
+// changed answer becomes revision N+1. That is what lets the tenant see what was
+// said first and what changed, rather than only the latest state.
+//
+// NOTE: three CHECK constraints live in raw SQL and are not expressible here —
+// revision_number >= 1, participant_estimate >= 0, and preferred_end_date >=
+// preferred_start_date.
+model RebookingSubmissionRevision {
+  id                       String   @id @default(uuid())
+  business_id              String
+  submission_id            String
+  revision_number          Int
+  // Response evidence, NOT authority to rewrite CRM identity. A respondent
+  // correcting their own name here never overwrites a FundraiserContact.
+  respondent_name          String?
+  respondent_email         String?
+  respondent_phone         String?
+  // Shared timing — the prototype asks once, and the tenant confirms each
+  // organization separately afterwards.
+  preferred_start_date     DateTime?
+  alternate_start_date     DateTime?
+  preferred_end_date       DateTime?
+  participant_estimate     Int?
+  notes                    String?
+  // Set when the respondent edited their contact details, so the tenant can
+  // reconcile deliberately instead of it happening silently behind them.
+  contact_update_requested Boolean  @default(false)
+  // Deterministic claim key, so a double-submitted form cannot become two
+  // revisions.
+  idempotency_key          String
+  created_at               DateTime @default(now())
+
+  submission               RebookingSubmission @relation("SubmissionRevisions", fields: [business_id, submission_id], references: [business_id, id], onDelete: Cascade, map: "rebooking_submission_revisions_submission_fkey")
+  orgs                     RebookingSubmissionRevisionOrg[] @relation("RevisionOrgs")
+  opportunities            RebookingOpportunity[]           @relation("RevisionOpportunities")
+
+  @@unique([submission_id, revision_number], map: "rebooking_submission_revisions_submission_number_key")
+  @@unique([idempotency_key], map: "rebooking_submission_revisions_idempotency_key")
+  @@unique([business_id, id], map: "rebooking_submission_revisions_business_id_id_key")
+  @@map("rebooking_submission_revisions")
+}
+
+// One row per REPRESENTED organization per revision — SELECTED OR NOT. Keeping
+// the unselected ones is what lets the tenant read "Cedar Ridge sat this season
+// out" instead of watching a row quietly vanish between revisions.
+model RebookingSubmissionRevisionOrg {
+  id                 String   @id @default(uuid())
+  business_id        String
+  revision_id        String
+  customer_id        String
+  // Denormalized on purpose: what the organization was CALLED at the moment of
+  // the response. A later rename in the CRM must not rewrite history.
+  organization_name  String
+  selected           Boolean  @default(false)
+  coordinator_intent CoordinatorIntent @default(not_sure)
+  // Captured when the respondent says someone else will coordinate. EVIDENCE
+  // ONLY — it grants no portal access and creates no CampaignContact.
+  coordinator_name   String?
+  coordinator_email  String?
+  org_notes          String?
+  created_at         DateTime @default(now())
+
+  revision           RebookingSubmissionRevision @relation("RevisionOrgs", fields: [business_id, revision_id], references: [business_id, id], onDelete: Cascade, map: "rebooking_submission_revision_orgs_revision_fkey")
+  customer           Customer                    @relation("OrgRevisionSnapshots", fields: [business_id, customer_id], references: [business_id, id], onDelete: Restrict, map: "rebooking_submission_revision_orgs_customer_fkey")
+
+  @@unique([revision_id, customer_id], map: "rebooking_submission_revision_orgs_revision_customer_key")
+  @@index([business_id, customer_id], map: "rebooking_submission_revision_orgs_business_customer_idx")
+  @@map("rebooking_submission_revision_orgs")
+}
+
+// One durable, REOPENABLE record per (season, organization). Deselecting cancels
+// it; reselecting reopens THIS row rather than creating a second one.
+//
+// NOTE: two CHECK constraints live in raw SQL — participant_estimate >= 0, and a
+// canceled/canceled_at consistency check that stops the list from claiming a
+// cancellation it cannot date.
+model RebookingOpportunity {
+  id                    String   @id @default(uuid())
+  business_id           String
+  seasonal_offering_id  String
+  customer_id           String
+  outreach_recipient_id String
+  submission_id         String
+  source_revision_id    String
+  organization_name     String
+  status                RebookingOpportunityStatus @default(interested)
+  coordinator_intent    CoordinatorIntent          @default(not_sure)
+  coordinator_name      String?
+  coordinator_email     String?
+  preferred_start_date  DateTime?
+  alternate_start_date  DateTime?
+  participant_estimate  Int?
+  notes                 String?
+  // Checkpoint 5 conversion target. Checkpoint 4 never creates a campaign, so
+  // this stays null and deliberately carries no foreign key yet.
+  campaign_id           String?
+  canceled_at           DateTime?
+  reopened_at           DateTime?
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  business              Business                    @relation("BusinessRebookingOpportunities", fields: [business_id], references: [id], onDelete: Cascade)
+  offering              SeasonalOffering            @relation("OfferingOpportunities", fields: [business_id, seasonal_offering_id], references: [business_id, id], onDelete: Restrict, map: "rebooking_opportunities_offering_fkey")
+  customer              Customer                    @relation("OrgOpportunities", fields: [business_id, customer_id], references: [business_id, id], onDelete: Restrict, map: "rebooking_opportunities_customer_fkey")
+  recipient             OutreachRecipient           @relation("RecipientOpportunities", fields: [business_id, outreach_recipient_id], references: [business_id, id], onDelete: Restrict, map: "rebooking_opportunities_recipient_fkey")
+  submission            RebookingSubmission         @relation("SubmissionOpportunities", fields: [business_id, submission_id], references: [business_id, id], onDelete: Cascade, map: "rebooking_opportunities_submission_fkey")
+  source_revision       RebookingSubmissionRevision @relation("RevisionOpportunities", fields: [business_id, source_revision_id], references: [business_id, id], onDelete: Restrict, map: "rebooking_opportunities_source_revision_fkey")
+
+  // ONE organization = ONE future fundraiser per season. This is the constraint
+  // that makes reselection REOPEN rather than duplicate, even when two submits
+  // race. Intentionally not partial: a canceled opportunity still holds the
+  // slot, because reopening it is correct and creating a twin is not.
+  @@unique([business_id, seasonal_offering_id, customer_id], map: "rebooking_opportunities_one_per_org_per_season")
+  @@unique([business_id, id], map: "rebooking_opportunities_business_id_id_key")
+  @@index([business_id, status], map: "rebooking_opportunities_business_status_idx")
+  @@map("rebooking_opportunities")
+}
+
+// `not_sure` is a real answer, not an absence of one. A respondent who does not
+// yet know who will coordinate must be able to say so without being pushed into
+// a wrong yes or no.
+enum CoordinatorIntent {
+  yes
+  no
+  not_sure
+}
+
+enum RebookingOpportunityStatus {
+  // The respondent asked for it; the tenant has not decided yet.
+  interested
+  // The tenant said yes. Ready for a fundraiser to be created in Checkpoint 5.
+  approved
+  // The respondent CHANGED something the tenant had already approved. Surfaced
+  // rather than silently overwritten — a moved date the tenant never sees is
+  // exactly the failure this status exists to prevent.
+  needs_review
+  // Deselected by the respondent, or "Not this season" by the tenant.
+  canceled
+  // A fundraiser exists. Nothing in Checkpoint 4 ever sets this.
+  converted
 }

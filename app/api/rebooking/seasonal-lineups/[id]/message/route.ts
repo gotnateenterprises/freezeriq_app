@@ -48,7 +48,7 @@ async function loadContext(businessId: string, lineupId: string) {
     return { lineup, batch, recipients };
 }
 
-export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
     try {
         const session = await auth();
         if (!session?.user?.businessId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -68,7 +68,10 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
         const representedContacts = new Set(deliverable.flatMap((r) => r.contacts.map((c) => c.contact_id))).size;
         const representedOrgs = new Set(deliverable.flatMap((r) => r.orgs.map((o) => o.customer_id))).size;
 
-        const cta = resolveRebookingCta(batch.id);
+        // Preview only: `ready` says a link CAN be built, and the rendered CTA
+        // shows the masked /rebook/••• form. No credential is minted here, so
+        // the persisted preview HTML never contains a working link.
+        const cta = resolveRebookingCta(req);
         const senderReadiness = checkSenderReadiness(process.env.EMAIL_FROM);
 
         // Preview renders the first deliverable recipient as the representative
@@ -117,7 +120,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 }
 
 /** Persist + approve the message. Still sends nothing. */
-export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
     try {
         const session = await auth();
         if (!session?.user?.businessId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -130,7 +133,8 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
 
         const business = await prisma.business.findUniqueOrThrow({ where: { id: businessId }, select: { name: true } });
         const deliverable = recipients.filter((r) => r.eligibility === 'included' && r.is_selected && r.normalized_email);
-        const cta = resolveRebookingCta(batch.id);
+        // Masked CTA — the stored approved message must not contain a real link.
+        const cta = resolveRebookingCta(req);
 
         const sample = deliverable[0];
         const rendered = renderSeasonalUpdate({

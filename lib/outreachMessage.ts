@@ -10,40 +10,55 @@
  * figure from gross would be fabrication. So the message leads with the
  * relationship and the ease of running again, not a number.
  *
- * CTA — the send gate:
- * The durable rebooking link is Checkpoint 4 work and does not exist yet.
- * Rather than invent a temporary URL, this module exposes a structured
- * readiness check that the send endpoint consults server-side. Preview shows an
- * internal placeholder; a real send is refused until CP4 supplies a real link.
+ * CTA — the send gate (FR-RETENTION-4):
+ * The durable rebooking link now exists. What this module checks is whether a
+ * link can be BUILT at all — i.e. whether an origin is resolvable — because
+ * emailing a half-formed URL to a coordinator is worse than refusing to send.
+ * The per-recipient credential itself is minted by the send engine at the moment
+ * of delivery and is never seen here.
  */
 
 import { escapeOutreachHtml } from '@/lib/outreachHtml';
 import { formatCalendarRange } from '@/lib/calendarDate';
+import { resolveRequestOrigin } from '@/lib/fundraiserUrls';
+import { maskRebookingUrl } from '@/lib/rebookingToken';
 
 // ── CTA readiness ────────────────────────────────────────────────────────────
 
 export interface RebookingCtaResult {
     ready: boolean;
-    /** Absolute URL. Only present when ready. */
+    /**
+     * The real, per-recipient absolute URL. Present ONLY on the send path, and
+     * only for the single recipient currently being rendered. Deliberately null
+     * during preview: a preview must never contain a working credential, because
+     * the preview HTML is persisted on OutreachMessage.
+     */
     url: string | null;
+    /** Masked form, safe to show a human. Matches the prototype's /rebook/•••. */
+    displayUrl: string | null;
     /** Tenant-facing plain language explaining why sending is blocked. */
     blockedReason: string | null;
 }
 
 /**
- * Resolves the durable rebooking CTA for one audience.
+ * Can a rebooking link be built for this send?
  *
- * Checkpoint 4 will implement this against a real, secure, per-recipient
- * rebooking link. Until then it reports NOT READY, and the send endpoint
- * refuses. This is a server-side condition on purpose — a disabled button is
- * not a safety control.
+ * This is a server-side readiness condition, not a disabled button — an API
+ * client bypassing the UI is refused identically. It answers only the question
+ * "do we know what URL to point people at"; the credential is minted later, per
+ * recipient, once that recipient's delivery is actually going to happen.
  */
-export function resolveRebookingCta(_batchId: string): RebookingCtaResult {
-    return {
-        ready: false,
-        url: null,
-        blockedReason: 'Rebooking link needs to be ready before this can be sent.',
-    };
+export function resolveRebookingCta(source: Request | string | null | undefined): RebookingCtaResult {
+    const origin = resolveRequestOrigin(source);
+    if (!origin) {
+        return {
+            ready: false,
+            url: null,
+            displayUrl: null,
+            blockedReason: "The rebooking link can't be built yet because this site's web address isn't configured.",
+        };
+    }
+    return { ready: true, url: null, displayUrl: maskRebookingUrl(origin), blockedReason: null };
 }
 
 // ── Sender readiness ─────────────────────────────────────────────────────────
@@ -145,17 +160,29 @@ export function renderSeasonalUpdate(input: SeasonalMessageInput): RenderedMessa
         ? `You already know how it works — pick your bundles and your dates, and we handle the food, the packing and the paperwork.`
         : `It's straightforward — pick your bundles and your dates, and we handle the food, the packing and the paperwork.`;
 
-    const ctaBlockHtml = cta.ready && cta.url
-        ? `<a href="${escapeOutreachHtml(cta.url)}" style="display:inline-block;background:#4f46e5;color:#ffffff;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;">Pick your dates</a>`
-        // Internal preview only. The send endpoint refuses while the CTA is not
-        // ready, so this string cannot reach a real coordinator.
-        : `<div style="border:1px dashed #cbd5e1;border-radius:8px;padding:14px;color:#64748b;font-size:13px;">
+    // Three states, and they are genuinely different:
+    //   · a real send      — a live per-recipient credential, a real anchor
+    //   · a preview        — the same button, masked, and NOT a link, because
+    //                        preview HTML is persisted on OutreachMessage and
+    //                        must never carry a working credential
+    //   · not ready        — no origin, so no link can be built and no send
+    //                        will be permitted
+    const ctaBlockHtml = !cta.ready
+        ? `<div style="border:1px dashed #cbd5e1;border-radius:8px;padding:14px;color:#64748b;font-size:13px;">
              <strong>Rebooking link will be added before sending.</strong>
-           </div>`;
+           </div>`
+        : cta.url
+            ? `<a href="${escapeOutreachHtml(cta.url)}" style="display:inline-block;background:#4f46e5;color:#ffffff;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;">Pick your dates</a>`
+            : `<div>
+                 <span style="display:inline-block;background:#4f46e5;color:#ffffff;padding:12px 24px;border-radius:6px;font-weight:bold;">Pick your dates</span>
+                 <p style="margin:8px 0 0 0;font-size:12px;color:#94a3b8;">${escapeOutreachHtml(cta.displayUrl ?? '')} — each person gets their own private link.</p>
+               </div>`;
 
-    const ctaBlockText = cta.ready && cta.url
-        ? `Pick your dates: ${cta.url}`
-        : `[Rebooking link will be added before sending.]`;
+    const ctaBlockText = !cta.ready
+        ? `[Rebooking link will be added before sending.]`
+        : cta.url
+            ? `Pick your dates: ${cta.url}`
+            : `Pick your dates: ${cta.displayUrl ?? ''} (each person gets their own private link)`;
 
     const testBannerHtml = isTest
         ? `<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;margin-bottom:16px;color:#92400e;font-weight:bold;">

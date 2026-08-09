@@ -104,8 +104,18 @@ export interface SendRunInput {
     messageId: string;
     generation: number;
     recipients: SendableRecipient[];
-    /** Per-recipient rendered content, keyed by recipientId. */
-    render: (r: SendableRecipient) => { subject: string; html: string; text: string };
+    /**
+     * Per-recipient rendered content.
+     *
+     * MAY BE ASYNC (FR-RETENTION-4). It is invoked AFTER the attempt row is
+     * claimed and BEFORE the provider call — the one moment where we know this
+     * particular delivery is definitely going to happen. That is exactly where
+     * a per-recipient rebooking credential must be minted: minting earlier would
+     * rotate the credential of someone whose email already went out, and minting
+     * later would be after the point of no return.
+     */
+    render: (r: SendableRecipient) => { subject: string; html: string; text: string }
+    | Promise<{ subject: string; html: string; text: string }>;
     from: string;
     replyTo?: string;
     now: Date;
@@ -165,7 +175,32 @@ export async function runSend(input: SendRunInput): Promise<SendSummary> {
         }
 
         // ── SEND ─────────────────────────────────────────────────────────────
-        const content = render(r);
+        // If rendering itself fails (for example the rebooking credential could
+        // not be written), the attempt is recorded as failed rather than left
+        // dangling in `queued` — and because failed attempts stay retryable, the
+        // recipient is not locked out of a later send.
+        let content: { subject: string; html: string; text: string };
+        try {
+            content = await render(r);
+        } catch {
+            await prisma.emailDeliveryAttempt.update({
+                where: { id: attemptId },
+                data: {
+                    status: 'failed',
+                    failed_at: new Date(),
+                    failure_category: 'unknown',
+                    failure_detail: "We couldn't prepare this person's email.",
+                },
+            });
+            outcomes.push({
+                recipientId: r.recipientId,
+                result: 'failed',
+                failureCategory: 'unknown',
+                failureDetail: "We couldn't prepare this person's email.",
+            });
+            continue;
+        }
+
         const payload: ProviderSendInput = {
             to: r.normalizedEmail!,
             subject: content.subject,

@@ -84,3 +84,39 @@ export function buildPublicFundraiserUrl(
     const origin = resolveOrigin(source);
     return `${origin}/fundraiser/${publicToken}`;
 }
+
+/**
+ * FR-RETENTION-4 — origin resolution that is allowed to FAIL.
+ *
+ * `resolveOrigin` above assumes the caller already has a usable source. The
+ * rebooking send path cannot assume that: if no origin can be resolved we must
+ * refuse to send rather than email a broken or half-formed link, so this returns
+ * null instead of fabricating one.
+ */
+export function resolveRequestOrigin(
+    source: Request | string | null | undefined
+): string | null {
+    if (source && typeof source !== 'string') return new URL(source.url).origin;
+    const raw = (typeof source === 'string' ? source : process.env.NEXTAUTH_URL ?? '').trim();
+    if (!raw) return null;
+    try {
+        return new URL(raw).origin;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * FR-RETENTION-4 — the durable rebooking link: /rebook/{token}.
+ *
+ * Same shape as the existing /coordinator and /fundraiser token routes, so it
+ * reads as one family of links. The difference is invisible from here and lives
+ * in the database: only the SHA-256 digest of this token is stored.
+ */
+export function buildRebookingUrl(
+    source: Request | string,
+    rebookingToken: string
+): string {
+    const origin = resolveOrigin(source);
+    return `${origin}/rebook/${rebookingToken}`;
+}

@@ -250,12 +250,28 @@ describe('provider error classification', () => {
     });
 });
 
-describe('5. real send is CTA-gated until CP4', () => {
+// FR-RETENTION-4 changed what this gate MEANS. It no longer asks "does the
+// rebooking feature exist yet"; it asks "can a link actually be built". These
+// two constants make that explicit instead of relying on ambient env.
+const ORIGIN = 'https://app.example.com';
+/** Non-empty and unparseable, so the NEXTAUTH_URL fallback is not consulted. */
+const NO_ORIGIN = 'not-a-configured-origin';
+
+describe('5. real send is gated on a buildable rebooking link', () => {
     it('reports not-ready with plain language and no invented URL', () => {
-        const cta = resolveRebookingCta('batch');
+        const cta = resolveRebookingCta(NO_ORIGIN);
         expect(cta.ready).toBe(false);
         expect(cta.url).toBeNull();
-        expect(cta.blockedReason).toMatch(/rebooking link needs to be ready/i);
+        expect(cta.displayUrl).toBeNull();
+        expect(cta.blockedReason).toMatch(/web address isn't configured/i);
+    });
+
+    it('is ready when an origin resolves, but still hands out no credential', () => {
+        const cta = resolveRebookingCta(ORIGIN);
+        expect(cta.ready).toBe(true);
+        // The real per-recipient URL is minted by the send engine, not here.
+        expect(cta.url).toBeNull();
+        expect(cta.displayUrl).toBe('https://app.example.com/rebook/•••');
     });
 });
 
@@ -265,7 +281,7 @@ describe('message rendering', () => {
         lineupName: 'Fall 2026',
         lineupStartsAt: new Date('2026-09-01'), lineupEndsAt: new Date('2026-11-30'),
         hasPreviousFundraiser: true, previousCampaignName: 'Fall 2025',
-        cta: resolveRebookingCta('b'),
+        cta: resolveRebookingCta(ORIGIN),
     };
 
     it('states no money figure at all', () => {
@@ -275,10 +291,29 @@ describe('message rendering', () => {
         expect(m.text).not.toMatch(/raised|kept|earned|profit/i);
     });
 
-    it('shows the internal CTA placeholder while CP4 is missing', () => {
-        const m = renderSeasonalUpdate(base);
+    it('shows the placeholder when no link can be built', () => {
+        const m = renderSeasonalUpdate({ ...base, cta: resolveRebookingCta(NO_ORIGIN) });
         expect(m.text).toMatch(/rebooking link will be added before sending/i);
         expect(m.html).not.toMatch(/href="(#|null|undefined|about:blank)"/);
+    });
+
+    it('previews a MASKED link and never a working one', () => {
+        const m = renderSeasonalUpdate(base);
+        expect(m.html).toContain('/rebook/•••');
+        // No anchor at all in preview — a persisted preview must not be
+        // clickable, because it would have to carry a real credential to work.
+        expect(m.html).not.toMatch(/<a [^>]*href="[^"]*\/rebook\//);
+        expect(m.text).not.toMatch(/href/);
+    });
+
+    it('renders a real anchor once the send engine supplies a credential', () => {
+        const m = renderSeasonalUpdate({
+            ...base,
+            cta: { ...resolveRebookingCta(ORIGIN), url: `${ORIGIN}/rebook/abc123` },
+        });
+        expect(m.html).toContain(`href="${ORIGIN}/rebook/abc123"`);
+        expect(m.text).toContain(`${ORIGIN}/rebook/abc123`);
+        expect(m.html).not.toContain('•••');
     });
 
     it('marks a test message visibly in subject and body', () => {
@@ -330,15 +365,28 @@ describe('3C — sender readiness gate', () => {
         expect(r.blockedReason).not.toMatch(/EMAIL_FROM|resend|onboarding@/i);
     });
 
-    it('a configured sender still leaves the CP4 CTA gate blocking today', () => {
+    it('a configured sender does not satisfy the rebooking-link gate', () => {
         expect(checkSenderReadiness('notifications@freezeriq.com').ready).toBe(true);
-        expect(resolveRebookingCta('batch').ready).toBe(false);
+        expect(resolveRebookingCta(NO_ORIGIN).ready).toBe(false);
+    });
+
+    it('a buildable link does not satisfy the sender gate', () => {
+        expect(resolveRebookingCta(ORIGIN).ready).toBe(true);
+        expect(checkSenderReadiness('onboarding@resend.dev').ready).toBe(false);
     });
 
     it('both gates are independent — neither alone permits a real send', () => {
-        const senderOk = checkSenderReadiness('notifications@freezeriq.com').ready;
-        const ctaOk = resolveRebookingCta('b').ready;
-        expect(senderOk && ctaOk).toBe(false);
+        // Each row is (senderReady, ctaReady); only both-true may send.
+        const rows: Array<[boolean, boolean]> = [
+            [checkSenderReadiness('onboarding@resend.dev').ready, resolveRebookingCta(NO_ORIGIN).ready],
+            [checkSenderReadiness('notifications@freezeriq.com').ready, resolveRebookingCta(NO_ORIGIN).ready],
+            [checkSenderReadiness('onboarding@resend.dev').ready, resolveRebookingCta(ORIGIN).ready],
+        ];
+        for (const [senderOk, ctaOk] of rows) expect(senderOk && ctaOk).toBe(false);
+        expect(
+            checkSenderReadiness('notifications@freezeriq.com').ready
+            && resolveRebookingCta(ORIGIN).ready,
+        ).toBe(true);
     });
 });
 
@@ -349,7 +397,7 @@ describe('3C — calendar dates in the rendered message', () => {
             lineupStartsAt: new Date('2026-09-01T00:00:00.000Z'),
             lineupEndsAt: new Date('2026-11-30T00:00:00.000Z'),
             hasPreviousFundraiser: true, previousCampaignName: null,
-            cta: resolveRebookingCta('b'),
+            cta: resolveRebookingCta(ORIGIN),
         });
         expect(m.text).toContain('September 1 – November 30');
         expect(m.text).not.toContain('August 31');

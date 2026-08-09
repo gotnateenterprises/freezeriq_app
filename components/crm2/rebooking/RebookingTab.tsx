@@ -15,11 +15,12 @@
  *    audience review. See SeasonalLineupDrawer / AudienceReviewDrawer.
  */
 
-import { useEffect, useState } from 'react';
-import { Users, AlertCircle, Loader2, Send } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Users, AlertCircle, Loader2, Send, Inbox } from 'lucide-react';
 import { SeasonalLineupDrawer, type SavedLineup } from './SeasonalLineupDrawer';
 import { AudienceReviewDrawer } from './AudienceReviewDrawer';
 import { EmailPreviewDrawer } from './EmailPreviewDrawer';
+import { ReviewRequestDrawer, type RebookingRequest } from './ReviewRequestDrawer';
 
 type Filter = 'all' | 'ready_to_invite' | 'waiting' | 'needs_action' | 'done';
 
@@ -76,6 +77,19 @@ export function RebookingTab() {
     const [savedLineup, setSavedLineup] = useState<SavedLineup | null>(null);
     const [audienceSaved, setAudienceSaved] = useState(false);
     const [previewOpen, setPreviewOpen] = useState(false);
+    // FR-RETENTION-4 — incoming responses.
+    const [requests, setRequests] = useState<RebookingRequest[]>([]);
+    const [openRequestId, setOpenRequestId] = useState<string | null>(null);
+
+    const loadRequests = useCallback(() => {
+        return fetch('/api/rebooking/requests', { cache: 'no-store' })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => { if (data?.requests) setRequests(data.requests); })
+            // The rest of the tab is still useful without the requests panel.
+            .catch(() => { /* no-op */ });
+    }, []);
+
+    useEffect(() => { void loadRequests(); }, [loadRequests]);
 
     // Reload the most recent saved lineup so the tenant can come back to it
     // after a refresh instead of starting over.
@@ -110,6 +124,15 @@ export function RebookingTab() {
             .catch((e) => { if (alive) { setError(e.message); setLoading(false); } });
         return () => { alive = false; };
     }, []);
+
+    // FR-RETENTION-4 — a request waiting on a decision IS something that needs
+    // action. Leaving it out of the count would mean the number a tenant checks
+    // every morning is silently wrong about the one thing they most need to see.
+    const requestsNeedingAction = requests.filter((r) => r.needsAction).length;
+    const displayCounts: Record<Filter, number> = {
+        ...counts,
+        needs_action: counts.needs_action + requestsNeedingAction,
+    };
 
     const visible = rows.filter((r) => {
         switch (filter) {
@@ -146,10 +169,10 @@ export function RebookingTab() {
             <div className="flex flex-col lg:flex-row lg:items-center gap-4">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 flex-1 min-w-0">
                     {([
-                        { label: 'Ready to invite', value: counts.ready_to_invite, tone: 'text-indigo-600' },
-                        { label: 'Waiting', value: counts.waiting, tone: '' },
-                        { label: 'Needs action', value: counts.needs_action, tone: 'text-amber-600' },
-                        { label: 'Rebooked', value: counts.done, tone: 'text-emerald-600' },
+                        { label: 'Ready to invite', value: displayCounts.ready_to_invite, tone: 'text-indigo-600' },
+                        { label: 'Waiting', value: displayCounts.waiting, tone: '' },
+                        { label: 'Needs action', value: displayCounts.needs_action, tone: 'text-amber-600' },
+                        { label: 'Rebooked', value: displayCounts.done, tone: 'text-emerald-600' },
                     ]).map((s) => (
                         <div key={s.label} className="glass-panel p-4 rounded-2xl border border-slate-100 dark:border-slate-700">
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{s.label}</p>
@@ -181,6 +204,44 @@ export function RebookingTab() {
                 </div>
             </div>
 
+            {/* FR-RETENTION-4 — responses that came back. Kept as its own panel
+                because a request belongs to the ADDRESS that answered, while the
+                table below is one row per durable person; folding them together
+                would misrepresent both. */}
+            {requests.length > 0 && (
+                <section aria-labelledby="requests-heading" className="space-y-2.5">
+                    <h3 id="requests-heading" className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
+                        <Inbox size={12} /> Requests to review
+                    </h3>
+                    <ul className="space-y-2.5">
+                        {requests.map((r) => (
+                            <li key={r.id}>
+                                <button
+                                    onClick={() => setOpenRequestId(r.id)}
+                                    className="w-full text-left bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-4 hover:border-indigo-200 dark:hover:border-indigo-800 transition-colors min-h-[44px]"
+                                >
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <p className="font-black text-slate-900 dark:text-white text-sm truncate">{r.respondentName}</p>
+                                            <p className="text-[11px] font-bold text-slate-400 truncate">
+                                                {r.lineupName} · {r.organizations.filter((o) => o.status !== 'canceled').length} of{' '}
+                                                {r.organizations.length} group{r.organizations.length === 1 ? '' : 's'}
+                                                {r.wasEdited && <span className="text-amber-600"> · updated</span>}
+                                            </p>
+                                        </div>
+                                        {r.needsAction && (
+                                            <span className="flex-none px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wide border bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-900">
+                                                Needs review
+                                            </span>
+                                        )}
+                                    </div>
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
+                </section>
+            )}
+
             {/* Filter chips — exactly five */}
             <div className="flex flex-wrap gap-2">
                 {FILTERS.map((f) => (
@@ -194,13 +255,16 @@ export function RebookingTab() {
                                 : 'bg-white dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
                         }`}
                     >
-                        {f.label} <span className="opacity-65 tabular-nums ml-1">{counts[f.key]}</span>
+                        {f.label} <span className="opacity-65 tabular-nums ml-1">{displayCounts[f.key]}</span>
                     </button>
                 ))}
             </div>
 
-            {/* Empty Needs-action: never silently shows All */}
-            {visible.length === 0 && filter === 'needs_action' && (
+            {/* Empty Needs-action: never silently shows All. Suppressed when a
+                request above is itself waiting on a decision — "nothing needs
+                your attention" directly under an unreviewed request would be a
+                straightforward lie. */}
+            {visible.length === 0 && filter === 'needs_action' && requestsNeedingAction === 0 && (
                 <div className="glass-panel rounded-3xl border border-slate-100 dark:border-slate-700 py-14 px-6 text-center space-y-3">
                     <p className="text-lg font-black text-slate-900 dark:text-white">Nothing needs your attention right now.</p>
                     <p className="text-sm text-slate-500">New responses and requests will appear here.</p>
@@ -357,13 +421,22 @@ export function RebookingTab() {
                 onFinalized={() => { setAudienceSaved(true); setAudienceOpen(false); setPreviewOpen(true); }}
             />
 
-            {/* Step 3 — the real email preview. Sends nothing; the real send stays
-                gated until the rebooking link exists. */}
+            {/* Step 3 — the real email preview. Each recipient's private
+                rebooking link is minted at send time, never here. */}
             <EmailPreviewDrawer
                 open={previewOpen}
                 lineupId={savedLineup?.id ?? null}
                 onBack={() => { setPreviewOpen(false); setAudienceOpen(true); }}
                 onClose={() => setPreviewOpen(false)}
+            />
+
+            {/* Step 4 — reviewing what came back. Status changes only; creating
+                the fundraiser itself is Checkpoint 5. */}
+            <ReviewRequestDrawer
+                open={openRequestId !== null}
+                request={requests.find((r) => r.id === openRequestId) ?? null}
+                onClose={() => setOpenRequestId(null)}
+                onChanged={() => { void loadRequests(); }}
             />
         </div>
     );

@@ -5,9 +5,16 @@
  *                                          destination. Never a coordinator.
  *   POST { mode: 'real' }               → the real audience send.
  *
- * THE CP4 GATE: a real send is refused server-side while the durable rebooking
- * CTA does not exist. This is a structured readiness condition, not a disabled
- * button — an API client bypassing the UI is refused identically.
+ * THE SEND GATES: a real send is refused server-side unless a rebooking link can
+ * be built AND the platform sender is configured. These are structured readiness
+ * conditions, not disabled buttons — an API client bypassing the UI is refused
+ * identically.
+ *
+ * FR-RETENTION-4 — the rebooking credential is minted PER RECIPIENT, inside the
+ * send loop, after that recipient's delivery attempt has been claimed. The raw
+ * token exists only in the local variable that renders one email; only its
+ * SHA-256 digest is written to the database, and neither the token nor the
+ * finished URL is logged.
  */
 
 import { NextResponse } from 'next/server';
@@ -17,6 +24,8 @@ import { getTenantSender } from '@/lib/email';
 import { renderSeasonalUpdate, resolveRebookingCta, checkSenderReadiness } from '@/lib/outreachMessage';
 import { ResendOutreachProvider } from '@/lib/outreachProvider';
 import { runSend, type SendableRecipient } from '@/lib/outreachSend';
+import { mintRebookingToken } from '@/lib/rebookingToken';
+import { buildRebookingUrl, resolveRequestOrigin } from '@/lib/fundraiserUrls';
 
 function isPlausible(email: string): boolean {
     const v = email.trim();
@@ -51,7 +60,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
         const business = await prisma.business.findUniqueOrThrow({ where: { id: businessId }, select: { name: true } });
         const sender = await getTenantSender(businessId);
-        const cta = resolveRebookingCta(batch.id);
+        const cta = resolveRebookingCta(req);
 
         // ── TEST SEND ────────────────────────────────────────────────────────
         if (mode === 'test') {
@@ -101,7 +110,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         // TWO independent gates, both server-side, both BEFORE any provider
         // call. A real fundraiser send requires each of them.
 
-        // Gate 1 — the CP4 rebooking link must exist.
+        // Gate 1 — a rebooking link must be buildable.
         if (!cta.ready) {
             return NextResponse.json({
                 ok: false,
@@ -155,20 +164,49 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         await prisma.outreachBatch.update({ where: { id: batch.id }, data: { status: 'sending' } });
         await prisma.outreachMessage.update({ where: { id: message.id }, data: { status: 'sending', send_started_at: new Date() } });
 
+        // Gate 1 already proved this resolves; re-resolving here keeps the
+        // non-null assertion honest rather than assumed.
+        const origin = resolveRequestOrigin(req)!;
+
         const summary = await runSend({
             prisma, provider: new ResendOutreachProvider(),
             businessId, batchId: batch.id, messageId: message.id, generation: message.version,
             recipients,
-            render: (r) => renderSeasonalUpdate({
-                tenantName: business.name,
-                organizationNames: r.organizationNames,
-                lineupName: lineup.name,
-                lineupStartsAt: lineup.starts_at,
-                lineupEndsAt: lineup.ends_at,
-                hasPreviousFundraiser: true,
-                previousCampaignName: null,
-                cta,
-            }),
+            render: async (r) => {
+                // ── MINT ─────────────────────────────────────────────────────
+                // Runs once this recipient's attempt is claimed, so we know the
+                // email is really going out. `raw` never leaves this closure:
+                // it goes into one email body and is then unreachable. Only the
+                // digest is persisted.
+                //
+                // Re-minting deliberately REPLACES any earlier digest for this
+                // recipient. Only recipients without a live attempt reach this
+                // point, so no link that someone already received is revoked by
+                // a retry — but a link minted for a delivery that then failed is
+                // correctly invalidated rather than left live and unreachable.
+                const minted = mintRebookingToken();
+                await prisma.outreachRecipient.update({
+                    where: { id: r.recipientId },
+                    data: {
+                        rebooking_token_hash: minted.hash,
+                        rebooking_token_issued_at: minted.issuedAt,
+                        rebooking_token_expires_at: minted.expiresAt,
+                        rebooking_token_revoked_at: null,
+                        refresh_requested_at: null,
+                    },
+                });
+
+                return renderSeasonalUpdate({
+                    tenantName: business.name,
+                    organizationNames: r.organizationNames,
+                    lineupName: lineup.name,
+                    lineupStartsAt: lineup.starts_at,
+                    lineupEndsAt: lineup.ends_at,
+                    hasPreviousFundraiser: true,
+                    previousCampaignName: null,
+                    cta: { ...cta, url: buildRebookingUrl(origin, minted.raw) },
+                });
+            },
             from: sender.from, replyTo: sender.replyTo, now: new Date(),
         });
 
