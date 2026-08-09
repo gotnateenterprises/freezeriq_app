@@ -19,10 +19,11 @@
 | **Last formally completed storefront phase** | SF-3 (including SF-3E) — Fable bundle shopping + empty state (`4234c93`, `a1a94c9`) |
 | **Last formally completed pipeline phase** | DD-0.5 + KB-1B |
 | **Last launch-readiness phase** | FR-LAUNCH-1E |
-| **Next storefront phase** | SF-4 — Bag redesign (per STOREFRONT_REDESIGN_HANDOFF.md) |
+| **Fundraiser retention (FR-RETENTION)** | 🚀 **LIVE** — CP1–CP5 + RELEASE-1/2 complete; production commit `7a3ab07`, deployment `dpl_4iYEybULFt7Ak8NtC5R2SpdPjbkd` |
+| **Next storefront phase** | SF-4 — Bag redesign (per STOREFRONT_REDESIGN_HANDOFF.md) — **now the next prioritized work** |
 | **CB-7 Meal Preview** | Registered — may begin (DD-0.1 prerequisite satisfied) |
-| **Password reset** | Parked — see [Parked Work](#parked-work) |
-| **Migration-history reconciliation** | Parked — separate future phase |
+| **Password reset** | Parked — see [Parked Work](#parked-work). Its stated precondition is now satisfied, but it stays parked until explicitly reopened. |
+| **Migration-history reconciliation** | ✅ Complete — delivered as FR-MIGRATION-RECON-1..4 during the retention program |
 
 ---
 
@@ -107,6 +108,46 @@ See CLAUDE.md for full details.
 | FR-LAUNCH-1C-1 — Fundraiser dashboard weighted progress fix | ✅ Complete | `e7ef40c` |
 | FR-LAUNCH-1D — Coordinator transactional order notification | ✅ Complete | `d3dd7aa` |
 | FR-LAUNCH-1E — Submission idempotency + concurrency hardening | ✅ Complete | `32d9610` |
+
+### Fundraiser Retention (FR-RETENTION) — 🚀 LIVE IN PRODUCTION
+
+Verdict: **RETENTION RELEASE LIVE — SAFE SMOKE ITEMS DEFERRED** (2026-08-09).
+
+| Item | Status | Evidence |
+|---|---|---|
+| FR-MIGRATION-RECON-1..4 — Canonical baseline + production ledger init | ✅ Complete | `528edf5` — see [Parked Work](#migration-history-reconciliation) |
+| FR-RETENTION-CHECKPOINT-1 — Durable contact foundation | ✅ Complete | `528edf5`, migration `20260806000000` |
+| FR-RETENTION-CHECKPOINT-2 — Seasonal Lineup + audience review | ✅ Complete | `d4fc254`, migration `20260807000000` |
+| FR-RETENTION-CHECKPOINT-3 — Email preview + controlled send engine | ✅ Complete | `9a9df87`, migration `20260808000000` |
+| FR-RETENTION-CHECKPOINT-4 — Secure rebooking link, response, revisions, opportunities | ✅ Complete | `dfdab10`, migration `20260809000000` |
+| FR-RETENTION-CHECKPOINT-5 — Approved opportunity → fundraiser creation handoff | ✅ Complete | `7a3ab07` — no schema change required |
+| FR-RETENTION-RELEASE-1 — CP3 + CP4 production schema deployment | ✅ Complete | Production ledger 5/5 |
+| FR-RETENTION-RELEASE-2 / 2A / 2B — Sender, controlled test, promotion, smoke | ✅ Complete / LIVE | `dpl_4iYEybULFt7Ak8NtC5R2SpdPjbkd` |
+
+**Production record**
+
+| | |
+|---|---|
+| Source commit | `7a3ab072d4cf91062e154589fc0393dbf9965202` — *feat: connect rebooking requests to fundraiser creation* |
+| Deployment | `dpl_4iYEybULFt7Ak8NtC5R2SpdPjbkd` — READY, target `production`, built 2026-08-09 16:07:45Z → 16:09:58Z |
+| Platform sender | `notifications@freezeriqapp.com` (Vercel Production `EMAIL_FROM`) |
+| Controlled Resend test | Exactly one authorized internal TEST email — provider result **accepted**. Not delivered: there is no Resend webhook, so no delivery/bounce/open/click state exists. |
+| Migration state | 5 applied, 0 rolled back, 0 unfinished — schema up to date |
+| Data impact | Deployment created **no** application rows; all retention tables were 0 immediately after release |
+| Branch | Released from `freezeriq-phase-2-cleanup`; `main` remains a strict ancestor and **no merge occurred** as part of this launch |
+
+**Launched flow** — Seasonal Lineup → audience review → Seasonal Update preview/send engine → secure per-recipient rebooking link → public rebooking response → append-only revisions → one opportunity per represented organization → tenant Review Request → Approve → **Start Fundraiser** → the **existing** StartFundraiserWizard → the **existing** `POST /api/campaigns` → exactly one `FundraiserCampaign` → opportunity converted and linked.
+
+Retention deliberately **reuses** the existing wizard and campaign-creation system; it did not introduce a second campaign-creation architecture. Coordinator intent captured in a response is **evidence only** — it grants no portal access, and neither `CampaignContact` nor `CampaignContactAccessGrant` exists.
+
+**Deferred operational verification** (not launch defects; all four were proven locally against a production-shaped database, and each is exercised naturally by the first real retention cycle):
+
+1. VALID-TOKEN PRODUCTION SMOKE DEFERRED — NO SAFE TEST RECIPIENT
+2. LIVE OPPORTUNITY-CONVERSION SMOKE DEFERRED — NO SAFE TEST FIXTURE
+3. Authenticated tenant retention UI production smoke — deferred; available browser tooling was blocked by site/session policy
+4. Deployed runtime sender-readiness readout — deferred; Production has no Seasonal Lineup and one was deliberately not created for smoke testing
+
+**Not launch prerequisites** (deferred enhancements, explicitly out of the initial launch): `CampaignContact`, `CampaignContactAccessGrant`, personal coordinator-token replacement, progress-only role, Resend webhook/event dashboard, delivered/open/click analytics, automated or scheduled Seasonal Updates, contact-merge execution. Resend's optional tracking CNAME (`notifications` subdomain) remains failed — DKIM and both SPF records are verified, so this does **not** block sending and is not repaired in this phase.
 
 ### Loyalty Cleanup (LOY-P0)
 
@@ -220,7 +261,14 @@ No database migration exists for `PasswordResetToken` yet. **Do not run any Pris
 
 ### Migration-history reconciliation
 
-Separate future forensic/baselining phase. The CB-1 and CB-repair migrations were manually owner-applied per their own file headers — this is documented precedent, not a substitute for the reconciliation phase. Do not merge this work into DD-0.1 or password reset. Do not run `prisma migrate dev`, `prisma migrate deploy`, or `prisma migrate resolve` under the current parked state.
+**✅ COMPLETE** — delivered as FR-MIGRATION-RECON-1..4 during the fundraiser-retention program (2026-08-07/08), no longer a future phase.
+
+The committed chain could not previously rebuild an empty database, and production had never carried a Prisma ledger. A canonical baseline was introspected from the production catalog, hand-authored, proven to rebuild from empty, and committed (`00000000000000_baseline`, in `528edf5`); the production ledger was then initialised against it. Production now holds **five** successful migrations, 0 rolled back, 0 unfinished, and reports *Database schema is up to date*.
+
+Two consequences worth carrying forward:
+
+- **Password reset**: its stated precondition ("parked until migration-history reconciliation is completed") is now satisfied. It nonetheless **remains parked** until explicitly reopened — reconciliation removed the blocker, it did not authorise the work. There is still no migration for `PasswordResetToken`, and its schema hunk stays uncommitted in the working tree.
+- **Migration convention**: production's stored checksums match the CRLF working-tree form of each migration file. Deploying the same migrations from an LF-normalised checkout would record different checksums and make them read as *modified after applied*. Deploy from the working tree, not from a `git archive` extraction.
 
 ---
 
