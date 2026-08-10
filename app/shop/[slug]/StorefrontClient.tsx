@@ -442,6 +442,9 @@ export default function StorefrontClient({ overrideSlug, hasCustomerSession = fa
                     businessId={business.id}
                     slug={business.slug}
                     storefrontConfig={storefrontConfig}
+                    /* SF-4: the tenant-scoped storefront payload, used only to
+                       source RoundOutRow suggestions inside the bag. */
+                    bundles={bundles}
                 />
 
                 {/* SF-3: legacy MobileStickyCart render removed (file untouched) —
