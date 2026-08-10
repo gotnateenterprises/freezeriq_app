@@ -47,3 +47,38 @@ export async function buildBundlePriceMap(
         dbBundles.map((b: any) => [b.id, Number(b.price)])
     );
 }
+
+/**
+ * Names any of the given bundles the tenant has deactivated.
+ *
+ * PUBLIC PURCHASE PATHS ONLY. Hiding a deactivated bundle from the storefront
+ * payload stops it being offered, but not being bought: a stale tab, a cached
+ * payload, a `?cart=` link, or a hand-edited request can still carry its id
+ * into an order. This is the server-side half of that guard.
+ *
+ * Deliberately NOT folded into `buildBundlePriceMap`, which is shared with
+ * authenticated staff surfaces (manual orders, invoices). A tenant may
+ * legitimately invoice or record an order for a bundle they have since
+ * deactivated, and silently dropping it there would corrupt those totals.
+ *
+ * Returns display names so the caller can tell the customer which item is
+ * unavailable rather than failing with a generic pricing error.
+ */
+export async function findInactiveBundleNames(
+    businessId: string,
+    bundleIds: string[]
+): Promise<string[]> {
+    const ids = bundleIds.filter((id) => id && id !== 'manual_upsell');
+    if (ids.length === 0) return [];
+
+    const inactive = await prisma.bundle.findMany({
+        where: {
+            id: { in: ids },
+            business_id: businessId,
+            is_active: false,
+        },
+        select: { name: true },
+    });
+
+    return inactive.map((b: { name: string }) => b.name);
+}

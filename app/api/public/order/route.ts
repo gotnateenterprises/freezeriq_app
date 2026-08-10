@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { resolveVariantSize, getServingMultiplier } from '@/lib/serving_multipliers';
-import { buildBundlePriceMap } from '@/lib/pricing';
+import { buildBundlePriceMap, findInactiveBundleNames } from '@/lib/pricing';
 import { resolveCampaignOrderMode, validateBundleEligibility } from '@/lib/campaignOrderBundles';
 import { isCampaignClosed } from '@/lib/campaignBundleSelection';
 import { validateSubmissionKey, buildSubmissionFingerprint } from '@/lib/orderIdempotency';
@@ -153,6 +153,17 @@ export async function POST(req: Request) {
 
         // 1.5 SERVER-SIDE PRICE VALIDATION — never trust client prices
         //     Uses centralized buildBundlePriceMap() from lib/pricing.ts (LAW 1)
+        // A deactivated bundle is no longer sellable. It is filtered out of the
+        // storefront payload, but a stale tab or a hand-edited request can still
+        // carry its id here, so refuse it at the server rather than trusting that
+        // the customer only ever saw eligible bundles.
+        const inactiveNames = await findInactiveBundleNames(businessId, bundleIds);
+        if (inactiveNames.length > 0) {
+            return NextResponse.json({
+                error: `${inactiveNames.join(', ')} ${inactiveNames.length === 1 ? 'is' : 'are'} no longer available. Please remove ${inactiveNames.length === 1 ? 'it' : 'them'} from your bag.`,
+            }, { status: 400 });
+        }
+
         const bundlePriceMap = await buildBundlePriceMap(businessId, bundleIds);
 
         let manualUpsellPrice: number | null = null;

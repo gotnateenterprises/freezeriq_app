@@ -1,6 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { PUBLIC_BUNDLE_VISIBILITY } from '@/lib/storefrontEligibility';
 
 /**
  * Safely coerce a JSONB field from $queryRaw into a plain JS array.
@@ -60,7 +61,10 @@ export async function GET(
         const bundlesWithRecipes = await prisma.bundle.findMany({
             where: {
                 business_id: business.id,
-                show_on_storefront: true
+                // Both flags are required — see lib/storefrontEligibility.
+                // Filtering only show_on_storefront let a deactivated bundle
+                // render here with a working Add button.
+                ...PUBLIC_BUNDLE_VISIBILITY,
             },
             include: {
                 contents: {

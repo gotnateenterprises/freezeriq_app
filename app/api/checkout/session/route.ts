@@ -5,7 +5,7 @@ import { getCustomerSession } from '@/lib/customerAuth';
 import { getPaymentProvider } from '@/lib/payments';
 import { geocodeAddress, resolveDeliveryZone } from '@/lib/delivery/zones';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
-import { buildBundlePriceMap } from '@/lib/pricing';
+import { buildBundlePriceMap, findInactiveBundleNames } from '@/lib/pricing';
 
 export async function POST(req: Request) {
     try {
@@ -135,6 +135,15 @@ export async function POST(req: Request) {
         const bundleIds = items
             .filter((item: any) => item.bundleId && item.bundleId !== 'manual_upsell')
             .map((item: any) => item.bundleId);
+
+        // Same guard as the offline /api/public/order path: a deactivated bundle
+        // is not sellable, and this route must not be the way around that.
+        const inactiveNames = await findInactiveBundleNames(business.id, bundleIds);
+        if (inactiveNames.length > 0) {
+            return NextResponse.json({
+                error: `${inactiveNames.join(', ')} ${inactiveNames.length === 1 ? 'is' : 'are'} no longer available. Please remove ${inactiveNames.length === 1 ? 'it' : 'them'} from your bag.`,
+            }, { status: 400 });
+        }
 
         const bundlePriceMap = await buildBundlePriceMap(business.id, bundleIds);
 
