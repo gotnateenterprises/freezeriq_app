@@ -6,10 +6,21 @@
  *        address. Two people sharing an inbox stay two rows; the audience/send
  *        flow is where addresses get deduplicated, and that is a later checkpoint.
  *
- * Checkpoint 1 derives only the statuses that exist without outreach tables:
- *   ready_to_invite · cant_email · archived
- * Outreach-driven statuses (update sent, needs review, needs a coordinator,
- * ready to create, rebooked) arrive with Checkpoints 2–5.
+ * FR-RETENTION-6 — this route now derives the FULL launched lifecycle by reading
+ * the outreach tables that Checkpoints 2–5 shipped. Until CP6 it still derived
+ * only the three pre-outreach states, which left every emailable contact frozen
+ * at "Ready to invite" no matter how much real outreach had happened.
+ *
+ * READ-ONLY: this GET performs no writes. Every status is derived from existing
+ * rows; nothing here creates, updates, or claims anything.
+ *
+ * ATTRIBUTION RULE THAT MATTERS: one delivery recipient (one inbox) may
+ * represent several durable people. A delivery attempt is fairly attributed to
+ * everyone on that inbox — the email really did arrive there. An OPPORTUNITY is
+ * not: it belongs to a specific organization, so it is attributed to this
+ * contact only when its customer_id is one of THIS contact's organizations.
+ * Without that check, two people sharing an inbox would each inherit the
+ * other's fundraiser.
  *
  * NOTE: campaign fields are deliberately limited to columns present in every
  * environment — the CB-1 `bundle_selection_*` columns are not selected here.
@@ -17,11 +28,16 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
+import {
+    bucketForStatus,
+    deriveRebookingRowState,
+    resolveActivePreference,
+    type PreferenceRow,
+    type RebookingBucket,
+    type RowState,
+} from '@/lib/rebookingRowState';
 
-export type RebookingStatus =
-    | 'ready_to_invite'
-    | 'cant_email'
-    | 'archived';
+export type { RebookingStatus, RebookingBucket } from '@/lib/rebookingRowState';
 
 export interface RebookingOrgSummary {
     customer_id: string;
@@ -33,7 +49,7 @@ export interface RebookingOrgSummary {
     last_settlement_total: number | null;
 }
 
-export interface RebookingContactRow {
+export type RebookingContactRow = RowState & {
     contact_id: string;
     display_name: string;
     email: string | null;
@@ -43,11 +59,9 @@ export interface RebookingContactRow {
     needs_review: boolean;
     review_reason: string | null;
     organizations: RebookingOrgSummary[];
-    status: RebookingStatus;
-    status_label: string;
-    exclusion_reason: string | null;
-    next_step: string;
-}
+    /** Which filter chip this row answers to. */
+    bucket: RebookingBucket;
+};
 
 function maskEmail(email: string | null): string | null {
     if (!email) return null;
@@ -97,9 +111,62 @@ export async function GET() {
                         },
                     },
                 },
+                // FR-RETENTION-6 — the outreach evidence CP1 could not read.
+                outreach_links: {
+                    select: {
+                        recipient: {
+                            select: {
+                                refresh_requested_at: true,
+                                // Test sends are excluded by the query, not by a later
+                                // filter: a tenant emailing themselves must never make a
+                                // real contact look contacted.
+                                attempts: {
+                                    where: { is_test: false },
+                                    select: { status: true },
+                                },
+                                // The submission id comes off the opportunity itself
+                                // (`submission_id`), so the submissions relation is
+                                // deliberately not joined here.
+                                opportunities: {
+                                    select: {
+                                        id: true,
+                                        submission_id: true,
+                                        customer_id: true,
+                                        status: true,
+                                        coordinator_intent: true,
+                                        coordinator_name: true,
+                                        campaign_id: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                // Contact-scoped preferences. Address-scoped ones are fetched
+                // separately below, because they key on the email, not the person.
+                marketing_prefs: {
+                    where: { scope: 'contact' },
+                    select: { status: true, effective_at: true, effective_until: true },
+                    orderBy: { effective_at: 'desc' },
+                },
             },
             orderBy: { display_name: 'asc' },
         });
+
+        // Address-scoped suppressions apply to everyone on that inbox, so they
+        // cannot be resolved from the per-contact relation above.
+        const addressPrefs = await prisma.marketingPreference.findMany({
+            where: { business_id: businessId, scope: 'email_address', normalized_email: { not: null } },
+            select: { normalized_email: true, status: true, effective_at: true, effective_until: true },
+            orderBy: { effective_at: 'desc' },
+        });
+        const addressPrefByEmail = new Map<string, PreferenceRow[]>();
+        for (const p of addressPrefs) {
+            const key = p.normalized_email as string;
+            const list = addressPrefByEmail.get(key);
+            if (list) list.push(p);
+            else addressPrefByEmail.set(key, [p]);
+        }
 
         // How many DISTINCT contacts sit on each address — powers "2 people" badges
         // without ever merging them into one row.
@@ -109,6 +176,10 @@ export async function GET() {
             if (!e) continue;
             addressCounts.set(e, (addressCounts.get(e) ?? 0) + 1);
         }
+
+        // One clock for the whole response, so two rows can never disagree about
+        // whether the same pause has lapsed.
+        const now = new Date();
 
         const rows: RebookingContactRow[] = contacts.map((c) => {
             const point = c.contact_points[0] ?? null;
@@ -132,27 +203,36 @@ export async function GET() {
 
             const allArchived = organizations.length > 0 && organizations.every((o) => o.archived);
 
-            let status: RebookingStatus;
-            let status_label: string;
-            let exclusion_reason: string | null = null;
-            let next_step: string;
+            // ── Outreach evidence for this person ──────────────────────────────
+            const recipients = c.outreach_links.map((l) => l.recipient);
+            // "Accepted" is the honest ceiling without delivery webhooks: the
+            // provider took the message. Queued is not yet sent; skipped and
+            // failed never reached anyone.
+            const wasSent = recipients.some((r) => r.attempts.some((a) => a.status === 'accepted'));
+            const askedForFreshLink = recipients.some((r) => r.refresh_requested_at !== null);
 
-            if (c.archived_at || allArchived) {
-                status = 'archived';
-                status_label = 'Archived';
-                next_step = 'View history';
-            } else if (!email) {
-                status = 'cant_email';
-                status_label = "Can't email";
-                exclusion_reason = 'No email';
-                next_step = 'Fix contact info';
-            } else {
-                status = 'ready_to_invite';
-                status_label = 'Ready to invite';
-                next_step = 'Included in next update';
-            }
+            // Only opportunities for THIS contact's own organizations — see the
+            // attribution rule in the file header.
+            const ownOrgIds = new Set(organizations.map((o) => o.customer_id));
+            const opportunities = recipients
+                .flatMap((r) => r.opportunities)
+                .filter((o) => ownOrgIds.has(o.customer_id));
+
+            const state = deriveRebookingRowState({
+                isArchived: Boolean(c.archived_at) || allArchived,
+                hasEmail: Boolean(email),
+                wasSent,
+                askedForFreshLink,
+                opportunities,
+                activePreference: resolveActivePreference(
+                    [...c.marketing_prefs, ...(normalized ? addressPrefByEmail.get(normalized) ?? [] : [])],
+                    now,
+                ),
+            });
 
             return {
+                ...state,
+                bucket: bucketForStatus(state.status, c.needs_review),
                 contact_id: c.id,
                 display_name: c.display_name,
                 email,
@@ -162,19 +242,19 @@ export async function GET() {
                 needs_review: c.needs_review,
                 review_reason: c.review_reason,
                 organizations,
-                status,
-                status_label,
-                exclusion_reason,
-                next_step,
             };
         });
 
+        // FR-RETENTION-6 — every count comes from the SAME derived bucket the
+        // filter uses. CP1 counted with one definition and filtered with another,
+        // which is how "Waiting" and "Done" could sit at zero forever.
+        const inBucket = (b: RebookingBucket) => rows.filter((r) => r.bucket === b).length;
         const counts = {
             all: rows.length,
-            ready_to_invite: rows.filter((r) => r.status === 'ready_to_invite').length,
-            waiting: 0,       // populated in Checkpoint 3
-            needs_action: rows.filter((r) => r.status === 'cant_email' || r.needs_review).length,
-            done: 0,          // populated in Checkpoint 5
+            ready_to_invite: inBucket('ready_to_invite'),
+            waiting: inBucket('waiting'),
+            needs_action: inBucket('needs_action'),
+            done: inBucket('done'),
         };
 
         return NextResponse.json({ contacts: rows, counts });

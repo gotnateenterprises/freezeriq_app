@@ -10,9 +10,15 @@
  *    empty message plus a deliberate "View all rebooking contacts" action
  *  · one row per durable PERSON; people sharing an address stay separate rows
  *  · no scheduling / automatic-send control exists anywhere on this surface
- *  · "Send Seasonal Update" opens a UI-only Seasonal Lineup shell — it sends no
- *    email and issues no token. It saves a real Seasonal Lineup, then opens the
- *    audience review. See SeasonalLineupDrawer / AudienceReviewDrawer.
+ *  · "Send Seasonal Update" saves a real Seasonal Lineup, then walks the tenant
+ *    through audience review and email preview before any send. Sending, token
+ *    issuance, and suppression all happen in that chain — see
+ *    SeasonalLineupDrawer / AudienceReviewDrawer / EmailPreviewDrawer.
+ *
+ * FR-RETENTION-6: row status, the Waiting/Done counts, and the per-row next step
+ * are derived server-side from real outreach evidence. Rows no longer sit frozen
+ * at "Ready to invite" after an update has actually gone out. The row action
+ * REUSES the drawer chain above — it opens no new route and sends nothing itself.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -46,6 +52,12 @@ interface ContactRow {
     status_label: string;
     exclusion_reason: string | null;
     next_step: string;
+    /** FR-RETENTION-6 — which filter chip this row answers to, derived server-side. */
+    bucket: 'ready_to_invite' | 'waiting' | 'needs_action' | 'done' | 'none';
+    next_action: 'send_seasonal_update' | 'review_request' | 'start_fundraiser' | 'view_campaign' | 'fix_contact' | null;
+    campaign_id: string | null;
+    request_id: string | null;
+    opportunity_id: string | null;
 }
 
 const FILTERS: { key: Filter; label: string }[] = [
@@ -56,12 +68,23 @@ const FILTERS: { key: Filter; label: string }[] = [
     { key: 'done', label: 'Done' },
 ];
 
+const NEUTRAL_CHIP = 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700';
+
 function statusChipClass(status: string) {
     switch (status) {
-        case 'ready_to_invite': return 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700';
+        case 'ready_to_invite': return NEUTRAL_CHIP;
+        // Sent-and-waiting is genuinely informational — it is not something the
+        // tenant has to act on, so it must not read as an alert.
+        case 'update_sent': return 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-400 dark:border-sky-900';
+        case 'interested': return 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-400 dark:border-violet-900';
+        case 'needs_review':
+        case 'needs_coordinator': return 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-900';
+        case 'ready_to_create': return 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-400 dark:border-indigo-900';
+        case 'rebooked': return 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900';
         case 'cant_email': return 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-900';
+        case 'paused_until':
         case 'archived': return 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-500 dark:border-slate-700';
-        default: return 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700';
+        default: return NEUTRAL_CHIP;
     }
 }
 
@@ -133,24 +156,73 @@ export function RebookingTab({ onStartFundraiser }: {
         return () => { alive = false; };
     }, []);
 
-    // FR-RETENTION-4 — a request waiting on a decision IS something that needs
-    // action. Leaving it out of the count would mean the number a tenant checks
-    // every morning is silently wrong about the one thing they most need to see.
+    // Still used to suppress a false "nothing needs your attention" while an
+    // unreviewed request sits above the table — see the empty state below.
     const requestsNeedingAction = requests.filter((r) => r.needsAction).length;
-    const displayCounts: Record<Filter, number> = {
-        ...counts,
-        needs_action: counts.needs_action + requestsNeedingAction,
+
+    // FR-RETENTION-4 added `requestsNeedingAction` on top of the contact count,
+    // because back then a pending request appeared NOWHERE in the contact table —
+    // the CP1 route could not see responses at all.
+    //
+    // FR-RETENTION-6 removes that addition. The same people are now real rows
+    // (Interested / Needs review / Needs a coordinator all land in needs_action),
+    // so adding the requests again counted the identical work twice and left the
+    // chip reading 7 while the filter showed 5. A chip that disagrees with its own
+    // rows is the exact defect this checkpoint exists to remove.
+    const displayCounts: Record<Filter, number> = counts;
+
+    // FR-RETENTION-6 — filters read the SAME server-derived bucket the counts are
+    // aggregated from, so a chip's number always matches the rows behind it.
+    const visible = rows.filter((r) => (filter === 'all' ? true : r.bucket === filter));
+
+    /**
+     * The ONE way into the Seasonal Update chain. The header button and every
+     * row-level "Include in your next Seasonal Update" call this same function,
+     * so there is exactly one send path — CP6 adds no per-contact send.
+     */
+    const openSeasonalUpdate = () => {
+        // Once a lineup has a reviewed audience it can no longer be edited, so go
+        // straight back to the audience rather than opening an editor that would
+        // only refuse.
+        if (savedLineup?.hasAudience || audienceSaved) setAudienceOpen(true);
+        else setLineupOpen(true);
     };
 
-    const visible = rows.filter((r) => {
-        switch (filter) {
-            case 'all': return true;
-            case 'ready_to_invite': return r.status === 'ready_to_invite';
-            case 'waiting': return false;   // Checkpoint 3
-            case 'needs_action': return r.status === 'cant_email' || r.needs_review;
-            case 'done': return false;      // Checkpoint 5
+    /**
+     * The row's next step. Where a real action exists it is a button wired to an
+     * EXISTING handler; where none exists it stays plain text rather than
+     * pretending to be clickable.
+     */
+    const NextStep = ({ r }: { r: ContactRow }) => {
+        const label = r.next_step;
+        // inline-flex is load-bearing: `min-h` has no effect on an inline element,
+        // so the anchor variant would otherwise render a ~15px tap target on
+        // mobile while the button variants were fine.
+        const base = 'inline-flex items-center text-left text-[11px] font-bold underline-offset-2 hover:underline text-indigo-600 dark:text-indigo-400 min-h-[44px] md:min-h-0 md:py-1';
+
+        switch (r.next_action) {
+            case 'send_seasonal_update':
+                return <button onClick={openSeasonalUpdate} className={base}>{label}</button>;
+            case 'review_request':
+                return r.request_id
+                    ? <button onClick={() => setOpenRequestId(r.request_id)} className={base}>{label}</button>
+                    : <span className="text-[11px] font-bold text-slate-400">{label}</span>;
+            case 'start_fundraiser': {
+                // The wizard lives on the page above and the prop is optional, so
+                // the row only offers the action when it can actually perform it.
+                const oppId = r.opportunity_id;
+                return oppId && onStartFundraiser
+                    ? <button onClick={() => onStartFundraiser(oppId)} className={base}>{label}</button>
+                    : <span className="text-[11px] font-bold text-slate-400">{label}</span>;
+            }
+            case 'view_campaign':
+                return r.campaign_id
+                    ? <a href={`/fundraisers/${r.campaign_id}`} className={base}>View campaign</a>
+                    : <span className="text-[11px] font-bold text-slate-400">{label}</span>;
+            default:
+                return <span className="text-[11px] font-bold text-slate-400">{label}</span>;
         }
-    });
+    };
 
     if (loading) {
         return (
@@ -191,13 +263,7 @@ export function RebookingTab({ onStartFundraiser }: {
 
                 <div className="flex flex-col items-stretch lg:items-end gap-1.5 flex-none">
                     <button
-                        onClick={() => {
-                            // Once a lineup has a reviewed audience it can no longer be
-                            // edited, so go straight back to the audience rather than
-                            // opening an editor that would only refuse.
-                            if (savedLineup?.hasAudience || audienceSaved) setAudienceOpen(true);
-                            else setLineupOpen(true);
-                        }}
+                        onClick={openSeasonalUpdate}
                         className="inline-flex items-center justify-center gap-2 px-5 min-h-[44px] rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700 transition-colors"
                     >
                         <Send size={15} /> Send Seasonal Update
@@ -370,7 +436,7 @@ export function RebookingTab({ onStartFundraiser }: {
                                             )}
                                         </td>
                                         <td className="px-4 py-4">
-                                            <span className="text-[11px] font-bold text-slate-400">{r.next_step}</span>
+                                            <NextStep r={r} />
                                         </td>
                                     </tr>
                                 ))}
@@ -398,8 +464,12 @@ export function RebookingTab({ onStartFundraiser }: {
                             {r.organizations.length > 1 && (
                                 <p className="text-[11px] font-bold text-violet-600">{r.organizations.length} groups</p>
                             )}
+                            {/* Mobile keeps an explicit "Next step" label. Without the
+                                table header, the bare uppercase text was what read in
+                                Production as a software-release notice. */}
                             <div className="border-t border-dashed border-slate-200 dark:border-slate-700 pt-2.5">
-                                <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">{r.next_step}</p>
+                                <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">Next step</p>
+                                <div className="mt-0.5"><NextStep r={r} /></div>
                             </div>
                         </div>
                     ))}
