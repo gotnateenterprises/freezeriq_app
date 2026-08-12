@@ -8,7 +8,7 @@
 > **Current source of truth:** [`docs/ai/UI_REDESIGN_SPEC.md`](../ai/UI_REDESIGN_SPEC.md) is the design and phase authority. This file is the **implementation ledger and dependency sequence** — it tracks what's done, what's next, and what's parked. **The spec wins on any conflict.**
 
 > [!NOTE]
-> **NEXT STOREFRONT PHASE: SF-4 — Bag redesign.** See [`docs/ai/STOREFRONT_REDESIGN_HANDOFF.md`](../ai/STOREFRONT_REDESIGN_HANDOFF.md). DD-0.1 through DD-0.5 and KB-1A/1B are complete. SF-1 through SF-3 (including SF-3E) are complete and validated.
+> **SF-4 — Bag redesign is COMPLETE FOR PRODUCTION** (`ace38a09211baeadd2e2e159a8e277d289e48819`), together with **SF-STOREFRONT-ACTIVE-BUNDLE-GUARD** (`809dc4c6573aa791165d013d837633e9ed6e7db3`) — both live in Production as of `809dc4c`. **SF-5 is PAUSED** (owner-priority pivot to the Fundraiser Growth Engine — no hard dependency forces SF-5 through SF-12 first; see [Active Remaining Sequence](#active-remaining-sequence)). **NEXT ACTIVE PHASE: GE-3 — Campaign Health & At-Risk Signals.** DD-0.1 through DD-0.5 and KB-1A/1B are complete. SF-1 through SF-4 are complete and validated.
 
 ---
 
@@ -20,7 +20,8 @@
 | **Last formally completed pipeline phase** | DD-0.5 + KB-1B |
 | **Last launch-readiness phase** | FR-LAUNCH-1E |
 | **Fundraiser retention (FR-RETENTION)** | 🚀 **LIVE** — CP1–CP5 + RELEASE-1/2 complete; production commit `7a3ab07`, deployment `dpl_4iYEybULFt7Ak8NtC5R2SpdPjbkd` |
-| **Next storefront phase** | SF-4 — Bag redesign (per STOREFRONT_REDESIGN_HANDOFF.md) — **now the next prioritized work** |
+| **Next storefront phase** | SF-4 ✅ complete; **SF-5 paused** — owner-priority pivot to Growth Engine, not a hard dependency (see below) |
+| **Active phase** | **GE-3 — Campaign Health & At-Risk Signals** (see [Active Remaining Sequence](#active-remaining-sequence)) |
 | **CB-7 Meal Preview** | Registered — may begin (DD-0.1 prerequisite satisfied) |
 | **Password reset** | Parked — see [Parked Work](#parked-work). Its stated precondition is now satisfied, but it stays parked until explicitly reopened. |
 | **Migration-history reconciliation** | ✅ Complete — delivered as FR-MIGRATION-RECON-1..4 during the retention program |
@@ -174,6 +175,8 @@ Retention deliberately **reuses** the existing wizard and campaign-creation syst
 | SF-3 — Fable bundle shopping experience | ✅ Complete | `4234c93` |
 | SF-3E — Zero-bundle storefront empty state | ✅ Complete | `a1a94c9` |
 | SF-2/SF-3 accepted deferrals | 9 data-dependent deferrals recorded | See STOREFRONT_REDESIGN_HANDOFF.md |
+| SF-4 — Bag redesign | ✅ **COMPLETE FOR PRODUCTION** | `ace38a09211baeadd2e2e159a8e277d289e48819` |
+| SF-STOREFRONT-ACTIVE-BUNDLE-GUARD — public-storefront `is_active` eligibility fix | ✅ **COMPLETE FOR PRODUCTION** | `809dc4c6573aa791165d013d837633e9ed6e7db3` |
 
 **SF-2/SF-3 validation evidence (closeout):** `npx tsc --noEmit` passed · Prisma Client
 generation passed · Next.js 16.1.1 production build passed · static generation 166/166
@@ -181,20 +184,23 @@ pages · storefront reviewed at runtime on `/shop/my-freezer-chef` (first-visit 
 cards, cart access, checkout reachability) · returning-state behavior **code-verified**,
 not live-tested · no relevant SF-2/SF-3 console or network regressions observed.
 
-> **Scope note:** SF-1 → SF-3E are closed. The storefront redesign as a whole is **not**
-> complete — SF-4 through SF-12 remain outstanding.
+> **Scope note:** SF-1 → SF-4 are closed and live in Production (`809dc4c`). The storefront
+> redesign as a whole is **not** complete — SF-5 through SF-12 remain outstanding, but
+> **SF-5 is paused** rather than active: there is no hard Growth Engine dependency on it,
+> and the owner has prioritized Growth Engine work first. See [Active Remaining
+> Sequence](#active-remaining-sequence).
 
 ---
 
 ## Active Remaining Sequence
 
-### Storefront redesign (current track)
+### Storefront redesign (paused — see Growth Engine track below)
 
-1. **SF-4** — Bag redesign *(next storefront phase)*
-2. SF-5 — Confirmation retention page
+1. ~~**SF-4** — Bag redesign~~ ✅ **COMPLETE FOR PRODUCTION** (`ace38a0`) + active-bundle guard (`809dc4c`)
+2. **SF-5** — Confirmation retention page — **PAUSED**. Owner-priority pivot to the Fundraiser Growth Engine after the SF-4 checkpoint. No hard dependency requires SF-5 through SF-12 before Growth Engine work; this is a sequencing choice, not an architectural block. Resume when re-prioritized.
 3. SF-6 — Schema proposal (PROPOSAL-FIRST)
 4. SF-7 — Gifting
-5. SF-8 — Review loop (wants GE-5 cron)
+5. SF-8 — Review loop (wants GE-5 cron — see [Growth Engine reconciliation](#growth-engine-ge--reconciled) below)
 6. SF-9 — Label QR loop
 7. SF-10 — "Usual box" email + cart prefill (wants GE-5 cron)
 8. SF-11 — PWA
@@ -214,11 +220,18 @@ not live-tested · no relevant SF-2/SF-3 console or network regressions observed
 
 | Track | Status | Dependency notes |
 |---|---|---|
-| GE-1 – GE-5 | NOT STARTED | Gate open — CRM-1..4 merged ✅ |
-| GE-6 – GE-9 | NOT STARTED | Independent extensions of GE-1..5 |
-| GE-10 – GE-11 | NOT STARTED | GE-11 optional CB connection ready (CB-1 ✅) |
-| PF-1 – PF-6 | NOT STARTED | DEPENDENCY-GATED — after CRM (✅) **and** GE-1..5 stable |
-| SF-4 – SF-12 | NOT STARTED | SF-4 next; SF-8/SF-10 want GE-5 cron |
+| GE-1 | ❌ **SUBSUMED BY FR-RETENTION — do not build** | See [Growth Engine reconciliation](#growth-engine-ge--reconciled) |
+| GE-2 | ⛔ **SPEC GAP / SCHEMA-BLOCKED** | `BusinessLead` is not tenant-scoped for this use — proposal-first required |
+| GE-3 | 🟢 **ACTIVE NEXT** | Campaign Health & At-Risk Signals — no schema/migration expected |
+| GE-4 | 🟢 READY (alongside/after GE-3) | Impact Report + Lifetime Value — read-only analytics |
+| GE-5 | NOT STARTED | Automation foundation — no cron infrastructure exists yet; proposal-first |
+| GE-6 | NOT STARTED | Independent extension |
+| GE-7 | 🟡 PARTIALLY SUBSUMED | Must orchestrate existing retention send chain, not a new one — after GE-5 |
+| GE-8 | ⛔ **SPEC GAP — undefined** | No GE-8 section exists in `GROWTH_ENGINE_HANDOFF.md` |
+| GE-9 – GE-11 | NOT STARTED | Independent extensions |
+| PF-1 – PF-6 | DEPENDENCY-GATED (reconciled) | After CRM (✅) **and** GE-4 + GE-5 stable — see [Growth Engine reconciliation](#growth-engine-ge--reconciled); GE-2/GE-3 are not hard PF blockers |
+| SF-4 | ✅ COMPLETE | See Storefront Redesign ledger above |
+| SF-5 – SF-12 | PAUSED / NOT STARTED | SF-5 paused (owner-priority pivot); SF-8/SF-10 want GE-5 cron |
 | FR-1 – FR-4 | NOT STARTED | FR-1 PROPOSAL-FIRST; wants SF-1 tokens ✅; CB gates ✅ |
 | VP-1 – VP-3 | NOT STARTED | VP-2 synergy with FB-3 (not a hard dependency) |
 | VP-F1, VP-F2 | REGISTERED — FUTURE | Do not build as part of VP-1..3 |
@@ -226,6 +239,107 @@ not live-tested · no relevant SF-2/SF-3 console or network regressions observed
 | §13.1 Add-ons (sides/desserts) | NOT STARTED | Same missed-migration issue (`bundle_type`) |
 | MC-0 – MC-5 | NOT STARTED | MC-0.2 needs the same missed-migration proposal (`low_stock_threshold`); MC-2 leans on FIX-3 ✅ |
 | FB-1 – FB-4 | NOT STARTED | `generate/route.ts` still uses the pre-FB-1 scoreboard URL builder |
+
+---
+
+## Growth Engine (GE) — Reconciled
+
+Reconciliation performed 2026-08-10 against `GROWTH_ENGINE_HANDOFF.md` after FR-RETENTION
+(CP1–CP6, live at `809dc4c`) and SF-4 + the active-bundle guard shipped to Production. The
+original GE-1..11 sequence was written before FR-RETENTION existed; this section records
+what changed, not a rewrite of the handoff itself.
+
+**GE-1 — Rebook pipeline — SUBSUMED BY FR-RETENTION / DO NOT BUILD AS A PARALLEL PIPELINE.**
+Old GE-1 was a read-only "closed 6–12 months ago" list with a suggested-ask number.
+FR-RETENTION now owns durable fundraiser relationships (`FundraiserContact`,
+`FundraiserContactPoint`, `FundraiserOrganizationContact`), seasonal outreach
+(`SeasonalOffering`, `OutreachBatch`, `OutreachRecipient`, `OutreachMessage`,
+`EmailDeliveryAttempt`), audience/suppression, rebooking response
+(`RebookingSubmission` + revisions), opportunity lifecycle (`RebookingOpportunity`),
+tenant Review Request, and atomic campaign conversion via the existing
+StartFundraiserWizard. A second `/api/growth/rebook` architecture would duplicate all of
+this on a weaker data model. The only genuinely additive old-GE-1 idea —
+`suggestedRebookAsk` / `orgShare` math — may be layered onto the existing CP6 Rebooking
+CRM rows as a small enhancement, not as a new phase.
+
+**GE-2 — Inbound lead capture — SPEC GAP / SCHEMA-BLOCKED.** The current `BusinessLead`
+model (`id, name, email, type, status, created_at, updated_at`) has no `business_id` and
+no `source`/message field — it cannot support the tenant-scoped, campaign-attributed lead
+capture the old spec assumed, and storing prospects in an unscoped table is a
+tenant-isolation risk. Retention contacts (prior fundraiser orgs) and brand-new inbound
+prospects (no order history) must remain separate populations — GE-2 must never write into
+`FundraiserContact`. Requires a proposal-first schema reconciliation before any
+implementation.
+
+**GE-3 — Campaign Health & At-Risk Signals — ACTIVE NEXT / READY FOR IMPLEMENTATION.** No
+new models, no schema, no migration expected. All required data already exists:
+`FundraiserCampaign` (`settlement_total`, `closed_at`, `end_date`, `created_at`,
+`bundle_goal`, `goal_amount`, `bundle_selection_status/at`), `Order`, and
+`CoordinatorActionEvent`. See guardrails below.
+
+**GE-4 — Impact Report + Lifetime Value — READY AFTER / ALONGSIDE GE-3.** Primarily
+read-only analytics over existing campaign/order data (lifetime `SUM(settlement_total)` per
+customer, best/average/most-recent campaign). GE-3 and GE-4 ordering is a **PRIORITY
+CHOICE**, not a hard dependency — they read overlapping data and may be sequenced together.
+
+**GE-5 — Automation foundation — NOT STARTED.** No cron infrastructure exists in this
+repository today: no `vercel.json`, no `CRON_SECRET`, no scheduled route of any kind. GE-5
+must reuse the existing retention send architecture — `MarketingPreference`,
+`EmailSuppressionEvent`, `OutreachBatch`, `OutreachRecipient`, `EmailDeliveryAttempt`,
+sender-readiness checks (`checkSenderReadiness`), and `lib/email.ts` — and must **not**
+create a parallel outreach engine. All future outbound automation defaults **OFF** unless
+explicitly enabled by tenant configuration. **Hazard:** `SystemSetting.key` is a *global*
+primary key (not scoped by `business_id`), so it is not automatically safe as a home for
+per-tenant growth settings without namespacing or a schema change. GE-5 schema/settings
+design is proposal-first. GE-5 (specifically a safe GE-5A foundation) is a **HARD
+DEPENDENCY** for GE-7, SF-8, SF-10, and PF automation.
+
+**GE-6 — Group leaderboard — NOT STARTED.** Independent of GE-1..5.
+
+**GE-7 — Season kickoff — PARTIALLY SUBSUMED / FUTURE ORCHESTRATION.** Must orchestrate the
+existing Seasonal Offering → Audience Review → Email Preview → send chain rather than build
+a second seasonal outreach system. Depends on GE-5A (**HARD DEPENDENCY**).
+
+**GE-8 — SPEC GAP / UNDEFINED IN CURRENT `GROWTH_ENGINE_HANDOFF.md`.** No GE-8 section
+exists in the handoff. Not invented here — needs definition before it can be scheduled.
+
+**GE-9 — Smart goal in wizard, GE-10 — Bundle auto-suggest, GE-11 — Auto Bundle Builder —
+NOT STARTED**, preserved as future/independent per the handoff; no new evidence changes
+their status.
+
+**Prospect Finder (PF) dependency — reconciled.** The old blanket rule ("after CRM and
+GE-1..5 stable") is replaced by the actual reconciled dependency: FR-RETENTION already
+satisfies the old GE-1 rebooking prerequisite, so PF does not wait on GE-1. The real PF
+prerequisites are **GE-4** (organization/value analytics PF needs for scoring) and **GE-5A**
+(safe automation infrastructure PF needs for outbound). GE-2 and GE-3 are not hard PF
+blockers on current evidence.
+
+**Recommended current sequence** (GE-3/GE-4 ordering is a **PRIORITY CHOICE**; GE-5A → GE-7
+is a **HARD DEPENDENCY**):
+
+1. GE-3 — Campaign Health & At-Risk Signals
+2. GE-4 — Impact / Lifetime Value
+3. GE-5A — Safe Automation Foundation (proposal-first schema)
+4. GE-7 — Season Kickoff orchestration (depends on GE-5A)
+5. GE-2R — reconciled inbound lead capture (depends on a lead-schema proposal)
+6. Later GE intelligence (GE-9/10/11) / Prospect Finder, as dependencies permit
+
+**GE-3 implementation guardrails.** Growth Engine metrics must be visibly one of three
+kinds, and the initial GE-3 version may only use the first two:
+
+- **FACTUAL METRIC** — read directly from data (gross sales, days remaining, order count,
+  days since last order, engagement count).
+- **HEURISTIC** — a transparent, reasoned threshold shown with its reasons (e.g. "at risk"
+  from ≥2 named signals). Do **not** label a campaign "on pace" merely because sales > 0
+  without the pace comparison itself.
+- **PREDICTION** — a claim of future certainty (e.g. "likely to miss goal"). **Not
+  authorized for the initial GE-3 version.** Do not present heuristic health logic as
+  predictive certainty.
+
+Do not hardcode values such as `$1,250` or `bundle_goal × $125` unless current source
+proves they are still current, apply to the specific metric, and are tenant-independent —
+if they are tenant/config-dependent, GE-3 must read the authoritative existing source
+rather than duplicate the constant as a new literal.
 
 ---
 
@@ -287,7 +401,10 @@ The spec instructed these fields to join the CB-1 migration:
 ## Shared Dependency Notes
 
 - **GE-5 cron infrastructure** is shared by GE-7, SF-8, SF-10, and PF-6 — build once, reuse.
-- **PF-1..6** must wait until CRM is complete (✅) **and** GE-1..5 are stable.
+- **PF-1..6** must wait until CRM is complete (✅) **and**, per the reconciled dependency
+  (see [Growth Engine reconciliation](#growth-engine-ge--reconciled)), GE-4 + GE-5A are
+  stable — not literal GE-1..5, since GE-1 is subsumed by FR-RETENTION and GE-2/GE-3 are not
+  hard PF blockers on current evidence.
 - **§14 Coordinator Buy-In Doctrine** is standing law for all fundraiser-facing work — check every coordinator-touching phase against it before proposing.
 - **VP-F1 / VP-F2** remain future work; do not build as part of VP-1..3.
 - **FB-1..4** remain not started; FB-1 is the prerequisite for FB-2/FB-3 messaging accuracy.
