@@ -27,6 +27,8 @@ import UpgradeRequired from '@/components/UpgradeRequired';
 import { StartFundraiserWizard, type RebookingHandoff } from '@/components/crm2/StartFundraiserWizard';
 import { formatBundleCount } from '@/lib/fundraiserMetrics';
 import { RebookingTab } from '@/components/crm2/rebooking/RebookingTab';
+import { CampaignHealthBadge } from '@/components/crm2/CampaignHealthBadge';
+import type { CampaignHealth, CampaignHealthReason } from '@/lib/growth/health';
 
 interface Fundraiser {
     id: string;
@@ -55,6 +57,10 @@ interface Fundraiser {
     // Phase 7E closeout fields (may not be present until prisma generate runs)
     closed_at?: string | null;
     settlement_total?: number | null;
+    // GE-3: server-derived campaign health. Read-only; optional so any consumer
+    // reading an older payload still renders.
+    health?: CampaignHealth;
+    health_reasons?: CampaignHealthReason[];
 }
 
 /** Returns true when a campaign cannot be closed again. */
@@ -369,6 +375,15 @@ export default function FundraisersPage() {
                                             <div className="min-w-0">
                                                 <p className="font-black text-slate-900 dark:text-white text-sm leading-tight truncate">{item.name}</p>
                                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">ID: {item.id.slice(0, 8)}</p>
+                                                {/* GE-3 mobile placement: this table is wider than a phone
+                                                    (pre-existing), so the Status column — and the health
+                                                    signal in it — sits off-screen at 375/430. Surfacing the
+                                                    SAME badge beside the campaign name makes "who needs me?"
+                                                    answerable without scrolling. Exactly one renders at any
+                                                    breakpoint: this one below md, the Status-cell one at md+. */}
+                                                <div className="md:hidden">
+                                                    <CampaignHealthBadge health={item.health} reasons={item.health_reasons} />
+                                                </div>
                                             </div>
                                         </div>
                                     </td>
@@ -393,6 +408,14 @@ export default function FundraisersPage() {
                                         }`}>
                                             {item.status}
                                         </span>
+                                        {/* GE-3 — health sits under the status chip rather than
+                                            in a new column, so the table keeps its 7 columns and
+                                            the reasons stay next to the campaign they describe.
+                                            Every state carries a word, never colour alone.
+                                            Hidden below md, where the name-cell copy takes over. */}
+                                        <div className="hidden md:block">
+                                            <CampaignHealthBadge health={item.health} reasons={item.health_reasons} />
+                                        </div>
                                     </td>
                                     <td className="px-4 py-4">
                                         <div className="space-y-0.5">

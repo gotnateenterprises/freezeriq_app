@@ -6,6 +6,7 @@ import {
   isCanonicalServes2Tier,
 } from '@/lib/campaignBundleSelection';
 import { computeBundleUnitsFromItems } from '@/lib/fundraiserMetrics';
+import { evaluateCampaignHealth } from '@/lib/growth/health';
 import {
   evaluateConversion,
   refusalHttpStatus,
@@ -511,6 +512,9 @@ export async function GET(req: Request) {
                 select: { slug: true }
             });
             const businessSlug = business?.slug || 'demo';
+            // GE-3: one clock for the whole response, so two campaigns in the
+            // same payload can never disagree about what "today" is.
+            const healthNow = new Date();
 
             // 1. Fetch Customers (Scoped to Business)
             const customers = await prisma.customer.findMany({
@@ -548,6 +552,13 @@ export async function GET(req: Request) {
                     customer_id: true,
                     created_at: true,
                     portal_token: true,
+                    // GE-3 health inputs. `closed_at` and the bundle-selection
+                    // pair decide applicability and one reason; `_count` gives the
+                    // coordinator-engagement signal without a second round trip.
+                    closed_at: true,
+                    bundle_selection_status: true,
+                    bundle_selection_at: true,
+                    _count: { select: { coordinator_actions: true } },
                     // Include ALL coordinator-entered orders for settlement visibility
                     // (covers both new fundraiser_hold AND historical pending/completed)
                     orders: {
@@ -555,6 +566,8 @@ export async function GET(req: Request) {
                         select: {
                             total_amount: true,
                             status: true,
+                            // GE-3: powers the "no orders in N days" signal.
+                            created_at: true,
                             // FR-LAUNCH-1C-1: item-level data for the canonical
                             // weighted-bundle calculation. variant_size is
                             // authoritative; bundle.serving_tier is the fallback.
@@ -610,6 +623,34 @@ export async function GET(req: Request) {
                             ? Math.min((weightedBundlesSold / bundleGoalValue) * 100, 100)
                             : 0;
 
+                        // ── GE-3 campaign health (read-only) ──────────────────
+                        // Derived from the same tenant-scoped rows already loaded
+                        // above; adds no query and mutates nothing. Progress is
+                        // the canonical weighted-bundle measure, not dollars.
+                        const orderDates = activeFundraiserOrders
+                            .map((o: any) => (o.created_at ? new Date(o.created_at) : null))
+                            .filter((d: Date | null): d is Date => d instanceof Date && !Number.isNaN(d.getTime()));
+                        const lastOrderAt = orderDates.length
+                            ? new Date(Math.max(...orderDates.map((d: Date) => d.getTime())))
+                            : null;
+
+                        const healthResult = evaluateCampaignHealth({
+                            status: String(fc.status),
+                            closed_at: (fc as any).closed_at ? new Date((fc as any).closed_at) : null,
+                            created_at: new Date((fc as any).created_at),
+                            start_date: fc.start_date ? new Date(fc.start_date) : null,
+                            end_date: fc.end_date ? new Date(fc.end_date) : null,
+                            weightedBundlesSold,
+                            bundle_goal: bundleGoalValue,
+                            orderCount: activeFundraiserOrders.length,
+                            lastOrderAt,
+                            coordinatorActionCount: Number((fc as any)._count?.coordinator_actions ?? 0),
+                            bundle_selection_status: (fc as any).bundle_selection_status ?? null,
+                            bundle_selection_at: (fc as any).bundle_selection_at
+                                ? new Date((fc as any).bundle_selection_at)
+                                : null,
+                        }, healthNow);
+
                         results.push({
                             id: fc.id,
                             name: fc.name,
@@ -634,7 +675,11 @@ export async function GET(req: Request) {
                             held_order_count: activeFundraiserOrders.length,
                             held_order_total: activeFundraiserOrders.reduce((sum: number, o: any) => sum + Number(o.total_amount || 0), 0),
                             weighted_bundles_sold: weightedBundlesSold,
-                            progress_percent: progressPercent
+                            progress_percent: progressPercent,
+                            // GE-3 — additive; existing consumers ignore these.
+                            health: healthResult.health,
+                            health_reasons: healthResult.reasons,
+                            health_metrics: healthResult.metrics
                         });
                     }
                 } else {
@@ -652,7 +697,11 @@ export async function GET(req: Request) {
                         sales_total: 0,
                         // A lead placeholder has no campaign and therefore no orders.
                         weighted_bundles_sold: 0,
-                        progress_percent: 0
+                        progress_percent: 0,
+                        // GE-3: a placeholder is not a running campaign to judge.
+                        health: 'not_applicable',
+                        health_reasons: [],
+                        health_metrics: null
                     });
                 }
             }
