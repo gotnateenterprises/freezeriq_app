@@ -61,6 +61,25 @@ export function computeBundleUnitsFromItems(items: OrderItemForMetrics[]): numbe
 
 // ── Full Campaign Progress ───────────────────────────────────
 
+/**
+ * ESTIMATED share of gross sales a fundraising organization keeps.
+ *
+ * The name carries "ESTIMATED" on purpose. This is not a settled rate, not a
+ * payout, and not anything a tenant has agreed to in the system: it is the
+ * tenant-facing marketing promise on the raise-funds page ("Your organization
+ * keeps 20% of the proceeds"), reproduced as a number. A bare
+ * `FUNDRAISER_ORG_SHARE` reads like configuration someone set; this does not.
+ *
+ * Exported so callers reuse this single definition instead of re-typing 0.2 —
+ * a second copy is how two screens start quoting a group different numbers.
+ *
+ * CAVEAT worth knowing before leaning on it: a single global rate with no
+ * per-tenant field behind it anywhere in the schema, never reconciled against
+ * a real payout. If a tenant ever negotiates a different split, this constant —
+ * not a new one — is what has to become configurable.
+ */
+export const ESTIMATED_FUNDRAISER_ORG_SHARE = 0.2;
+
 export interface OrderForMetrics {
     items?: OrderItemForMetrics[];
     total_amount?: number | string | null;
@@ -103,7 +122,7 @@ export function computeFundraiserProgress(
 
     // Fundraiser earnings: 20% of total dollar sales
     // (from raise-funds page: "Your organization keeps 20% of the proceeds")
-    const estimatedEarnings = dollarSales * 0.2;
+    const estimatedEarnings = dollarSales * ESTIMATED_FUNDRAISER_ORG_SHARE;
 
     return {
         totalBundlesSold,

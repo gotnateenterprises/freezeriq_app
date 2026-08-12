@@ -28,6 +28,7 @@ import { StartFundraiserWizard, type RebookingHandoff } from '@/components/crm2/
 import { formatBundleCount } from '@/lib/fundraiserMetrics';
 import { RebookingTab } from '@/components/crm2/rebooking/RebookingTab';
 import { CampaignHealthBadge } from '@/components/crm2/CampaignHealthBadge';
+import { OrganizationImpactTab } from '@/components/crm2/OrganizationImpactTab';
 import type { CampaignHealth, CampaignHealthReason } from '@/lib/growth/health';
 
 interface Fundraiser {
@@ -278,11 +279,17 @@ export default function FundraisersPage() {
             {activeTab === 'rebooking' && <RebookingTab onStartFundraiser={startFundraiserFromOpportunity} />}
 
             {activeTab === 'organizations' && (
-                <div className="glass-panel rounded-3xl border border-slate-100 dark:border-slate-700 py-14 px-6 text-center">
-                    <p className="font-bold text-slate-500">Organizations view lives in the Customers area today.</p>
-                    <a href="/customers?type=organization" className="inline-block mt-3 px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 min-h-[44px]">
-                        Open Organizations
-                    </a>
+                <div className="space-y-6">
+                    {/* GE-4 — organization fundraiser history. This tab previously
+                        only pointed at the Customers area; the record of what each
+                        group has actually sold over time now lives here, next to
+                        the campaigns and rebooking work it informs. */}
+                    <OrganizationImpactTab />
+                    <div className="text-center">
+                        <a href="/customers?type=organization" className="inline-block px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 min-h-[44px]">
+                            Manage organizations in Customers
+                        </a>
+                    </div>
                 </div>
             )}
 
