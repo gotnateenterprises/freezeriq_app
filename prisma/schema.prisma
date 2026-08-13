@@ -50,6 +50,8 @@ model Business {
   seasonal_offerings     SeasonalOffering[]      @relation("BusinessSeasonalOfferings")
   outreach_batches       OutreachBatch[]         @relation("BusinessOutreachBatches")
   marketing_preferences  MarketingPreference[]   @relation("BusinessMarketingPreferences")
+  automation_policies    AutomationPolicy[]      @relation("BusinessAutomationPolicies")
+  automation_actions     AutomationAction[]      @relation("BusinessAutomationActions")
   suppression_events     EmailSuppressionEvent[] @relation("BusinessSuppressionEvents")
   // FR-RETENTION-3
   outreach_messages      OutreachMessage[]       @relation("BusinessOutreachMessages")
@@ -327,6 +329,7 @@ model Customer {
   // FR-RETENTION-4: rebooking response snapshots and durable opportunities.
   rebooking_snapshots    RebookingSubmissionRevisionOrg[] @relation("OrgRevisionSnapshots")
   rebooking_opportunities RebookingOpportunity[]          @relation("OrgOpportunities")
+  automation_actions      AutomationAction[]              @relation("OrgAutomationActions")
 
   // FR-RETENTION-1: composite parent key so tenant-scoped children can reference
   // (business_id, customer_id) and have Postgres enforce same-tenant ownership.
@@ -1028,6 +1031,7 @@ model SeasonalOffering {
   outreach_batches         OutreachBatch[]          @relation("OfferingBatches")
   // FR-RETENTION-4
   opportunities            RebookingOpportunity[]   @relation("OfferingOpportunities")
+  automation_actions       AutomationAction[]       @relation("OfferingAutomationActions")
 
   @@unique([business_id, id])
   @@index([business_id, status])
@@ -1637,4 +1641,97 @@ enum RebookingOpportunityStatus {
   canceled
   // A fundraiser exists. Nothing in Checkpoint 4 ever sets this.
   converted
+}
+
+// ── GE-5A · Safe automation foundation ──────────────────────────────────────
+// A recommendation engine that can propose work and nothing else. GE-5A writes
+// only to the two tables below; every FR-RETENTION table is read-only to it, so
+// no path here can send, schedule, or queue an email. Execution — turning an
+// approved recommendation into a real OutreachBatch — belongs to GE-7, which is
+// why there is no `executed` status and no outreach_batch_id yet: this phase
+// cannot reach that state, so claiming it in the schema would be a lie.
+
+enum AutomationActionType {
+  // The only action family GE-5A ships. A new family is a deliberate decision,
+  // not a string someone passes in.
+  seasonal_rebooking_recommendation
+}
+
+enum AutomationActionStatus {
+  candidate
+  approved
+  dismissed
+  suppressed
+  expired
+}
+
+/// Per-tenant switch for one action family. Absence of a row means OFF, and so
+/// does `enabled = false`; nothing creates this row implicitly, so a tenant that
+/// has never opted in cannot have recommendations generated for them.
+model AutomationPolicy {
+  id                 String               @id @default(uuid())
+  business_id        String
+  action_type        AutomationActionType
+  enabled            Boolean              @default(false)
+  // Repo convention for actor attribution: an unenforced nullable id. `User`
+  // has no [business_id, id] unique to point a compound FK at, and its
+  // business_id is nullable for super-admins, so the existing FR-RETENTION
+  // columns (created_by_user_id, recorded_by_user_id) are plain strings too.
+  updated_by_user_id String?
+  created_at         DateTime             @default(now())
+  updated_at         DateTime             @updatedAt
+
+  business           Business             @relation("BusinessAutomationPolicies", fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@unique([business_id, action_type])
+  @@map("automation_policies")
+}
+
+/// One auditable recommendation. The unique tuple below IS the idempotency
+/// contract: business + family + offering + organization identifies the action,
+/// so re-evaluating the same condition can never create a second row, and a
+/// dismissed or expired action is not silently replaced by a fresh one. A new
+/// SeasonalOffering is what legitimately starts a new lifecycle.
+model AutomationAction {
+  id                   String                 @id @default(uuid())
+  business_id          String
+  action_type          AutomationActionType
+  status               AutomationActionStatus @default(candidate)
+
+  // Required, not optional. A nullable column inside the unique tuple would let
+  // Postgres treat NULLs as distinct and quietly stop enforcing uniqueness.
+  seasonal_offering_id String
+  customer_id          String
+
+  /// Transparent evidence. Every entry carries kind: 'fact' | 'heuristic' so a
+  /// GE-3 threshold can never be presented as an observation.
+  reasons              Json
+  evidence_at          DateTime
+  expires_at           DateTime?
+
+  approved_by_user_id  String?
+  approved_at          DateTime?
+  dismissed_by_user_id String?
+  dismissed_at         DateTime?
+  suppressed_at        DateTime?
+  suppressed_reason    String?
+  expired_at           DateTime?
+  /// Controlled value from AutomationExpiredReason in lib/growth/automation.ts,
+  /// not tenant-authored text: a state-machine reason must stay machine-readable.
+  expired_reason       String?
+
+  created_at           DateTime               @default(now())
+  updated_at           DateTime               @updatedAt
+
+  business             Business               @relation("BusinessAutomationActions", fields: [business_id], references: [id], onDelete: Cascade)
+  // Compound FKs carry business_id into the reference, so a row pointing at
+  // another tenant's offering or organization is rejected by the database
+  // rather than by a code path someone might forget to write.
+  offering             SeasonalOffering       @relation("OfferingAutomationActions", fields: [business_id, seasonal_offering_id], references: [business_id, id], onDelete: Restrict, map: "automation_actions_offering_fkey")
+  customer             Customer               @relation("OrgAutomationActions", fields: [business_id, customer_id], references: [business_id, id], onDelete: Restrict, map: "automation_actions_customer_fkey")
+
+  @@unique([business_id, action_type, seasonal_offering_id, customer_id], map: "automation_actions_one_per_org_per_offering")
+  @@index([business_id, status, action_type])
+  @@index([business_id, seasonal_offering_id])
+  @@map("automation_actions")
 }
