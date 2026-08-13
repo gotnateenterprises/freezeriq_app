@@ -1,6 +1,7 @@
 import NextAuth from 'next-auth';
 import { authConfig } from './auth.config';
 import { NextResponse } from 'next/server';
+import { isPlatformHost } from './lib/platformHosts';
 
 const { auth } = NextAuth(authConfig);
 
@@ -28,11 +29,12 @@ export default async function middleware(req: any) {
     }
 
     const searchParams = req.nextUrl.searchParams.toString();
-    const isLocalhost = hostname === 'localhost:3000';
-    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'freezeriq.com';
-    const isRootDomain = hostname === rootDomain || hostname === `www.${rootDomain}`;
 
-    if (isLocalhost || isRootDomain || hostname.includes('freezeriq.com') || hostname.includes('vercel.app')) {
+    // DOMAIN-ROUTING-1: platform identity is an exact/suffix decision made in
+    // one place. The former substring pair rejected the real SaaS domain
+    // (`freezeriqapp.com` does not contain `freezeriq.com`) and accepted any
+    // host that merely contained a trusted string.
+    if (isPlatformHost(hostname, process.env.NEXT_PUBLIC_ROOT_DOMAIN)) {
         // Run auth middleware manually since we need it for platform pages
         const authResult = await auth(req as any);
         return authResult || NextResponse.next();
