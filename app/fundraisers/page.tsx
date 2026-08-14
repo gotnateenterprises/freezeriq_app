@@ -7,27 +7,19 @@ import {
     Search,
     Filter,
     Calendar,
-    ChevronRight,
-    Building2,
-    Users,
-    ExternalLink,
-    Receipt,
     Lock,
     Loader2,
     CheckCircle2,
     AlertCircle
 } from 'lucide-react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { format } from 'date-fns';
 import { useSession } from 'next-auth/react';
 import UpgradeRequired from '@/components/UpgradeRequired';
 import { StartFundraiserWizard, type RebookingHandoff } from '@/components/crm2/StartFundraiserWizard';
-import { formatBundleCount } from '@/lib/fundraiserMetrics';
 import { RebookingTab } from '@/components/crm2/rebooking/RebookingTab';
-import { CampaignHealthBadge } from '@/components/crm2/CampaignHealthBadge';
 import { OrganizationImpactTab } from '@/components/crm2/OrganizationImpactTab';
 import { AttentionStrip } from '@/components/crm2/AttentionStrip';
+import { CampaignPriorityList } from '@/components/crm2/CampaignPriorityList';
 import { triageCampaign } from '@/lib/growth/nextAction';
 import type { CampaignHealth, CampaignHealthReason } from '@/lib/growth/health';
 
@@ -332,193 +324,20 @@ export default function FundraisersPage() {
                 </div>
             </div>
 
-            {/* Table */}
-            <div className="bg-white dark:bg-slate-800 rounded-[2.5rem] overflow-hidden border border-slate-100 dark:border-slate-700 shadow-xl shadow-slate-200/50 dark:shadow-none">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                        <thead>
-                            <tr className="bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-700">
-                                <th className="px-5 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[25%]">Campaign</th>
-                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[17%]">Coordinator</th>
-                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[10%]">Status</th>
-                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[12%]">Dates</th>
-                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest text-center w-[12%]">Held Orders</th>
-                                <th className="px-4 py-3 text-xs font-black text-slate-400 uppercase tracking-widest text-right w-[14%]">Progress</th>
-                                <th className="px-2 py-3 text-xs font-black text-slate-400 uppercase tracking-widest w-[10%]"></th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50">
-                            {isLoading ? (
-                                <tr>
-                                    <td colSpan={7} className="px-5 py-20 text-center text-slate-400 animate-pulse font-bold">Loading Campaigns...</td>
-                                </tr>
-                            ) : filtered.length === 0 ? (
-                                <tr>
-                                    <td colSpan={7} className="px-5 py-20 text-center text-slate-400 italic">No campaigns found.</td>
-                                </tr>
-                            ) : filtered.map(item => (
-                                <tr key={item.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
-                                    <td className="px-5 py-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center text-indigo-600 group-hover:scale-110 transition-transform flex-shrink-0">
-                                                <Megaphone size={16} />
-                                            </div>
-                                            <div className="min-w-0">
-                                                <p className="font-black text-slate-900 dark:text-white text-sm leading-tight truncate">{item.name}</p>
-                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">ID: {item.id.slice(0, 8)}</p>
-                                                {/* GE-3 mobile placement: this table is wider than a phone
-                                                    (pre-existing), so the Status column — and the health
-                                                    signal in it — sits off-screen at 375/430. Surfacing the
-                                                    SAME badge beside the campaign name makes "who needs me?"
-                                                    answerable without scrolling. Exactly one renders at any
-                                                    breakpoint: this one below md, the Status-cell one at md+. */}
-                                                <div className="md:hidden">
-                                                    <CampaignHealthBadge health={item.health} reasons={item.health_reasons} />
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td className="px-4 py-4">
-                                        <div className="flex items-center gap-2">
-                                            <Building2 size={14} className="text-slate-400 flex-shrink-0" />
-                                            <div className="min-w-0">
-                                                <p className="font-bold text-sm text-slate-700 dark:text-slate-300 truncate">{item.customer.contact_name || item.customer.name}</p>
-                                                {item.customer.contact_name && (
-                                                    <p className="text-[10px] font-bold text-slate-400 truncate">{item.customer.name}</p>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td className="px-4 py-4">
-                                        <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${
-                                            item.status === 'Active' ? 'bg-emerald-100 text-emerald-700' :
-                                            item.status === 'Lead' ? 'bg-amber-100 text-amber-700' :
-                                            item.status === 'Closed' ? 'bg-amber-100 text-amber-800' :
-                                            item.status === 'Settled' ? 'bg-violet-100 text-violet-700' :
-                                            'bg-slate-100 text-slate-600'
-                                        }`}>
-                                            {item.status}
-                                        </span>
-                                        {/* GE-3 — health sits under the status chip rather than
-                                            in a new column, so the table keeps its 7 columns and
-                                            the reasons stay next to the campaign they describe.
-                                            Every state carries a word, never colour alone.
-                                            Hidden below md, where the name-cell copy takes over. */}
-                                        <div className="hidden md:block">
-                                            <CampaignHealthBadge health={item.health} reasons={item.health_reasons} />
-                                        </div>
-                                    </td>
-                                    <td className="px-4 py-4">
-                                        <div className="space-y-0.5">
-                                            <p className="text-xs font-bold text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                                {item.start_date ? format(new Date(item.start_date), 'MMM d, yyyy') : 'No date'}
-                                            </p>
-                                            {item.end_date && (
-                                                <p className="text-[10px] font-black text-slate-300 uppercase whitespace-nowrap">to {format(new Date(item.end_date), 'MMM d, yyyy')}</p>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td className="px-4 py-4 text-center">
-                                        {(item.held_order_count || 0) > 0 ? (
-                                            <div className="flex flex-col items-center gap-0.5">
-                                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-400 text-xs font-black">
-                                                    {item.held_order_count} held
-                                                </span>
-                                                <span className="text-[10px] font-bold text-slate-400 font-mono">
-                                                    ${(item.held_order_total || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                </span>
-                                            </div>
-                                        ) : (
-                                            <span className="text-xs font-medium text-slate-300 dark:text-slate-600">—</span>
-                                        )}
-                                    </td>
-                                    <td className="px-4 py-4">
-                                        <div className="flex flex-col items-end gap-1">
-                                            {/* FR-LAUNCH-1C-1: weighted bundle progress from the
-                                                server (weighted_bundles_sold / bundle_goal). The
-                                                legacy sales_total ÷ goal_amount dollar calculation
-                                                is gone — it always read 0 because total_sales is a
-                                                denormalized field public orders never write. */}
-                                            <div className="flex justify-between w-full text-[10px] font-black font-mono">
-                                                <span className="text-indigo-600">
-                                                    {item.bundle_goal > 0
-                                                        ? `${formatBundleCount(item.weighted_bundles_sold || 0)} of ${formatBundleCount(item.bundle_goal)} bundles`
-                                                        : `${formatBundleCount(item.weighted_bundles_sold || 0)} bundles`}
-                                                </span>
-                                                <span className="text-slate-400">
-                                                    {item.bundle_goal > 0
-                                                        ? `${Math.round(Math.min(Math.max(item.progress_percent || 0, 0), 100))}%`
-                                                        : 'No bundle goal set'
-                                                    }
-                                                </span>
-                                            </div>
-                                            <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-900 rounded-full overflow-hidden">
-                                                <div
-                                                    className="h-full bg-indigo-600 transition-all duration-1000"
-                                                    style={{ width: `${Math.min(Math.max(item.progress_percent || 0, 0), 100)}%` }}
-                                                />
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td className="px-2 py-4 text-right">
-                                        <div className="flex items-center justify-end gap-0.5">
-                                            {/* FIX-4: Only show public page link when slug exists and row is real */}
-                                            {!item.is_placeholder && item.business_slug && (
-                                                <Link
-                                                    href={`/shop/${item.business_slug}/fundraiser/${item.id}`}
-                                                    target="_blank"
-                                                    className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-pink-600 transition-all"
-                                                    title="View Public Page"
-                                                >
-                                                    <ExternalLink size={15} />
-                                                </Link>
-                                            )}
-                                            {!item.is_placeholder && item.portal_token && (
-                                                <Link
-                                                    href={`/coordinator/${item.portal_token}`}
-                                                    target="_blank"
-                                                    className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-purple-600 transition-all"
-                                                    title="Coordinator Portal"
-                                                >
-                                                    <Users size={15} />
-                                                </Link>
-                                            )}
-                                            {/* FIX-4: Only show invoice icon for real (non-placeholder) rows */}
-                                            {!item.is_placeholder && (
-                                                <Link
-                                                    href={`/customers/${item.customer_id}?tab=fundraisers&action=invoice&campaignId=${item.id}`}
-                                                    className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-emerald-600 transition-all"
-                                                    title="Create Invoice"
-                                                >
-                                                    <Receipt size={15} />
-                                                </Link>
-                                            )}
-                                            {/* Phase 7E-3: Close Campaign button — only for non-closed campaigns */}
-                                            {!item.is_placeholder && !isCampaignClosed(item) && (
-                                                <button
-                                                    onClick={() => openCloseoutModal(item)}
-                                                    className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-amber-600 transition-all"
-                                                    title="Close Campaign"
-                                                >
-                                                    <Lock size={15} />
-                                                </button>
-                                            )}
-                                            <Link
-                                                href={`/fundraisers/${item.customer_id}`}
-                                                className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-indigo-600 transition-all"
-                                                title="View organization"
-                                                aria-label={`View organization for ${item.name}`}
-                                            >
-                                                <ChevronRight size={15} />
-                                            </Link>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+            {/* CRM-CC-2 — Campaign Priority List. Replaces the legacy 7-column
+                table: campaigns are grouped by CRM-CC-1 triage into priority
+                sections, each row carries one primary signal and at most one
+                labeled next action, and legacy per-row capabilities live in a
+                labeled overflow menu instead of five icon-only buttons. */}
+            <CampaignPriorityList
+                campaigns={filtered}
+                loading={isLoading}
+                totalCount={fundraisers.length}
+                searchTerm={searchTerm}
+                filterStatus={filterStatus}
+                now={triageNow}
+                onCloseout={(c) => openCloseoutModal(c as Fundraiser)}
+            />
             </>
             )}
         </div>
