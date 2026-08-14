@@ -62,6 +62,7 @@ export function CampaignPriorityList({
     filterStatus,
     now,
     onCloseout,
+    onOpenDetail,
 }: {
     /** Already search/filter-scoped rows from the page. */
     campaigns: PriorityListCampaign[];
@@ -74,6 +75,8 @@ export function CampaignPriorityList({
     now: Date;
     /** Existing Phase 7E closeout modal opener. */
     onCloseout: (c: PriorityListCampaign) => void;
+    /** CRM-CC-4 — opens the Campaign Context drawer for one campaign. */
+    onOpenDetail?: (c: PriorityListCampaign & { triage: CampaignTriage }) => void;
 }) {
     // Which sections are folded. Seeded lazily from each section's default the
     // first time it is toggled; until then the meta default applies.
@@ -160,6 +163,7 @@ export function CampaignPriorityList({
                                         onToggleMenu={() => setOpenMenuId((id) => (id === c.id ? null : c.id))}
                                         onCloseMenu={() => setOpenMenuId(null)}
                                         onCloseout={onCloseout}
+                                        onOpenDetail={onOpenDetail}
                                     />
                                 ))}
                             </div>
@@ -193,6 +197,7 @@ function CampaignRow({
     onToggleMenu,
     onCloseMenu,
     onCloseout,
+    onOpenDetail,
 }: {
     c: PriorityListCampaign & { triage: CampaignTriage };
     now: Date;
@@ -200,6 +205,7 @@ function CampaignRow({
     onToggleMenu: () => void;
     onCloseMenu: () => void;
     onCloseout: (c: PriorityListCampaign) => void;
+    onOpenDetail?: (c: PriorityListCampaign & { triage: CampaignTriage }) => void;
 }) {
     const action = c.triage.action;
     const isActiveRow = c.status === 'Active' && c.triage.priority !== 'completed';
@@ -231,11 +237,23 @@ function CampaignRow({
         // signal/meta columns would crush long campaign names into a sliver, and
         // the CRM-CC-2 contract wants stacked cards at 768 anyway.
         <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4 px-5 py-4">
-            {/* WHO */}
+            {/* WHO — the name opens the Campaign Context drawer (CRM-CC-4).
+                A real button, not a clickable card: the row's other controls
+                (primary action, More menu) stay independently operable. */}
             <div className="min-w-0 lg:flex-1">
-                <Link href={`/fundraisers/${c.customer_id}`} className="font-bold text-sm text-slate-900 dark:text-white leading-snug break-words hover:text-indigo-600 dark:hover:text-indigo-400">
-                    {c.name}
-                </Link>
+                {onOpenDetail ? (
+                    <button
+                        type="button"
+                        onClick={() => onOpenDetail(c)}
+                        className="text-left font-bold text-sm text-slate-900 dark:text-white leading-snug break-words hover:text-indigo-600 dark:hover:text-indigo-400 underline-offset-2 hover:underline min-h-[44px] lg:min-h-0 lg:py-0.5"
+                    >
+                        {c.name}
+                    </button>
+                ) : (
+                    <Link href={`/fundraisers/${c.customer_id}`} className="font-bold text-sm text-slate-900 dark:text-white leading-snug break-words hover:text-indigo-600 dark:hover:text-indigo-400">
+                        {c.name}
+                    </Link>
+                )}
                 <p className="text-xs font-medium text-slate-500 dark:text-slate-400 break-words">
                     {c.customer.name}
                     {c.customer.contact_name ? ` · ${c.customer.contact_name}` : ''}
@@ -285,6 +303,20 @@ function CampaignRow({
                             aria-label={`${action.label} — ${c.name}`}
                             title={action.reason}
                             className="inline-flex items-center justify-center min-h-[44px] px-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900 text-xs font-bold hover:bg-amber-100 dark:hover:bg-amber-950/60 transition-colors"
+                        >
+                            {action.label}
+                        </button>
+                    ) : onOpenDetail ? (
+                        // CRM-CC-4: non-closeout actions open the Campaign
+                        // Context drawer, which carries the coordinator contact,
+                        // bundle-selection state, and health reasons the action
+                        // refers to — instead of the generic org profile.
+                        <button
+                            type="button"
+                            onClick={() => onOpenDetail(c)}
+                            aria-label={`${action.label} — ${c.name}`}
+                            title={action.reason}
+                            className="inline-flex items-center justify-center min-h-[44px] px-4 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-900 text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-950/60 transition-colors"
                         >
                             {action.label}
                         </button>

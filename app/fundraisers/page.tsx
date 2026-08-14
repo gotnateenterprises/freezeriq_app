@@ -19,7 +19,9 @@ import { StartFundraiserWizard, type RebookingHandoff } from '@/components/crm2/
 import { RebookingTab } from '@/components/crm2/rebooking/RebookingTab';
 import { OrganizationImpactTab } from '@/components/crm2/OrganizationImpactTab';
 import { AttentionStrip } from '@/components/crm2/AttentionStrip';
-import { CampaignPriorityList } from '@/components/crm2/CampaignPriorityList';
+import { CampaignPriorityList, type PriorityListCampaign } from '@/components/crm2/CampaignPriorityList';
+import { CampaignContextDrawer } from '@/components/crm2/CampaignContextDrawer';
+import type { CampaignTriage } from '@/lib/growth/nextAction';
 import { triageCampaign } from '@/lib/growth/nextAction';
 import type { CampaignHealth, CampaignHealthReason } from '@/lib/growth/health';
 
@@ -103,6 +105,9 @@ export default function FundraisersPage() {
 
     // FR-RETENTION-1B-1: primary tab state (Campaigns / Organizations / Rebooking)
     const [activeTab, setActiveTab] = useState<'campaigns' | 'organizations' | 'rebooking'>('campaigns');
+
+    // ── CRM-CC-4: Campaign Context drawer state ───────────────────────────
+    const [detailCampaign, setDetailCampaign] = useState<(PriorityListCampaign & { triage: CampaignTriage }) | null>(null);
 
     // ── Phase 7E-3: Closeout modal state ──────────────────────────────────
     const [closeoutTarget, setCloseoutTarget] = useState<Fundraiser | null>(null);
@@ -337,10 +342,20 @@ export default function FundraisersPage() {
                 filterStatus={filterStatus}
                 now={triageNow}
                 onCloseout={(c) => openCloseoutModal(c as Fundraiser)}
+                onOpenDetail={setDetailCampaign}
             />
             </>
             )}
         </div>
+
+        {/* ── CRM-CC-4: Campaign Context drawer. Closeout from inside the
+            drawer reuses the SAME Phase 7E modal below — one closeout path. */}
+        <CampaignContextDrawer
+            campaign={detailCampaign}
+            now={triageNow}
+            onClose={() => setDetailCampaign(null)}
+            onCloseout={(c) => { setDetailCampaign(null); openCloseoutModal(c as Fundraiser); }}
+        />
 
         {/* ── Phase 7E-3: Close Campaign Confirmation Modal ──────────────────── */}
         {closeoutTarget && (
