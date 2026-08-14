@@ -27,6 +27,7 @@ import { SeasonalLineupDrawer, type SavedLineup } from './SeasonalLineupDrawer';
 import { AudienceReviewDrawer } from './AudienceReviewDrawer';
 import { EmailPreviewDrawer } from './EmailPreviewDrawer';
 import { ReviewRequestDrawer, type RebookingRequest } from './ReviewRequestDrawer';
+import { SeasonalRecommendationsPanel } from './SeasonalRecommendationsPanel';
 
 type Filter = 'all' | 'ready_to_invite' | 'waiting' | 'needs_action' | 'done';
 
@@ -245,6 +246,11 @@ export function RebookingTab({ onStartFundraiser }: {
 
     return (
         <div className="space-y-6">
+            {/* GE-5A-2 — safe recommendation foundation. Entirely self-contained:
+                its own fetches, its own on/off state, writes only through the
+                GE-5A APIs. It never touches the Seasonal Update chain below. */}
+            <SeasonalRecommendationsPanel />
+
             {/* Summary strip + primary action */}
             <div className="flex flex-col lg:flex-row lg:items-center gap-4">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 flex-1 min-w-0">
