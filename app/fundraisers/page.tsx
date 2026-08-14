@@ -7,8 +7,6 @@ import {
     Search,
     Filter,
     Calendar,
-    Target,
-    TrendingUp,
     ChevronRight,
     Building2,
     Users,
@@ -29,6 +27,8 @@ import { formatBundleCount } from '@/lib/fundraiserMetrics';
 import { RebookingTab } from '@/components/crm2/rebooking/RebookingTab';
 import { CampaignHealthBadge } from '@/components/crm2/CampaignHealthBadge';
 import { OrganizationImpactTab } from '@/components/crm2/OrganizationImpactTab';
+import { AttentionStrip } from '@/components/crm2/AttentionStrip';
+import { triageCampaign } from '@/lib/growth/nextAction';
 import type { CampaignHealth, CampaignHealthReason } from '@/lib/growth/health';
 
 interface Fundraiser {
@@ -204,20 +204,19 @@ export default function FundraisersPage() {
         setCloseoutLoading(false);
     };
 
+    // CRM-CC-1: one clock per render so every row is triaged consistently.
+    const triageNow = new Date();
+
     const filtered = fundraisers.filter(f => {
         const matchesSearch = f.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             f.customer.name.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesFilter =
             filterStatus === 'all' ? true :
+            filterStatus === 'attention' ? triageCampaign(f, triageNow).priority === 'needs_attention' :
             filterStatus === 'closed' ? isCampaignClosed(f) :
             f.status.toLowerCase() === filterStatus.toLowerCase();
         return matchesSearch && matchesFilter;
     });
-
-    const activeCount = fundraisers.filter(f => f.status === 'Active').length;
-    const pendingCount = fundraisers.filter(f => f.status === 'Lead').length;
-    const totalHeldOrders = fundraisers.reduce((sum, f) => sum + (f.held_order_count || 0), 0);
-    const totalHeldValue = fundraisers.reduce((sum, f) => sum + (f.held_order_total || 0), 0);
 
     if (status === 'loading') return <div className="p-8 text-center text-slate-400">Loading Session...</div>;
 
@@ -295,37 +294,20 @@ export default function FundraisersPage() {
 
             {activeTab === 'campaigns' && (
             <>
-            {/* Quick Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="glass-panel p-6 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm">
-                    <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center mb-4">
-                        <TrendingUp size={24} />
-                    </div>
-                    <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-1">Active Campaigns</p>
-                    <p className="text-3xl font-black">{activeCount}</p>
-                </div>
-                <div className="glass-panel p-6 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm">
-                    <div className="w-12 h-12 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-2xl flex items-center justify-center mb-4">
-                        <Target size={24} />
-                    </div>
-                    <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-1">High Leads</p>
-                    <p className="text-3xl font-black text-amber-600">{pendingCount}</p>
-                </div>
-                <div className="glass-panel p-6 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm">
-                    <div className="w-12 h-12 bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-2xl flex items-center justify-center mb-4">
-                        <Receipt size={24} />
-                    </div>
-                    <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-1">Held Orders</p>
-                    <p className="text-3xl font-black text-violet-600">{totalHeldOrders}</p>
-                    {totalHeldValue > 0 && (
-                        <p className="text-xs font-bold text-slate-400 mt-1">${totalHeldValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} awaiting settlement</p>
-                    )}
-                </div>
-            </div>
+            {/* CRM-CC-1 — needs-attention strip. Replaces the three passive KPI
+                cards (Active / High Leads / Held Orders): counts told the tenant
+                what EXISTS; this band tells them what needs DOING today, and each
+                chip goes to the place the work happens. */}
+            <AttentionStrip
+                fundraisers={fundraisers}
+                loading={isLoading}
+                onShowAttention={() => setFilterStatus('attention')}
+                onGoRebooking={() => setActiveTab('rebooking')}
+            />
 
             {/* Filters */}
-            <div className="flex flex-col md:flex-row gap-4 justify-between bg-white dark:bg-slate-800 p-4 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700">
-                <div className="relative flex-1">
+            <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between bg-white dark:bg-slate-800 p-4 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700">
+                <div className="relative flex-1 min-w-[200px]">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                     <input
                         type="text"
@@ -335,14 +317,16 @@ export default function FundraisersPage() {
                         className="w-full pl-12 pr-4 py-3 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500/20 font-medium"
                     />
                 </div>
-                <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-2xl">
-                    {['all', 'active', 'lead', 'closed'].map(status => (
+                <div className="flex flex-wrap bg-slate-100 dark:bg-slate-900 p-1 rounded-2xl">
+                    {/* CRM-CC-1: 'attention' filters to triage === needs_attention,
+                        giving the strip's campaign chip a real destination. */}
+                    {(['all', 'attention', 'active', 'lead', 'closed'] as const).map(status => (
                         <button
                             key={status}
                             onClick={() => setFilterStatus(status)}
-                            className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${filterStatus === status ? 'bg-white dark:bg-slate-800 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                            className={`px-4 md:px-6 py-2 rounded-xl text-xs font-black uppercase transition-all min-h-[36px] ${filterStatus === status ? 'bg-white dark:bg-slate-800 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                         >
-                            {status}
+                            {status === 'attention' ? 'Needs attention' : status}
                         </button>
                     ))}
                 </div>
