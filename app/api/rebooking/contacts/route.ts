@@ -52,7 +52,10 @@ export interface RebookingOrgSummary {
 export type RebookingContactRow = RowState & {
     contact_id: string;
     display_name: string;
-    email: string | null;
+    // CRM-CC-3 privacy hygiene: the RAW address is no longer serialized. Every
+    // consumer (RebookingTab, AttentionStrip) reads only the masked form, so
+    // shipping the full address to the browser served no purpose. The raw
+    // value still flows through masking/suppression logic server-side.
     email_masked: string | null;
     is_shared_inbox: boolean;
     shares_address_with: number;   // other contacts on the same address
@@ -235,7 +238,6 @@ export async function GET() {
                 bucket: bucketForStatus(state.status, c.needs_review),
                 contact_id: c.id,
                 display_name: c.display_name,
-                email,
                 email_masked: maskEmail(email),
                 is_shared_inbox: point?.is_shared_inbox ?? false,
                 shares_address_with: sharesWith,

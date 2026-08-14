@@ -63,6 +63,8 @@ export async function GET(req: Request) {
                     select: {
                         id: true,
                         status: true,
+                        // CRM-CC-3 — display only: the last fundraiser's NAME.
+                        name: true,
                         closed_at: true,
                         created_at: true,
                         settlement_total: true,
@@ -89,6 +91,7 @@ export async function GET(req: Request) {
             campaigns: o.campaigns.map((c) => ({
                 id: c.id,
                 status: String(c.status),
+                name: c.name ?? null,
                 closed_at: c.closed_at,
                 created_at: c.created_at,
                 settlement_total: c.settlement_total === null ? null : Number(c.settlement_total),

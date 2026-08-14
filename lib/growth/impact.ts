@@ -76,6 +76,12 @@ export interface ImpactCampaignInput {
     created_at: Date;
     /** Frozen gross sales; null until the campaign has been closed out. */
     settlement_total: number | null;
+    /**
+     * CRM-CC-3 — display only. Lets the Organizations tab say WHICH fundraiser
+     * was last, not just when. Optional so existing callers keep compiling; it
+     * never influences any money figure.
+     */
+    name?: string | null;
     /** Eligible + ineligible orders on this campaign; GE-4 does the filtering. */
     orders?: ImpactOrderInput[];
 }
@@ -113,6 +119,8 @@ export interface OrganizationImpact {
     bestCampaignSales: number | null;
     firstCampaignAt: Date | null;
     lastCampaignAt: Date | null;
+    /** Name of the most recent real campaign, when the caller supplied names. */
+    lastCampaignName: string | null;
     daysSinceLastCampaign: number | null;
     /** True once a group has more than one real campaign — a fact, not a forecast. */
     isRepeatOrganization: boolean;
@@ -210,12 +218,15 @@ export function computeOrganizationImpact(org: ImpactOrganizationInput, now: Dat
     const lifetimeFundraiserSales = contributions.reduce((sum, v) => sum + v, 0);
     const settledSales = settled.reduce((sum, c) => sum + Number(c.settlement_total), 0);
 
-    const dates = real
-        .map(c => c.created_at)
-        .filter((d): d is Date => d instanceof Date && !Number.isNaN(d.getTime()))
-        .sort((a, b) => a.getTime() - b.getTime());
+    // Dated campaigns, oldest → newest. Kept as whole campaigns (not bare
+    // dates) so the newest one can also supply its NAME for display.
+    const dated = real
+        .filter((c): c is typeof c & { created_at: Date } =>
+            c.created_at instanceof Date && !Number.isNaN(c.created_at.getTime()))
+        .sort((a, b) => a.created_at.getTime() - b.created_at.getTime());
 
-    const lastCampaignAt = dates.length ? dates[dates.length - 1] : null;
+    const newest = dated.length ? dated[dated.length - 1] : null;
+    const lastCampaignAt = newest ? newest.created_at : null;
 
     return {
         organizationId: org.organizationId,
@@ -231,8 +242,9 @@ export function computeOrganizationImpact(org: ImpactOrganizationInput, now: Dat
         // smaller denominator and overstate its typical campaign.
         averageCampaignSales: real.length ? lifetimeFundraiserSales / real.length : null,
         bestCampaignSales: contributions.length ? Math.max(...contributions) : null,
-        firstCampaignAt: dates.length ? dates[0] : null,
+        firstCampaignAt: dated.length ? dated[0].created_at : null,
         lastCampaignAt,
+        lastCampaignName: newest?.name?.trim() ? newest.name.trim() : null,
         daysSinceLastCampaign: lastCampaignAt ? wholeDaysBetween(lastCampaignAt, now) : null,
         isRepeatOrganization: real.length > 1,
     };

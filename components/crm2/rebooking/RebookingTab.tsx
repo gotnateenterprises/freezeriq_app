@@ -28,8 +28,12 @@ import { AudienceReviewDrawer } from './AudienceReviewDrawer';
 import { EmailPreviewDrawer } from './EmailPreviewDrawer';
 import { ReviewRequestDrawer, type RebookingRequest } from './ReviewRequestDrawer';
 import { SeasonalRecommendationsPanel } from './SeasonalRecommendationsPanel';
-
-type Filter = 'all' | 'ready_to_invite' | 'waiting' | 'needs_action' | 'done';
+import {
+    REBOOKING_FILTERS,
+    isQuietStatus,
+    rebookingEmptyCopy,
+    type RebookingFilter as Filter,
+} from '@/lib/growth/rebookingUi';
 
 interface OrgSummary {
     customer_id: string;
@@ -60,14 +64,6 @@ interface ContactRow {
     request_id: string | null;
     opportunity_id: string | null;
 }
-
-const FILTERS: { key: Filter; label: string }[] = [
-    { key: 'all', label: 'All' },
-    { key: 'ready_to_invite', label: 'Ready to invite' },
-    { key: 'waiting', label: 'Waiting' },
-    { key: 'needs_action', label: 'Needs action' },
-    { key: 'done', label: 'Done' },
-];
 
 const NEUTRAL_CHIP = 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700';
 
@@ -196,10 +192,15 @@ export function RebookingTab({ onStartFundraiser }: {
      */
     const NextStep = ({ r }: { r: ContactRow }) => {
         const label = r.next_step;
+        // CRM-CC-3 — a row IN the work queue surfaces its action as a real
+        // button (the Campaigns list's primary-action treatment); everything
+        // else keeps the quieter text link. Same handlers either way.
         // inline-flex is load-bearing: `min-h` has no effect on an inline element,
         // so the anchor variant would otherwise render a ~15px tap target on
         // mobile while the button variants were fine.
-        const base = 'inline-flex items-center text-left text-[11px] font-bold underline-offset-2 hover:underline text-indigo-600 dark:text-indigo-400 min-h-[44px] md:min-h-0 md:py-1';
+        const base = r.bucket === 'needs_action'
+            ? 'inline-flex items-center justify-center text-left min-h-[44px] px-4 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-900 text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-950/60 transition-colors'
+            : 'inline-flex items-center text-left text-[11px] font-bold underline-offset-2 hover:underline text-indigo-600 dark:text-indigo-400 min-h-[44px] lg:min-h-0 lg:py-1';
 
         switch (r.next_action) {
             case 'send_seasonal_update':
@@ -251,20 +252,35 @@ export function RebookingTab({ onStartFundraiser }: {
                 GE-5A APIs. It never touches the Seasonal Update chain below. */}
             <SeasonalRecommendationsPanel />
 
-            {/* Summary strip + primary action */}
-            <div className="flex flex-col lg:flex-row lg:items-center gap-4">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 flex-1 min-w-0">
-                    {([
-                        { label: 'Ready to invite', value: displayCounts.ready_to_invite, tone: 'text-indigo-600' },
-                        { label: 'Waiting', value: displayCounts.waiting, tone: '' },
-                        { label: 'Needs action', value: displayCounts.needs_action, tone: 'text-amber-600' },
-                        { label: 'Rebooked', value: displayCounts.done, tone: 'text-emerald-600' },
-                    ]).map((s) => (
-                        <div key={s.label} className="glass-panel p-4 rounded-2xl border border-slate-100 dark:border-slate-700">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{s.label}</p>
-                            <p className={`text-2xl font-black tabular-nums ${s.tone}`}>{s.value}</p>
-                        </div>
-                    ))}
+            {/* CRM-CC-3 — compact control bar. The counted filter chips ARE the
+                summary, replacing the four KPI cards that used to say the same
+                numbers a second time ~110px taller. "Needs action" leads and
+                carries amber emphasis while work exists; it remains the default
+                selection per the approved ruling. */}
+            <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+                <div className="flex flex-wrap gap-2 flex-1 min-w-0">
+                    {REBOOKING_FILTERS.map((f) => {
+                        const active = filter === f.key;
+                        const hot = f.emphasize && displayCounts[f.key] > 0;
+                        return (
+                            <button
+                                key={f.key}
+                                onClick={() => setFilter(f.key)}
+                                aria-pressed={active}
+                                className={`px-4 py-2 rounded-full text-[11px] font-black uppercase tracking-wide border transition-colors min-h-[44px] ${
+                                    active
+                                        ? hot
+                                            ? 'bg-amber-600 text-white border-amber-600'
+                                            : 'bg-indigo-600 text-white border-indigo-600'
+                                        : hot
+                                            ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-900 hover:bg-amber-100'
+                                            : 'bg-white dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+                                }`}
+                            >
+                                {f.label} <span className="opacity-65 tabular-nums ml-1">{displayCounts[f.key]}</span>
+                            </button>
+                        );
+                    })}
                 </div>
 
                 <div className="flex flex-col items-stretch lg:items-end gap-1.5 flex-none">
@@ -290,8 +306,9 @@ export function RebookingTab({ onStartFundraiser }: {
                 would misrepresent both. */}
             {requests.length > 0 && (
                 <section aria-labelledby="requests-heading" className="space-y-2.5">
-                    <h3 id="requests-heading" className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
-                        <Inbox size={12} /> Requests to review
+                    <h3 id="requests-heading" className="text-[11px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                        <Inbox size={12} aria-hidden="true" /> Requests to review
+                        <span className="text-slate-400 dark:text-slate-500 font-bold">({requests.length})</span>
                     </h3>
                     <ul className="space-y-2.5">
                         {requests.map((r) => (
@@ -322,24 +339,6 @@ export function RebookingTab({ onStartFundraiser }: {
                 </section>
             )}
 
-            {/* Filter chips — exactly five */}
-            <div className="flex flex-wrap gap-2">
-                {FILTERS.map((f) => (
-                    <button
-                        key={f.key}
-                        onClick={() => setFilter(f.key)}
-                        aria-pressed={filter === f.key}
-                        className={`px-4 py-2 rounded-full text-[11px] font-black uppercase tracking-wide border transition-colors min-h-[36px] ${
-                            filter === f.key
-                                ? 'bg-indigo-600 text-white border-indigo-600'
-                                : 'bg-white dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                    >
-                        {f.label} <span className="opacity-65 tabular-nums ml-1">{displayCounts[f.key]}</span>
-                    </button>
-                ))}
-            </div>
-
             {/* Empty Needs-action: never silently shows All. Suppressed when a
                 request above is itself waiting on a decision — "nothing needs
                 your attention" directly under an unreviewed request would be a
@@ -359,33 +358,32 @@ export function RebookingTab({ onStartFundraiser }: {
 
             {visible.length === 0 && filter !== 'needs_action' && (
                 <div className="glass-panel rounded-3xl border border-slate-100 dark:border-slate-700 py-14 px-6 text-center">
-                    <Users size={32} className="mx-auto text-slate-300 mb-3" />
-                    <p className="font-bold text-slate-500">
-                        {filter === 'waiting' && 'No updates are waiting on replies yet.'}
-                        {filter === 'done' && 'No groups have rebooked yet.'}
-                        {filter === 'ready_to_invite' && 'No contacts are ready to invite.'}
-                        {filter === 'all' && 'Add a fundraiser organization and it will appear here.'}
-                    </p>
+                    <Users size={32} className="mx-auto text-slate-300 mb-3" aria-hidden="true" />
+                    <p className="font-bold text-slate-500">{rebookingEmptyCopy(filter)}</p>
                 </div>
             )}
 
-            {/* Desktop table */}
+            {/* Desktop table — lg and up, matching the Campaigns list's
+                breakpoint so tablets get stacked cards, never a squeeze. */}
             {visible.length > 0 && (
-                <div className="hidden md:block bg-white dark:bg-slate-800 rounded-3xl overflow-hidden border border-slate-100 dark:border-slate-700 shadow-sm">
+                <div className="hidden lg:block bg-white dark:bg-slate-800 rounded-3xl overflow-hidden border border-slate-100 dark:border-slate-700 shadow-sm">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-700">
-                                    <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Main contact</th>
-                                    <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Organizations</th>
-                                    <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Last fundraiser</th>
-                                    <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
-                                    <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Next step</th>
+                                    <th className="px-5 py-3 text-[11px] font-black text-slate-400 uppercase tracking-widest">Main contact</th>
+                                    <th className="px-4 py-3 text-[11px] font-black text-slate-400 uppercase tracking-widest">Organizations</th>
+                                    <th className="px-4 py-3 text-[11px] font-black text-slate-400 uppercase tracking-widest">Last fundraiser</th>
+                                    <th className="px-4 py-3 text-[11px] font-black text-slate-400 uppercase tracking-widest">Status</th>
+                                    <th className="px-4 py-3 text-[11px] font-black text-slate-400 uppercase tracking-widest">Next step</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50">
                                 {visible.map((r) => (
-                                    <tr key={r.contact_id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
+                                    /* Resting states (archived / paused) render dimmed —
+                                       they are deliberately not work, and must not compete
+                                       with rows that need a human. */
+                                    <tr key={r.contact_id} className={`hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors ${isQuietStatus(r.status) ? 'opacity-60' : ''}`}>
                                         <td className="px-5 py-4">
                                             <p className="font-black text-slate-900 dark:text-white text-sm">{r.display_name}</p>
                                             <p className="text-[11px] font-bold text-slate-400">
@@ -452,15 +450,15 @@ export function RebookingTab({ onStartFundraiser }: {
                 </div>
             )}
 
-            {/* Mobile cards */}
+            {/* Stacked cards below lg */}
             {visible.length > 0 && (
-                <div className="md:hidden space-y-3">
+                <div className="lg:hidden space-y-3">
                     {visible.map((r) => (
-                        <div key={r.contact_id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-4 space-y-2.5">
+                        <div key={r.contact_id} className={`bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-4 space-y-2.5 ${isQuietStatus(r.status) ? 'opacity-60' : ''}`}>
                             <div className="flex justify-between items-start gap-3">
                                 <div className="min-w-0">
-                                    <p className="font-black text-slate-900 dark:text-white text-sm truncate">{r.display_name}</p>
-                                    <p className="text-[11px] font-bold text-slate-400 truncate">{r.organizations[0]?.name || '—'}</p>
+                                    <p className="font-black text-slate-900 dark:text-white text-sm break-words">{r.display_name}</p>
+                                    <p className="text-[11px] font-bold text-slate-400 break-words">{r.organizations[0]?.name || '—'}</p>
                                 </div>
                                 <span className={`flex-none inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wide border ${statusChipClass(r.status)}`}>
                                     <span className="w-1.5 h-1.5 rounded-full bg-current" aria-hidden="true" />
