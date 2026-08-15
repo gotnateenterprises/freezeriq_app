@@ -61,6 +61,9 @@ interface ContactRow {
     bucket: 'ready_to_invite' | 'waiting' | 'needs_action' | 'done' | 'none';
     next_action: 'send_seasonal_update' | 'review_request' | 'start_fundraiser' | 'view_campaign' | 'fix_contact' | null;
     campaign_id: string | null;
+    /** CRM-CC-5 fix: the actual /fundraisers/[id] route param — that route is
+     *  the organization profile and takes a CUSTOMER id, not campaign_id. */
+    campaign_customer_id: string | null;
     request_id: string | null;
     opportunity_id: string | null;
 }
@@ -135,13 +138,16 @@ export function RebookingTab({ onStartFundraiser }: {
         return () => { alive = false; };
     }, []);
 
-    useEffect(() => {
+    // CRM-CC-5: extracted so the error state's Retry re-runs THIS request
+    // instead of reloading the whole app (which also reset the active tab).
+    const loadContacts = useCallback(() => {
         let alive = true;
+        setLoading(true);
+        setError(null);
         fetch('/api/rebooking/contacts', { cache: 'no-store' })
             .then(async (res) => {
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Failed to load');
-                return data;
+                if (!res.ok) throw new Error(`rebooking contacts load failed: ${res.status}`);
+                return res.json();
             })
             .then((data) => {
                 if (!alive) return;
@@ -149,9 +155,15 @@ export function RebookingTab({ onStartFundraiser }: {
                 setCounts(data.counts || { all: 0, ready_to_invite: 0, waiting: 0, needs_action: 0, done: 0 });
                 setLoading(false);
             })
-            .catch((e) => { if (alive) { setError(e.message); setLoading(false); } });
+            .catch((e) => {
+                console.error('Failed to load rebooking contacts', e);
+                if (alive) { setError('load-failed'); setLoading(false); }
+            });
         return () => { alive = false; };
     }, []);
+
+    useEffect(() => loadContacts(), [loadContacts]);
+
 
     // Still used to suppress a false "nothing needs your attention" while an
     // unreviewed request sits above the table — see the empty state below.
@@ -200,26 +212,34 @@ export function RebookingTab({ onStartFundraiser }: {
         // mobile while the button variants were fine.
         const base = r.bucket === 'needs_action'
             ? 'inline-flex items-center justify-center text-left min-h-[44px] px-4 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-900 text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-950/60 transition-colors'
-            : 'inline-flex items-center text-left text-[11px] font-bold underline-offset-2 hover:underline text-indigo-600 dark:text-indigo-400 min-h-[44px] lg:min-h-0 lg:py-1';
+            : 'inline-flex items-center text-left text-[11px] font-bold underline-offset-2 hover:underline text-indigo-600 dark:text-indigo-400 min-h-[44px] xl:min-h-0 xl:py-1';
+
+        // CRM-CC-5: the accessible name carries WHO the step is for — a screen
+        // reader scanning buttons would otherwise hear identical labels.
+        const ariaLabel = `${label} — ${r.display_name}`;
 
         switch (r.next_action) {
             case 'send_seasonal_update':
-                return <button onClick={openSeasonalUpdate} className={base}>{label}</button>;
+                return <button type="button" aria-label={ariaLabel} onClick={openSeasonalUpdate} className={base}>{label}</button>;
             case 'review_request':
                 return r.request_id
-                    ? <button onClick={() => setOpenRequestId(r.request_id)} className={base}>{label}</button>
+                    ? <button type="button" aria-label={ariaLabel} onClick={() => setOpenRequestId(r.request_id)} className={base}>{label}</button>
                     : <span className="text-[11px] font-bold text-slate-400">{label}</span>;
             case 'start_fundraiser': {
                 // The wizard lives on the page above and the prop is optional, so
                 // the row only offers the action when it can actually perform it.
                 const oppId = r.opportunity_id;
                 return oppId && onStartFundraiser
-                    ? <button onClick={() => onStartFundraiser(oppId)} className={base}>{label}</button>
+                    ? <button type="button" aria-label={ariaLabel} onClick={() => onStartFundraiser(oppId)} className={base}>{label}</button>
                     : <span className="text-[11px] font-bold text-slate-400">{label}</span>;
             }
             case 'view_campaign':
-                return r.campaign_id
-                    ? <a href={`/fundraisers/${r.campaign_id}`} className={base}>View campaign</a>
+                // The server's next_step is the single wording source, exactly
+                // like every other case. CRM-CC-5 fix: /fundraisers/[id] is the
+                // organization profile route (it fetches /api/customers/[id]) —
+                // navigate with campaign_customer_id, never the raw campaign_id.
+                return r.campaign_customer_id
+                    ? <a href={`/fundraisers/${r.campaign_customer_id}`} aria-label={ariaLabel} className={base}>{label}</a>
                     : <span className="text-[11px] font-bold text-slate-400">{label}</span>;
             default:
                 return <span className="text-[11px] font-bold text-slate-400">{label}</span>;
@@ -228,17 +248,22 @@ export function RebookingTab({ onStartFundraiser }: {
 
     if (loading) {
         return (
-            <div className="py-20 text-center text-slate-400 font-bold flex items-center justify-center gap-2">
-                <Loader2 size={18} className="animate-spin" /> Loading rebooking contacts…
+            <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm py-16 px-5 text-center text-slate-400 font-bold flex items-center justify-center gap-2">
+                <Loader2 size={18} className="animate-spin" aria-hidden="true" /> Loading rebooking contacts…
             </div>
         );
     }
 
     if (error) {
         return (
-            <div className="py-16 text-center space-y-3">
-                <p className="font-bold text-rose-600">Couldn&apos;t load rebooking contacts.</p>
-                <button onClick={() => window.location.reload()} className="px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-sm min-h-[44px]">
+            <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm py-14 px-6 text-center space-y-3">
+                <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Couldn&apos;t load rebooking contacts.</p>
+                <p className="text-xs font-medium text-slate-400">Check your connection and try again.</p>
+                <button
+                    type="button"
+                    onClick={loadContacts}
+                    className="mt-1 px-5 min-h-[44px] rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                >
                     Retry
                 </button>
             </div>
@@ -257,7 +282,7 @@ export function RebookingTab({ onStartFundraiser }: {
                 numbers a second time ~110px taller. "Needs action" leads and
                 carries amber emphasis while work exists; it remains the default
                 selection per the approved ruling. */}
-            <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+            <div className="flex flex-col xl:flex-row xl:items-center gap-3">
                 <div className="flex flex-wrap gap-2 flex-1 min-w-0">
                     {REBOOKING_FILTERS.map((f) => {
                         const active = filter === f.key;
@@ -283,14 +308,14 @@ export function RebookingTab({ onStartFundraiser }: {
                     })}
                 </div>
 
-                <div className="flex flex-col items-stretch lg:items-end gap-1.5 flex-none">
+                <div className="flex flex-col items-stretch xl:items-end gap-1.5 flex-none">
                     <button
                         onClick={openSeasonalUpdate}
                         className="inline-flex items-center justify-center gap-2 px-5 min-h-[44px] rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700 transition-colors"
                     >
-                        <Send size={15} /> Send Seasonal Update
+                        <Send size={15} aria-hidden="true" /> Send Seasonal Update
                     </button>
-                    <span className="text-[11px] font-bold text-slate-400 lg:text-right">
+                    <span className="text-[11px] font-bold text-slate-400 xl:text-right">
                         {audienceSaved && savedLineup
                             ? `${savedLineup.name} · audience ready to preview`
                             : savedLineup
@@ -344,10 +369,11 @@ export function RebookingTab({ onStartFundraiser }: {
                 your attention" directly under an unreviewed request would be a
                 straightforward lie. */}
             {visible.length === 0 && filter === 'needs_action' && requestsNeedingAction === 0 && (
-                <div className="glass-panel rounded-3xl border border-slate-100 dark:border-slate-700 py-14 px-6 text-center space-y-3">
+                <div className="bg-white dark:bg-slate-800 shadow-sm rounded-3xl border border-slate-100 dark:border-slate-700 py-14 px-6 text-center space-y-3">
                     <p className="text-lg font-black text-slate-900 dark:text-white">Nothing needs your attention right now.</p>
                     <p className="text-sm text-slate-500">New responses and requests will appear here.</p>
                     <button
+                        type="button"
                         onClick={() => setFilter('all')}
                         className="mt-2 px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 min-h-[44px]"
                     >
@@ -356,17 +382,28 @@ export function RebookingTab({ onStartFundraiser }: {
                 </div>
             )}
 
+            {/* CRM-CC-5 — the fourth case: zero contact rows need action while a
+                request above still does. Neither the caught-up panel (which
+                would be a lie) nor bare emptiness (a void) is right; one quiet
+                pointer at the real work is. */}
+            {visible.length === 0 && filter === 'needs_action' && requestsNeedingAction > 0 && (
+                <p className="text-sm font-bold text-slate-500 dark:text-slate-400 text-center py-4">
+                    No contact rows need action — the requests above are what&apos;s waiting on you.
+                </p>
+            )}
+
             {visible.length === 0 && filter !== 'needs_action' && (
-                <div className="glass-panel rounded-3xl border border-slate-100 dark:border-slate-700 py-14 px-6 text-center">
+                <div className="bg-white dark:bg-slate-800 shadow-sm rounded-3xl border border-slate-100 dark:border-slate-700 py-14 px-6 text-center">
                     <Users size={32} className="mx-auto text-slate-300 mb-3" aria-hidden="true" />
                     <p className="font-bold text-slate-500">{rebookingEmptyCopy(filter)}</p>
                 </div>
             )}
 
-            {/* Desktop table — lg and up, matching the Campaigns list's
-                breakpoint so tablets get stacked cards, never a squeeze. */}
+            {/* Desktop table — xl and up, matching the Campaigns list's
+                CRM-CC-5 breakpoint (the sidebar leaves too little room for the
+                table below a 1280 viewport). */}
             {visible.length > 0 && (
-                <div className="hidden lg:block bg-white dark:bg-slate-800 rounded-3xl overflow-hidden border border-slate-100 dark:border-slate-700 shadow-sm">
+                <div className="hidden xl:block bg-white dark:bg-slate-800 rounded-3xl overflow-hidden border border-slate-100 dark:border-slate-700 shadow-sm">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left border-collapse">
                             <thead>
@@ -435,7 +472,7 @@ export function RebookingTab({ onStartFundraiser }: {
                                             </span>
                                             {r.needs_review && (
                                                 <p className="mt-1 text-[10px] font-black uppercase tracking-wide text-amber-600 flex items-center gap-1">
-                                                    <AlertCircle size={11} /> Needs review
+                                                    <AlertCircle size={11} aria-hidden="true" /> Needs review
                                                 </p>
                                             )}
                                         </td>
@@ -450,9 +487,9 @@ export function RebookingTab({ onStartFundraiser }: {
                 </div>
             )}
 
-            {/* Stacked cards below lg */}
+            {/* Stacked cards below xl */}
             {visible.length > 0 && (
-                <div className="lg:hidden space-y-3">
+                <div className="xl:hidden space-y-3">
                     {visible.map((r) => (
                         <div key={r.contact_id} className={`bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-4 space-y-2.5 ${isQuietStatus(r.status) ? 'opacity-60' : ''}`}>
                             <div className="flex justify-between items-start gap-3">

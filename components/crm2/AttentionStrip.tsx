@@ -55,20 +55,24 @@ export function AttentionStrip({
     const [rebookingNeedsAction, setRebookingNeedsAction] = useState<number | null>(null);
     const [openRecommendations, setOpenRecommendations] = useState<number | null>(null);
     const [auxSettled, setAuxSettled] = useState(false);
+    // CRM-CC-5: a failed count is not a zero. When either auxiliary source
+    // failed, the strip may omit chips (honest) but must not assert the
+    // all-sources "caught up" line it can no longer prove.
+    const [auxFailed, setAuxFailed] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
         Promise.allSettled([
             fetch('/api/rebooking/contacts', { cache: 'no-store' })
-                .then((r) => (r.ok ? r.json() : null))
+                .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
                 .then((d) => {
                     if (!cancelled && d?.counts && typeof d.counts.needs_action === 'number') {
                         setRebookingNeedsAction(d.counts.needs_action);
                     }
                 })
-                .catch(() => { /* omit the chip rather than guess */ }),
+                .catch(() => { if (!cancelled) setAuxFailed(true); /* omit the chip rather than guess */ }),
             fetch('/api/growth/automation/actions', { cache: 'no-store' })
-                .then((r) => (r.ok ? r.json() : null))
+                .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
                 .then((d) => {
                     if (!cancelled && Array.isArray(d?.actions)) {
                         setOpenRecommendations(
@@ -76,7 +80,7 @@ export function AttentionStrip({
                         );
                     }
                 })
-                .catch(() => { /* omit the chip rather than guess */ }),
+                .catch(() => { if (!cancelled) setAuxFailed(true); /* omit the chip rather than guess */ }),
         ]).then(() => { if (!cancelled) setAuxSettled(true); });
         return () => { cancelled = true; };
     }, []);
@@ -114,7 +118,7 @@ export function AttentionStrip({
             icon: MailQuestion,
             stripe: 'border-l-indigo-500',
             iconTone: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30',
-            title: `${rebookingNeedsAction} rebooking item${rebookingNeedsAction === 1 ? '' : 's'} need${rebookingNeedsAction === 1 ? 's' : ''} review`,
+            title: `${rebookingNeedsAction} rebooking item${rebookingNeedsAction === 1 ? '' : 's'} need${rebookingNeedsAction === 1 ? 's' : ''} action`,
             sub: 'Responses and requests waiting on you',
             onClick: onGoRebooking,
         });
@@ -132,9 +136,10 @@ export function AttentionStrip({
     }
 
     // Quiet until the auxiliary counts settle, so "caught up" never flashes
-    // before a real count arrives to contradict it.
+    // before a real count arrives to contradict it. And if a source failed,
+    // stay quiet entirely — "caught up" is a claim about every source.
     if (items.length === 0) {
-        if (!auxSettled) return null;
+        if (!auxSettled || auxFailed) return null;
         return (
             <p className="flex items-center gap-2 text-sm font-bold text-slate-400 dark:text-slate-500">
                 <CheckCircle2 size={16} className="text-emerald-500 flex-none" aria-hidden="true" />

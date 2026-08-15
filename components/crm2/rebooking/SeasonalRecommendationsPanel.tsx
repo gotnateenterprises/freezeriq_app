@@ -141,8 +141,10 @@ export function SeasonalRecommendationsPanel() {
         setPolicyLoading(true);
         return fetch('/api/growth/automation/policy', { cache: 'no-store' })
             .then(async (res) => {
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Failed to load');
+                // Parse defensively: a non-JSON error page must surface the calm
+                // fallback message, never a raw SyntaxError.
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || 'Could not load recommendations.');
                 return data;
             })
             .then((data) => {
@@ -173,8 +175,8 @@ export function SeasonalRecommendationsPanel() {
         setActionsLoading(true);
         return fetch('/api/growth/automation/actions', { cache: 'no-store' })
             .then(async (res) => {
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Failed to load');
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || 'Could not load recommendations.');
                 return data;
             })
             .then((data) => {
@@ -312,7 +314,7 @@ export function SeasonalRecommendationsPanel() {
                 </div>
             </div>
 
-            {policyError && <p className="text-[11px] font-bold text-rose-600">{policyError}</p>}
+            {policyError && <p role="alert" className="text-[11px] font-bold text-rose-600">{policyError}</p>}
             {statusMessage && !policyError && (
                 <p role="status" className="text-[11px] font-bold text-slate-500 dark:text-slate-400">{statusMessage}</p>
             )}
@@ -360,7 +362,7 @@ export function SeasonalRecommendationsPanel() {
                     )}
 
                     {actionsError && (
-                        <p className="text-[11px] font-bold text-rose-600">{actionsError}</p>
+                        <p role="alert" className="text-[11px] font-bold text-rose-600">{actionsError}</p>
                     )}
 
                     {/* Empty states — distinct copy for each real reason the list is empty,
@@ -403,6 +405,7 @@ export function SeasonalRecommendationsPanel() {
                                         <div className="flex flex-wrap items-center gap-2 pt-1">
                                             <button
                                                 type="button"
+                                                aria-label={`Approve recommendation for ${a.organization_name ?? 'this organization'}`}
                                                 onClick={() => transition(a.id, 'approve')}
                                                 disabled={Boolean(transitioning[a.id])}
                                                 className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-xl bg-emerald-600 text-white font-bold text-xs uppercase tracking-wide hover:bg-emerald-700 transition-colors disabled:opacity-50"
@@ -412,6 +415,7 @@ export function SeasonalRecommendationsPanel() {
                                             </button>
                                             <button
                                                 type="button"
+                                                aria-label={`Dismiss recommendation for ${a.organization_name ?? 'this organization'}`}
                                                 onClick={() => transition(a.id, 'dismiss')}
                                                 disabled={Boolean(transitioning[a.id])}
                                                 className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-xs uppercase tracking-wide text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
@@ -424,6 +428,7 @@ export function SeasonalRecommendationsPanel() {
                                         <div className="flex flex-wrap items-center gap-2 pt-1">
                                             <button
                                                 type="button"
+                                                aria-label={`Dismiss recommendation for ${a.organization_name ?? 'this organization'}`}
                                                 onClick={() => transition(a.id, 'dismiss')}
                                                 disabled={Boolean(transitioning[a.id])}
                                                 className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-xs uppercase tracking-wide text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
@@ -449,7 +454,7 @@ export function SeasonalRecommendationsPanel() {
                                 type="button"
                                 onClick={() => setHistoryOpen((v) => !v)}
                                 aria-expanded={historyOpen}
-                                className="inline-flex items-center gap-1 text-[11px] font-black uppercase tracking-wide text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 min-h-[36px]"
+                                className="inline-flex items-center gap-1 text-[11px] font-black uppercase tracking-wide text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 min-h-[44px]"
                             >
                                 {historyOpen ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}
                                 {historyOpen ? 'Hide' : 'Show'} history ({history.length})

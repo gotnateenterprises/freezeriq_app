@@ -22,7 +22,7 @@
  * still exist server-side for any future detail surface.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Building2, Loader2, Repeat } from 'lucide-react';
 import { money, settledNote, lastFundraiserDisplay } from '@/lib/growth/organizationUi';
@@ -63,8 +63,9 @@ const SORTS: { key: Sort; label: string }[] = [
 ];
 
 function RepeatBadge() {
+    // CRM-CC-5: the suite's one chip recipe — rounded-lg, bordered, px-2.5 py-1.
     return (
-        <span className="inline-flex flex-none items-center gap-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+        <span className="inline-flex flex-none items-center gap-1.5 rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
             <Repeat size={10} aria-hidden="true" /> Repeat
         </span>
     );
@@ -91,14 +92,17 @@ export function OrganizationImpactTab() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    useEffect(() => {
+    // CRM-CC-5: extracted so the error state's Retry can re-run the load; the
+    // request itself is unchanged. Raw server/parse errors are logged, never
+    // shown — the owner-facing copy stays calm and constant.
+    const load = useCallback(() => {
         let alive = true;
         setLoading(true);
+        setError(null);
         fetch(`/api/growth/organizations?sort=${sort}`, { cache: 'no-store' })
             .then(async (res) => {
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || res.statusText);
-                return data;
+                if (!res.ok) throw new Error(`organizations load failed: ${res.status}`);
+                return res.json();
             })
             .then((data) => {
                 if (!alive) return;
@@ -106,13 +110,21 @@ export function OrganizationImpactTab() {
                 setTotals(data.totals || null);
                 setLoading(false);
             })
-            .catch((e) => { if (alive) { setError(e.message); setLoading(false); } });
+            .catch((e) => {
+                console.error('Failed to load organization history', e);
+                if (alive) { setError('load-failed'); setLoading(false); }
+            });
         return () => { alive = false; };
     }, [sort]);
 
-    if (loading) {
+    useEffect(() => load(), [load]);
+
+
+    // Full-screen states only before anything has loaded; a re-sort keeps the
+    // tiles and sort controls mounted instead of blanking the whole tab.
+    if (loading && !totals) {
         return (
-            <div className="py-20 text-center text-slate-400 font-bold flex items-center justify-center gap-2">
+            <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm py-16 px-5 text-center text-slate-400 font-bold flex items-center justify-center gap-2">
                 <Loader2 size={18} className="animate-spin" aria-hidden="true" /> Loading organization history…
             </div>
         );
@@ -120,9 +132,16 @@ export function OrganizationImpactTab() {
 
     if (error) {
         return (
-            <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm py-14 px-6 text-center">
-                <p className="font-bold text-slate-500">Could not load organization history.</p>
-                <p className="mt-1 text-xs text-slate-400">{error}</p>
+            <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm py-14 px-6 text-center space-y-3">
+                <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Couldn&apos;t load organization history.</p>
+                <p className="text-xs font-medium text-slate-400">Check your connection and try again.</p>
+                <button
+                    type="button"
+                    onClick={load}
+                    className="mt-1 px-5 min-h-[44px] rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                >
+                    Retry
+                </button>
             </div>
         );
     }
@@ -131,7 +150,9 @@ export function OrganizationImpactTab() {
 
     return (
         <div className="space-y-5">
-            {totals && (
+            {/* Zero history renders the empty message alone — a row of zero
+                tiles above "no history yet" is a wall of zeros, not a summary. */}
+            {totals && totals.organizationsWithHistory > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {[
                         { label: 'Organizations with history', value: String(totals.organizationsWithHistory), tone: '' },
@@ -146,25 +167,36 @@ export function OrganizationImpactTab() {
                 </div>
             )}
 
-            <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Sort by</span>
-                {SORTS.map(s => (
-                    <button
-                        key={s.key}
-                        onClick={() => setSort(s.key)}
-                        aria-pressed={sort === s.key}
-                        className={`min-h-[44px] rounded-xl px-4 text-xs font-black uppercase tracking-wide transition-all ${
-                            sort === s.key
-                                ? 'bg-indigo-600 text-white'
-                                : 'border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'
-                        }`}
-                    >
-                        {s.label}
-                    </button>
-                ))}
-            </div>
+            {/* Sorting an empty list is meaningless — the controls appear once
+                there are rows to sort (and stay mounted through a re-sort). */}
+            {(withHistory.length > 0 || loading) && (
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Sort by</span>
+                    {SORTS.map(s => (
+                        <button
+                            key={s.key}
+                            type="button"
+                            onClick={() => setSort(s.key)}
+                            aria-pressed={sort === s.key}
+                            className={`min-h-[44px] rounded-xl px-4 text-xs font-black uppercase tracking-wide transition-all ${
+                                sort === s.key
+                                    ? 'bg-indigo-600 text-white'
+                                    : 'border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'
+                            }`}
+                        >
+                            {s.label}
+                        </button>
+                    ))}
+                </div>
+            )}
 
-            {withHistory.length === 0 ? (
+            {loading ? (
+                /* Re-sort in flight: tiles and pills stay put, only the list
+                   area waits. Old rows are not shown under the new sort label. */
+                <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm py-16 px-5 text-center text-slate-400 font-bold flex items-center justify-center gap-2">
+                    <Loader2 size={18} className="animate-spin" aria-hidden="true" /> Loading organization history…
+                </div>
+            ) : withHistory.length === 0 ? (
                 <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm py-14 px-6 text-center">
                     <p className="text-sm font-bold text-slate-500 dark:text-slate-400">
                         No fundraiser history yet — once a group runs a campaign, its history appears here.
@@ -172,17 +204,23 @@ export function OrganizationImpactTab() {
                 </div>
             ) : (
                 <>
-                    {/* Desktop rows — lg and up, matching the Campaigns list's
-                        breakpoint so tablets get stacked cards, never a squeeze. */}
-                    <div className="hidden lg:block bg-white dark:bg-slate-800 rounded-3xl overflow-hidden border border-slate-100 dark:border-slate-700 shadow-sm">
-                        <table className="w-full text-left border-collapse">
+                    {/* Desktop rows — xl and up, matching the Campaigns list's
+                        CRM-CC-5 breakpoint (the sidebar leaves too little room
+                        for the table below a 1280 viewport). */}
+                    <div className="hidden xl:block bg-white dark:bg-slate-800 rounded-3xl overflow-hidden border border-slate-100 dark:border-slate-700 shadow-sm">
+                        {/* CRM-CC-5: scroll instead of clip, matching the
+                            Rebooking table's wrapper. */}
+                        <div className="overflow-x-auto">
+                        {/* table-fixed so a long organization name truncates in
+                            its cell instead of forcing the whole table wide. */}
+                        <table className="w-full table-fixed text-left border-collapse">
                             <thead>
                                 <tr className="bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-700">
-                                    <th className="px-5 py-3 text-[11px] font-black text-slate-400 uppercase tracking-widest">Organization</th>
-                                    <th className="px-4 py-3 text-[11px] font-black text-slate-400 uppercase tracking-widest">Campaigns</th>
-                                    <th className="px-4 py-3 text-[11px] font-black text-slate-400 uppercase tracking-widest">Lifetime fundraiser sales</th>
-                                    <th className="px-4 py-3 text-[11px] font-black text-slate-400 uppercase tracking-widest">Last fundraiser</th>
-                                    <th className="px-4 py-3"><span className="sr-only">Actions</span></th>
+                                    <th className="w-[34%] px-5 py-3 text-[11px] font-black text-slate-400 uppercase tracking-widest">Organization</th>
+                                    <th className="w-[12%] px-4 py-3 text-[11px] font-black text-slate-400 uppercase tracking-widest">Campaigns</th>
+                                    <th className="w-[22%] px-4 py-3 text-[11px] font-black text-slate-400 uppercase tracking-widest">Lifetime fundraiser sales</th>
+                                    <th className="w-[18%] px-4 py-3 text-[11px] font-black text-slate-400 uppercase tracking-widest">Last fundraiser</th>
+                                    <th className="w-[14%] px-4 py-3"><span className="sr-only">Actions</span></th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50">
@@ -233,10 +271,11 @@ export function OrganizationImpactTab() {
                                 ))}
                             </tbody>
                         </table>
+                        </div>
                     </div>
 
-                    {/* Stacked cards below lg — the money stays the headline. */}
-                    <div className="lg:hidden space-y-3">
+                    {/* Stacked cards below xl — the money stays the headline. */}
+                    <div className="xl:hidden space-y-3">
                         {withHistory.map(r => (
                             <div key={r.organizationId} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-4 space-y-2.5">
                                 <div className="flex items-start justify-between gap-3">

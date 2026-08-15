@@ -107,6 +107,10 @@ export interface RowEvidence {
         coordinator_intent: string;
         coordinator_name: string | null;
         campaign_id: string | null;
+        /** The organization this opportunity belongs to — already selected
+         *  alongside campaign_id by the route; carried through here so a
+         *  converted opportunity's campaign can be navigated to correctly. */
+        customer_id: string;
     }[];
     activePreference: PreferenceRow | null;
 }
@@ -117,8 +121,15 @@ export interface RowState {
     exclusion_reason: string | null;
     next_step: string;
     next_action: RebookingNextAction;
-    /** Set only for rebooked rows, so the UI can link to the real campaign. */
+    /** Set only for rebooked rows. Identifies WHICH campaign, but is not
+     *  itself a navigable route param — see campaign_customer_id. */
     campaign_id: string | null;
+    /** CRM-CC-5 fix: /fundraisers/[id] is the organization profile route and
+     *  takes a CUSTOMER id (it fetches /api/customers/[id]), never a campaign
+     *  id. This is that customer id, set only alongside campaign_id, so the
+     *  UI can build a truthful href without guessing which of a multi-org
+     *  contact's organizations actually converted. */
+    campaign_customer_id: string | null;
     /** Submission id — opens the EXISTING ReviewRequestDrawer. */
     request_id: string | null;
     /** Opportunity id — feeds the EXISTING StartFundraiserWizard handoff. */
@@ -135,7 +146,7 @@ export interface RowState {
  * later stages of the lifecycle winning over the earlier ones.
  */
 export function deriveRebookingRowState(e: RowEvidence): RowState {
-    const base = { exclusion_reason: null, next_action: null, campaign_id: null, request_id: null, opportunity_id: null } as const;
+    const base = { exclusion_reason: null, next_action: null, campaign_id: null, campaign_customer_id: null, request_id: null, opportunity_id: null } as const;
 
     // Reuses the existing CP5 semantic verbatim: answering a form makes nobody a
     // coordinator, so "known" means they said yes, or they named someone.
@@ -160,6 +171,9 @@ export function deriveRebookingRowState(e: RowEvidence): RowState {
             status: 'rebooked',
             status_label: 'Rebooked',
             campaign_id: converted.campaign_id,
+            // Same gate as campaign_id: only a converted opportunity that
+            // actually produced a campaign gets a navigable destination.
+            campaign_customer_id: converted.campaign_id ? converted.customer_id : null,
             next_step: converted.campaign_id ? 'View campaign' : 'Fundraiser created',
             next_action: converted.campaign_id ? 'view_campaign' : null,
         };

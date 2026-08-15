@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
     Megaphone,
     Plus,
@@ -21,6 +21,7 @@ import { OrganizationImpactTab } from '@/components/crm2/OrganizationImpactTab';
 import { AttentionStrip } from '@/components/crm2/AttentionStrip';
 import { CampaignPriorityList, type PriorityListCampaign } from '@/components/crm2/CampaignPriorityList';
 import { CampaignContextDrawer } from '@/components/crm2/CampaignContextDrawer';
+import { useDialogFocus } from '@/components/crm2/useDialogFocus';
 import type { CampaignTriage } from '@/lib/growth/nextAction';
 import { triageCampaign } from '@/lib/growth/nextAction';
 import type { CampaignHealth, CampaignHealthReason } from '@/lib/growth/health';
@@ -72,6 +73,9 @@ export default function FundraisersPage() {
     const searchParams = useSearchParams();
     const [fundraisers, setFundraisers] = useState<Fundraiser[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    // CRM-CC-5: a failed campaigns load must render as an error, never as the
+    // fake-healthy "No fundraiser campaigns yet" first-run empty state.
+    const [loadError, setLoadError] = useState(false);
     const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
     const [filterStatus, setFilterStatus] = useState('all');
 
@@ -118,12 +122,19 @@ export default function FundraisersPage() {
         settlement_total?: number;
         promoted_order_count?: number;
     } | null>(null);
+    // CRM-CC-5: the closeout modal gets the same focus/scroll treatment as the
+    // Campaign Context drawer — focus in on open, Tab contained, focus restored.
+    const closeoutDialog = useDialogFocus(closeoutTarget !== null);
 
     const userPlan = (session?.user as any)?.plan;
     const isSuperAdmin = (session?.user as any)?.isSuperAdmin;
     const hasAccess = userPlan === 'ENTERPRISE' || userPlan === 'ULTIMATE' || userPlan === 'FREE' || isSuperAdmin;
 
-    useEffect(() => {
+    // CRM-CC-5: extracted so the error state's Retry can re-run the same load
+    // without a full page reload.
+    const loadCampaigns = useCallback(() => {
+        setIsLoading(true);
+        setLoadError(false);
         fetch('/api/campaigns')
             .then(async res => {
                 const text = await res.text();
@@ -146,9 +157,13 @@ export default function FundraisersPage() {
             })
             .catch(err => {
                 console.error("Failed to fetch fundraisers", err);
+                setLoadError(true);
                 setIsLoading(false);
             });
     }, []);
+
+    useEffect(() => { loadCampaigns(); }, [loadCampaigns]);
+
 
     // ── Phase 7E-3: Closeout handler ──────────────────────────────────────
     const handleCloseout = async () => {
@@ -215,7 +230,7 @@ export default function FundraisersPage() {
         return matchesSearch && matchesFilter;
     });
 
-    if (status === 'loading') return <div className="p-8 text-center text-slate-400">Loading Session...</div>;
+    if (status === 'loading') return <div className="p-8 text-center text-slate-400 font-bold">Loading session…</div>;
 
     if (!hasAccess) {
         return (
@@ -249,8 +264,27 @@ export default function FundraisersPage() {
                 </button>
             </div>
 
-            {/* FR-RETENTION-1B-1: primary navigation — Campaigns / Organizations / Rebooking */}
-            <div className="flex gap-2 border-b border-slate-200 dark:border-slate-700 pb-1 overflow-x-auto" role="tablist">
+            {/* FR-RETENTION-1B-1: primary navigation — Campaigns / Organizations / Rebooking.
+                CRM-CC-5 completes the ARIA tabs contract the roles promise: roving
+                tabindex (one tab stop), arrow-key movement, and tab↔panel linkage. */}
+            <div
+                className="flex gap-2 border-b border-slate-200 dark:border-slate-700 pb-1 overflow-x-auto"
+                role="tablist"
+                aria-label="Fundraiser CRM"
+                onKeyDown={(e) => {
+                    const keys = ['campaigns', 'organizations', 'rebooking'] as const;
+                    if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(e.key)) return;
+                    e.preventDefault();
+                    const idx = keys.indexOf(activeTab);
+                    const next =
+                        e.key === 'ArrowRight' ? keys[(idx + 1) % keys.length]
+                        : e.key === 'ArrowLeft' ? keys[(idx + keys.length - 1) % keys.length]
+                        : e.key === 'Home' ? keys[0]
+                        : keys[keys.length - 1];
+                    setActiveTab(next);
+                    requestAnimationFrame(() => document.getElementById(`tab-${next}`)?.focus());
+                }}
+            >
                 {([
                     { key: 'campaigns' as const, label: 'Campaigns' },
                     { key: 'organizations' as const, label: 'Organizations' },
@@ -258,8 +292,11 @@ export default function FundraisersPage() {
                 ]).map(t => (
                     <button
                         key={t.key}
+                        id={`tab-${t.key}`}
                         role="tab"
                         aria-selected={activeTab === t.key}
+                        aria-controls={`panel-${t.key}`}
+                        tabIndex={activeTab === t.key ? 0 : -1}
                         onClick={() => setActiveTab(t.key)}
                         className={`px-5 py-2.5 rounded-t-xl font-bold text-sm whitespace-nowrap transition-all min-h-[44px] ${
                             activeTab === t.key
@@ -272,10 +309,14 @@ export default function FundraisersPage() {
                 ))}
             </div>
 
-            {activeTab === 'rebooking' && <RebookingTab onStartFundraiser={startFundraiserFromOpportunity} />}
+            {activeTab === 'rebooking' && (
+                <div role="tabpanel" id="panel-rebooking" aria-labelledby="tab-rebooking">
+                    <RebookingTab onStartFundraiser={startFundraiserFromOpportunity} />
+                </div>
+            )}
 
             {activeTab === 'organizations' && (
-                <div className="space-y-6">
+                <div role="tabpanel" id="panel-organizations" aria-labelledby="tab-organizations" className="space-y-6">
                     {/* GE-4 — organization fundraiser history. This tab previously
                         only pointed at the Customers area; the record of what each
                         group has actually sold over time now lives here, next to
@@ -289,8 +330,26 @@ export default function FundraisersPage() {
                 </div>
             )}
 
-            {activeTab === 'campaigns' && (
-            <>
+            {activeTab === 'campaigns' && loadError && !isLoading && (
+                <div role="tabpanel" id="panel-campaigns" aria-labelledby="tab-campaigns">
+                    {/* CRM-CC-5 — a failed load says so, with a bounded retry;
+                        the sibling tabs already have this treatment. */}
+                    <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm py-14 px-6 text-center space-y-3">
+                        <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Couldn&apos;t load campaigns.</p>
+                        <p className="text-xs font-medium text-slate-400">Check your connection and try again.</p>
+                        <button
+                            type="button"
+                            onClick={loadCampaigns}
+                            className="mt-1 px-5 min-h-[44px] rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                        >
+                            Retry
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {activeTab === 'campaigns' && !(loadError && !isLoading) && (
+            <div role="tabpanel" id="panel-campaigns" aria-labelledby="tab-campaigns" className="space-y-8">
             {/* CRM-CC-1 — needs-attention strip. Replaces the three passive KPI
                 cards (Active / High Leads / Held Orders): counts told the tenant
                 what EXISTS; this band tells them what needs DOING today, and each
@@ -308,7 +367,8 @@ export default function FundraisersPage() {
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                     <input
                         type="text"
-                        placeholder="Search by name or school..."
+                        aria-label="Search campaigns"
+                        placeholder="Search by campaign or organization…"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="w-full pl-12 pr-4 py-3 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500/20 font-medium"
@@ -317,13 +377,17 @@ export default function FundraisersPage() {
                 <div className="flex flex-wrap bg-slate-100 dark:bg-slate-900 p-1 rounded-2xl">
                     {/* CRM-CC-1: 'attention' filters to triage === needs_attention,
                         giving the strip's campaign chip a real destination. */}
+                    {/* CRM-CC-5: 44px floor + aria-pressed to match the sibling
+                        filter groups; labels are words, not raw filter keys. */}
                     {(['all', 'attention', 'active', 'lead', 'closed'] as const).map(status => (
                         <button
                             key={status}
+                            type="button"
                             onClick={() => setFilterStatus(status)}
-                            className={`px-4 md:px-6 py-2 rounded-xl text-xs font-black uppercase transition-all min-h-[36px] ${filterStatus === status ? 'bg-white dark:bg-slate-800 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                            aria-pressed={filterStatus === status}
+                            className={`px-4 md:px-6 py-2 rounded-xl text-xs font-black uppercase transition-all min-h-[44px] ${filterStatus === status ? 'bg-white dark:bg-slate-800 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                         >
-                            {status === 'attention' ? 'Needs attention' : status}
+                            {{ all: 'All', attention: 'Needs attention', active: 'Active', lead: 'Leads', closed: 'Closed' }[status]}
                         </button>
                     ))}
                 </div>
@@ -344,7 +408,7 @@ export default function FundraisersPage() {
                 onCloseout={(c) => openCloseoutModal(c as Fundraiser)}
                 onOpenDetail={setDetailCampaign}
             />
-            </>
+            </div>
             )}
         </div>
 
@@ -357,18 +421,33 @@ export default function FundraisersPage() {
             onCloseout={(c) => { setDetailCampaign(null); openCloseoutModal(c as Fundraiser); }}
         />
 
-        {/* ── Phase 7E-3: Close Campaign Confirmation Modal ──────────────────── */}
+        {/* ── Phase 7E-3: closeout confirmation modal. CRM-CC-5 gives it the
+            same dialog semantics and focus treatment as the Campaign Context
+            drawer; the closeout rules themselves are untouched. ──────────── */}
         {closeoutTarget && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in fade-in zoom-in duration-200">
+            <div
+                className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="closeout-modal-title"
+                onKeyDown={(e) => {
+                    if (e.key === 'Escape' && !closeoutLoading) { dismissCloseoutModal(); return; }
+                    closeoutDialog.containTab(e);
+                }}
+            >
+                <div
+                    ref={closeoutDialog.panelRef}
+                    tabIndex={-1}
+                    className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in fade-in zoom-in duration-200 focus:outline-none"
+                >
 
                     {/* Header */}
                     <div className="flex items-center gap-3 mb-2">
                         <div className="w-10 h-10 rounded-2xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-                            <Lock size={20} className="text-amber-600" />
+                            <Lock size={20} className="text-amber-600" aria-hidden="true" />
                         </div>
-                        <h3 className="text-xl font-black text-slate-900 dark:text-white">
-                            Close Campaign
+                        <h3 id="closeout-modal-title" className="text-xl font-black text-slate-900 dark:text-white">
+                            Close out fundraiser
                         </h3>
                     </div>
                     <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-6 pl-[3.25rem]">
@@ -377,10 +456,10 @@ export default function FundraisersPage() {
 
                     {/* Result state — success */}
                     {closeoutResult?.success && (
-                        <div className="mb-6 p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-2xl space-y-1">
+                        <div role="status" className="mb-6 p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-2xl space-y-1">
                             <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-black">
-                                <CheckCircle2 size={18} />
-                                Campaign Closed
+                                <CheckCircle2 size={18} aria-hidden="true" />
+                                Campaign closed
                             </div>
                             {closeoutResult.promoted_order_count !== undefined && (
                                 <p className="text-sm text-emerald-700 dark:text-emerald-400 font-bold">
@@ -397,12 +476,12 @@ export default function FundraisersPage() {
 
                     {/* Result state — error */}
                     {closeoutResult && !closeoutResult.success && (
-                        <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-2xl">
-                            <div className="flex items-center gap-2 text-red-700 dark:text-red-400 font-black">
-                                <AlertCircle size={18} />
+                        <div role="alert" className="mb-6 p-4 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-700 rounded-2xl">
+                            <div className="flex items-center gap-2 text-rose-700 dark:text-rose-400 font-black">
+                                <AlertCircle size={18} aria-hidden="true" />
                                 Error
                             </div>
-                            <p className="text-sm text-red-600 dark:text-red-400 font-bold mt-1">
+                            <p className="text-sm text-rose-600 dark:text-rose-400 font-bold mt-1">
                                 {closeoutResult.message}
                             </p>
                         </div>
@@ -448,9 +527,9 @@ export default function FundraisersPage() {
                                 className="flex items-center gap-2 px-6 py-3 rounded-xl font-black bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/20 transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-60 disabled:scale-100"
                             >
                                 {closeoutLoading ? (
-                                    <><Loader2 size={16} className="animate-spin" /> Closing...</>
+                                    <><Loader2 size={16} className="animate-spin" aria-hidden="true" /> Closing…</>
                                 ) : (
-                                    <><Lock size={16} /> Close Campaign</>
+                                    <><Lock size={16} aria-hidden="true" /> Close out fundraiser</>
                                 )}
                             </button>
                         )}
@@ -474,7 +553,7 @@ export default function FundraisersPage() {
             />
         )}
         {handoffError && (
-            <div role="alert" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-md rounded-2xl border border-rose-200 dark:border-rose-900 bg-white dark:bg-slate-900 px-4 py-3 shadow-lg">
+            <div role="alert" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-max max-w-[calc(100vw-2rem)] sm:max-w-md rounded-2xl border border-rose-200 dark:border-rose-900 bg-white dark:bg-slate-900 px-4 py-3 shadow-lg">
                 <p className="text-sm font-bold text-rose-700 dark:text-rose-400">{handoffError}</p>
                 <button onClick={() => setHandoffError(null)}
                     className="mt-2 min-h-[44px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-bold">

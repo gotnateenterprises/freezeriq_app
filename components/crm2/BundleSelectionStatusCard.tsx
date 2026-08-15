@@ -11,6 +11,7 @@ import {
   ChevronUp,
   Loader2,
 } from 'lucide-react';
+import { useDialogFocus } from './useDialogFocus';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -72,6 +73,13 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
   const [overrideAcknowledged, setOverrideAcknowledged] = useState(false);
   const [overrideLoading, setOverrideLoading] = useState(false);
   const [overrideResult, setOverrideResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // CRM-CC-5 — both confirmation dialogs get the suite's shared dialog
+  // treatment (focus in, Tab contained, scroll locked, focus restored).
+  // Their Escape handlers stop propagation so closing a dialog never closes
+  // the Campaign Context drawer this card can be mounted inside.
+  const resetDialog = useDialogFocus(showResetConfirm);
+  const overrideDialog = useDialogFocus(showOverride);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -170,7 +178,7 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
   if (isLoading) {
     return (
       <div className="mt-2 flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] text-slate-400 dark:bg-slate-800">
-        <Loader2 size={12} className="animate-spin" />
+        <Loader2 size={12} className="animate-spin" aria-hidden="true" />
         Loading bundle selection…
       </div>
     );
@@ -213,10 +221,12 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
     <div className={`mt-2.5 rounded-xl border ${config.border} ${config.bg} overflow-hidden`}>
       {/* Header row */}
       <button
+        type="button"
+        aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
-        className={`flex w-full items-center gap-2 px-3 py-2.5 text-left ${config.text}`}
+        className={`flex w-full items-center gap-2 min-h-[44px] px-3 py-2.5 text-left ${config.text}`}
       >
-        <Package size={13} className="flex-none" />
+        <Package size={13} className="flex-none" aria-hidden="true" />
         <span className="flex-1 text-[11px] font-bold">{config.label}</span>
         {status === 'pending' && (
           <span className="text-[10px] font-semibold opacity-75">
@@ -228,7 +238,7 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
             {selectedFamilies.length} selected · {orderCount} order{orderCount !== 1 ? 's' : ''}
           </span>
         )}
-        {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+        {expanded ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}
       </button>
 
       {/* Expanded content */}
@@ -244,7 +254,7 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
               {candidateFamilies.length > 0 && (
                 <div className="space-y-1">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Candidate Pool
+                    Candidate pool
                   </p>
                   {candidateFamilies.map((f) => (
                     <div
@@ -253,7 +263,7 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
                     >
                       <span className="font-bold text-slate-700 dark:text-slate-200">{f.name}</span>
                       {!f.available && (
-                        <span className="text-[9px] font-semibold text-red-500">Unavailable</span>
+                        <span className="text-[9px] font-semibold text-rose-600">Unavailable</span>
                       )}
                     </div>
                   ))}
@@ -280,7 +290,9 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
                     <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
                       {f.name}
                     </p>
-                    <div className="mt-1 flex gap-3 text-[10px] text-slate-500">
+                    {/* flex-wrap: two real bundle names side by side can exceed
+                        the drawer sheet's width at 375 — wrap, never clip. */}
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-500">
                       <span>Serves 5: {f.serves5BundleName}</span>
                       <span>Serves 2: {f.serves2BundleName}</span>
                     </div>
@@ -301,17 +313,19 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
                   {/* Reset button (zero orders) */}
                   {canReset && (
                     <button
+                      type="button"
                       onClick={() => setShowResetConfirm(true)}
-                      className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50 transition dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                      className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white min-h-[44px] px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50 transition dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                     >
-                      <RefreshCw size={11} />
-                      Reset Selection
+                      <RefreshCw size={11} aria-hidden="true" />
+                      Reset selection
                     </button>
                   )}
 
                   {/* Override button (has orders) */}
                   {requiresOverride && (
                     <button
+                      type="button"
                       onClick={() => {
                         setShowOverride(true);
                         setOverrideSelectedFamilies([]);
@@ -319,10 +333,10 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
                         setOverrideAcknowledged(false);
                         setOverrideResult(null);
                       }}
-                      className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] font-bold text-amber-700 hover:bg-amber-100 transition dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300 dark:hover:bg-amber-900"
+                      className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 min-h-[44px] px-3 py-1.5 text-[11px] font-bold text-amber-700 hover:bg-amber-100 transition dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300 dark:hover:bg-amber-900"
                     >
-                      <AlertTriangle size={11} />
-                      Change Future Bundles
+                      <AlertTriangle size={11} aria-hidden="true" />
+                      Change future bundles
                     </button>
                   )}
                 </div>
@@ -336,7 +350,7 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
               className={`mt-1 rounded-lg px-3 py-2 text-[11px] font-bold ${
                 resetResult.success
                   ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                  : 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300'
+                  : 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
               }`}
             >
               {resetResult.message}
@@ -348,7 +362,7 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
               className={`mt-1 rounded-lg px-3 py-2 text-[11px] font-bold ${
                 overrideResult.success
                   ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                  : 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300'
+                  : 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
               }`}
             >
               {overrideResult.message}
@@ -359,9 +373,28 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
 
       {/* ── Reset Confirmation Dialog ───────────────────────────────────── */}
       {showResetConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-800">
-            <h3 className="text-lg font-black text-slate-900 dark:text-white">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bundle-reset-title"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              // stopPropagation: closing this dialog must not close the
+              // Campaign Context drawer hosting the card.
+              e.stopPropagation();
+              if (!resetLoading) { setShowResetConfirm(false); setResetResult(null); }
+              return;
+            }
+            resetDialog.containTab(e);
+          }}
+        >
+          <div
+            ref={resetDialog.panelRef}
+            tabIndex={-1}
+            className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-800 focus:outline-none"
+          >
+            <h3 id="bundle-reset-title" className="text-lg font-black text-slate-900 dark:text-white">
               Reset this bundle selection?
             </h3>
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
@@ -370,26 +403,28 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
 
             <div className="mt-6 flex gap-3 justify-end">
               <button
+                type="button"
                 onClick={() => {
                   setShowResetConfirm(false);
                   setResetResult(null);
                 }}
-                className="rounded-xl px-4 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100 transition dark:hover:bg-slate-700"
+                className="rounded-xl min-h-[44px] px-4 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100 transition dark:hover:bg-slate-700"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleReset}
                 disabled={resetLoading}
-                className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 transition disabled:opacity-50"
+                className="flex items-center gap-2 rounded-xl bg-indigo-600 min-h-[44px] px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 transition disabled:opacity-50"
               >
-                {resetLoading && <Loader2 size={14} className="animate-spin" />}
-                Reset and Reopen Selection
+                {resetLoading && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+                Reset and reopen selection
               </button>
             </div>
 
             {resetResult && !resetResult.success && (
-              <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-[11px] font-bold text-red-700 dark:bg-red-950 dark:text-red-300">
+              <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-bold text-rose-700 dark:bg-rose-950 dark:text-rose-300">
                 {resetResult.message}
               </div>
             )}
@@ -399,10 +434,29 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
 
       {/* ── Override Dialog ─────────────────────────────────────────────── */}
       {showOverride && data && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-800 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-black text-slate-900 dark:text-white">
-              Change Future Bundles
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bundle-override-title"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              // stopPropagation: Escape here closes only this dialog — never
+              // the drawer above, which would discard the typed reason.
+              e.stopPropagation();
+              if (!overrideLoading) { setShowOverride(false); setOverrideResult(null); }
+              return;
+            }
+            overrideDialog.containTab(e);
+          }}
+        >
+          <div
+            ref={overrideDialog.panelRef}
+            tabIndex={-1}
+            className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-800 max-h-[90vh] overflow-y-auto focus:outline-none"
+          >
+            <h3 id="bundle-override-title" className="text-lg font-black text-slate-900 dark:text-white">
+              Change future bundles
             </h3>
 
             {/* Warning */}
@@ -428,6 +482,8 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
                   return (
                     <button
                       key={f.familyId}
+                      type="button"
+                      aria-pressed={isSelected}
                       onClick={() => toggleOverrideFamily(f.familyId)}
                       disabled={!isSelected && atLimit}
                       className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
@@ -443,7 +499,7 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
                             : 'border-slate-300 dark:border-slate-600'
                         }`}
                       >
-                        {isSelected && <CheckCircle2 size={12} />}
+                        {isSelected && <CheckCircle2 size={12} aria-hidden="true" />}
                       </div>
                       <span className="text-[12px] font-bold text-slate-700 dark:text-slate-200">
                         {f.name}
@@ -459,10 +515,11 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
 
             {/* Reason field */}
             <div className="mt-4">
-              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+              <label htmlFor="bundle-override-reason" className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
                 Reason for change
               </label>
               <textarea
+                id="bundle-override-reason"
                 value={overrideReason}
                 onChange={(e) => setOverrideReason(e.target.value)}
                 maxLength={500}
@@ -490,7 +547,7 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
 
             {/* Error message */}
             {overrideResult && !overrideResult.success && (
-              <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-[11px] font-bold text-red-700 dark:bg-red-950 dark:text-red-300">
+              <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-bold text-rose-700 dark:bg-rose-950 dark:text-rose-300">
                 {overrideResult.message}
               </div>
             )}
@@ -498,15 +555,17 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
             {/* Actions */}
             <div className="mt-5 flex gap-3 justify-end">
               <button
+                type="button"
                 onClick={() => {
                   setShowOverride(false);
                   setOverrideResult(null);
                 }}
-                className="rounded-xl px-4 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100 transition dark:hover:bg-slate-700"
+                className="rounded-xl min-h-[44px] px-4 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100 transition dark:hover:bg-slate-700"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleOverride}
                 disabled={
                   overrideLoading ||
@@ -514,10 +573,10 @@ export function BundleSelectionStatusCard({ campaignId }: BundleSelectionStatusC
                   overrideReason.trim().length === 0 ||
                   !overrideAcknowledged
                 }
-                className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 rounded-xl bg-indigo-600 min-h-[44px] px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {overrideLoading && <Loader2 size={14} className="animate-spin" />}
-                Confirm Future Bundle Change
+                {overrideLoading && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+                Confirm future bundle change
               </button>
             </div>
           </div>

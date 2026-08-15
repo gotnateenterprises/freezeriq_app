@@ -197,6 +197,13 @@ describe('6. action precedence is deterministic', () => {
         expect(t.action?.kind).toBe('review_campaign');
     });
 
+    it('CRM-CC-5: no action reason leaks an internal checkpoint code to the owner', () => {
+        // The reason strings render verbatim in the drawer and as tooltips —
+        // "GE-3" once shipped in the review_campaign reason.
+        const t = triageCampaign(active({ health: 'watch', health_reasons: [reason('no_recent_orders')] }), NOW);
+        expect(t.action?.reason).not.toMatch(/\b(GE|CRM|FR|SF|CP)-\w*\d/);
+    });
+
     it('a healthy running campaign has NO action — no busywork', () => {
         expect(triageCampaign(active({ health: 'on_pace' }), NOW).action).toBeNull();
         expect(triageCampaign(active({ health: 'no_signal' }), NOW).action).toBeNull();

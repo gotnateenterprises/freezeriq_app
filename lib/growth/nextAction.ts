@@ -169,7 +169,7 @@ export function triageCampaign(c: CampaignForTriage, now: Date): CampaignTriage 
     } else if (c.health === 'at_risk' || c.health === 'watch') {
         action = {
             label: 'Review campaign',
-            reason: 'GE-3 flagged this campaign — the reasons are listed on its health badge.',
+            reason: 'FreezerIQ flagged this campaign — the reasons are listed on its health badge.',
             kind: 'review_campaign',
             destination: 'organization_profile',
         };

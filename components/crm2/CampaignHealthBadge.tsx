@@ -63,7 +63,7 @@ export function CampaignHealthBadge({ health, reasons }: Props) {
     return (
         <div className="mt-1.5 max-w-[16rem]">
             <span
-                className={`inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${className}`}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10px] font-black uppercase tracking-wide ${className}`}
             >
                 <Icon size={11} aria-hidden="true" />
                 {label}

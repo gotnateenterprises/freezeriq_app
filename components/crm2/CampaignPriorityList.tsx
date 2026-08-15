@@ -20,10 +20,10 @@
  * organization profile — exactly as the old table's chevron did.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { format } from 'date-fns';
-import { MoreHorizontal, ChevronDown, ChevronUp, CheckCircle2 } from 'lucide-react';
+import { MoreHorizontal, ChevronDown, ChevronUp, CheckCircle2, Loader2 } from 'lucide-react';
 import { CampaignHealthBadge } from './CampaignHealthBadge';
 import { StageChip } from './StageChip';
 import type { CampaignForTriage, CampaignTriage } from '@/lib/growth/nextAction';
@@ -84,9 +84,11 @@ export function CampaignPriorityList({
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
     if (loading) {
+        // CRM-CC-5: one loading vocabulary across the three tabs — carded
+        // container, spinner, sentence-case copy.
         return (
-            <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm px-5 py-16 text-center text-slate-400 animate-pulse font-bold">
-                Loading campaigns…
+            <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm px-5 py-16 text-center text-slate-400 font-bold flex items-center justify-center gap-2">
+                <Loader2 size={18} className="animate-spin" aria-hidden="true" /> Loading campaigns…
             </div>
         );
     }
@@ -211,6 +213,23 @@ function CampaignRow({
     const isActiveRow = c.status === 'Active' && c.triage.priority !== 'completed';
     const progress = formatBundleProgress(c.weighted_bundles_sold, c.bundle_goal, c.progress_percent);
 
+    // CRM-CC-5 — the overflow popup is announced as a menu, so it behaves like
+    // one: focus moves to the first item on open, arrows move between items,
+    // Escape (below) returns focus to the trigger, and losing focus closes it.
+    const menuRef = useRef<HTMLDivElement>(null);
+    const triggerRef = useRef<HTMLButtonElement>(null);
+    useEffect(() => {
+        if (menuOpen) {
+            menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+        }
+    }, [menuOpen]);
+    const moveMenuFocus = (delta: 1 | -1) => {
+        const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+        if (items.length === 0) return;
+        const idx = items.indexOf(document.activeElement as HTMLElement);
+        items[(idx + delta + items.length) % items.length]?.focus();
+    };
+
     const end = c.end_date ? new Date(c.end_date) : null;
     const endValid = end && !Number.isNaN(end.getTime());
     const ended = endValid && end!.getTime() < now.getTime();
@@ -220,10 +239,10 @@ function CampaignRow({
     const menuItems: { key: string; label: string; href?: string; newTab?: boolean; onClick?: () => void; warn?: boolean }[] = [];
     menuItems.push({ key: 'org', label: 'View organization', href: `/fundraisers/${c.customer_id}` });
     if (!c.is_placeholder && c.business_slug) {
-        menuItems.push({ key: 'public', label: 'Public order page ↗', href: `/shop/${c.business_slug}/fundraiser/${c.id}`, newTab: true });
+        menuItems.push({ key: 'public', label: 'Public order page', href: `/shop/${c.business_slug}/fundraiser/${c.id}`, newTab: true });
     }
     if (!c.is_placeholder && c.portal_token) {
-        menuItems.push({ key: 'portal', label: 'Coordinator portal ↗', href: `/coordinator/${c.portal_token}`, newTab: true });
+        menuItems.push({ key: 'portal', label: 'Coordinator portal', href: `/coordinator/${c.portal_token}`, newTab: true });
     }
     if (!c.is_placeholder) {
         menuItems.push({ key: 'invoice', label: 'Create invoice', href: `/customers/${c.customer_id}?tab=fundraisers&action=invoice&campaignId=${c.id}` });
@@ -233,19 +252,24 @@ function CampaignRow({
     }
 
     return (
-        // Horizontal row layout starts at lg, not md: at tablet widths the fixed
-        // signal/meta columns would crush long campaign names into a sliver, and
-        // the CRM-CC-2 contract wants stacked cards at 768 anyway.
-        <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4 px-5 py-4">
+        // CRM-CC-5: horizontal row layout starts at xl, not lg. Breakpoints
+        // track the VIEWPORT while the app sidebar eats ~256px of it — at a
+        // 1024 viewport the fixed signal/meta columns crushed long campaign
+        // names to one character per line. Stacked cards (the approved tablet
+        // layout) carry every width below 1280.
+        // `relative` so the overflow menu can anchor to the ROW below xl — a
+        // 224px popup anchored to the button itself clips off the viewport edge
+        // on stacked cards at 375.
+        <div className="relative flex flex-col xl:flex-row xl:items-center gap-3 xl:gap-4 px-5 py-4">
             {/* WHO — the name opens the Campaign Context drawer (CRM-CC-4).
                 A real button, not a clickable card: the row's other controls
                 (primary action, More menu) stay independently operable. */}
-            <div className="min-w-0 lg:flex-1">
+            <div className="min-w-0 xl:flex-1">
                 {onOpenDetail ? (
                     <button
                         type="button"
                         onClick={() => onOpenDetail(c)}
-                        className="text-left font-bold text-sm text-slate-900 dark:text-white leading-snug break-words hover:text-indigo-600 dark:hover:text-indigo-400 underline-offset-2 hover:underline min-h-[44px] lg:min-h-0 lg:py-0.5"
+                        className="text-left font-bold text-sm text-slate-900 dark:text-white leading-snug break-words hover:text-indigo-600 dark:hover:text-indigo-400 underline-offset-2 hover:underline min-h-[44px] xl:min-h-0 xl:py-0.5"
                     >
                         {c.name}
                     </button>
@@ -261,14 +285,14 @@ function CampaignRow({
             </div>
 
             {/* HOW IS IT DOING — one primary signal per row */}
-            <div className="lg:w-56 lg:flex-none">
+            <div className="xl:w-56 xl:flex-none">
                 {isActiveRow
                     ? <CampaignHealthBadge health={c.health} reasons={c.health_reasons} />
                     : <StageChip status={c.closed_at ? 'Closed' : c.status} />}
             </div>
 
             {/* WHAT MATTERS RIGHT NOW */}
-            <div className="lg:w-48 lg:flex-none space-y-1">
+            <div className="xl:w-48 xl:flex-none space-y-1">
                 {endValid && (
                     <p className="text-xs font-bold text-slate-500 dark:text-slate-400">
                         {ended ? 'Ended' : 'Ends'} {format(end!, 'MMM d, yyyy')}
@@ -292,7 +316,7 @@ function CampaignRow({
             </div>
 
             {/* WHAT SHOULD I DO — one labeled action, everything else in the menu */}
-            <div className="flex items-center gap-2 lg:flex-none">
+            <div className="flex items-center gap-2 xl:flex-none">
                 {action && (
                     action.kind === 'closeout' ? (
                         <button
@@ -332,11 +356,24 @@ function CampaignRow({
                     )
                 )}
 
-                <div className="relative" onKeyDown={(e) => { if (e.key === 'Escape') onCloseMenu(); }}>
+                <div
+                    className="static xl:relative"
+                    onKeyDown={(e) => {
+                        if (e.key === 'Escape') { onCloseMenu(); triggerRef.current?.focus(); }
+                        else if (menuOpen && e.key === 'ArrowDown') { e.preventDefault(); moveMenuFocus(1); }
+                        else if (menuOpen && e.key === 'ArrowUp') { e.preventDefault(); moveMenuFocus(-1); }
+                    }}
+                    onBlur={(e) => {
+                        // Focus left the trigger+menu entirely → close, so the
+                        // invisible click-away layer never lingers over the page.
+                        if (menuOpen && !e.currentTarget.contains(e.relatedTarget as Node)) onCloseMenu();
+                    }}
+                >
                     <button
+                        ref={triggerRef}
                         type="button"
                         aria-label={`More actions for ${c.name}`}
-                        aria-haspopup="true"
+                        aria-haspopup="menu"
                         aria-expanded={menuOpen}
                         onClick={onToggleMenu}
                         className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-xl border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60 transition-colors"
@@ -347,24 +384,37 @@ function CampaignRow({
                         <>
                             {/* Click-away layer; keyboard users close with Escape. */}
                             <div className="fixed inset-0 z-10" aria-hidden="true" onClick={onCloseMenu} />
-                            <div className="absolute right-0 top-full mt-1 z-20 w-56 rounded-xl border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
+                            <div
+                                ref={menuRef}
+                                role="menu"
+                                aria-label={`Actions for ${c.name}`}
+                                className="absolute right-0 top-full mt-1 z-20 w-56 max-w-[calc(100vw-2.5rem)] rounded-xl border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1"
+                            >
                                 {menuItems.map((item) =>
                                     item.href ? (
                                         <Link
                                             key={item.key}
+                                            role="menuitem"
                                             href={item.href}
                                             target={item.newTab ? '_blank' : undefined}
                                             onClick={onCloseMenu}
-                                            className="block px-4 py-2.5 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60"
+                                            className="flex items-center min-h-[44px] px-4 py-1.5 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60"
                                         >
                                             {item.label}
+                                            {item.newTab && (
+                                                <>
+                                                    <span aria-hidden="true">&nbsp;↗</span>
+                                                    <span className="sr-only"> (opens in new tab)</span>
+                                                </>
+                                            )}
                                         </Link>
                                     ) : (
                                         <button
                                             key={item.key}
+                                            role="menuitem"
                                             type="button"
                                             onClick={() => { onCloseMenu(); item.onClick?.(); }}
-                                            className={`block w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-700/60 ${item.warn ? 'text-amber-700 dark:text-amber-400' : 'text-slate-600 dark:text-slate-300'}`}
+                                            className={`flex w-full items-center text-left min-h-[44px] px-4 py-1.5 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-700/60 ${item.warn ? 'text-amber-700 dark:text-amber-400' : 'text-slate-600 dark:text-slate-300'}`}
                                         >
                                             {item.label}
                                         </button>

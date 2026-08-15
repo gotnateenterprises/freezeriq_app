@@ -25,6 +25,9 @@ const opp = (over: Partial<RowEvidence['opportunities'][number]> = {}) => ({
     coordinator_intent: 'yes',
     coordinator_name: null,
     campaign_id: null,
+    // Deliberately distinct from campaign_id in every fixture below, so a
+    // test that conflated the two ids would fail instead of passing by luck.
+    customer_id: 'org-1',
     ...over,
 });
 
@@ -59,12 +62,33 @@ describe('1. the CP1 regression: outreach must move a contact off "Ready to invi
     it('a converted opportunity is Rebooked, never Ready to invite', () => {
         const s = deriveRebookingRowState(evidence({
             wasSent: true,
-            opportunities: [opp({ status: 'converted', campaign_id: 'camp-9' })],
+            opportunities: [opp({ status: 'converted', campaign_id: 'camp-9', customer_id: 'org-42' })],
         }));
         expect(s.status).toBe('rebooked');
         expect(bucketForStatus(s.status, false)).toBe('done');
         expect(s.campaign_id).toBe('camp-9');
         expect(s.next_action).toBe('view_campaign');
+    });
+
+    it('CRM-CC-5 routing fix: the rebooked destination is the ORGANIZATION id, not the campaign id', () => {
+        // /fundraisers/[id] fetches /api/customers/[id] — it is the org profile
+        // route and has never accepted a campaign id. Every other consumer in
+        // the codebase (CampaignPriorityList, OrganizationImpactTab,
+        // CampaignContextDrawer, StartFundraiserWizard, and the sibling
+        // /api/rebooking/requests route's fundraiserHref) links to it with the
+        // customer id. This pins the same contract for the Rebooking row.
+        const s = deriveRebookingRowState(evidence({
+            opportunities: [opp({ status: 'converted', campaign_id: 'camp-9', customer_id: 'org-42' })],
+        }));
+        expect(s.campaign_customer_id).toBe('org-42');
+        expect(s.campaign_customer_id).not.toBe(s.campaign_id);
+    });
+
+    it('no campaign_customer_id when there is no real campaign to view', () => {
+        const s = deriveRebookingRowState(evidence({
+            opportunities: [opp({ status: 'approved', campaign_id: null, customer_id: 'org-42' })],
+        }));
+        expect(s.campaign_customer_id).toBeNull();
     });
 });
 

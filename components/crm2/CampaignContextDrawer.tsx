@@ -27,9 +27,10 @@
  * The "Wrap up" section is structured so that work can later live there.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { X, Loader2, ExternalLink, Users, Receipt, Lock, Building2 } from 'lucide-react';
+import { useDialogFocus } from './useDialogFocus';
 import { CampaignHealthBadge } from './CampaignHealthBadge';
 import { StageChip } from './StageChip';
 import { BundleSelectionStatusCard } from './BundleSelectionStatusCard';
@@ -64,29 +65,26 @@ export function CampaignContextDrawer({
     onCloseout: (c: PriorityListCampaign) => void;
 }) {
     const open = campaign !== null;
-    const panelRef = useRef<HTMLDivElement>(null);
-    const restoreFocusRef = useRef<HTMLElement | null>(null);
+
+    // CRM-CC-5 — shared dialog treatment: focus in on open, background scroll
+    // locked, Tab contained, focus restored to the trigger on close.
+    const { panelRef, containTab } = useDialogFocus(open, campaign?.id);
 
     // Coordinator context — ONE on-demand fetch per open, existing endpoint.
+    // failed=true means the READ failed; that renders differently from a
+    // successful read that found no contact fields on file.
     const [coordinator, setCoordinator] = useState<CoordinatorInfo | null>(null);
     const [coordinatorLoading, setCoordinatorLoading] = useState(false);
-
-    // Focus management: remember the trigger, focus the panel on open, and
-    // hand focus back when the drawer closes.
-    useEffect(() => {
-        if (!open) return;
-        restoreFocusRef.current = document.activeElement as HTMLElement | null;
-        panelRef.current?.focus();
-        return () => { restoreFocusRef.current?.focus?.(); };
-    }, [open, campaign?.id]);
+    const [coordinatorFailed, setCoordinatorFailed] = useState(false);
 
     useEffect(() => {
         if (!open || !campaign) return;
         let cancelled = false;
         setCoordinator(null);
+        setCoordinatorFailed(false);
         setCoordinatorLoading(true);
         fetch(`/api/customers/${campaign.customer_id}`, { cache: 'no-store' })
-            .then((res) => (res.ok ? res.json() : null))
+            .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
             .then((data) => {
                 if (cancelled) return;
                 const c = data?.customer ?? data;
@@ -98,7 +96,7 @@ export function CampaignContextDrawer({
                     });
                 }
             })
-            .catch(() => { /* the drawer is still useful without contact context */ })
+            .catch(() => { if (!cancelled) setCoordinatorFailed(true); })
             .finally(() => { if (!cancelled) setCoordinatorLoading(false); });
         return () => { cancelled = true; };
     }, [open, campaign?.customer_id, campaign?.id]);
@@ -118,7 +116,10 @@ export function CampaignContextDrawer({
             role="dialog"
             aria-modal="true"
             aria-labelledby="campaign-context-title"
-            onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+            onKeyDown={(e) => {
+                if (e.key === 'Escape') { onClose(); return; }
+                containTab(e);
+            }}
         >
             {/* Click-away layer */}
             <div className="absolute inset-0" aria-hidden="true" onClick={onClose} />
@@ -127,7 +128,7 @@ export function CampaignContextDrawer({
             <div
                 ref={panelRef}
                 tabIndex={-1}
-                className="relative h-full w-full sm:max-w-[480px] bg-white dark:bg-slate-900 shadow-2xl overflow-y-auto focus:outline-none"
+                className="relative h-full w-full sm:max-w-[480px] bg-white dark:bg-slate-900 shadow-2xl overflow-y-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500/40"
             >
                 {/* ── Header ─────────────────────────────────────────────── */}
                 <div className="sticky top-0 z-10 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-100 dark:border-slate-800 px-5 py-4">
@@ -137,9 +138,11 @@ export function CampaignContextDrawer({
                                 {c.name}
                             </h2>
                             <p className="mt-0.5 text-xs font-bold text-slate-500 dark:text-slate-400 break-words">
+                                {/* inline-flex so min-h can give this link a real
+                                    tap target on phones; collapses again at lg. */}
                                 <Link
                                     href={`/fundraisers/${c.customer_id}`}
-                                    className="hover:text-indigo-600 dark:hover:text-indigo-400 underline-offset-2 hover:underline"
+                                    className="inline-flex items-center min-h-[44px] xl:min-h-0 hover:text-indigo-600 dark:hover:text-indigo-400 underline-offset-2 hover:underline"
                                 >
                                     {c.customer.name}
                                 </Link>
@@ -249,18 +252,26 @@ export function CampaignContextDrawer({
                                         )}
                                         <div className="flex flex-wrap gap-x-4 gap-y-1">
                                             {coordinator.email && (
-                                                <a href={`mailto:${coordinator.email}`} className="inline-flex items-center min-h-[44px] sm:min-h-0 sm:py-1 text-indigo-600 dark:text-indigo-400 hover:underline underline-offset-2">
+                                                <a href={`mailto:${coordinator.email}`} className="inline-flex items-center min-h-[44px] xl:min-h-0 xl:py-1 text-indigo-600 dark:text-indigo-400 hover:underline underline-offset-2 break-all">
                                                     {coordinator.email}
                                                 </a>
                                             )}
                                             {coordinator.phone && (
-                                                <a href={`tel:${coordinator.phone}`} className="inline-flex items-center min-h-[44px] sm:min-h-0 sm:py-1 text-indigo-600 dark:text-indigo-400 hover:underline underline-offset-2">
+                                                <a href={`tel:${coordinator.phone}`} className="inline-flex items-center min-h-[44px] xl:min-h-0 xl:py-1 text-indigo-600 dark:text-indigo-400 hover:underline underline-offset-2">
                                                     {coordinator.phone}
                                                 </a>
                                             )}
                                         </div>
                                     </div>
-                                ) : null}
+                                ) : coordinatorFailed ? (
+                                    // The READ failed — say so instead of silently
+                                    // looking like there is no contact on file.
+                                    <p className="text-xs font-bold text-slate-400">Couldn&apos;t load contact details.</p>
+                                ) : (
+                                    // The read succeeded and found nothing — a
+                                    // useful absence, worth one quiet line.
+                                    <p className="text-xs font-bold text-slate-400">No contact details on file yet.</p>
+                                )}
                                 <div className="flex flex-wrap gap-2 pt-1">
                                     <Link
                                         href={`/fundraisers/${c.customer_id}`}
@@ -276,6 +287,7 @@ export function CampaignContextDrawer({
                                             className="inline-flex items-center gap-1.5 min-h-[44px] px-3.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
                                         >
                                             <Users size={13} aria-hidden="true" /> Coordinator portal
+                                            <span className="sr-only"> (opens in new tab)</span>
                                         </a>
                                     )}
                                     {!c.is_placeholder && c.business_slug && (
@@ -286,6 +298,7 @@ export function CampaignContextDrawer({
                                             className="inline-flex items-center gap-1.5 min-h-[44px] px-3.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
                                         >
                                             <ExternalLink size={13} aria-hidden="true" /> Public order page
+                                            <span className="sr-only"> (opens in new tab)</span>
                                         </a>
                                     )}
                                 </div>
@@ -304,7 +317,7 @@ export function CampaignContextDrawer({
                                     <button
                                         type="button"
                                         onClick={() => onCloseout(c)}
-                                        className="inline-flex items-center gap-1.5 min-h-[44px] px-3.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900 text-xs font-bold hover:bg-amber-100 dark:hover:bg-amber-950/60 transition-colors"
+                                        className="inline-flex items-center gap-2 min-h-[44px] px-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900 text-xs font-bold hover:bg-amber-100 dark:hover:bg-amber-950/60 transition-colors"
                                     >
                                         <Lock size={13} aria-hidden="true" /> Close out fundraiser
                                     </button>
