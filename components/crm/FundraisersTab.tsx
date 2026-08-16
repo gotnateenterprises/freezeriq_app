@@ -1,9 +1,24 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Plus, ExternalLink, Calendar, Target, Megaphone, Loader2, Settings, Package } from 'lucide-react';
+import { useSession } from 'next-auth/react';
+import { Plus, ExternalLink, Calendar, Target, Megaphone, Loader2, Settings, Package, Percent } from 'lucide-react';
 import { toast } from 'sonner';
-import { useParams, useRouter } from 'next/navigation';
+// INV-A: useRouter dropped — closeout no longer redirects to the invoice page.
+// (useParams was already imported-unused before INV-A; left alone deliberately.)
+import { useParams } from 'next/navigation';
+import {
+    canManageOrgShare,
+    orgShareRequestField,
+    orgShareInputError,
+    orgShareFieldMode,
+    formatOrgShare,
+    ORG_SHARE_DEFAULT_INPUT,
+    ORG_SHARE_HELPER_TEXT,
+    ORG_SHARE_ADMIN_MANAGED_NOTE,
+    ORG_SHARE_LOCKED_NOTE,
+} from '@/lib/orgShareForm';
+import { isCampaignClosed } from '@/lib/campaignBundleSelection';
 
 interface BundleOption {
     id: string;
@@ -24,10 +39,12 @@ interface Fundraiser {
     participant_label?: string;
     group_label?: string;
     is_group_enabled?: boolean;
+    // INV-A: per-campaign organization share + closed marker for the locked state.
+    org_share_percent?: number | string | null;
+    closed_at?: string | null;
 }
 
 export default function FundraisersTab({ customerId, businessSlug }: { customerId: string, businessSlug: string }) {
-    const router = useRouter();
     const [campaigns, setCampaigns] = useState<Fundraiser[]>([]);
     const [loading, setLoading] = useState(true);
     const [isCreating, setIsCreating] = useState(false);
@@ -37,13 +54,28 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
         bundleGoal: '',
         endDate: '',
         participantLabel: 'Seller',
-        groupLabel: ''
+        groupLabel: '',
+        orgShare: ORG_SHARE_DEFAULT_INPUT
     });
 
     const [editData, setEditData] = useState({
         participant_label: '',
         group_label: ''
     });
+
+    // INV-A: organization share. Client role read is presentation only — the
+    // server authorizes every explicit override independently.
+    const { data: session } = useSession();
+    const shareUser = {
+        role: (session?.user as any)?.role,
+        isSuperAdmin: (session?.user as any)?.isSuperAdmin === true,
+    };
+    const shareAuthorized = canManageOrgShare(shareUser);
+    const createShareError = shareAuthorized ? orgShareInputError(newCampaign.orgShare) : null;
+    const [editingShareId, setEditingShareId] = useState<string | null>(null);
+    const [shareInput, setShareInput] = useState(ORG_SHARE_DEFAULT_INPUT);
+    const [savingShare, setSavingShare] = useState(false);
+    const editShareError = orgShareInputError(shareInput);
 
     // Bundle assignment state
     const [allBundles, setAllBundles] = useState<BundleOption[]>([]);
@@ -139,6 +171,11 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
 
     async function handleCreate(e: React.FormEvent) {
         e.preventDefault();
+        // INV-A: refuse to submit a share the server would reject anyway.
+        if (createShareError) {
+            toast.error(createShareError);
+            return;
+        }
         setLoading(true);
         try {
             const res = await fetch('/api/campaigns', {
@@ -150,20 +187,60 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                     bundleGoal: newCampaign.bundleGoal ? Number(newCampaign.bundleGoal) : undefined,
                     endDate: newCampaign.endDate,
                     participantLabel: newCampaign.participantLabel,
-                    groupLabel: newCampaign.groupLabel
+                    groupLabel: newCampaign.groupLabel,
+                    // INV-A: key present only for an authorized ADMIN/super-admin
+                    // with a non-blank value; the DB default (20.00) otherwise.
+                    ...orgShareRequestField({ user: shareUser, raw: newCampaign.orgShare })
                 })
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
 
             toast.success('Campaign created!');
-            setNewCampaign({ name: '', bundleGoal: '', endDate: '', participantLabel: 'Seller', groupLabel: '' });
+            setNewCampaign({ name: '', bundleGoal: '', endDate: '', participantLabel: 'Seller', groupLabel: '', orgShare: ORG_SHARE_DEFAULT_INPUT });
             setIsCreating(false);
             fetchCampaigns();
         } catch (error: any) {
             toast.error(error.message);
         } finally {
             setLoading(false);
+        }
+    }
+
+    /**
+     * INV-A — save an edited organization share for one OPEN campaign.
+     *
+     * Uses the campaign-specific PATCH (never the customer profile save). The
+     * server re-checks authorization (403), open-ness (409) and range (400);
+     * its messages are already human-readable, so they surface verbatim.
+     */
+    async function handleSaveShare(id: string) {
+        if (editShareError) {
+            toast.error(editShareError);
+            return;
+        }
+        const field = orgShareRequestField({ user: shareUser, raw: shareInput });
+        if (!('orgSharePercent' in field)) {
+            // Blank input or unauthorized viewer — nothing truthful to send.
+            setEditingShareId(null);
+            return;
+        }
+        setSavingShare(true);
+        try {
+            const res = await fetch(`/api/campaigns/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(field)
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to update organization share');
+            toast.success('Organization share updated!');
+            setEditingShareId(null);
+            fetchCampaigns();
+        } catch (error: any) {
+            toast.error(error.message);
+        } finally {
+            setSavingShare(false);
         }
     }
 
@@ -188,24 +265,49 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
         }
     }
 
-    async function handleCloseAndInvoice(campaign: Fundraiser) {
-        if (!confirm(`Are you sure you want to close "${campaign.name}"? This will move it to Production state and start an Invoice.`)) {
+    /**
+     * INV-A — Close out fundraiser.
+     *
+     * WHAT THIS USED TO DO, AND WHY IT WAS WRONG: it PATCHed the campaign to
+     * status 'Production' and reported "Campaign Closed!". 'Production' is not
+     * in the closed family, so nothing was actually closed — held fundraiser
+     * orders were never released, settlement_total was never frozen, and the
+     * campaign kept accepting orders. It then deep-linked to the invoice page
+     * prefilled from campaign.total_sales, a denormalised counter the closeout
+     * engine itself distrusts.
+     *
+     * It now calls the canonical closeout endpoint, which freezes the gross
+     * settlement and promotes held orders in one transaction. No invoice is
+     * created — INV-B owns generation — so this no longer claims one was.
+     */
+    async function handleCloseOut(campaign: Fundraiser) {
+        if (!confirm(
+            `Close out "${campaign.name}"?\n\n` +
+            `This freezes the campaign's settlement total and releases its held orders to production. ` +
+            `It cannot be undone.`
+        )) {
             return;
         }
 
         try {
-            const res = await fetch(`/api/campaigns/${campaign.id}`, {
-                method: 'PATCH',
+            const res = await fetch(`/api/campaigns/${campaign.id}/closeout`, {
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: 'Production' })
             });
 
+            const data = await res.json().catch(() => ({}));
+
             if (res.ok) {
-                toast.success('Campaign Closed!');
-                // Redirect to Invoices with pre-filled parameters
-                router.push(`/invoices?action=new&customerId=${customerId}&name=${encodeURIComponent(campaign.name)}&amount=${campaign.total_sales}`);
+                toast.success(
+                    data?.idempotent
+                        ? 'This fundraiser was already closed out.'
+                        : 'Fundraiser closed out.'
+                );
+                fetchCampaigns();
+            } else if (res.status === 403) {
+                toast.error(data?.error || 'Only an administrator can close out a fundraiser.');
             } else {
-                toast.error('Failed to close campaign');
+                toast.error(data?.error || 'Failed to close out fundraiser');
             }
         } catch (e) {
             toast.error('An error occurred');
@@ -259,6 +361,40 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                     value={newCampaign.endDate}
                                     onChange={e => setNewCampaign({ ...newCampaign, endDate: e.target.value })}
                                 />
+                            </div>
+                            {/* INV-A: organization share — editable for ADMIN /
+                                super-admin only; the server enforces this
+                                independently. Others see the default read-only. */}
+                            <div>
+                                <label htmlFor="new-org-share" className="block text-xs font-bold text-slate-500 uppercase mb-1">Organization Share</label>
+                                {shareAuthorized ? (
+                                    <>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                id="new-org-share"
+                                                type="number"
+                                                min={0}
+                                                max={100}
+                                                step={0.01}
+                                                className="w-full max-w-[8rem] px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold"
+                                                value={newCampaign.orgShare}
+                                                aria-describedby={createShareError ? 'new-org-share-error' : 'new-org-share-help'}
+                                                aria-invalid={createShareError ? true : undefined}
+                                                onChange={e => setNewCampaign({ ...newCampaign, orgShare: e.target.value })}
+                                            />
+                                            <span className="text-sm font-bold text-slate-500 dark:text-slate-400">%</span>
+                                        </div>
+                                        <p id="new-org-share-help" className="text-[10px] text-slate-400 mt-1">{ORG_SHARE_HELPER_TEXT}</p>
+                                        {createShareError && (
+                                            <p id="new-org-share-error" role="alert" className="text-[11px] font-bold text-red-600 dark:text-red-400 mt-1">{createShareError}</p>
+                                        )}
+                                    </>
+                                ) : (
+                                    <>
+                                        <p className="px-3 py-2 font-bold text-slate-900 dark:text-white">20%</p>
+                                        <p className="text-[10px] text-slate-400 mt-1">{ORG_SHARE_ADMIN_MANAGED_NOTE}</p>
+                                    </>
+                                )}
                             </div>
                         </div>
 
@@ -338,6 +474,37 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                             }
                                         </span>
                                     </div>
+                                    {/* INV-A: per-campaign organization share.
+                                        Editable for ADMIN/super-admin while the
+                                        fundraiser is open; locked after closeout. */}
+                                    <div className="flex items-center gap-1.5">
+                                        <Percent className="w-4 h-4 text-slate-400" />
+                                        <span>Org share: {formatOrgShare(campaign.org_share_percent)}</span>
+                                        {orgShareFieldMode({ user: shareUser, campaignClosed: isCampaignClosed({ closed_at: campaign.closed_at ? new Date(campaign.closed_at) : null, status: campaign.status }) }) === 'editable' && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setEditingLabelsId(null);
+                                                    setEditingBundlesId(null);
+                                                    setEditingShareId(campaign.id);
+                                                    setShareInput(
+                                                        campaign.org_share_percent != null && campaign.org_share_percent !== ''
+                                                            ? String(campaign.org_share_percent)
+                                                            : ORG_SHARE_DEFAULT_INPUT
+                                                    );
+                                                }}
+                                                className="text-xs font-bold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 px-2 py-1.5 -my-1.5 rounded"
+                                                title="Edit organization share"
+                                            >
+                                                Edit
+                                            </button>
+                                        )}
+                                        {orgShareFieldMode({ user: shareUser, campaignClosed: isCampaignClosed({ closed_at: campaign.closed_at ? new Date(campaign.closed_at) : null, status: campaign.status }) }) === 'locked' && (
+                                            <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400" title={ORG_SHARE_LOCKED_NOTE}>
+                                                Locked
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
 
@@ -378,11 +545,11 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                     </a>
                                     {campaign.status === 'Active' && (
                                         <button
-                                            onClick={() => handleCloseAndInvoice(campaign)}
-                                            className="flex items-center gap-2 px-4 py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-sm font-bold transition-colors"
-                                            title="Close Campaign and Generate Invoice"
+                                            onClick={() => handleCloseOut(campaign)}
+                                            className="flex items-center gap-2 px-4 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-900/30 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-300 rounded-lg text-sm font-bold transition-colors"
+                                            title="Freeze the settlement total and release held orders to production"
                                         >
-                                            Close & Invoice
+                                            Close out fundraiser
                                         </button>
                                     )}
                                 </div>
@@ -423,6 +590,47 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                         className="text-xs font-bold text-indigo-600 hover:text-indigo-800"
                                     >
                                         Save Labels
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* INV-A: Inline Organization Share Edit — open campaigns,
+                            ADMIN/super-admin only (the affordance above is not
+                            rendered otherwise; the server re-checks regardless). */}
+                        {editingShareId === campaign.id && (
+                            <div className="mt-2 pt-4 border-t border-slate-100 dark:border-slate-700/50 bg-slate-50/50 dark:bg-slate-900/20 p-4 rounded-xl">
+                                <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-1">Organization Share</p>
+                                <p className="text-[10px] text-slate-400 mb-3">{ORG_SHARE_HELPER_TEXT}</p>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        max={100}
+                                        step={0.01}
+                                        className="w-28 text-sm px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700"
+                                        value={shareInput}
+                                        aria-invalid={editShareError ? true : undefined}
+                                        onChange={e => setShareInput(e.target.value)}
+                                    />
+                                    <span className="text-sm font-bold text-slate-500 dark:text-slate-400">%</span>
+                                </div>
+                                {editShareError && (
+                                    <p role="alert" className="text-[11px] font-bold text-red-600 dark:text-red-400 mt-2">{editShareError}</p>
+                                )}
+                                <div className="flex justify-end gap-2 mt-4">
+                                    <button
+                                        onClick={() => setEditingShareId(null)}
+                                        className="text-xs font-bold text-slate-400 hover:text-slate-600"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={() => handleSaveShare(campaign.id)}
+                                        disabled={savingShare || editShareError !== null}
+                                        className="text-xs font-bold text-indigo-600 hover:text-indigo-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                        {savingShare ? 'Saving…' : 'Save Share'}
                                     </button>
                                 </div>
                             </div>

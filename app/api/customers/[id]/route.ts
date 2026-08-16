@@ -406,10 +406,27 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
             const latestCampaign = await prisma.fundraiserCampaign.findFirst({
                 where: { customer_id: orgId },
                 orderBy: { created_at: 'desc' },
-                select: { id: true },
+                select: { id: true, closed_at: true, status: true },
             });
 
-            if (latestCampaign) {
+            // ── INV-A boundary ────────────────────────────────────────────────
+            // This route targets "whichever campaign was created most recently"
+            // with no campaign id, so once an organization has a closed campaign
+            // it can silently retarget financially-frozen data. Saving an
+            // ORGANISATION PROFILE must never rewrite a closed fundraiser's
+            // financial configuration (deadline, goal, payment instructions).
+            //
+            // Deliberately narrow: open campaigns keep the existing sync
+            // verbatim — the flyer/packet/tracker routes still read these
+            // columns and removing the sync would reintroduce that drift.
+            // org_share_percent is NOT settable here at all; it is owned by the
+            // campaign create/edit surfaces, never by the generic org form.
+            const latestIsClosed = latestCampaign
+                ? Boolean(latestCampaign.closed_at) ||
+                  ['Closed', 'Settled', 'Completed', 'Archived'].includes(latestCampaign.status)
+                : false;
+
+            if (latestCampaign && !latestIsClosed) {
                 await prisma.fundraiserCampaign.update({
                     where: { id: latestCampaign.id },
                     data: {

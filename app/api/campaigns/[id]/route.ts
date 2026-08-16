@@ -1,6 +1,8 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { decideOrgShareChange, isOrgShareRejected } from '@/lib/fundraiserOrgShare';
+import { isCampaignClosed } from '@/lib/campaignBundleSelection';
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
@@ -35,10 +37,43 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
             return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
         }
 
+        // ── INV-A: per-campaign organization share ────────────────────────────
+        // Editable only while the fundraiser is financially open. Once closeout
+        // has frozen settlement_total, the share is part of the frozen financial
+        // contract: the invoice must stay reproducible from
+        // (frozen gross, frozen percent), so silently changing it afterwards
+        // would retroactively rewrite what the organization owes.
+        //
+        // An explicit share change must clear BOTH gates: the caller is
+        // authorized to set financial terms (403), AND the campaign is still
+        // financially open (409). Authorization is checked first so an
+        // unauthorized caller cannot probe a campaign's closeout state.
+        // Non-financial edits on this route keep their existing permissions.
+        const orgShareDecision = decideOrgShareChange({
+            requested: body.orgSharePercent,
+            user: {
+                role: (session.user as any).role,
+                isSuperAdmin: (session.user as any).isSuperAdmin === true,
+            },
+            campaignClosed: isCampaignClosed({
+                closed_at: (campaign as any).closed_at ?? null,
+                status: campaign.status,
+            }),
+        });
+        if (isOrgShareRejected(orgShareDecision)) {
+            return NextResponse.json({ error: orgShareDecision.error }, { status: orgShareDecision.status });
+        }
+        const orgSharePercentValue: number | undefined = orgShareDecision.change
+            ? orgShareDecision.percent
+            : undefined;
+
         // Update
         const updated = await prisma.fundraiserCampaign.update({
             where: { id },
             data: {
+                ...(orgSharePercentValue !== undefined
+                    ? { org_share_percent: orgSharePercentValue }
+                    : {}),
                 name: body.name,
                 status: body.status,
                 start_date: body.start_date ? new Date(body.start_date) : undefined,

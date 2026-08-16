@@ -6,6 +6,10 @@ import type { VariantSize } from '@prisma/client';
 import { buildBundlePriceMap } from '@/lib/pricing';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
 import { LOYALTY_ACCRUAL_ENABLED } from '@/lib/loyalty';
+import {
+    shouldCreateFulfillmentOrder,
+    isClientSettableInvoiceStatus,
+} from '@/lib/invoiceFulfillment';
 
 // ---------------------------------------------------------------------------
 // Local helper — round money to two decimal places consistently.
@@ -193,6 +197,21 @@ export async function POST(request: Request) {
             if (customer.business_id !== businessId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
+        // ── INV-A: status input hardening ─────────────────────────────────────
+        // `status` is passed straight to Prisma below. Now that DRAFT and SENT
+        // exist in the enum, an allowlist is required or any authenticated
+        // tenant user could mint a fundraiser-lifecycle invoice through the
+        // ordinary API. DRAFT belongs to INV-B's generator; SENT to INV-C.
+        if (status !== undefined && status !== null && !isClientSettableInvoiceStatus(status)) {
+            return NextResponse.json({ error: 'Invalid invoice status.' }, { status: 400 });
+        }
+
+        // ── INV-A: campaign linkage is server-owned ───────────────────────────
+        // Ordinary invoices created through this endpoint are never
+        // campaign-linked, so a client cannot claim a campaign's one-invoice
+        // slot here. INV-B's server-side generator is what sets campaign_id.
+        const campaignId: string | null = null;
+
         // --- SERVER-SIDE PRICE & VARIANT VALIDATION ---
         // Validate bundle prices and serving tiers before opening any transaction.
         // resolveInvoiceItems throws InvoiceValidationError with a statusCode if any
@@ -237,7 +256,15 @@ export async function POST(request: Request) {
                             description: item.description,
                             quantity: item.quantity,
                             unit_price: item.unit_price,
-                            total: item.total
+                            total: item.total,
+                            // INV-A: persist the server-derived serving size.
+                            // resolveInvoiceItems already computes it; it was
+                            // previously forwarded only to OrderItem. NULL for
+                            // manual lines — never fabricated as serves_5.
+                            // Re-derived here on PUT too, so it survives the
+                            // delete-and-recreate cycle without the client
+                            // needing to round-trip it.
+                            variant_size: item.variant_size ?? null
                         }))
                     }
                 },
@@ -250,8 +277,11 @@ export async function POST(request: Request) {
             });
 
             // AUTO-POPULATE ORDER
-            // We only create an order if there are items linked to bundles
-            if (fulfillableItems.length > 0) {
+            // We only create an order if there are items linked to bundles —
+            // and never for a campaign-linked (fundraiser) invoice, whose
+            // fulfilment records are the campaign's own orders. See
+            // lib/invoiceFulfillment.ts for why that would double the kitchen.
+            if (shouldCreateFulfillmentOrder({ campaignId, fulfillableItemCount: fulfillableItems.length })) {
                 // @ts-ignore - New invoice_id field
                 await tx.order.create({
                     data: {
@@ -348,6 +378,20 @@ export async function PUT(request: Request) {
             if (customer.business_id !== businessId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
+        // ── INV-A: status input hardening (see POST) ──────────────────────────
+        if (status !== undefined && status !== null && !isClientSettableInvoiceStatus(status)) {
+            return NextResponse.json({ error: 'Invalid invoice status.' }, { status: 400 });
+        }
+
+        // ── INV-A: campaign linkage comes from the PERSISTED row, never the
+        //    client body — an edit must not be able to attach or detach a
+        //    campaign, and the fulfilment suppression must hold on every edit.
+        const persisted = await prisma.invoice.findFirst({
+            where: { id, business_id: businessId },
+            select: { campaign_id: true },
+        });
+        const campaignId: string | null = persisted?.campaign_id ?? null;
+
         // --- SERVER-SIDE PRICE & VARIANT VALIDATION ---
         // Validate bundle prices and serving tiers before opening any transaction.
         let validatedItems: ValidatedItem[];
@@ -397,7 +441,15 @@ export async function PUT(request: Request) {
                             description: item.description,
                             quantity: item.quantity,
                             unit_price: item.unit_price,
-                            total: item.total
+                            total: item.total,
+                            // INV-A: persist the server-derived serving size.
+                            // resolveInvoiceItems already computes it; it was
+                            // previously forwarded only to OrderItem. NULL for
+                            // manual lines — never fabricated as serves_5.
+                            // Re-derived here on PUT too, so it survives the
+                            // delete-and-recreate cycle without the client
+                            // needing to round-trip it.
+                            variant_size: item.variant_size ?? null
                         }))
                     }
                 },
@@ -414,7 +466,18 @@ export async function PUT(request: Request) {
             // @ts-ignore
             const existingOrder = invoice.order;
 
-            if (existingOrder) {
+            // ── INV-A: a campaign-linked invoice never creates or maintains a
+            //    fulfilment Order. Guarded here as well as at creation because
+            //    an edit must not be able to conjure the phantom order that
+            //    creation refused. Ordinary invoices are untouched.
+            const maySyncFulfillmentOrder = shouldCreateFulfillmentOrder({
+                campaignId,
+                fulfillableItemCount: fulfillableItems.length,
+            });
+
+            if (campaignId) {
+                // Campaign invoice: no fulfilment order, nothing to sync.
+            } else if (existingOrder) {
                 if (fulfillableItems.length > 0) {
                     // Update existing order items
                     await tx.orderItem.deleteMany({ where: { order_id: existingOrder.id } });
@@ -441,7 +504,7 @@ export async function PUT(request: Request) {
                         data: { total_amount: 0 }
                     });
                 }
-            } else if (fulfillableItems.length > 0) {
+            } else if (maySyncFulfillmentOrder) {
                 // Create new order if it didn't exist
                 // @ts-ignore
                 await tx.order.create({

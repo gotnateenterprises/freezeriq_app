@@ -6,6 +6,7 @@ import {
   isCanonicalServes2Tier,
 } from '@/lib/campaignBundleSelection';
 import { computeBundleUnitsFromItems } from '@/lib/fundraiserMetrics';
+import { decideOrgShareChange, isOrgShareRejected } from '@/lib/fundraiserOrgShare';
 import { evaluateCampaignHealth } from '@/lib/growth/health';
 import {
   evaluateConversion,
@@ -74,6 +75,10 @@ interface CreateCampaignBody {
   // an approved rebooking opportunity, which is claimed and linked in the same
   // transaction as the campaign. Everything else about creation is unchanged.
   opportunityId?: string | null;
+  // INV-A: optional per-campaign organization share, as a PERCENT (25 = 25%).
+  // Omitted by every pre-INV-A caller, which is why the column carries a 20.00
+  // database default rather than requiring a value here.
+  orgSharePercent?: number | string | null;
 }
 
 /**
@@ -118,11 +123,36 @@ export async function POST(req: Request) {
             groupLabel,
             bundleSelection,
             opportunityId,
+            orgSharePercent,
         } = body;
 
         if (!customerId || !name) {
             return NextResponse.json({ error: "Customer ID and Name are required" }, { status: 400 });
         }
+
+        // ── INV-A: organization share. Server-authoritative; omitted means the
+        //    database default (20.00) applies, so every legacy caller is safe.
+        //
+        //    An EXPLICIT override is a financial-terms change and is ADMIN or
+        //    super-admin only. The gate is inside this branch on purpose:
+        //    creating a fundraiser is not ADMIN-only and must not become so.
+        //    Authorization is checked before validation, so an unauthorized
+        //    caller is refused outright rather than told whether their number
+        //    was well-formed.
+        const orgShareDecision = decideOrgShareChange({
+            requested: orgSharePercent,
+            user: {
+                role: (session.user as any).role,
+                isSuperAdmin: (session.user as any).isSuperAdmin === true,
+            },
+            campaignClosed: false, // a campaign being created cannot be closed
+        });
+        if (isOrgShareRejected(orgShareDecision)) {
+            return NextResponse.json({ error: orgShareDecision.error }, { status: orgShareDecision.status });
+        }
+        const orgSharePercentValue: number | undefined = orgShareDecision.change
+            ? orgShareDecision.percent
+            : undefined;
 
         attemptedOpportunityId = opportunityId ?? null;
         attemptedBusinessId = businessId;
@@ -386,6 +416,10 @@ export async function POST(req: Request) {
                             bundle_selection_status: 'pending',
                             bundle_selection_limit: selectionLimit,
                             bundle_selection_at: null,
+                            // INV-A: when omitted, the DB default (20.00) applies.
+                            ...(orgSharePercentValue !== undefined
+                                ? { org_share_percent: orgSharePercentValue }
+                                : {}),
                         },
                     });
 
@@ -429,6 +463,10 @@ export async function POST(req: Request) {
                         is_group_enabled: !!groupLabel,
                         status: 'Active',
                         bundle_selection_status: 'not_required',
+                        // INV-A: when omitted, the DB default (20.00) applies.
+                        ...(orgSharePercentValue !== undefined
+                            ? { org_share_percent: orgSharePercentValue }
+                            : {}),
                     },
                 }));
                 return NextResponse.json(campaign);
@@ -463,6 +501,10 @@ export async function POST(req: Request) {
                 is_group_enabled: !!groupLabel,
                 status: 'Active',
                 bundle_selection_status: 'not_required',
+                // INV-A: when omitted, the DB default (20.00) applies.
+                ...(orgSharePercentValue !== undefined
+                    ? { org_share_percent: orgSharePercentValue }
+                    : {}),
             }
         }));
 
@@ -556,6 +598,10 @@ export async function GET(req: Request) {
                     // pair decide applicability and one reason; `_count` gives the
                     // coordinator-engagement signal without a second round trip.
                     closed_at: true,
+                    // INV-A: the per-campaign organization share, for the
+                    // fundraiser setup/edit UI. Display data only — every
+                    // change goes through the authorized POST/PATCH paths.
+                    org_share_percent: true,
                     bundle_selection_status: true,
                     bundle_selection_at: true,
                     _count: { select: { coordinator_actions: true } },
@@ -668,6 +714,14 @@ export async function GET(req: Request) {
                             group_label: (fc as any).group_label,
                             is_group_enabled: (fc as any).is_group_enabled,
                             portal_token: (fc as any).portal_token,
+                            // INV-A: share + closed_at for the setup/edit UI.
+                            // closed_at was already selected for GE-3 health; it
+                            // is surfaced so the UI can render the share as
+                            // locked once the fundraiser is financially closed.
+                            org_share_percent: (fc as any).org_share_percent != null
+                                ? Number((fc as any).org_share_percent)
+                                : 20,
+                            closed_at: (fc as any).closed_at ?? null,
                             // Settlement visibility — held order counts.
                             // These three metrics measure DIFFERENT things and are
                             // intentionally independent: order rows, dollars, and

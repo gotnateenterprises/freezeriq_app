@@ -142,6 +142,16 @@ export async function resolveCoordinatorCampaign(
 // ── Closed-campaign predicate ─────────────────────────────────────────────────
 
 /**
+ * Statuses that already mean "financially closed".
+ *
+ * Exported (INV-A) because the closeout claim needs the same list as a Prisma
+ * `notIn` filter, and the campaign PATCH needs it to lock org_share_percent. A
+ * second hand-written copy in either route could drift, which would let the
+ * organization share change after settlement_total was frozen against it.
+ */
+export const CLOSED_STATUSES = ['Closed', 'Settled', 'Completed', 'Archived'] as const;
+
+/**
  * Returns true when the campaign is server-closed per the existing coordinator contract.
  * Mirrors the isCampaignClosed() pattern from app/api/coordinator/[token]/route.ts.
  */
@@ -151,7 +161,7 @@ export function isCampaignClosed(campaign: {
 }): boolean {
   return (
     Boolean(campaign.closed_at) ||
-    ['Closed', 'Settled', 'Completed', 'Archived'].includes(campaign.status)
+    (CLOSED_STATUSES as readonly string[]).includes(campaign.status)
   );
 }
 

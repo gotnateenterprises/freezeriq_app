@@ -1,6 +1,15 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import { isPastCalendarDate } from '@/lib/rebookingConversion';
+import {
+    canManageOrgShare,
+    orgShareRequestField,
+    orgShareInputError,
+    ORG_SHARE_DEFAULT_INPUT,
+    ORG_SHARE_HELPER_TEXT,
+    ORG_SHARE_ADMIN_MANAGED_NOTE,
+} from '@/lib/orgShareForm';
 
 type Prefill = { customerId?: string; orgName?: string; goal?: number };
 
@@ -145,6 +154,16 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
         endDate: rebooking?.endDate ?? '',
         bundleGoal: prefill?.goal ?? 0,
     });
+    // INV-A: organization share. Client-side role read is PRESENTATION only —
+    // the server independently authorizes any explicit override. An
+    // unauthorized session never has the field serialized into the request.
+    const { data: session } = useSession();
+    const shareAuthorized = canManageOrgShare({
+        role: (session?.user as any)?.role,
+        isSuperAdmin: (session?.user as any)?.isSuperAdmin === true,
+    });
+    const [orgShare, setOrgShare] = useState(ORG_SHARE_DEFAULT_INPUT);
+    const orgShareError = shareAuthorized ? orgShareInputError(orgShare) : null;
     // CB-4: eligible families from /api/campaigns/bundle-families
     const [eligibleFamilies, setEligibleFamilies] = useState<EligibleFamily[]>([]);
     const [familiesLoading, setFamiliesLoading] = useState(false);
@@ -262,6 +281,16 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                     name: camp.name,
                     bundleGoal: camp.bundleGoal,
                     endDate: camp.endDate,
+                    // INV-A: present only for an authorized ADMIN/super-admin
+                    // with a non-blank value; everyone else omits the key and
+                    // the database default (20.00) applies.
+                    ...orgShareRequestField({
+                        user: {
+                            role: (session?.user as any)?.role,
+                            isSuperAdmin: (session?.user as any)?.isSuperAdmin === true,
+                        },
+                        raw: orgShare,
+                    }),
                     bundleSelection: bundleSelectionPayload,
                     // FR-RETENTION-5: the ONLY rebooking value the server trusts.
                     // It re-derives the business, the organization and the state
@@ -475,6 +504,47 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                             </FieldLabel>
                         </div>
 
+                        {/* INV-A: organization share. Editable only for ADMIN /
+                            super-admin; others see the default read-only. The
+                            server independently enforces this — the input here
+                            is experience, not security. */}
+                        <FieldLabel label="Organization Share">
+                            {shareAuthorized ? (
+                                <>
+                                    <div className="mt-1 flex items-center gap-2">
+                                        <input
+                                            id="wiz-org-share"
+                                            type="number"
+                                            min={0}
+                                            max={100}
+                                            step={0.01}
+                                            className={`${inputCls.replace('mt-1 ', '')} max-w-[8rem]`}
+                                            value={orgShare}
+                                            aria-describedby={orgShareError ? 'wiz-org-share-error' : 'wiz-org-share-help'}
+                                            aria-invalid={orgShareError ? true : undefined}
+                                            onChange={e => setOrgShare(e.target.value)}
+                                        />
+                                        <span className="text-sm font-bold text-slate-500 dark:text-slate-400">%</span>
+                                    </div>
+                                    <p id="wiz-org-share-help" className="mt-1 text-[11px] font-medium normal-case tracking-normal text-slate-500 dark:text-slate-400">
+                                        {ORG_SHARE_HELPER_TEXT}
+                                    </p>
+                                    {orgShareError && (
+                                        <p id="wiz-org-share-error" role="alert" className="mt-1 text-[12px] font-bold normal-case tracking-normal text-red-600 dark:text-red-400">
+                                            {orgShareError}
+                                        </p>
+                                    )}
+                                </>
+                            ) : (
+                                <>
+                                    <p className="mt-1 text-sm font-bold text-slate-900 dark:text-white">20%</p>
+                                    <p className="mt-0.5 text-[11px] font-medium normal-case tracking-normal text-slate-500 dark:text-slate-400">
+                                        {ORG_SHARE_ADMIN_MANAGED_NOTE}
+                                    </p>
+                                </>
+                            )}
+                        </FieldLabel>
+
                         {/* GE-9 below-minimum amber warning (handoff line 529) */}
                         {camp.bundleGoal > 0 && camp.bundleGoal * 125 < 1250 && (
                             <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-200">
@@ -556,6 +626,8 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                                 disabled={
                                     !camp.name.trim() ||
                                     busy ||
+                                    // INV-A: an invalid share cannot be submitted.
+                                    orgShareError !== null ||
                                     pickedFamilyIds.size === 0 ||
                                     !Number.isInteger(selectionLimit) ||
                                     selectionLimit < 1 ||
