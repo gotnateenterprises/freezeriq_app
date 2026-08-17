@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
+import { mintCoordinatorPortalToken } from '@/lib/coordinatorPortalToken';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,8 +25,19 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        // We assume User is admin or has rights
-        const businessId = session.user.businessId; // Might be null for Super Admin, but we can proceed
+        // FR-FLOW-1: a tenant context is now REQUIRED.
+        // This previously proceeded with a possibly-null businessId ("Might be
+        // null for Super Admin, but we can proceed"), which — now that the
+        // organization lookup is scoped by business_id — would silently target
+        // orphan rows whose business_id IS NULL and create more of them. An
+        // import has to land in exactly one tenant, so refuse without one.
+        const businessId = session.user.businessId;
+        if (!businessId) {
+            return NextResponse.json(
+                { error: 'A business context is required to import fundraisers.' },
+                { status: 403 }
+            );
+        }
 
         const formData = await req.formData();
         const file = formData.get('file') as File;
@@ -91,15 +103,26 @@ export async function POST(req: NextRequest) {
             }
 
             // 1. Find or Create Organization (Customer)
-            // Match by Name OR Email
+            // Match by Name OR Email — WITHIN THIS TENANT ONLY.
+            //
+            // FR-FLOW-1: the business_id predicate below was commented out
+            // ("Optionally filter by businessId if strict multi-tenancy"). It is
+            // not optional. Without it this findFirst matched an organization by
+            // name or email across EVERY tenant, and the branch immediately
+            // below then wrote to whatever it found — so uploading a CSV row for
+            // "Lincoln PTA" could patch another tenant's customer record and,
+            // worse, create a campaign under their organization (the campaign is
+            // created with customer_id, which is what carries tenant ownership).
+            //
+            // business_id is derived from the authenticated session above and is
+            // never taken from the request.
             let customer = await prisma.customer.findFirst({
                 where: {
+                    business_id: businessId,
                     OR: [
                         { name: { equals: orgName, mode: 'insensitive' } },
                         { contact_email: email && email.length > 0 ? { equals: email, mode: 'insensitive' } : undefined }
                     ],
-                    // Optionally filter by businessId if strict multi-tenancy
-                    // business_id: businessId 
                 }
             });
 
@@ -167,6 +190,10 @@ export async function POST(req: NextRequest) {
                         goal_amount: goal,
                         start_date: startDate,
                         end_date: endDate,
+                        // FR-FLOW-1R: imported campaigns get the same secure
+                        // coordinator credential as wizard-created ones. Without
+                        // this the row silently inherits @default(cuid()).
+                        portal_token: mintCoordinatorPortalToken(),
                         status: 'Lead' // Default status
                     }
                 });

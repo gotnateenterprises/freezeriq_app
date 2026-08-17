@@ -16,13 +16,26 @@ function escapeCSV(val: any): string {
 
 export async function GET(req: NextRequest) {
     try {
+        // ── FR-FLOW-1: authentication is now ENFORCED ────────────────────────
+        // This route previously called auth(), assigned the result to a local,
+        // and never read it — while findMany() carried no WHERE clause at all.
+        // middleware.ts's matcher excludes `/api/`, so nothing upstream was
+        // enforcing anything either: an unauthenticated GET returned every
+        // campaign belonging to every tenant on the platform, including each
+        // coordinator's portal_token and the organization's contact email and
+        // phone. Both halves are fixed here.
         const session = await auth();
-        // Since we want to export for the current context, we rely on session
-        // Assuming Super Admin or valid Business User
 
-        // Fetch all campaigns with customer info
-        // Ordered by creation for consistency
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+        const businessId = session.user.businessId;
+
+        // Tenant scope is derived from the session, never from the request.
+        // A campaign belongs to a tenant through its Customer, which is the
+        // same join every other fundraiser read uses.
         const campaigns = await prisma.fundraiserCampaign.findMany({
+            where: { customer: { business_id: businessId } },
             orderBy: { created_at: 'desc' },
             include: {
                 customer: true
@@ -39,8 +52,11 @@ export async function GET(req: NextRequest) {
             'End Date',
             'Bundle Goal',
             'Total Sales',
-            'Status',
-            'Portal Token'
+            'Status'
+            // FR-FLOW-1: 'Portal Token' removed. portal_token is the coordinator's
+            // sole credential for the private portal and setup page — it is a
+            // secret, not business data, and a spreadsheet is exactly the kind of
+            // artifact that gets forwarded. Nothing in the export needs it.
         ];
 
         const rows = campaigns.map(c => [
@@ -53,9 +69,7 @@ export async function GET(req: NextRequest) {
             escapeCSV(c.end_date ? new Date(c.end_date).toISOString().split('T')[0] : ''),
             escapeCSV(c.goal_amount),
             escapeCSV(c.total_sales),
-            escapeCSV(c.status),
-            // @ts-ignore - Field exists in schema but client type is stale
-            escapeCSV(c.portal_token)
+            escapeCSV(c.status)
         ]);
 
         const csvContent = [

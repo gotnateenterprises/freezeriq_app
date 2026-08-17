@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import FundraiserClient from './FundraiserClient';
 import { computeFundraiserProgress } from '@/lib/fundraiserMetrics';
 import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
+import { toPublicCampaign } from '@/lib/publicFundraiserPayload';
 import type { Metadata } from 'next';
 
 // ── OG Metadata (controls the Facebook/Twitter link preview) ───────────
@@ -153,13 +154,40 @@ async function getData(slug: string, fundraiserId: string) {
     // Attach branding to business object for compatibility
     (business as any).branding = branding;
 
-    // 3. Fetch Campaign
+    // 3. Fetch Campaign — EXPLICIT COLUMN ALLOWLIST, TENANT-SCOPED.
+    //
+    // FR-FLOW-1: this previously read `SELECT fc.*` and was not scoped to the
+    // business resolved from the slug. Two consequences, both fixed here:
+    //
+    //   1. `fc.*` returned every campaign column — including `portal_token`,
+    //      the coordinator's ONLY credential for the private setup/portal page,
+    //      plus settlement_total, org_share_percent, checks_payable, closed_by
+    //      and the other tenant-internal fields. The whole row was then handed
+    //      to a Client Component, so it was serialized into the RSC payload
+    //      embedded in the public HTML of a page anyone can load.
+    //   2. Without `c.business_id`, a campaign id belonging to Tenant A rendered
+    //      under Tenant B's storefront slug.
+    //
+    // The generateMetadata() query above already did both correctly; this is the
+    // same predicate. A campaign owned by another tenant is indistinguishable
+    // from one that does not exist (both fall through to notFound()).
+    //
+    // Columns below are split into two groups: those the supporter page renders,
+    // and those consumed SERVER-SIDE ONLY (order-mode resolution and progress).
+    // The server-only group is stripped before the client boundary — see the
+    // publicCampaign projection near the end of this function.
     const campaigns: any[] = await prisma.$queryRaw`
-        SELECT fc.*, c.name as organization_name, c.contact_email as coordinator_email,
+        SELECT fc.id, fc.name, fc.about_text, fc.participant_label,
+               fc.end_date, fc.delivery_date, fc.pickup_location,
+               fc.payment_instructions, fc.external_payment_link,
+               fc.bundle_goal, fc.total_sales,
+               fc.status, fc.closed_at,
+               fc.bundle_selection_status, fc.bundle_selection_limit,
+               c.name as organization_name,
                c.fundraiser_info as customer_fundraiser_info
         FROM fundraiser_campaigns fc
         JOIN customers c ON fc.customer_id = c.id
-        WHERE fc.id = ${fundraiserId} 
+        WHERE fc.id = ${fundraiserId} AND c.business_id = ${business.id}
         LIMIT 1
     `;
     const campaign = campaigns[0];
@@ -264,13 +292,28 @@ async function getData(slug: string, fundraiserId: string) {
 
     (business as any).bundles = formattedBundles;
 
+    // FR-FLOW-1: PUBLIC PROJECTION — the second half of the allowlist.
+    //
+    // The query above still selects a few tenant-internal columns because the
+    // server needs them (status/closed_at/bundle_selection_* drive
+    // resolveCampaignOrderMode; bundle_goal/total_sales drive progress). None of
+    // them may cross to the Client Component, because anything passed to a
+    // Client Component is serialized into the public HTML.
+    //
+    // The allowlist itself lives in lib/publicFundraiserPayload.ts so the
+    // boundary is unit-testable. It is an explicit include-list, not a
+    // delete-list: a column added to the query later cannot leak by being
+    // forgotten here. It also narrows customer_fundraiser_info, a free-form org
+    // JSON blob that carries internal keys such as checks_payable_to.
+    const publicCampaign = toPublicCampaign(campaign);
+
     // Serialize the full return value to plain objects before the Server→Client boundary.
     // $queryRaw returns TIMESTAMP(3) columns as Date objects and any DECIMAL columns as
     // strings/numbers — all of which must be plain primitives before being passed to a
     // Client Component (Next.js "Only plain objects" constraint).
     // JSON.stringify converts Date → ISO string; JSON.parse produces a plain object.
     // This is the same approach as safeJSON() in /api/campaigns/route.ts.
-    return JSON.parse(JSON.stringify({ business, campaign, bundleProgress, orderMode }));
+    return JSON.parse(JSON.stringify({ business, campaign: publicCampaign, bundleProgress, orderMode }));
 
 }
 

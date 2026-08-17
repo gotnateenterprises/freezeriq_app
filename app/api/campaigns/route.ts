@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
+import { mintCoordinatorPortalToken } from '@/lib/coordinatorPortalToken';
+import { fundraiserCrmCustomerFilter } from '@/lib/fundraiserLead';
 import {
   isCanonicalFamilyTier,
   isCanonicalServes2Tier,
@@ -398,6 +400,10 @@ export async function POST(req: Request) {
                         data: {
                             customer_id: customerId,
                             name,
+                            // FR-FLOW-1R: mint the coordinator credential explicitly.
+                            // Omitting it falls back to the schema's @default(cuid()),
+                            // which is a sortable identifier, not a secret.
+                            portal_token: mintCoordinatorPortalToken(),
                             // @ts-ignore - Stale client: bundle_goal added in CB-1 migration
                             bundle_goal: bundleGoal ? Number(bundleGoal) : undefined,
                             end_date: endDate ? new Date(endDate) : undefined,
@@ -451,6 +457,8 @@ export async function POST(req: Request) {
                     data: {
                         customer_id: customerId,
                         name,
+                        // FR-FLOW-1R: explicit secure coordinator credential.
+                        portal_token: mintCoordinatorPortalToken(),
                         // @ts-ignore - Stale client
                         bundle_goal: bundleGoal ? Number(bundleGoal) : undefined,
                         end_date: endDate ? new Date(endDate) : undefined,
@@ -486,6 +494,8 @@ export async function POST(req: Request) {
             data: {
                 customer_id: customerId,
                 name,
+                // FR-FLOW-1R: explicit secure coordinator credential.
+                portal_token: mintCoordinatorPortalToken(),
                 // @ts-ignore - Stale client
                 bundle_goal: bundleGoal ? Number(bundleGoal) : undefined,
                 end_date: endDate ? new Date(endDate) : undefined,
@@ -559,10 +569,20 @@ export async function GET(req: Request) {
             const healthNow = new Date();
 
             // 1. Fetch Customers (Scoped to Business)
+            //
+            // FR-FLOW-1R: inclusion is "fundraiser organization by type OR carries
+            // the fundraiser-inquiry tag". The tag arm is what makes a public
+            // inquiry from an EXISTING customer visible — previously such a lead
+            // was saved and then filtered out of this very list, because the
+            // storefront and waitlist write type 'direct_customer'.
+            //
+            // Customer.type is deliberately NOT rewritten to achieve this:
+            // marketing audience segmentation, growth analytics and the Customers
+            // page all route on it. See lib/fundraiserLead.ts.
             const customers = await prisma.customer.findMany({
                 where: {
                     business_id: session.user.businessId,
-                    type: { in: ['fundraiser_org', 'organization'] as any }, // Cast to any to avoid Enum issues if stale
+                    ...fundraiserCrmCustomerFilter(),
                     ...(customerId ? { id: customerId } : {})
                 },
                 orderBy: { name: 'asc' }
