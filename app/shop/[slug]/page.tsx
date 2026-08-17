@@ -2,6 +2,7 @@ import { Metadata } from 'next';
 import StorefrontClient from './StorefrontClient';
 import { getCustomerSession } from '@/lib/customerAuth';
 import { prisma } from '@/lib/db';
+import { findBusinessBySlug } from '@/lib/publicIdentity';
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
     const { slug } = await params;
@@ -55,10 +56,8 @@ export default async function StorefrontPage({ params }: { params: Promise<{ slu
     try {
         const session = await getCustomerSession();
         if (session?.businessId) {
-            const business = await prisma.business.findFirst({
-                where: { slug: { equals: slug, mode: 'insensitive' } },
-                select: { id: true },
-            });
+            // FR-PUBLIC-IDENTITY-1: literal slug.
+            const business = await findBusinessBySlug(prisma, slug, { id: true });
             hasCustomerSession = Boolean(business && business.id === session.businessId);
         }
     } catch {

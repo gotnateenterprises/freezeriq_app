@@ -33,6 +33,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { FUNDRAISER_INQUIRY_TAG, FUNDRAISER_INQUIRY_SOURCE } from '@/lib/fundraiserLead';
+import { findBusinessBySlug, findCustomersByEmailIdentity, identityLockKey, IDENTITY_LOCK_SQL } from '@/lib/publicIdentity';
+import { resolveFundraiserCustomer, IDENTITY_REVIEW_TAG } from '@/lib/fundraiserCustomerResolution';
 
 /** Trim, collapse whitespace, and cap length on free-text the public can send. */
 function clean(value: unknown, max: number): string | null {
@@ -87,10 +89,10 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'Unknown storefront.' }, { status: 400 });
         }
 
-        const business = await prisma.business.findFirst({
-            where: { slug: { equals: slug.toLowerCase().trim(), mode: 'insensitive' } },
-            select: { id: true },
-        });
+        // FR-PUBLIC-IDENTITY-1: literal slug resolution. The previous
+        // `mode: 'insensitive'` compiled to ILIKE, so a submitted "%" resolved to
+        // an ARBITRARY Business — a cross-tenant misroute of a public write.
+        const business = await findBusinessBySlug(prisma, slug, { id: true });
 
         if (!business) {
             return NextResponse.json({ error: 'Unknown storefront.' }, { status: 404 });
@@ -108,40 +110,82 @@ export async function POST(req: Request) {
             notes ? `Notes: ${clean(notes, 2000)}` : null,
         ].filter(Boolean).join('\n');
 
-        // ── Idempotency: a double-click or retry must not create a second org ─
-        // Matched within the tenant on contact email, which is how the fundraiser
-        // CSV import already matches organizations. An existing organization is
-        // enriched, never overwritten: only blank fields are filled in, so a
-        // tenant's own corrections are not clobbered by a resubmission. A real
-        // returning prospect therefore updates one row instead of creating rows.
-        const existing = await prisma.customer.findFirst({
-            where: {
-                business_id: businessId,
-                contact_email: { equals: contactEmail, mode: 'insensitive' },
-            },
-        });
+        // ── Organization identity ─────────────────────────────────────────────
+        // FR-PUBLIC-IDENTITY-1. Two defects were repaired here.
+        //
+        // 1. The email was matched with ILIKE, so "a_b@x.com" matched "aXb@x.com"
+        //    and "%@their-domain.org" matched an arbitrary existing customer.
+        //    Matching is now literal and case-insensitive, via bound parameters.
+        //
+        // 2. `findFirst` with no ORDER BY picked arbitrarily when a tenant has
+        //    several customers on one email — Production has 5 such groups over
+        //    13 rows, one of which mixes three campaign-owning organizations with
+        //    a retail customer holding 33 orders. Every candidate is now fetched
+        //    and disambiguated by ORGANIZATION NAME, because two organizations
+        //    can legitimately share a treasurer's mailbox.
+        //
+        // When the evidence does not leave exactly one defensible candidate the
+        // resolver refuses to guess: the lead is still saved, as a new
+        // organization flagged for review, rather than silently bound to the
+        // wrong legacy row. No merge, no delete, no reclassification.
+        // FR-PUBLIC-IDENTITY-1R2 — SERIALIZED inside one transaction.
+        //
+        // Resolution is read-then-write, so without serialization twelve
+        // simultaneous inquiries for the same ambiguous organization all read
+        // "no holding record yet" and all created one. Measured on a real
+        // database: FIVE holding records from twelve requests, after which every
+        // later inquiry hit the multi-record branch and was dropped entirely.
+        //
+        // The advisory lock is taken FIRST, on the same tenant+email identity the
+        // candidate query matches on, and the candidates are read AFTER it — so
+        // the loser of a race observes the winner's row instead of racing it.
+        // Transaction-scoped, so COMMIT or ROLLBACK releases it automatically.
+        const { customerId, created } = await prisma.$transaction(async (tx) => {
+            await tx.$executeRawUnsafe(IDENTITY_LOCK_SQL, identityLockKey(businessId, contactEmail));
 
-        let customerId: string;
-        let created: boolean;
+            // Read AFTER the lock. Never reuse a pre-lock result.
+            const candidates = await findCustomersByEmailIdentity(tx as any, businessId, contactEmail);
 
-        if (existing) {
-            const patch: Record<string, unknown> = {};
-            if (!existing.contact_name) patch.contact_name = contactName;
-            if (!existing.contact_phone) patch.contact_phone = contactPhone;
-            if (!existing.notes) patch.notes = inquiryContext;
-
-            const tags = existing.tags || [];
-            if (!tags.includes(FUNDRAISER_INQUIRY_TAG)) {
-                patch.tags = [...tags, FUNDRAISER_INQUIRY_TAG];
+            let campaignOwnerIds = new Set<string>();
+            let orgContactIds = new Set<string>();
+            if (candidates.length > 1) {
+                const ids = candidates.map((c) => c.id);
+                const [withCampaigns, withContacts] = await Promise.all([
+                    tx.fundraiserCampaign.findMany({
+                        where: { customer_id: { in: ids } }, select: { customer_id: true },
+                    }),
+                    tx.fundraiserOrganizationContact.findMany({
+                        where: { business_id: businessId, customer_id: { in: ids } },
+                        select: { customer_id: true },
+                    }),
+                ]);
+                campaignOwnerIds = new Set(withCampaigns.map((r) => r.customer_id));
+                orgContactIds = new Set(withContacts.map((r) => r.customer_id));
             }
 
-            if (Object.keys(patch).length > 0) {
-                await prisma.customer.update({ where: { id: existing.id }, data: patch });
+            const outcome = resolveFundraiserCustomer({
+                candidates, organizationName, campaignOwnerIds, orgContactIds,
+            });
+
+            if (outcome.kind === 'reuse') {
+                const existing = outcome.customer;
+                const patch: Record<string, unknown> = {};
+                if (!existing.contact_name) patch.contact_name = contactName;
+                if (!existing.contact_phone) patch.contact_phone = contactPhone;
+                if (!existing.notes) patch.notes = inquiryContext;
+
+                const tags = existing.tags || [];
+                if (!tags.includes(FUNDRAISER_INQUIRY_TAG)) {
+                    patch.tags = [...tags, FUNDRAISER_INQUIRY_TAG];
+                }
+                if (Object.keys(patch).length > 0) {
+                    await tx.customer.update({ where: { id: existing.id }, data: patch });
+                }
+                return { customerId: existing.id, created: false };
             }
-            customerId = existing.id;
-            created = false;
-        } else {
-            const lead = await prisma.customer.create({
+
+            const ambiguous = outcome.reason === 'ambiguous';
+            const lead = await tx.customer.create({
                 data: {
                     business_id: businessId,
                     name: organizationName,
@@ -154,13 +198,16 @@ export async function POST(req: Request) {
                     // `source` distinguishes this from a hand-typed lead, which
                     // defaults to "Manual".
                     source: FUNDRAISER_INQUIRY_SOURCE,
-                    notes: inquiryContext,
-                    tags: [FUNDRAISER_INQUIRY_TAG],
+                    notes: ambiguous
+                        ? `${inquiryContext}\n\nIDENTITY REVIEW: this tenant already has ${candidates.length} customers on this email address. FreezerIQ did not have enough evidence to decide which organization this inquiry belongs to, so it was saved as a new organization rather than attached to the wrong one. Reconcile the duplicates when convenient.`
+                        : inquiryContext,
+                    tags: ambiguous
+                        ? [FUNDRAISER_INQUIRY_TAG, IDENTITY_REVIEW_TAG]
+                        : [FUNDRAISER_INQUIRY_TAG],
                 },
             });
-            customerId = lead.id;
-            created = true;
-        }
+            return { customerId: lead.id, created: true };
+        }, { timeout: 20000 });
 
         // ── Tenant notification — best effort, AFTER the lead is durable ──────
         // Deliberately outside the persistence path and individually caught: a

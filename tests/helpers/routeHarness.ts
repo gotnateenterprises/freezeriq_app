@@ -45,6 +45,8 @@ export interface PrismaMock {
 const MODELS = [
     'business', 'customer', 'user', 'fundraiserCampaign', 'campaignBundle',
     'order', 'orderItem', 'bundle', 'businessLead', 'document',
+    // FR-PUBLIC-IDENTITY-1: duplicate-organization disambiguation reads these.
+    'fundraiserOrganizationContact',
 ];
 
 const METHODS = [

@@ -6,6 +6,7 @@ import { buildBundlePriceMap, findInactiveBundleNames } from '@/lib/pricing';
 import { resolveCampaignOrderMode, validateBundleEligibility } from '@/lib/campaignOrderBundles';
 import { isCampaignClosed } from '@/lib/campaignBundleSelection';
 import { validateSubmissionKey, buildSubmissionFingerprint } from '@/lib/orderIdempotency';
+import { normalizeSlug, NO_SUCH_SLUG } from '@/lib/publicIdentity';
 
 /**
  * FR-LAUNCH-1E: sentinel used to abort the order transaction when the campaign
@@ -70,12 +71,8 @@ export async function POST(req: Request) {
 
         // 1. Resolve Business from slug (server-trusted, never from client businessId)
         const business = await prisma.business.findFirst({
-            where: {
-                slug: {
-                    equals: slug.toLowerCase().trim(),
-                    mode: 'insensitive'
-                }
-            }
+            // FR-PUBLIC-IDENTITY-1: literal slug, never a LIKE pattern.
+            where: { slug: normalizeSlug(slug) ?? NO_SUCH_SLUG }
         });
 
         if (!business) {
