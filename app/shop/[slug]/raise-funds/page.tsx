@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, FormEvent } from 'react';
+import { useState, useRef, FormEvent } from 'react';
 import { useParams } from 'next/navigation';
 import { CheckCircle, ArrowRight, DollarSign, Users, Heart, Loader2 } from 'lucide-react';
 import Link from 'next/link';
@@ -21,23 +21,48 @@ export default function RaiseFundsPage() {
         notes: ''
     });
 
+    /**
+     * FR-FUNNEL-1 — idempotency identity for ONE submission attempt.
+     *
+     * Minted once and held until the attempt succeeds, so a double-click or a
+     * network retry carries the SAME key and the server returns the original
+     * inquiry instead of recording a second one. Cleared on success, so a
+     * deliberate future inquiry is correctly a new attempt with a new key.
+     *
+     * A random UUID, never a timestamp: two clicks in the same millisecond must
+     * not collide, and two different submissions must never share an identity.
+     * Same pattern as the public order form (FR-LAUNCH-1E).
+     */
+    const submissionKeyRef = useRef<string | null>(null);
+
     const scrollToForm = () => {
         document.getElementById('contact-form')?.scrollIntoView({ behavior: 'smooth' });
     };
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
+        if (loading) return; // cheap guard; the server key is the real protection
         setLoading(true);
         try {
+            if (!submissionKeyRef.current) {
+                submissionKeyRef.current = crypto.randomUUID();
+            }
+
             const res = await fetch('/api/public/fundraiser-request', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...formData, slug })
+                body: JSON.stringify({
+                    ...formData,
+                    slug,
+                    submissionKey: submissionKeyRef.current,
+                })
             });
 
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Failed to submit request');
 
+            // Retire the key only once the attempt has genuinely landed.
+            submissionKeyRef.current = null;
             setSubmitted(true);
             toast.success('Request submitted! We\'ll be in touch soon.');
         } catch (err: any) {
@@ -227,9 +252,13 @@ export default function RaiseFundsPage() {
                                 </div>
 
                                 <div className="space-y-2">
-                                    <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Delivery Location *</label>
+                                    {/* FR-FUNNEL-1: no longer required. Capture enough to START a
+                                        conversation, not enough to run the fundraiser — the delivery
+                                        area is settled once the date discussion is real. */}
+                                    <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Delivery / pickup area</label>
                                     <input
-                                        type="text" required
+                                        type="text"
+                                        placeholder="Optional — where would you distribute?"
                                         value={formData.deliveryLocation}
                                         onChange={e => setFormData({ ...formData, deliveryLocation: e.target.value })}
                                         className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"

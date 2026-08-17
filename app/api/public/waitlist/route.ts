@@ -1,6 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { findBusinessBySlug } from '@/lib/publicIdentity';
 
 export async function POST(req: Request) {
     try {
@@ -22,10 +23,8 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
         }
 
-        const business = await prisma.business.findFirst({
-            where: { slug: { equals: slug.toLowerCase().trim(), mode: 'insensitive' } },
-            select: { id: true },
-        });
+        // FR-PUBLIC-IDENTITY-1: literal slug. ILIKE let "%" reach an arbitrary tenant.
+        const business = await findBusinessBySlug(prisma, slug, { id: true });
 
         if (!business) {
             return NextResponse.json({ error: 'Business not found' }, { status: 404 });

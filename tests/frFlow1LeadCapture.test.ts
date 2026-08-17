@@ -55,6 +55,7 @@ function freshTenantMock(extra: Record<string, any> = {}) {
         results: {
             'business.findFirst': { id: TENANT_A },
             'customer.findFirst': null,
+            $queryRaw: [],
             'user.findFirst': { email: 'owner@tenant-a.com' },
             ...extra,
         },
@@ -151,6 +152,7 @@ describe('3. an inquiry is NOT a fundraiser', () => {
         await post(VALID);
         useMock(freshTenantMock({
             'customer.findFirst': { id: 'cust-1', business_id: TENANT_A, contact_name: 'Jo', contact_phone: '555-0100', notes: 'x', tags: ['fundraiser_inquiry'] },
+            $queryRaw: [{ id: 'cust-1', business_id: TENANT_A, contact_name: 'Jo', contact_phone: '555-0100', notes: 'x', tags: ['fundraiser_inquiry'] }],
         }));
         await post(VALID);
         expect(mock.callsTo('fundraiserCampaign.create')).toHaveLength(0);
@@ -180,6 +182,11 @@ describe('5. duplicate submissions are safe', () => {
                 contact_name: 'Jo Coordinator', contact_phone: '555-0100',
                 notes: 'earlier note', tags: ['fundraiser_inquiry'],
             },
+            $queryRaw: [{
+                id: 'cust-1', business_id: TENANT_A,
+                contact_name: 'Jo Coordinator', contact_phone: '555-0100',
+                notes: 'earlier note', tags: ['fundraiser_inquiry'],
+            }],
         }));
         const { status, body } = await post(VALID);
         expect(status).toBe(200);
@@ -190,11 +197,16 @@ describe('5. duplicate submissions are safe', () => {
     it('matches the existing organization within the tenant, by email', async () => {
         useMock(freshTenantMock({
             'customer.findFirst': { id: 'cust-1', business_id: TENANT_A, tags: [] },
+            $queryRaw: [{ id: 'cust-1', business_id: TENANT_A, tags: [] }],
         }));
         await post(VALID);
-        const where = mock.firstCall('customer.findFirst')!.args.where;
-        expect(where.business_id).toBe(TENANT_A);
-        expect(JSON.stringify(where)).toContain('jo@lincolnpta.org');
+        // FR-PUBLIC-IDENTITY-1: the match now runs through a parameterized
+        // candidate query instead of an ILIKE `customer.findFirst`. The
+        // protection asserted here is unchanged — tenant scope plus this email.
+        const lookup = mock.firstCall('$queryRaw.raw')!;
+        expect(lookup.args.values).toEqual([TENANT_A, 'jo@lincolnpta.org']);
+        expect(lookup.args.sql).toContain('business_id');
+        expect(lookup.args.sql).not.toMatch(/ILIKE/i);
     });
 
     it('enriches only blank fields — it never overwrites tenant corrections', async () => {
@@ -206,6 +218,13 @@ describe('5. duplicate submissions are safe', () => {
                 notes: 'tenant wrote this',
                 tags: ['fundraiser_inquiry'],
             },
+            $queryRaw: [{
+                id: 'cust-1', business_id: TENANT_A,
+                contact_name: 'Corrected By Tenant',
+                contact_phone: '555-9999',
+                notes: 'tenant wrote this',
+                tags: ['fundraiser_inquiry'],
+            }],
         }));
         await post(VALID);
         const updates = mock.callsTo('customer.update');
@@ -219,6 +238,7 @@ describe('5. duplicate submissions are safe', () => {
     it('fills in fields that are genuinely blank', async () => {
         useMock(freshTenantMock({
             'customer.findFirst': { id: 'cust-1', business_id: TENANT_A, contact_name: null, contact_phone: null, notes: null, tags: [] },
+            $queryRaw: [{ id: 'cust-1', business_id: TENANT_A, contact_name: null, contact_phone: null, notes: null, tags: [] }],
         }));
         await post(VALID);
         const data = mock.firstCall('customer.update')!.args.data;

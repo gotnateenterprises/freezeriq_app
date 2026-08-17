@@ -17,6 +17,7 @@ import { useSession } from 'next-auth/react';
 import UpgradeRequired from '@/components/UpgradeRequired';
 import { StartFundraiserWizard, type RebookingHandoff } from '@/components/crm2/StartFundraiserWizard';
 import { RebookingTab } from '@/components/crm2/rebooking/RebookingTab';
+import { FunnelLeadsPanel } from '@/components/crm2/FunnelLeadsPanel';
 import { OrganizationImpactTab } from '@/components/crm2/OrganizationImpactTab';
 import { AttentionStrip } from '@/components/crm2/AttentionStrip';
 import { CampaignPriorityList, type PriorityListCampaign } from '@/components/crm2/CampaignPriorityList';
@@ -108,7 +109,7 @@ export default function FundraisersPage() {
     };
 
     // FR-RETENTION-1B-1: primary tab state (Campaigns / Organizations / Rebooking)
-    const [activeTab, setActiveTab] = useState<'campaigns' | 'organizations' | 'rebooking'>('campaigns');
+    const [activeTab, setActiveTab] = useState<'leads' | 'campaigns' | 'organizations' | 'rebooking'>('campaigns');
 
     // ── CRM-CC-4: Campaign Context drawer state ───────────────────────────
     const [detailCampaign, setDetailCampaign] = useState<(PriorityListCampaign & { triage: CampaignTriage }) | null>(null);
@@ -272,7 +273,7 @@ export default function FundraisersPage() {
                 role="tablist"
                 aria-label="Fundraiser CRM"
                 onKeyDown={(e) => {
-                    const keys = ['campaigns', 'organizations', 'rebooking'] as const;
+                    const keys = ['leads', 'campaigns', 'organizations', 'rebooking'] as const;
                     if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(e.key)) return;
                     e.preventDefault();
                     const idx = keys.indexOf(activeTab);
@@ -286,6 +287,7 @@ export default function FundraisersPage() {
                 }}
             >
                 {([
+                    { key: 'leads' as const, label: 'Leads' },
                     { key: 'campaigns' as const, label: 'Campaigns' },
                     { key: 'organizations' as const, label: 'Organizations' },
                     { key: 'rebooking' as const, label: 'Rebooking' },
@@ -308,6 +310,15 @@ export default function FundraisersPage() {
                     </button>
                 ))}
             </div>
+
+            {/* FR-FUNNEL-1: the pre-campaign funnel. Buckets are derived per request
+                by lib/growth/opportunityNextAction.ts, never stored, so this tab
+                cannot become a fourth competing pipeline vocabulary. */}
+            {activeTab === 'leads' && (
+                <div role="tabpanel" id="panel-leads" aria-labelledby="tab-leads">
+                    <FunnelLeadsPanel />
+                </div>
+            )}
 
             {activeTab === 'rebooking' && (
                 <div role="tabpanel" id="panel-rebooking" aria-labelledby="tab-rebooking">

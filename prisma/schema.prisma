@@ -60,6 +60,9 @@ model Business {
   // FR-RETENTION-4
   rebooking_submissions  RebookingSubmission[]    @relation("BusinessRebookingSubmissions")
   rebooking_opportunities RebookingOpportunity[]  @relation("BusinessRebookingOpportunities")
+  // FR-FUNNEL-1
+  funnel_inquiries        FundraiserInquiry[]      @relation("BusinessFunnelInquiries")
+  funnel_opportunities    FundraiserOpportunity[]  @relation("BusinessFunnelOpportunities")
 
   @@map("businesses")
 }
@@ -330,6 +333,9 @@ model Customer {
   rebooking_snapshots    RebookingSubmissionRevisionOrg[] @relation("OrgRevisionSnapshots")
   rebooking_opportunities RebookingOpportunity[]          @relation("OrgOpportunities")
   automation_actions      AutomationAction[]              @relation("OrgAutomationActions")
+  // FR-FUNNEL-1: acquisition-funnel history for this organization.
+  funnel_inquiries        FundraiserInquiry[]             @relation("OrgFunnelInquiries")
+  funnel_opportunities    FundraiserOpportunity[]         @relation("OrgFunnelOpportunities")
 
   // FR-RETENTION-1: composite parent key so tenant-scoped children can reference
   // (business_id, customer_id) and have Postgres enforce same-tenant ownership.
@@ -572,7 +578,22 @@ model FundraiserCampaign {
   // the partial unique index invoices_one_per_campaign. The list shape is what
   // Prisma requires for the back-relation; the database is what guarantees "one".
   invoices              Invoice[]
+  // FR-FUNNEL-1: the pre-campaign opportunity this campaign was launched from,
+  // if any. At most one — see the @unique on FundraiserOpportunity.campaign_id.
+  // Legacy campaigns created before the funnel existed simply have none.
+  funnel_opportunity    FundraiserOpportunity? @relation("OpportunityCampaign")
 
+  // FR-FUNNEL-1: intentionally redundant with the primary key on `id`.
+  // FundraiserCampaign has no business_id, so there is no [business_id, id] for
+  // a tenant-safe compound FK to point at. This composite key gives one to point
+  // at instead: an opportunity referencing [customer_id, campaign_id] can only
+  // resolve to a campaign owned by the SAME Customer, and the opportunity's own
+  // customer is already tenant-bound by a compound FK. Tenancy is therefore
+  // enforced transitively BY POSTGRES rather than by application code — and the
+  // check is stricter than business equality, because it also rejects a link to
+  // a different organization inside the same tenant. Adding this index cannot
+  // fail: (customer_id, id) is already unique by virtue of the primary key.
+  @@unique([customer_id, id])
   @@index([bundle_selection_status, bundle_selection_at])
   @@map("fundraiser_campaigns")
 }
@@ -1777,4 +1798,139 @@ model AutomationAction {
   @@index([business_id, status, action_type])
   @@index([business_id, seasonal_offering_id])
   @@map("automation_actions")
+}
+
+// ── FR-FUNNEL-1 · Fundraiser acquisition funnel foundation ──────────────────
+// Appended at end-of-file, following the FR-RETENTION convention, so the parked
+// PasswordResetToken hunk earlier in this file is never touched or reordered.
+//
+// TWO MODELS, TWO JOBS, DELIBERATELY NOT ONE:
+//   FundraiserInquiry     — an immutable FACT: an inquiry happened. Append-only.
+//   FundraiserOpportunity — mutable pre-campaign STATE: where this prospect sits.
+//
+// Conflating them is what creates competing sources of truth, and it is also
+// what makes duplicate handling hard. Kept apart, a nervous resubmit is simply
+// another honest inquiry row folded into the SAME opportunity — which is why
+// this design needs no time-window dedupe heuristic anywhere.
+//
+// Everything after conversion (waiting-for-coordinator, live, completed,
+// rebooking) is DERIVED from existing campaign and rebooking facts. No status
+// here duplicates them.
+
+/// Pre-campaign lifecycle. Terminal at `converted` and `lost`: once a campaign
+/// exists, FundraiserCampaign is authoritative and this row never moves again.
+enum FundraiserOpportunityStatus {
+  new
+  in_conversation
+  date_confirmed
+  converted
+  lost
+}
+
+/// Why a prospect did not proceed. A closed analytic vocabulary, so it is a real
+/// enum rather than free text — "why do prospects disappear" is unanswerable if
+/// every tenant spells the reasons differently. Losing a lead never deletes it.
+enum FundraiserLostReason {
+  no_response
+  date_unavailable
+  not_interested
+  postponed
+  duplicate
+  not_a_fit
+  chose_other_fundraiser
+  other
+}
+
+/// One inquiry, exactly as it arrived. Immutable: there is no `updated_at`,
+/// because editing history is how funnel reporting starts lying.
+model FundraiserInquiry {
+  id                     String   @id @default(uuid())
+  business_id            String
+  customer_id            String
+  /// NOT NULL by contract: an inquiry that belongs to no opportunity is an
+  /// orphan fact that no CRM surface would ever show. The route creates or
+  /// finds the opportunity FIRST, inside the same transaction.
+  opportunity_id         String
+  received_at            DateTime @default(now())
+  /// Controlled value from FUNDRAISER_SOURCE_CHANNELS in lib/fundraiserFunnel.ts,
+  /// not tenant-authored text. A String rather than a PG enum because this list
+  /// must grow with new ad channels without an ALTER TYPE migration.
+  source_channel         String   @default("tenant_website")
+  /// Free context only (campaign name, referrer, ad id). NEVER a grouping key.
+  source_detail          String?
+  /// Client-generated, one per submission attempt. The partial unique index
+  /// fundraiser_inquiries_business_submission_key is what makes a double-click
+  /// race-safe; see lib/orderIdempotency.ts for the established contract.
+  submission_key         String?
+  /// SHA-256 of the logical inquiry identity, so a key replayed with different
+  /// content fails truthfully instead of returning an unrelated row.
+  submission_fingerprint String?
+  contact_name           String
+  contact_email          String
+  contact_phone          String?
+  organization_name      String
+  /// Website / cause / delivery area / notes, preserved as readable text. These
+  /// have no dedicated columns and are not worth inventing any for at intake.
+  context                String?
+  storefront_slug        String?
+
+  business    Business              @relation("BusinessFunnelInquiries", fields: [business_id], references: [id], onDelete: Cascade)
+  customer    Customer              @relation("OrgFunnelInquiries", fields: [business_id, customer_id], references: [business_id, id], onDelete: Restrict)
+  opportunity FundraiserOpportunity @relation("OpportunityInquiries", fields: [business_id, opportunity_id], references: [business_id, id], onDelete: Restrict)
+
+  @@index([business_id, received_at])
+  @@index([business_id, source_channel])
+  @@index([business_id, opportunity_id])
+  @@map("fundraiser_inquiries")
+}
+
+/// Where one prospective fundraiser currently sits, before a campaign exists.
+model FundraiserOpportunity {
+  id                      String                      @id @default(uuid())
+  business_id             String
+  customer_id             String
+  status                  FundraiserOpportunityStatus @default(new)
+  /// Set by the first tenant reply — the prepared email going out, or the
+  /// "Mark as responded" control for a phone call. Response time is
+  /// first_response_at minus the first inquiry's received_at.
+  first_response_at       DateTime?
+  /// All three are DELIVERY/PICKUP days. That is the date a tenant and an
+  /// organization actually negotiate ("yes, October 17 works"), proven from the
+  /// coordinator portal, flyer, public page and launch gate. NOT the campaign
+  /// start, and NOT the supporter order deadline.
+  preferred_delivery_date DateTime?                   @db.Date
+  alternate_delivery_date DateTime?                   @db.Date
+  confirmed_delivery_date DateTime?                   @db.Date
+  participant_estimate    Int?
+  notes                   String?
+  lost_reason             FundraiserLostReason?
+  lost_at                 DateTime?
+  /// Null until conversion. Uniqueness is carried by @@unique([customer_id,
+  /// campaign_id]) below rather than by a second index on this column alone:
+  /// the compound FK pins any given campaign_id to exactly ONE customer_id
+  /// (campaign.id is the primary key), so two opportunities sharing a campaign
+  /// would necessarily share the customer too and collide on that composite.
+  /// One index, same guarantee. PostgreSQL permits many NULLs, which is exactly
+  /// what an un-converted funnel needs.
+  campaign_id             String?
+  converted_at            DateTime?
+  created_at              DateTime                    @default(now())
+  updated_at              DateTime                    @updatedAt
+
+  business  Business            @relation("BusinessFunnelOpportunities", fields: [business_id], references: [id], onDelete: Cascade)
+  customer  Customer            @relation("OrgFunnelOpportunities", fields: [business_id, customer_id], references: [business_id, id], onDelete: Restrict)
+  /// Tenant safety WITHOUT adding business_id to FundraiserCampaign: keying on
+  /// [customer_id, campaign_id] means the campaign must belong to the same
+  /// Customer, and this row's Customer is already tenant-bound above. Restrict
+  /// so a converted campaign cannot be deleted out from under its funnel history.
+  campaign  FundraiserCampaign? @relation("OpportunityCampaign", fields: [customer_id, campaign_id], references: [customer_id, id], onDelete: Restrict)
+  inquiries FundraiserInquiry[] @relation("OpportunityInquiries")
+
+  @@unique([business_id, id])
+  /// ONE campaign -> AT MOST ONE opportunity. Also the unique criterion Prisma
+  /// requires on the defining side of the 1-1 campaign relation.
+  @@unique([customer_id, campaign_id])
+  @@index([business_id, status])
+  @@index([business_id, customer_id])
+  @@map("fundraiser_opportunities")
 }

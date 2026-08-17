@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { findBusinessBySlug } from '@/lib/publicIdentity';
 
 /**
  * SF-2 — public storefront menu-email capture.
@@ -36,10 +37,8 @@ export async function POST(req: NextRequest) {
 
         // Resolve the tenant case-insensitively by slug (same pattern as the
         // public order route). Unknown slug → silent success, no write.
-        const business = await prisma.business.findFirst({
-            where: { slug: { equals: slug, mode: 'insensitive' } },
-            select: { name: true },
-        });
+        // FR-PUBLIC-IDENTITY-1: literal slug. ILIKE let "%" reach an arbitrary tenant.
+        const business = await findBusinessBySlug(prisma, slug, { name: true });
 
         if (!business) {
             return NextResponse.json({ success: true });

@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { PUBLIC_BUNDLE_VISIBILITY } from '@/lib/storefrontEligibility';
+import { normalizeSlug, NO_SUCH_SLUG } from '@/lib/publicIdentity';
 
 /**
  * Safely coerce a JSONB field from $queryRaw into a plain JS array.
@@ -36,12 +37,8 @@ export async function GET(
 
         // 1. Fetch Business by slug (using findFirst with mode insensitive for robustness)
         const business = await prisma.business.findFirst({
-            where: {
-                slug: {
-                    equals: slug.toLowerCase().trim(),
-                    mode: 'insensitive'
-                }
-            },
+            // FR-PUBLIC-IDENTITY-1: literal slug, never a LIKE pattern.
+            where: { slug: normalizeSlug(slug) ?? NO_SUCH_SLUG },
             select: { id: true, name: true, slug: true, logo_url: true }
         });
 

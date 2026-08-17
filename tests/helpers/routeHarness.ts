@@ -45,6 +45,10 @@ export interface PrismaMock {
 const MODELS = [
     'business', 'customer', 'user', 'fundraiserCampaign', 'campaignBundle',
     'order', 'orderItem', 'bundle', 'businessLead', 'document',
+    // FR-FUNNEL-1
+    'fundraiserInquiry', 'fundraiserOpportunity',
+    // FR-PUBLIC-IDENTITY-1: duplicate-organization disambiguation reads these.
+    'fundraiserOrganizationContact',
 ];
 
 const METHODS = [
@@ -96,8 +100,17 @@ export function createPrismaMock(config: PrismaMockConfig = {}): PrismaMock {
         calls.push({ model: '$queryRaw', method: 'raw', args: { sql, values } });
         return resolve('$queryRaw', { sql, values }, []);
     });
-    client.$executeRawUnsafe = jest.fn(async () => 0);
-    client.$queryRawUnsafe = jest.fn(async () => []);
+    // Recorded, not silent: FR-FUNNEL-1R takes an advisory lock through this
+    // path, and a test must be able to prove it happened BEFORE the customer
+    // lookup — ordering is the whole point of the lock.
+    client.$executeRawUnsafe = jest.fn(async (sql: string, ...values: any[]) => {
+        calls.push({ model: '$executeRawUnsafe', method: 'raw', args: { sql, values } });
+        return resolve('$executeRawUnsafe', { sql, values }, 0);
+    });
+    client.$queryRawUnsafe = jest.fn(async (sql: string, ...values: any[]) => {
+        calls.push({ model: '$queryRawUnsafe', method: 'raw', args: { sql, values } });
+        return resolve('$queryRawUnsafe', { sql, values }, []);
+    });
     client.$transaction = jest.fn(async (arg: any) =>
         typeof arg === 'function' ? arg(client) : Promise.all(arg)
     );

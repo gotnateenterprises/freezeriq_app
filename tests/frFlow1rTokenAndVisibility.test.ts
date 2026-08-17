@@ -251,6 +251,10 @@ describe('5. an inquiry from an EXISTING customer becomes visible', () => {
                     id: 'cust-retail', business_id: TENANT_A,
                     type: 'direct_customer', tags: [], contact_name: 'Jo', contact_phone: '555',
                 },
+                $queryRaw: [{
+                    id: 'cust-retail', business_id: TENANT_A,
+                    type: 'direct_customer', tags: [], contact_name: 'Jo', contact_phone: '555',
+                }],
                 'user.findFirst': { email: 'owner@a.com' },
             },
         }));
@@ -271,6 +275,10 @@ describe('5. an inquiry from an EXISTING customer becomes visible', () => {
                     id: 'cust-retail', business_id: TENANT_A,
                     type: 'direct_customer', tags: [], contact_name: 'Jo', contact_phone: '555',
                 },
+                $queryRaw: [{
+                    id: 'cust-retail', business_id: TENANT_A,
+                    type: 'direct_customer', tags: [], contact_name: 'Jo', contact_phone: '555',
+                }],
                 'user.findFirst': { email: 'owner@a.com' },
             },
         }));
@@ -287,6 +295,7 @@ describe('5. an inquiry from an EXISTING customer becomes visible', () => {
             results: {
                 'business.findFirst': { id: TENANT_A },
                 'customer.findFirst': null,
+                $queryRaw: [],
                 'user.findFirst': { email: 'owner@a.com' },
             },
         }));
@@ -302,6 +311,7 @@ describe('5. an inquiry from an EXISTING customer becomes visible', () => {
             results: {
                 'business.findFirst': { id: TENANT_A },
                 'customer.findFirst': { id: 'c1', business_id: TENANT_A, type: 'direct_customer', tags: [] },
+                $queryRaw: [{ id: 'c1', business_id: TENANT_A, type: 'direct_customer', tags: [] }],
                 'user.findFirst': null,
             },
         }));
@@ -313,13 +323,17 @@ describe('5. an inquiry from an EXISTING customer becomes visible', () => {
         useMock(createPrismaMock({
             results: {
                 'business.findFirst': { id: TENANT_A },
-                'customer.findFirst': (args: any) =>
-                    args?.where?.business_id === TENANT_A ? null : { id: 'foreign', business_id: TENANT_B },
+                // FR-PUBLIC-IDENTITY-1: candidates now arrive through a
+                // parameterized query. The foreign-tenant row is only returned
+                // if the handler forgets to scope, which is the point of the test.
+                $queryRaw: (args: any) =>
+                    args?.values?.[0] === TENANT_A ? [] : [{ id: 'foreign', business_id: TENANT_B, tags: [] }],
+                'customer.findFirst': null,
                 'user.findFirst': null,
             },
         }));
         await post(VALID);
-        expect(mock.firstCall('customer.findFirst')!.args.where.business_id).toBe(TENANT_A);
+        expect(mock.firstCall('$queryRaw.raw')!.args.values[0]).toBe(TENANT_A);
         for (const u of mock.callsTo('customer.update')) {
             expect(u.args.where.id).not.toBe('foreign');
         }
