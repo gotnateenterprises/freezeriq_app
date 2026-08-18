@@ -1,14 +1,21 @@
 /**
  * Flyer Download API
  *
- * ACCESS MODEL: Token-based (no session auth)
- * - GET gated by `portal_token` on FundraiserCampaign
- * - Returns a PDF flyer as a binary download
+ * ACCESS MODEL: TWO authenticated modes, no bearer credential in any URL.
  *
- * ACTOR: Fundraiser Coordinator
- * SCOPE: Single campaign (resolved from portal_token)
+ *   1. Coordinator — the coordinator session cookie. Campaign comes from the
+ *      session; nothing is read from the request.
+ *   2. Tenant staff — a signed-in NextAuth session plus ?campaignId=. The
+ *      campaign is re-checked against the caller's own business, so the id is
+ *      an argument, never an authorisation.
  *
- * Mirrors the exact pattern of /api/tracker/download
+ * FR-COORD-SEC-1B — this route previously accepted ?token=<portal_token>, which
+ * put the coordinator credential into the query string of a logged request. The
+ * tenant mode exists because the CRM's StartFundraiserWizard also downloads the
+ * flyer; removing the bearer without it would have broken that flow.
+ *
+ * ACTOR: Fundraiser Coordinator, or authenticated tenant staff
+ * SCOPE: Single campaign
  */
 
 import { NextResponse } from 'next/server';
@@ -17,22 +24,46 @@ import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
 import { generateFlyer, type FlyerBundle } from '@/lib/generateFlyer';
 import { Prisma } from '@prisma/client';
 import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
+import { auth } from '@/auth';
+import { resolveCoordinatorSession } from '@/lib/coordinatorSession';
+
+/**
+ * Resolve which campaign this caller may have, from authentication alone.
+ * Returns null when neither mode authorises anything — the caller cannot tell
+ * which mode failed, or whether the campaign exists.
+ */
+async function resolveAuthorizedCampaignId(req: Request): Promise<string | null> {
+    // Mode 1 — coordinator session.
+    const coordinator = await resolveCoordinatorSession();
+    if (coordinator) return coordinator.campaignId;
+
+    // Mode 2 — authenticated tenant staff, scoped to their own business.
+    const session = await auth();
+    const businessId = (session as any)?.user?.businessId as string | undefined;
+    if (!businessId) return null;
+
+    const campaignId = new URL(req.url).searchParams.get('campaignId');
+    if (!campaignId) return null;
+
+    // The id is checked against the caller's business, so supplying another
+    // tenant's campaign id resolves to nothing.
+    const owned = await prisma.fundraiserCampaign.findFirst({
+        where: { id: campaignId, customer: { business_id: businessId } },
+        select: { id: true },
+    });
+    return owned?.id ?? null;
+}
 
 export async function GET(req: Request) {
     try {
-        const { searchParams } = new URL(req.url);
-        const token = searchParams.get('token');
-
-        if (!token) {
-            return NextResponse.json(
-                { error: 'Missing token parameter' },
-                { status: 400 }
-            );
+        const campaignId = await resolveAuthorizedCampaignId(req);
+        if (!campaignId) {
+            return NextResponse.json({ error: 'Not authorized' }, { status: 401 });
         }
 
         // 1. Fetch campaign + customer
         const campaign = await prisma.fundraiserCampaign.findFirst({
-            where: { portal_token: token },
+            where: { id: campaignId },
             include: {
                 customer: {
                     select: {

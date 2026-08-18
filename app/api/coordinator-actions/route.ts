@@ -13,6 +13,7 @@
  */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 
 const VALID_ACTION_TYPES = new Set([
     'share_fundraiser',
@@ -29,30 +30,24 @@ const VALID_ACTION_TYPES = new Set([
 
 export async function POST(req: Request) {
     try {
+        // FR-COORD-SEC-1B: this used to take the coordinator credential in the
+        // request body. Authority now comes from the session cookie, and the
+        // guard also enforces the same-origin check this mutation needs.
+        const guard = await requireCoordinatorSession(req);
+        if (!guard.ok) return guard.response as NextResponse;
+
         const body = await req.json();
-        const { token, action_type, source, metadata } = body;
+        const { action_type, source, metadata } = body;
 
         // ── Validate ────────────────────────────────
-        if (!token || typeof token !== 'string') {
-            return NextResponse.json({ error: 'Missing token' }, { status: 400 });
-        }
         if (!action_type || !VALID_ACTION_TYPES.has(action_type)) {
             return NextResponse.json({ error: 'Invalid action_type' }, { status: 400 });
-        }
-
-        // ── Resolve campaign from portal_token ──────
-        const campaign = await prisma.fundraiserCampaign.findFirst({
-            where: { portal_token: token },
-            select: { id: true },
-        });
-        if (!campaign) {
-            return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
         }
 
         // ── Write event ─────────────────────────────
         await prisma.coordinatorActionEvent.create({
             data: {
-                campaign_id: campaign.id,
+                campaign_id: guard.campaignId,
                 action_type,
                 source: source || null,
                 metadata: metadata || null,

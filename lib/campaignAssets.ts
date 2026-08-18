@@ -30,17 +30,23 @@ export type CampaignAssetsResponse = {
 
 // ── Main Function ────────────────────────────────────────────────────
 
-export async function getCampaignAssetsByToken(
-  token: string
+/**
+ * FR-COORD-SEC-1B — takes an authorised campaign id, not a portal_token.
+ *
+ * The download URLs this returns used to carry `?token=<credential>`, which put
+ * the coordinator secret into the query string of four more logged requests.
+ * They are now bare paths: the download routes authenticate from the same
+ * session cookie as the rest of the portal.
+ */
+export async function getCampaignAssetsByCampaignId(
+  campaignId: string
 ): Promise<CampaignAssetsResponse> {
-  // 1. Validate token
-  if (!token || typeof token !== 'string' || token.trim().length === 0) {
-    throw new Error('Missing or invalid campaign token');
+  if (!campaignId || typeof campaignId !== 'string' || campaignId.trim().length === 0) {
+    throw new Error('Missing or invalid campaign id');
   }
 
-  // 2. Fetch campaign using same token-based lookup as coordinator portal
   const campaign = await prisma.fundraiserCampaign.findFirst({
-    where: { portal_token: token.trim() },
+    where: { id: campaignId.trim() },
     select: {
       id: true,
       name: true,
@@ -64,7 +70,7 @@ export async function getCampaignAssetsByToken(
       key: 'tracker',
       label: 'Download Printable Tracker',
       kind: 'download',
-      url: `/api/tracker/download?token=${token}`,
+      url: `/api/tracker/download`,
       available: true,
     },
 
@@ -73,7 +79,7 @@ export async function getCampaignAssetsByToken(
       key: 'flyer',
       label: 'Download Flyer',
       kind: 'download',
-      url: `/api/flyer/download?token=${token}`,
+      url: `/api/flyer/download`,
       available: true,
     },
 
@@ -82,7 +88,7 @@ export async function getCampaignAssetsByToken(
       key: 'packet',
       label: 'Download Full Packet (Optional)',
       kind: 'download',
-      url: `/api/packet/download?token=${token}`,
+      url: `/api/packet/download`,
       available: true,
     },
 
@@ -91,7 +97,7 @@ export async function getCampaignAssetsByToken(
       key: 'qr',
       label: 'Download QR Code',
       kind: 'download',
-      url: `/api/qr/download?token=${token}`,
+      url: `/api/qr/download`,
       available: true,
     },
   ];

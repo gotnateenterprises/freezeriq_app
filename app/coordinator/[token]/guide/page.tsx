@@ -1,267 +1,49 @@
-"use client";
+/**
+ * FR-COORD-SEC-1C-R — retired coordinator guide bearer route.
+ *
+ * `/coordinator/<token>/guide` used to authenticate from the credential in the
+ * path, exactly like its sibling `/coordinator/<token>`. The guide now lives
+ * inside the session-authenticated portal at `/coordinator/portal/guide`, so
+ * this route exists only to give old bookmarks and previously-sent emails the
+ * same neutral answer as the retired portal route instead of a bare 404.
+ *
+ * Like its sibling it deliberately does almost nothing:
+ *
+ *   - it does NOT read the token from params,
+ *   - it does NOT query portal_token,
+ *   - it does NOT exchange the value for a session,
+ *   - it does NOT redirect based on it.
+ *
+ * Every visitor sees the same page whether the value is a real credential, a
+ * rotated one, or nonsense, so the route cannot be used to test whether a
+ * campaign or credential exists.
+ *
+ * HONEST LIMITATION: this page cannot un-log anything. A browser that requests
+ * this URL has already put the value into the access log — that request happened
+ * before any of our code ran. This is precisely why FR-COORD-SEC-1D rotates every
+ * existing credential rather than relying on this page to contain the exposure.
+ *
+ * Rendered as a static server component: no client JavaScript reads the URL, so
+ * the value is not handed to anything at all.
+ */
+export const dynamic = 'force-static';
 
-import { useState, useEffect } from 'react';
+export const metadata = {
+    title: 'Coordinator link | FreezerIQ',
+    robots: { index: false, follow: false },
+};
 
-import {
-    Megaphone,
-    ArrowLeft,
-    CheckCircle2,
-    Share2,
-    DollarSign,
-    TrendingUp,
-    Mail,
-    ArrowRight,
-    Star,
-    Rocket,
-    Users,
-    AlertCircle
-} from 'lucide-react';
-import { useParams } from 'next/navigation';
-import Link from 'next/link';
-import { toast } from 'sonner';
-
-export default function SuccessGuide() {
-    const params = useParams();
-    const token = params.token as string;
-    const [campaign, setCampaign] = useState<any>(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const [loadError, setLoadError] = useState(false);
-
-    useEffect(() => {
-        if (!token) return;
-
-        // Access is validated server-side by the /api/coordinator/[token] route
-        // via portal_token lookup. No client-side plan gating or session check needed —
-        // coordinators are external users who access via private links.
-        fetch(`/api/coordinator/${token}`)
-            .then(res => {
-                if (!res.ok) {
-                    console.error('Guide page: coordinator API returned', res.status);
-                    setLoadError(true);
-                    setIsLoading(false);
-                    return null;
-                }
-                return res.json();
-            })
-            .then(data => {
-                if (!data || data.error || !data.id) {
-                    setLoadError(true);
-                } else {
-                    setCampaign(data);
-                }
-                setIsLoading(false);
-            })
-            .catch(() => {
-                setLoadError(true);
-                setIsLoading(false);
-            });
-    }, [token]);
-
-    const sections = [
-        {
-            icon: <TrendingUp className="text-indigo-600" />,
-            title: "1. Your Secret Dashboard",
-            desc: "This is your control center. Use it to record cash and Venmo sales instantly.",
-            tips: [
-                "Bookmark this page on your phone!",
-                "Add orders as soon as you get them to keep the scoreboard live.",
-                "See who has contributed and how close you are to the goal."
-            ],
-            color: "bg-indigo-50"
-        },
-        {
-            icon: <Megaphone className="text-emerald-600" />,
-            title: "2. The Public Order Form",
-            desc: "Your supporters see the live scoreboard and can place orders directly by emailing you!",
-            tips: [
-                "Share this link so supporters can browse meals and submit orders.",
-                "Orders are emailed directly to you for easy tracking.",
-                "The live scoreboard at the top keeps momentum going!"
-            ],
-            color: "bg-emerald-50"
-        },
-        {
-            icon: <DollarSign className="text-amber-600" />,
-            title: "3. Direct Online Payments",
-            desc: "Want payment to go directly to your organization's bank account, Venmo, or PayPal?",
-            tips: [
-                "Add your payment link in the Portal settings.",
-                "Direct donors to use your specific payment link for faster processing.",
-                "Let Laurie know if you need help setting this up."
-            ],
-            color: "bg-amber-50"
-        }
-    ];
-
-    if (isLoading) return <div className="min-h-screen flex items-center justify-center font-black animate-pulse">Loading Your Toolkit...</div>;
-
-    if (loadError || !campaign) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
-                <div className="text-center space-y-4 max-w-sm">
-                    <AlertCircle className="mx-auto text-red-500" size={48} />
-                    <h1 className="text-2xl font-black text-slate-900">Guide Not Found</h1>
-                    <p className="text-slate-500 font-medium">
-                        This link may be expired or incorrect. Check with your fundraiser organizer for the correct coordinator link.
-                    </p>
-                </div>
-            </div>
-        );
-    }
-
-    const slug = (campaign?.customer as any)?.business?.slug;
-    const publicUrl = slug && campaign?.id
-        ? `${window.location.origin}/shop/${slug}/fundraiser/${campaign.id}`
-        : `${window.location.origin}/fundraiser/${campaign?.public_token}`;
-
+export default function RetiredCoordinatorGuideLinkPage() {
     return (
-        <div className="min-h-screen bg-slate-50 pb-20 font-sans selection:bg-indigo-100 selection:text-indigo-900">
-            {/* Header */}
-            <header className="bg-white border-b border-slate-200 px-6 py-6 sticky top-0 z-50">
-                <div className="max-w-2xl mx-auto flex items-center justify-between">
-                    <Link href={`/coordinator/${token}`} className="flex items-center gap-2 text-slate-500 hover:text-indigo-600 font-black text-xs uppercase tracking-widest transition-colors">
-                        <ArrowLeft size={16} /> Back to Dashboard
-                    </Link>
-                    <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
-                            <Star size={16} fill="currentColor" />
-                        </div>
-                        <span className="font-black tracking-tighter text-xl">Success Guide</span>
-                    </div>
-                </div>
-            </header>
-
-            <main className="max-w-2xl mx-auto px-6 py-12 space-y-12">
-                {/* Hero */}
-                <div className="text-center space-y-4">
-                    <div className="inline-flex items-center gap-2 bg-indigo-100 text-indigo-700 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest">
-                        <Rocket size={14} /> Coordinator Toolkit
-                    </div>
-                    <h1 className="text-5xl font-black text-slate-900 tracking-tight leading-none">
-                        Let's CRUSH <br /> this fundraiser!
-                    </h1>
-                    <p className="text-lg text-slate-500 font-medium max-w-md mx-auto">
-                        Everything you need to promote {campaign?.name || 'your campaign'} and hit your <strong>{campaign?.bundle_goal || '100'} bundle goal</strong>.
-                    </p>
-                </div>
-
-                {/* Scoreboard Preview */}
-                <div className="bg-slate-900 rounded-[2.5rem] p-10 text-white relative overflow-hidden shadow-2xl">
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full -translate-y-20 translate-x-20 blur-3xl" />
-                    <div className="relative z-10 space-y-6">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center text-indigo-400">
-                                <Share2 size={24} />
-                            </div>
-                            <h2 className="text-2xl font-black tracking-tight">Promote Your Online Order Form</h2>
-                        </div>
-                        <p className="text-slate-400 font-medium">
-                            Share this link everywhere — texts, emails, Facebook, word-of-mouth! The more people who see your order form, the faster you hit your goal. Every share counts!
-                        </p>
-                        <div className="bg-white/5 rounded-2xl p-4 flex items-center justify-between gap-4 border border-white/10 group">
-                            <code className="text-xs font-mono text-indigo-300 truncate">{publicUrl}</code>
-                            <button
-                                onClick={() => {
-                                    navigator.clipboard.writeText(publicUrl);
-                                    toast.success("Public Link Copied!");
-                                }}
-                                className="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl text-xs font-black uppercase transition-all"
-                            >
-                                Copy Link
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                {/* The Plan */}
-                <div className="space-y-6">
-                    <h3 className="text-2xl font-black text-slate-900 px-2">The Success Plan</h3>
-                    <div className="space-y-4">
-                        {sections.map((s, i) => (
-                            <div key={i} className="bg-white rounded-3xl p-8 border border-slate-100 shadow-sm group hover:border-indigo-200 transition-all">
-                                <div className="flex items-start gap-6">
-                                    <div className={`w-14 h-14 ${s.color} rounded-2xl flex items-center justify-center shrink-0`}>
-                                        {s.icon}
-                                    </div>
-                                    <div className="space-y-3">
-                                        <h4 className="text-xl font-black text-slate-900">{s.title}</h4>
-                                        <p className="text-slate-500 font-medium leading-relaxed">{s.desc}</p>
-                                        <ul className="space-y-2 pt-2">
-                                            {s.tips.map((tip, idx) => (
-                                                <li key={idx} className="flex items-start gap-2 text-sm font-bold text-slate-600">
-                                                    <CheckCircle2 size={16} className="text-indigo-500 shrink-0 mt-0.5" />
-                                                    {tip}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Social Media Strategy — links to dashboard */}
-                <div className="bg-indigo-600 rounded-[2.5rem] p-10 text-white text-center space-y-4">
-                    <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center mx-auto">
-                        <Rocket size={28} />
-                    </div>
-                    <h3 className="text-2xl font-black tracking-tight">Ready to promote?</h3>
-                    <p className="text-indigo-100 font-medium">
-                        Use the share tools and copy scripts on your dashboard to spread the word.
-                    </p>
-                    <Link
-                        href={`/coordinator/${token}`}
-                        className="inline-flex items-center gap-2 bg-white text-indigo-600 px-6 py-3 rounded-xl font-black text-sm transition-all hover:scale-105 active:scale-95"
-                    >
-                        Go to Dashboard <ArrowRight size={16} />
-                    </Link>
-                </div>
-
-                {/* FAQ / Support */}
-                <div className="bg-white rounded-3xl p-8 border border-slate-100 text-center space-y-4">
-                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto text-slate-400">
-                        <Users size={32} />
-                    </div>
-                    <div>
-                        <h4 className="text-xl font-black text-slate-900">Need Help?</h4>
-                        <p className="text-slate-500 font-medium">Laurie is here to support you every step of the way.</p>
-                    </div>
-                    <a href="mailto:Laurie@MyFreezerChef.com" className="inline-flex items-center gap-2 text-indigo-600 font-black hover:underline underline-offset-4">
-                        <Mail size={18} /> Laurie@MyFreezerChef.com
-                    </a>
-                </div>
-
-                {/* Bottom CTA */}
-                <div className="text-center pt-10">
-                    <Link
-                        href={`/coordinator/${token}`}
-                        className="inline-flex items-center gap-3 bg-slate-900 hover:bg-black text-white px-10 py-5 rounded-full font-black text-xl shadow-2xl transition-all hover:scale-105 active:scale-95"
-                    >
-                        Go to My Dashboard <ArrowRight strokeWidth={3} />
-                    </Link>
-                </div>
-            </main>
-
-
-
-            {/* Sticky Mobile Share */}
-            <div className="fixed bottom-6 left-0 right-0 px-6 z-40 md:hidden">
-                <button
-                    onClick={() => {
-                        if (navigator.share) {
-                            navigator.share({
-                                title: `${campaign?.name} Fundraiser`,
-                                text: `Support our fundraiser and solve dinner!`,
-                                url: publicUrl
-                            });
-                        }
-                    }}
-                    className="w-full bg-indigo-600 text-white py-5 rounded-full font-black shadow-2xl shadow-indigo-500/40 flex items-center justify-center gap-3 active:scale-95 transition-all"
-                >
-                    <Share2 size={24} /> Share Order Page
-                </button>
+        <main className="min-h-screen flex items-center justify-center bg-slate-50 px-6">
+            <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-sm ring-1 ring-slate-200 text-center">
+                <h1 className="text-lg font-semibold text-slate-900">
+                    This coordinator link is no longer valid
+                </h1>
+                <p className="mt-3 text-sm text-slate-600">
+                    Please ask your FreezerIQ contact for a new link.
+                </p>
             </div>
-        </div>
+        </main>
     );
 }

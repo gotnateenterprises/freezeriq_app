@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { CheckCircle2, Circle, Mail, Phone, Loader2, Expand, Shrink } from 'lucide-react';
 import { toast } from 'sonner';
 
-export default function LiveTallySheet({ orders, availableBundles, token, onUpdate }: { orders: any[], availableBundles: any[], token: string, onUpdate: () => void }) {
+export default function LiveTallySheet({ orders, availableBundles, onUpdate }: { orders: any[], availableBundles: any[], onUpdate: () => void }) {
     const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
     const [isExpanded, setIsExpanded] = useState(false);
 
@@ -21,7 +21,7 @@ export default function LiveTallySheet({ orders, availableBundles, token, onUpda
     const handlePatch = async (orderId: string, field: string, value: any) => {
         setUpdatingIds(prev => new Set(prev).add(orderId));
         try {
-            const res = await fetch(`/api/coordinator/${token}`, {
+            const res = await fetch('/api/coordinator', {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

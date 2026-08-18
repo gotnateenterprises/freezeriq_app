@@ -10,6 +10,7 @@
  */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 
 export type CoordinatorActionSummary = {
     totalActions: number;
@@ -56,16 +57,16 @@ const ACTION_LABELS: Record<string, string> = {
     download_packet: 'Download Packet',
 };
 
-export async function GET(
-    req: Request,
-    { params }: { params: Promise<{ token: string }> }
-) {
+export async function GET(req: Request) {
     try {
-        const { token } = await params;
+        // FR-COORD-SEC-1B: authority comes from the session cookie, never a URL.
+        const guard = await requireCoordinatorSession(req);
+        if (!guard.ok) return guard.response as NextResponse;
+        const campaignId = guard.campaignId;
 
         // ── Resolve campaign ────────────────────────
         const campaign = await prisma.fundraiserCampaign.findFirst({
-            where: { portal_token: token },
+            where: { id: campaignId },
             select: { id: true },
         });
         if (!campaign) {

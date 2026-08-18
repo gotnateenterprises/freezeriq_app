@@ -33,6 +33,7 @@ import {
     type CampaignSection,
 } from '@/lib/growth/campaignSections';
 import type { CampaignPriority } from '@/lib/growth/nextAction';
+import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
 
 export interface PriorityListCampaign extends CampaignForTriage {
     id: string;
@@ -242,7 +243,7 @@ function CampaignRow({
         menuItems.push({ key: 'public', label: 'Public order page', href: `/shop/${c.business_slug}/fundraiser/${c.id}`, newTab: true });
     }
     if (!c.is_placeholder && c.portal_token) {
-        menuItems.push({ key: 'portal', label: 'Coordinator portal', href: `/coordinator/${c.portal_token}`, newTab: true });
+        menuItems.push({ key: 'portal', label: 'Coordinator portal', href: buildCoordinatorAccessUrl(null, c.portal_token), newTab: true });
     }
     if (!c.is_placeholder) {
         menuItems.push({ key: 'invoice', label: 'Create invoice', href: `/customers/${c.customer_id}?tab=fundraisers&action=invoice&campaignId=${c.id}` });

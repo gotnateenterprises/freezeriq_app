@@ -543,7 +543,15 @@ model FundraiserCampaign {
   external_payment_link String?
   mission_text          String?
   payment_instructions  String?
-  portal_token          String?    @unique @default(cuid())
+  // FR-COORD-SEC-1B — the `@default(cuid())` is gone on purpose.
+  // CUID v1 is a sortable identifier, not a secret, and a schema default is a
+  // silent one: any future create path that forgets this column would have been
+  // handed a weak coordinator credential without a single line of code saying so.
+  // Every runtime create path already passes mintCoordinatorPortalToken(); with
+  // no default, one that forgets now writes NULL and fails loudly instead.
+  // public_token keeps its default — it guards a deliberately public scoreboard
+  // and is explicitly out of scope for this phase.
+  portal_token          String?    @unique
   public_token          String?    @unique @default(cuid())
   participant_label     String     @default("Seller")
   group_label           String?
@@ -574,6 +582,8 @@ model FundraiserCampaign {
   orders                Order[]
   campaign_bundles      CampaignBundle[]
   coordinator_actions   CoordinatorActionEvent[]
+  // FR-COORD-SEC-1B — server-side coordinator sessions issued for this campaign.
+  coordinator_sessions  CoordinatorSession[]
   // INV-A: a campaign has at most ONE generated fundraiser invoice, enforced by
   // the partial unique index invoices_one_per_campaign. The list shape is what
   // Prisma requires for the back-relation; the database is what guarantees "one".
@@ -1933,4 +1943,45 @@ model FundraiserOpportunity {
   @@index([business_id, status])
   @@index([business_id, customer_id])
   @@map("fundraiser_opportunities")
+}
+
+// ── FR-COORD-SEC-1B · Coordinator session ───────────────────────────────────
+// Appended at end-of-file so the parked PasswordResetToken hunk earlier in this
+// file is never touched or reordered.
+//
+// WHY THIS TABLE EXISTS
+// The coordinator credential used to travel in the URL path and was re-sent on
+// every request, so one portal visit wrote the secret into Vercel's request log
+// a dozen times over. The fix moves the credential into the URL fragment, which
+// browsers never transmit, and exchanges it ONCE for an opaque session cookie.
+// This table is the server side of that session.
+//
+// WHY SERVER-STORED RATHER THAN A SIGNED STATELESS COOKIE
+// Revocation is a hard requirement: rotating a campaign's portal_token, or an
+// explicit logout, must end access immediately. A stateless cookie cannot be
+// revoked without a denylist, and a denylist is this table wearing a disguise.
+//
+// WHAT IS STORED
+// Only sha256(secret). The raw cookie value exists in the coordinator's browser
+// and nowhere else, so a database disclosure cannot be replayed as a session —
+// the same reasoning as OutreachRecipient.rebooking_token_hash.
+model CoordinatorSession {
+  id           String    @id @default(uuid())
+  campaign_id  String
+  /// sha256 of the opaque cookie secret. UNIQUE so a lookup is a single indexed
+  /// probe and two sessions can never collide on one digest.
+  session_hash String    @unique
+  created_at   DateTime  @default(now())
+  /// Fixed lifetime, set at creation. No sliding expiry in v1: a coordinator
+  /// whose session lapses simply re-opens the link they already have.
+  expires_at   DateTime
+  /// Set by logout and by portal_token rotation. Checked on every request.
+  revoked_at   DateTime?
+  last_used_at DateTime?
+
+  campaign FundraiserCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+
+  @@index([campaign_id])
+  @@index([expires_at])
+  @@map("coordinator_sessions")
 }

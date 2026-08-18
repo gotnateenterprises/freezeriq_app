@@ -80,8 +80,6 @@ interface SelectionState {
 // ── Props ────────────────────────────────────────────────────────────────────
 
 interface BundleSelectionStepProps {
-    /** The coordinator portal_token — used only to build the API path. */
-    token: string;
     /**
      * Called after the server confirms a successful selection so the parent
      * page can reveal the normal ordering workflow.
@@ -105,7 +103,7 @@ function familySetsEqual(a: string[], b: string[]): boolean {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function BundleSelectionStep({ token, onSelectionComplete }: BundleSelectionStepProps) {
+export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStepProps) {
     const [state, setState] = useState<SelectionState>({
         loading: true,
         submitting: false,
@@ -115,7 +113,7 @@ export function BundleSelectionStep({ token, onSelectionComplete }: BundleSelect
         completed: false,
     });
 
-    const apiPath = `/api/coordinator/${token}/bundle-selection`;
+    const apiPath = '/api/coordinator/bundle-selection';
 
     // ── Fetch current selection state ─────────────────────────────────────
 

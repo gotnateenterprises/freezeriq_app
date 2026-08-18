@@ -15,22 +15,19 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { generateQrCode } from '@/lib/generateQrCode';
 import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
+import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 
 export async function GET(req: Request) {
     try {
-        const { searchParams } = new URL(req.url);
-        const token = searchParams.get('token');
-
-        if (!token) {
-            return NextResponse.json(
-                { error: 'Missing token parameter' },
-                { status: 400 }
-            );
-        }
+        // FR-COORD-SEC-1B: the coordinator credential used to arrive here as
+        // ?token=<secret>, putting it into the query string of a logged request.
+        // Authority now comes from the coordinator session cookie.
+        const guard = await requireCoordinatorSession(req);
+        if (!guard.ok) return guard.response as NextResponse;
 
         // 1. Fetch campaign to validate token and get data for URL
         const campaign = await prisma.fundraiserCampaign.findFirst({
-            where: { portal_token: token },
+            where: { id: guard.campaignId },
             select: {
                 id: true,
                 public_token: true,

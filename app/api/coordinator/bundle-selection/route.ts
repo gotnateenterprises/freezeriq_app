@@ -27,7 +27,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import {
-  resolveCoordinatorCampaign,
+  resolveCoordinatorCampaignById,
   isCampaignClosed,
   isCanonicalFamilyTier,
   isCanonicalServes2Tier,
@@ -38,6 +38,7 @@ import {
   type BundleSelectionGetResponse,
   type BundleSelectionNotRequired,
 } from '@/lib/campaignBundleSelection';
+import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 
 // ── Concurrency config ───────────────────────────────────────────────────────
 
@@ -52,15 +53,15 @@ const PRISMA_SERIALIZATION_ERROR = 'P2034';
 
 // ── GET ───────────────────────────────────────────────────────────────────────
 
-export async function GET(
-  _req: Request,
-  { params }: { params: Promise<{ token: string }> }
-): Promise<NextResponse> {
+export async function GET(req: Request): Promise<NextResponse> {
   try {
-    const { token } = await params;
+    // FR-COORD-SEC-1B: authority comes from the session cookie, never a URL.
+    const guard = await requireCoordinatorSession(req);
+    if (!guard.ok) return guard.response as NextResponse;
+    const campaignId = guard.campaignId;
 
     // 1. Resolve token → campaign → business
-    const campaign = await resolveCoordinatorCampaign(token);
+    const campaign = await resolveCoordinatorCampaignById(campaignId);
     if (!campaign) {
       return NextResponse.json(
         { error: 'Invalid coordinator link' },
@@ -134,12 +135,12 @@ export async function GET(
 
 // ── POST ──────────────────────────────────────────────────────────────────────
 
-export async function POST(
-  req: Request,
-  { params }: { params: Promise<{ token: string }> }
-): Promise<NextResponse> {
+export async function POST(req: Request): Promise<NextResponse> {
   try {
-    const { token } = await params;
+    // FR-COORD-SEC-1B: authority comes from the session cookie, never a URL.
+    const guard = await requireCoordinatorSession(req);
+    if (!guard.ok) return guard.response as NextResponse;
+    const campaignId = guard.campaignId;
 
     // 1. Parse and validate request body
     let body: unknown;
@@ -196,7 +197,7 @@ export async function POST(
     }
 
     // 2. Pre-transaction: resolve token → campaign → business
-    const campaign = await resolveCoordinatorCampaign(token);
+    const campaign = await resolveCoordinatorCampaignById(campaignId);
     if (!campaign) {
       return NextResponse.json(
         { error: 'Invalid coordinator link' },
@@ -239,8 +240,7 @@ export async function POST(
         const result = await runActivationTransaction(
           campaign.id,
           campaign.businessId,
-          familyIds,
-          token
+            familyIds
         );
         return result;
       } catch (err: unknown) {
@@ -307,8 +307,7 @@ export async function POST(
 async function runActivationTransaction(
   campaignId: string,
   expectedBusinessId: string,
-  familyIds: string[],
-  _portalToken: string // kept for context; not stored in the event
+  familyIds: string[]
 ): Promise<NextResponse> {
   return await prisma.$transaction(
     async (tx) => {

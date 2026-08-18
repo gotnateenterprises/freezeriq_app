@@ -10,6 +10,7 @@ import {
     ORG_SHARE_HELPER_TEXT,
     ORG_SHARE_ADMIN_MANAGED_NOTE,
 } from '@/lib/orgShareForm';
+import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
 
 type Prefill = { customerId?: string; orgName?: string; goal?: number };
 
@@ -308,7 +309,7 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
             }
 
             const origin = window.location.origin;
-            const portalUrl = campaign.portal_token ? `${origin}/coordinator/${campaign.portal_token}` : null;
+            const portalUrl = campaign.portal_token ? buildCoordinatorAccessUrl(origin, campaign.portal_token) : null;
             const orderUrl = branding?.business_slug && campaign.id
                 ? `${origin}/shop/${branding.business_slug}/fundraiser/${campaign.id}`
                 : null;
@@ -347,7 +348,7 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
 
     // Flyer URL: /api/flyer/download uses ?token= (portal token), not ?campaignId=
     const flyerUrl = kit?.campaign?.portal_token
-        ? `/api/flyer/download?token=${kit.campaign.portal_token}`
+        ? `/api/flyer/download?campaignId=${kit.campaign.id}`
         : null;
 
     // ── RENDER ────────────────────────────────────────────────────────────────

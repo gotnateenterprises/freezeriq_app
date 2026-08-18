@@ -17,24 +17,18 @@ import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
 import { Prisma } from '@prisma/client';
 import { generatePromoScripts, type BundleSummary } from '@/lib/generatePromoScripts';
 import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
+import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 
-export async function GET(
-    req: Request,
-    { params }: { params: Promise<{ token: string }> }
-) {
+export async function GET(req: Request) {
     try {
-        const { token } = await params;
-
-        if (!token || token.length < 8) {
-            return NextResponse.json(
-                { error: 'Invalid token' },
-                { status: 400 }
-            );
-        }
+        // FR-COORD-SEC-1B: was /api/promo-scripts/[token]; the credential is no
+        // longer in the URL. Authority comes from the coordinator session.
+        const guard = await requireCoordinatorSession(req);
+        if (!guard.ok) return guard.response as NextResponse;
 
         // 1. Fetch Campaign + Org Name
         const campaign = await prisma.fundraiserCampaign.findFirst({
-            where: { portal_token: token },
+            where: { id: guard.campaignId },
             include: {
                 customer: {
                     select: {

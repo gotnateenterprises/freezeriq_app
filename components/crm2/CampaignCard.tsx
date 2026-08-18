@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { StageChip } from './StageChip';
 import { BundleSelectionStatusCard } from './BundleSelectionStatusCard';
+import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
 
 export function CampaignCard({ c, businessSlug }: { c: any; businessSlug?: string }) {
     const closed = Boolean(c.closed_at) || ['Closed', 'Settled', 'Completed', 'Archived'].includes(c.status);
@@ -27,7 +28,7 @@ export function CampaignCard({ c, businessSlug }: { c: any; businessSlug?: strin
                     </div>
                     <div className="mt-2.5 flex flex-wrap gap-1.5">
                         {businessSlug && <Kit href={`/shop/${businessSlug}/fundraiser/${c.id}`} label="🛒 Public order page" />}
-                        {c.portal_token && <Kit href={`/coordinator/${c.portal_token}`} label="🎯 Coordinator portal" />}
+                        {c.portal_token && <Kit href={buildCoordinatorAccessUrl(null, c.portal_token)} label="🎯 Coordinator portal" />}
                         {c.public_token && <Kit href={`/fundraiser/${c.public_token}`} label="🏆 Scoreboard" />}
                     </div>
                 </>

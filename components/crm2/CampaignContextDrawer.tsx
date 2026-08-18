@@ -38,6 +38,7 @@ import type { PriorityListCampaign } from './CampaignPriorityList';
 import type { CampaignTriage } from '@/lib/growth/nextAction';
 import { formatBundleProgress } from '@/lib/growth/campaignSections';
 import { detailSections, detailDateLine } from '@/lib/growth/campaignContextUi';
+import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
 
 interface CoordinatorInfo {
     contact_name: string | null;
@@ -281,7 +282,7 @@ export function CampaignContextDrawer({
                                     </Link>
                                     {!c.is_placeholder && c.portal_token && (
                                         <a
-                                            href={`/coordinator/${c.portal_token}`}
+                                            href={buildCoordinatorAccessUrl(null, c.portal_token)}
                                             target="_blank"
                                             rel="noreferrer"
                                             className="inline-flex items-center gap-1.5 min-h-[44px] px-3.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"

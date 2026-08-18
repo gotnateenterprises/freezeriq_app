@@ -20,22 +20,19 @@ import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
 import { generateFullPacket } from '@/lib/generateFullPacket';
 import type { FlyerBundle } from '@/lib/generateFlyer';
 import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
+import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 
 export async function GET(req: Request) {
     try {
-        const { searchParams } = new URL(req.url);
-        const token = searchParams.get('token');
-
-        if (!token) {
-            return NextResponse.json(
-                { error: 'Missing token parameter' },
-                { status: 400 }
-            );
-        }
+        // FR-COORD-SEC-1B: the coordinator credential used to arrive here as
+        // ?token=<secret>, putting it into the query string of a logged request.
+        // Authority now comes from the coordinator session cookie.
+        const guard = await requireCoordinatorSession(req);
+        if (!guard.ok) return guard.response as NextResponse;
 
         // 1. Fetch campaign + customer
         const campaign = await prisma.fundraiserCampaign.findFirst({
-            where: { portal_token: token },
+            where: { id: guard.campaignId },
             include: {
                 customer: {
                     select: {

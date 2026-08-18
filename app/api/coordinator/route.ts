@@ -22,6 +22,7 @@ import { prisma } from '@/lib/db';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
 import { buildBundlePriceMap } from '@/lib/pricing';
 import { resolveCampaignOrderMode, validateBundleEligibility } from '@/lib/campaignOrderBundles';
+import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 
 /**
  * Phase 7E-1C: Returns true if the campaign has been server-closed.
@@ -33,16 +34,16 @@ function isCampaignClosed(campaign: any): boolean {
     return Boolean(campaign.closed_at) || campaign.status === 'Closed';
 }
 
-export async function GET(
-    req: Request,
-    { params }: { params: Promise<{ token: string }> }
-) {
+export async function GET(req: Request) {
     try {
-        const { token } = await params;
+        // FR-COORD-SEC-1B: authority comes from the session cookie, never a URL.
+        const guard = await requireCoordinatorSession(req);
+        if (!guard.ok) return guard.response as NextResponse;
+        const campaignId = guard.campaignId;
 
         // 1. Fetch Campaign with Business Info by portal_token (private coordinator access)
         let campaign = await prisma.fundraiserCampaign.findFirst({
-            where: { portal_token: token },
+            where: { id: campaignId },
             include: {
                 customer: {
                     select: {
@@ -85,7 +86,7 @@ export async function GET(
         });
 
         if (!campaign) {
-            console.warn(`Coordinator GET: no campaign found for token (length=${token.length})`);
+            console.warn('Coordinator GET: session resolved to no campaign');
             return NextResponse.json({ error: "Portal not found" }, { status: 404 });
         }
 
@@ -190,18 +191,18 @@ export async function GET(
     }
 }
 
-export async function POST(
-    req: Request,
-    { params }: { params: Promise<{ token: string }> }
-) {
+export async function POST(req: Request) {
     try {
-        const { token } = await params;
+        // FR-COORD-SEC-1B: authority comes from the session cookie, never a URL.
+        const guard = await requireCoordinatorSession(req);
+        if (!guard.ok) return guard.response as NextResponse;
+        const campaignId = guard.campaignId;
         const body = await req.json();
         const { customerName, items, totalAmount, deliveryAddress, participantName, email, phone } = body;
 
         // 1. Fetch Campaign & Check Plan
         const campaign = await prisma.fundraiserCampaign.findFirst({
-            where: { portal_token: token },
+            where: { id: campaignId },
             include: {
                 customer: {
                     include: {
@@ -339,17 +340,17 @@ export async function POST(
     }
 }
 
-export async function PUT(
-    req: Request,
-    { params }: { params: Promise<{ token: string }> }
-) {
+export async function PUT(req: Request) {
     try {
-        const { token } = await params;
+        // FR-COORD-SEC-1B: authority comes from the session cookie, never a URL.
+        const guard = await requireCoordinatorSession(req);
+        if (!guard.ok) return guard.response as NextResponse;
+        const campaignId = guard.campaignId;
         const body = await req.json();
         const { paymentInstructions, externalPaymentLink } = body;
 
         const campaign = await prisma.fundraiserCampaign.findFirst({
-            where: { portal_token: token },
+            where: { id: campaignId },
             include: {
                 customer: {
                     include: {
@@ -397,12 +398,12 @@ export async function PUT(
  * - Uses atomic updateMany with WHERE guards
  * - Does NOT modify campaign.total_sales (totals derive from filtered queries)
  */
-export async function DELETE(
-    req: Request,
-    { params }: { params: Promise<{ token: string }> }
-) {
+export async function DELETE(req: Request) {
     try {
-        const { token } = await params;
+        // FR-COORD-SEC-1B: authority comes from the session cookie, never a URL.
+        const guard = await requireCoordinatorSession(req);
+        if (!guard.ok) return guard.response as NextResponse;
+        const campaignId = guard.campaignId;
         const body = await req.json();
         const { orderId } = body;
 
@@ -412,7 +413,7 @@ export async function DELETE(
 
         // 1. Resolve campaign from token
         const campaign = await prisma.fundraiserCampaign.findFirst({
-            where: { portal_token: token },
+            where: { id: campaignId },
             // Phase 7E-1C: also fetch closed_at and status for the closed-campaign gate below
             select: { id: true, closed_at: true, status: true }
         });
@@ -468,12 +469,12 @@ export async function DELETE(
  * - Uses atomic updateMany with WHERE guards
  * - Does NOT modify campaign.total_sales (totals derive from filtered queries)
  */
-export async function PATCH(
-    req: Request,
-    { params }: { params: Promise<{ token: string }> }
-) {
+export async function PATCH(req: Request) {
     try {
-        const { token } = await params;
+        // FR-COORD-SEC-1B: authority comes from the session cookie, never a URL.
+        const guard = await requireCoordinatorSession(req);
+        if (!guard.ok) return guard.response as NextResponse;
+        const campaignId = guard.campaignId;
         const body = await req.json();
         const { action, orderId } = body;
 
@@ -483,7 +484,7 @@ export async function PATCH(
 
         // 1. Resolve campaign from token
         const campaign = await prisma.fundraiserCampaign.findFirst({
-            where: { portal_token: token },
+            where: { id: campaignId },
             // Phase 7E-1C: also fetch closed_at and status for the closed-campaign gate below
             select: { id: true, closed_at: true, status: true }
         });

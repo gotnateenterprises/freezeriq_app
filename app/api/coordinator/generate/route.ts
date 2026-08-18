@@ -13,6 +13,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { callGemini, getGeminiApiKey } from '@/lib/ai/gemini';
 import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
+import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 
 const MAX_GENERATIONS = 40;
 
@@ -42,12 +43,12 @@ function buildPrompt(channel: string, campaign: any, publicUrl: string): string 
     }
 }
 
-export async function POST(
-    req: Request,
-    { params }: { params: Promise<{ token: string }> }
-) {
+export async function POST(req: Request) {
     try {
-        const { token } = await params;
+        // FR-COORD-SEC-1B: authority comes from the session cookie, never a URL.
+        const guard = await requireCoordinatorSession(req);
+        if (!guard.ok) return guard.response as NextResponse;
+        const campaignId = guard.campaignId;
         const body = await req.json();
         const { channel } = body;
 
@@ -57,7 +58,7 @@ export async function POST(
 
         // 1. Fetch campaign with org name
         const campaign = await prisma.fundraiserCampaign.findFirst({
-            where: { portal_token: token },
+            where: { id: campaignId },
             include: {
                 customer: {
                     select: {

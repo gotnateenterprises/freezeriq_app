@@ -54,6 +54,46 @@ function resolveOrigin(source: Request | string): string {
  * @param source - A Request object (API routes), origin string (client), or env var
  * @param tokens - portal_token and/or public_token for the campaign
  */
+/**
+ * FR-COORD-SEC-1B — the canonical coordinator origin.
+ *
+ * Coordinator access is pinned to the FreezerIQ platform domain rather than the
+ * dynamic request origin. The session cookie is host-only (`__Host-` prefix, no
+ * Domain attribute), so it belongs to exactly one host; issuing links from
+ * whichever domain happened to serve the request would scatter sessions across
+ * tenant storefront domains that cannot see each other's cookies.
+ */
+export const CANONICAL_COORDINATOR_ORIGIN = 'https://www.freezeriqapp.com';
+
+export function resolveCoordinatorOrigin(source?: Request | string | null): string {
+    // Production always uses the canonical platform origin.
+    if (process.env.NODE_ENV === 'production') return CANONICAL_COORDINATOR_ORIGIN;
+    // Dev/preview: follow the caller so localhost and preview URLs work.
+    if (source) return resolveOrigin(source);
+    const env = (process.env.NEXTAUTH_URL ?? '').trim();
+    if (env) { try { return new URL(env).origin; } catch { /* fall through */ } }
+    return CANONICAL_COORDINATOR_ORIGIN;
+}
+
+/**
+ * FR-COORD-SEC-1B — THE coordinator link.
+ *
+ * The credential goes after `#`. Browsers never transmit a fragment, so the
+ * request this URL produces is exactly `GET /coordinator/access` and the secret
+ * never reaches a server log. `/coordinator/access` then exchanges it, once, in
+ * a request body, for a session cookie.
+ *
+ * This is the only supported way to build a coordinator link. The previous
+ * `/coordinator/<token>` shape put the credential in the request path, where
+ * Vercel recorded it on every visit.
+ */
+export function buildCoordinatorAccessUrl(
+    source: Request | string | null | undefined,
+    portalToken: string
+): string {
+    return `${resolveCoordinatorOrigin(source)}/coordinator/access#${encodeURIComponent(portalToken)}`;
+}
+
 export function buildFundraiserUrls(
     source: Request | string,
     tokens: TokenInputs
@@ -62,10 +102,12 @@ export function buildFundraiserUrls(
 
     return {
         coordinatorUrl: tokens.portalToken
-            ? `${origin}/coordinator/${tokens.portalToken}`
+            ? buildCoordinatorAccessUrl(source, tokens.portalToken)
             : null,
+        // The guide lives inside the portal now, so it is reached through the
+        // same one-time exchange rather than by pasting the credential again.
         coordinatorGuideUrl: tokens.portalToken
-            ? `${origin}/coordinator/${tokens.portalToken}/guide`
+            ? buildCoordinatorAccessUrl(source, tokens.portalToken)
             : null,
         publicUrl: tokens.publicToken
             ? `${origin}/fundraiser/${tokens.publicToken}`

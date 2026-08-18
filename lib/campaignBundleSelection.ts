@@ -95,18 +95,25 @@ export function isCanonicalServes2Tier(servingTier: string | null | undefined): 
 // ── Campaign resolution ───────────────────────────────────────────────────────
 
 /**
- * Resolves a coordinator portal_token to a campaign with its business chain.
+ * Resolves an authorised campaign id to a campaign with its business chain.
+ *
+ * FR-COORD-SEC-1B — this used to take a coordinator portal_token. It no longer
+ * does: the credential never travels past the session exchange, so the only
+ * thing a coordinator route can present is the campaign id its session is bound
+ * to. Taking an id here is what makes that impossible to get wrong — there is
+ * no longer a function in this codebase that turns a URL-borne token into a
+ * campaign.
  *
  * Trusted ownership path:
- *   portal_token → FundraiserCampaign → Customer → Business
+ *   CoordinatorSession → campaign_id → FundraiserCampaign → Customer → Business
  *
- * Returns null when no campaign matches the token.
+ * Returns null when no campaign matches.
  */
-export async function resolveCoordinatorCampaign(
-  token: string
+export async function resolveCoordinatorCampaignById(
+  campaignId: string
 ): Promise<ResolvedCoordinatorCampaign | null> {
   const campaign = await prisma.fundraiserCampaign.findFirst({
-    where: { portal_token: token },
+    where: { id: campaignId },
     select: {
       id: true,
       name: true,
