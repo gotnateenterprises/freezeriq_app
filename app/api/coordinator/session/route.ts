@@ -77,13 +77,27 @@ export async function POST(req: Request) {
     }
 }
 
-/** Explicit logout: revoke server-side, then clear the cookie. */
+/**
+ * Explicit logout: revoke server-side, then clear the cookie.
+ *
+ * Idempotent by design. No cookie, an expired session, and an already-revoked
+ * session all succeed, so this can never be used to probe whether a session
+ * existed.
+ *
+ * FR-COORD-SEC-1D-L: only a genuine infrastructure failure reaches the catch,
+ * and it must NOT report success — the session would still be live while the
+ * coordinator believed they had signed out. The cookie is deliberately left in
+ * place on that path so a retry can still identify which session to revoke.
+ */
 export async function DELETE(req: Request) {
     try {
         if (!isSameOriginMutation(req)) return refuse();
         await revokeCurrentCoordinatorSession();
         return NextResponse.json({ ok: true });
     } catch {
-        return NextResponse.json({ ok: true });
+        return NextResponse.json(
+            { ok: false, error: 'We could not log you out. Please try again.' },
+            { status: 500 }
+        );
     }
 }

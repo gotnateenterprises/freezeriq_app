@@ -36,6 +36,7 @@ import { QuietLinks } from '@/components/coordinator/QuietLinks';
 import { DeliveryPrep } from '@/components/coordinator/DeliveryPrep';
 import { WhatsNext } from '@/components/coordinator/WhatsNext';
 import { BundleSelectionStep } from '@/components/coordinator/BundleSelectionStep';
+import { LogoutButton } from '@/components/coordinator/LogoutButton';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 
@@ -543,20 +544,26 @@ export default function CoordinatorPortal() {
             <Toaster position="top-center" toastOptions={{ duration: 4000 }} />
             {/* Nav */}
             <div className="bg-white/70 backdrop-blur-xl border-b border-white/20 px-6 py-4 sticky top-0 z-10 shadow-sm">
-                <div className="max-w-xl mx-auto flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white">
+                <div className="max-w-xl mx-auto flex justify-between items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white shrink-0">
                             <Target size={16} />
                         </div>
-                        <span className="font-black tracking-tight text-lg">Coordinator Portal</span>
+                        <span className="font-black tracking-tight text-lg truncate">Coordinator Portal</span>
                     </div>
-                    <button
-                        onClick={() => setShowSettingsModal(true)}
-                        className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-all"
-                        title="Payment Settings"
-                    >
-                        <Settings size={20} />
-                    </button>
+                    {/* Top-level coordinator controls. Logout is deliberately a
+                        labelled control rather than an icon, so signing out on a
+                        shared or borrowed device is obvious. */}
+                    <div className="flex items-center gap-1 shrink-0">
+                        <button
+                            onClick={() => setShowSettingsModal(true)}
+                            className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-all"
+                            title="Payment Settings"
+                        >
+                            <Settings size={20} />
+                        </button>
+                        <LogoutButton />
+                    </div>
                 </div>
             </div>
 

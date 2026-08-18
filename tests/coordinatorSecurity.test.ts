@@ -66,6 +66,10 @@ const ADDED = [
     'app/api/campaign-assets/route.ts',
     'app/api/promo-scripts/route.ts',
     'components/analytics/SafeAnalytics.tsx',
+    // FR-COORD-SEC-1D-L — the logout control must be swept by every credential
+    // and client-storage assertion below, exactly like the code it sits beside.
+    'lib/coordinatorLogout.ts',
+    'components/coordinator/LogoutButton.tsx',
 ];
 const RUNTIME = [...walk('app'), ...walk('lib'), ...walk('components')]
     .filter((f) => TRACKED.has(f) || ADDED.includes(f));

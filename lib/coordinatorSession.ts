@@ -127,21 +127,50 @@ export async function createCoordinatorSession(campaignId: string): Promise<{
     return { secret, session };
 }
 
+/**
+ * The cookie's scope, defined once.
+ *
+ * FR-COORD-SEC-1D-L-R: setting and clearing MUST use identical attributes. A
+ * browser matches a Set-Cookie to an existing cookie by name/domain/path, and
+ * the `__Host-` prefix additionally REQUIRES Secure, Path=/ and no Domain — on
+ * the deletion as much as on the original. Sharing one definition is what makes
+ * the two impossible to drift apart.
+ */
+function coordinatorSessionCookieScope() {
+    return {
+        httpOnly: true,
+        secure: isProd(),
+        sameSite: 'lax' as const,
+        path: '/',
+    };
+}
+
 /** Write the session cookie. Production attributes are not negotiable. */
 export async function setCoordinatorSessionCookie(secret: string): Promise<void> {
     const store = await cookies();
     store.set(coordinatorSessionCookieName(), secret, {
-        httpOnly: true,
-        secure: isProd(),
-        sameSite: 'lax',
-        path: '/',
+        ...coordinatorSessionCookieScope(),
         maxAge: Math.floor(COORDINATOR_SESSION_TTL_MS / 1000),
     });
 }
 
+/**
+ * Expire the cookie explicitly.
+ *
+ * NOT `store.delete()`: Next serialises that as `name=; Path=/; Expires=1970`
+ * with NO Secure attribute, and a `__Host-` prefixed cookie without Secure is
+ * rejected outright by the browser — so the deletion is discarded and the real
+ * cookie survives its full TTL. Proven against the installed runtime and in a
+ * browser. Max-Age=0 expires it; the 1970 Expires is the belt-and-braces form
+ * for any client that honours only the older attribute.
+ */
 export async function clearCoordinatorSessionCookie(): Promise<void> {
     const store = await cookies();
-    store.delete(coordinatorSessionCookieName());
+    store.set(coordinatorSessionCookieName(), '', {
+        ...coordinatorSessionCookieScope(),
+        maxAge: 0,
+        expires: new Date(0),
+    });
 }
 
 async function readCoordinatorSessionSecret(): Promise<string | null> {
