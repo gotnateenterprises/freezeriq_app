@@ -51,6 +51,9 @@ const MODELS = [
     'fundraiserOrganizationContact',
     // FR-FLOW-2A: the campaign's primary coordinator.
     'fundraiserCampaignCoordinator',
+    // FR-ACCEPTANCE-1: the fundraiser address book.
+    'fundraiserContact',
+    'fundraiserContactPoint',
 ];
 
 const METHODS = [

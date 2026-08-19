@@ -49,6 +49,8 @@ import {
     IDENTITY_LOCK_SQL,
 } from '@/lib/publicIdentity';
 import { resolveFundraiserCustomer, IDENTITY_REVIEW_TAG } from '@/lib/fundraiserCustomerResolution';
+import { ensureInquiryOrganizationContact } from '@/lib/inquiryContact';
+import { normalizeWebsiteUrl } from '@/lib/websiteUrl';
 
 /**
  * Deliberately permissive: this only rejects input that cannot be an address at
@@ -137,12 +139,21 @@ export async function POST(req: Request) {
             slug, organizationName, contactEmail, contactName, contactPhone,
         });
 
+        // FR-ACCEPTANCE-1: the submitted website, normalised to https. Optional —
+        // a blank stays blank, and an unusable value is simply not recorded.
+        const websiteResult = normalizeWebsiteUrl(website);
+        const normalizedWebsite = websiteResult.ok ? websiteResult.url : null;
+
         // Context the form collects that has no dedicated column. Preserved as
         // readable notes rather than thrown away; no schema invented for it.
         const inquiryContext = [
             `Fundraiser inquiry submitted from the ${slug} storefront.`,
             deliveryLocation ? `Delivery/pickup area: ${cleanText(deliveryLocation, 300)}` : null,
-            website ? `Website: ${cleanText(website, 300)}` : null,
+            // FR-ACCEPTANCE-1: normalised server-side, so a person may type
+            // "thebestbrewcoffee.com" the way they would say it out loud. A
+            // rejected address is dropped rather than failing the whole enquiry —
+            // losing a fundraiser lead over a mistyped website would be absurd.
+            normalizedWebsite ? `Website: ${normalizedWebsite}` : null,
             cause ? `Cause: ${cleanText(cause, 500)}` : null,
             notes ? `Notes: ${cleanText(notes, 2000)}` : null,
         ].filter(Boolean).join('\n');
@@ -312,6 +323,29 @@ export async function POST(req: Request) {
                             storefront_slug: typeof slug === 'string' ? slug : null,
                         },
                         select: { id: true },
+                    });
+
+                    // 4. FR-ACCEPTANCE-1 — the person who wrote in becomes a contact
+                    //    of this organisation.
+                    //
+                    //    Inside the SAME transaction as the inquiry, because an
+                    //    inquiry recorded while its author is not is exactly the
+                    //    split this fixes: the organisation existed, the enquiry
+                    //    existed, and the address book was empty, so Launch
+                    //    Fundraiser reported "no active contacts" about the very
+                    //    person who had just asked for a fundraiser.
+                    //
+                    //    This makes them SELECTABLE, not appointed. The
+                    //    relationship role is 'relationship_contact', never
+                    //    'coordinator' — filling in a form is not agreeing to run
+                    //    the fundraiser, and FR-FLOW-2A's campaign coordinator
+                    //    remains the only record of that deliberate tenant choice.
+                    await ensureInquiryOrganizationContact(tx, {
+                        businessId,
+                        customerId,
+                        name: contactName,
+                        email: contactEmail,
+                        phone: contactPhone,
                     });
 
                     return { customerId, opportunityId, inquiryId: inquiry.id, createdCustomer };

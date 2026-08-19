@@ -242,9 +242,21 @@ export default function RaiseFundsPage() {
                                 </div>
 
                                 <div className="space-y-2">
-                                    <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Website</label>
+                                    <label className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                                        Website <span className="font-medium text-slate-400">(optional)</span>
+                                    </label>
+                                    {/* FR-ACCEPTANCE-1 — text, not type="url".
+                                        A browser refuses to validate type="url" without a scheme, so
+                                        someone typing their own address the way they say it out loud
+                                        ("thebestbrewcoffee.com") was told it was invalid, with nothing
+                                        on screen explaining that the fix was to type "https://" first.
+                                        The server normalises this, so the input's job is only to let
+                                        a person write down their website. */}
                                     <input
-                                        type="url"
+                                        type="text"
+                                        inputMode="url"
+                                        autoComplete="url"
+                                        placeholder="thebestbrewcoffee.com"
                                         value={formData.website}
                                         onChange={e => setFormData({ ...formData, website: e.target.value })}
                                         className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"

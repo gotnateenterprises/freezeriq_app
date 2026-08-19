@@ -12,9 +12,10 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Mail, CalendarCheck, CalendarClock, Rocket, XCircle } from 'lucide-react';
+import { Loader2, Mail, CalendarCheck, CalendarClock, Rocket, XCircle, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { LaunchFundraiserDialog } from '@/components/crm2/LaunchFundraiserDialog';
+import { RespondToInquiryDialog, type RespondTarget } from '@/components/crm2/RespondToInquiryDialog';
 
 type Bucket = 'new_leads' | 'needs_follow_up' | 'waiting_on_date' | 'ready_to_create_campaign' | 'closed';
 
@@ -33,6 +34,69 @@ interface Opportunity {
     response_hours: number | null;
     customer: { id: string; name: string; contact_name: string | null; contact_email: string | null; contact_phone: string | null };
     action: { label: string; reason: string; kind: string } | null;
+}
+
+/**
+ * FR-ACCEPTANCE-1 — a lead date that is not saved until the tenant says so.
+ *
+ * THE DEFECT THIS FIXES
+ * These two fields used an UNCONTROLLED `<input type="date">` whose `onChange`
+ * fired a network write immediately. Chrome's date picker emits change events
+ * while you move between months, so paging from August to September silently
+ * saved September 19th and popped a "Delivery date confirmed" toast — the
+ * tenant had committed a delivery date they were only browsing past.
+ *
+ * WHY THIS IS NOT A NEW DATE PICKER
+ * The deadline field in the Launch Fundraiser dialog behaves correctly and is
+ * the SAME native `<input type="date">`. The repository has no date-picker
+ * library and no reusable calendar component — CalendarWidget is a Google
+ * Calendar embed. What makes the launch field safe is not its widget, it is
+ * that `onChange` only sets React state and nothing persists until the tenant
+ * presses a button. That is the property being reused here.
+ *
+ * A native input cannot tell "clicked a day" from "paged a month" — the browser
+ * reports both as a change. So rather than guess, the commit moves to an
+ * explicit action: the value follows the picker, and Save writes it.
+ */
+function LeadDateField({
+    icon, label, value, disabled, onCommit,
+}: {
+    icon: React.ReactNode;
+    label: string;
+    value: string;
+    disabled?: boolean;
+    onCommit: (date: string) => void;
+}) {
+    const [draft, setDraft] = useState(value);
+    // Re-sync when the server value changes (another save, or a refresh).
+    useEffect(() => { setDraft(value); }, [value]);
+
+    const dirty = draft !== value && draft !== '';
+
+    return (
+        <span className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+            <label className="inline-flex items-center gap-1.5">
+                {icon} {label}
+                <input
+                    type="date"
+                    value={draft}
+                    disabled={disabled}
+                    onChange={(e) => setDraft(e.target.value)}
+                    className="rounded-lg border border-slate-200 px-2 py-1 dark:border-slate-700 dark:bg-slate-800"
+                />
+            </label>
+            {dirty && (
+                <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onCommit(draft)}
+                    className="rounded-lg bg-indigo-600 px-2 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+                >
+                    Save
+                </button>
+            )}
+        </span>
+    );
 }
 
 /** Display order matches the order a lead actually moves through them. */
@@ -63,6 +127,8 @@ export function FunnelLeadsPanel() {
     const [busyId, setBusyId] = useState<string | null>(null);
     // FR-FLOW-2B: which opportunity, if any, is being launched right now.
     const [launchingId, setLaunchingId] = useState<string | null>(null);
+    // FR-ACCEPTANCE-1: which lead, if any, we are replying to.
+    const [respondingTo, setRespondingTo] = useState<RespondTarget | null>(null);
 
     const load = useCallback(() => {
         setLoading(true);
@@ -149,37 +215,51 @@ export function FunnelLeadsPanel() {
                                     </div>
 
                                     <div className="mt-3 flex flex-wrap items-center gap-2">
+                                        {/* FR-ACCEPTANCE-1 — the real reply leads, and looks like it.
+                                            "Mark responded" stays for a reply that happened on the
+                                            phone or from a personal inbox, but as the quiet secondary
+                                            action it actually is: it records history, it does not
+                                            contact anybody. */}
                                         {!o.first_response_at && (
-                                            <button
-                                                disabled={busyId === o.id}
-                                                onClick={() => mutate(o.id, { action: 'mark_responded' }, 'Marked as responded')}
-                                                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
-                                            >
-                                                <Mail size={13} /> Mark responded
-                                            </button>
+                                            <>
+                                                <button
+                                                    disabled={busyId === o.id}
+                                                    onClick={() => setRespondingTo({
+                                                        opportunityId: o.id,
+                                                        contactName: o.customer.contact_name,
+                                                        contactEmail: o.customer.contact_email,
+                                                        organizationName: o.customer.name,
+                                                    })}
+                                                    className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+                                                >
+                                                    <Send size={13} /> Respond to inquiry
+                                                </button>
+                                                <button
+                                                    disabled={busyId === o.id}
+                                                    onClick={() => mutate(o.id, { action: 'mark_responded' }, 'Marked as responded')}
+                                                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                                                    title="Use this if you already replied by phone or from your own inbox"
+                                                >
+                                                    <Mail size={13} /> I replied elsewhere
+                                                </button>
+                                            </>
                                         )}
 
-                                        <label className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
-                                            <CalendarClock size={13} /> Preferred
-                                            <input
-                                                type="date"
-                                                defaultValue={o.preferred_delivery_date ? o.preferred_delivery_date.slice(0, 10) : ''}
-                                                disabled={busyId === o.id}
-                                                onChange={(e) => e.target.value && mutate(o.id, { action: 'set_dates', preferred_delivery_date: e.target.value }, 'Preferred delivery date saved')}
-                                                className="rounded-lg border border-slate-200 px-2 py-1 dark:border-slate-700 dark:bg-slate-800"
-                                            />
-                                        </label>
+                                        <LeadDateField
+                                            icon={<CalendarClock size={13} />}
+                                            label="Preferred"
+                                            value={o.preferred_delivery_date ? o.preferred_delivery_date.slice(0, 10) : ''}
+                                            disabled={busyId === o.id}
+                                            onCommit={(d) => mutate(o.id, { action: 'set_dates', preferred_delivery_date: d }, 'Preferred delivery date saved')}
+                                        />
 
-                                        <label className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
-                                            <CalendarCheck size={13} /> Confirm
-                                            <input
-                                                type="date"
-                                                defaultValue={o.confirmed_delivery_date ? o.confirmed_delivery_date.slice(0, 10) : ''}
-                                                disabled={busyId === o.id}
-                                                onChange={(e) => e.target.value && mutate(o.id, { action: 'confirm_date', confirmed_delivery_date: e.target.value }, 'Delivery date confirmed')}
-                                                className="rounded-lg border border-slate-200 px-2 py-1 dark:border-slate-700 dark:bg-slate-800"
-                                            />
-                                        </label>
+                                        <LeadDateField
+                                            icon={<CalendarCheck size={13} />}
+                                            label="Confirm"
+                                            value={o.confirmed_delivery_date ? o.confirmed_delivery_date.slice(0, 10) : ''}
+                                            disabled={busyId === o.id}
+                                            onCommit={(d) => mutate(o.id, { action: 'confirm_date', confirmed_delivery_date: d }, 'Delivery date confirmed')}
+                                        />
 
                                         {/* FR-FLOW-2B: this was a dead label telling the tenant to go
                                             somewhere else, and there was nowhere else to go — conversion
@@ -216,6 +296,19 @@ export function FunnelLeadsPanel() {
             <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
                 <XCircle size={12} /> Leads marked not proceeding are kept, never deleted — the reason is what tells you where prospects drop out.
             </p>
+
+            {respondingTo && (
+                <RespondToInquiryDialog
+                    target={respondingTo}
+                    onClose={() => setRespondingTo(null)}
+                    // Only a genuinely successful send records the response — the
+                    // whole point of this control is that what we store matches
+                    // what actually left the building.
+                    onResponded={() => {
+                        mutate(respondingTo.opportunityId, { action: 'mark_responded' }, 'Response recorded');
+                    }}
+                />
+            )}
 
             {launchingId && (
                 <LaunchFundraiserDialog

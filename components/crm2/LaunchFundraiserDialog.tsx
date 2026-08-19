@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Rocket, Copy, Check, Lock } from 'lucide-react';
+import { Loader2, Rocket, Copy, Check, Lock, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { AWAITING_COORDINATOR_SETUP_LABEL } from '@/lib/campaignDisplayStage';
 
@@ -91,12 +91,18 @@ export function LaunchFundraiserDialog({
                 }
                 setCtx(data);
                 setName(`${data.organization.name} Fundraiser`);
-                // Default to the organization's current primary coordinator, which is
-                // the answer the tenant means almost every time.
-                const preferred =
-                    data.coordinatorCandidates.find((c: CoordinatorCandidate) => c.isPrimaryRelationship)
-                    ?? data.coordinatorCandidates[0];
-                if (preferred) setOrgContactId(preferred.orgContactId);
+                // FR-ACCEPTANCE-1 — no pre-selection, deliberately.
+                //
+                // This used to default to the organization's primary relationship,
+                // falling back to whoever came first. Now that the person who
+                // submits an enquiry automatically becomes an organization contact,
+                // that fallback would quietly nominate them as coordinator — and
+                // the person who fills in a web form is often a parent or an office
+                // administrator, not whoever will actually run the fundraiser.
+                //
+                // Appointing a coordinator sends them a credential and makes them
+                // responsible for the setup. That is a decision, so it is left to
+                // the tenant to make one.
             } catch {
                 if (alive) { toast.error('Could not load this opportunity.'); onClose(); }
             } finally {
@@ -162,6 +168,34 @@ export function LaunchFundraiserDialog({
     const canSubmit =
         !busy && !!name.trim() && !!endDate && !!orgContactId && familyCount >= 1
         && selectionLimit >= 1 && selectionLimit <= familyCount;
+
+    /**
+     * FR-ACCEPTANCE-1 — say WHY the button is off.
+     *
+     * The tenant met a greyed-out "Create & Prepare Coordinator Setup" with no
+     * explanation, next to an empty coordinator field, and had no way to know
+     * which of five requirements was missing. The gate itself is right — FR-FLOW-2
+     * cannot mint a coordinator setup link without a coordinator — but a disabled
+     * control that will not say what it wants is just a dead end.
+     *
+     * Ordered the way someone fills the form in, so the first thing named is the
+     * first thing to go and do.
+     */
+    const blockingReason = ((): string | null => {
+        if (!name.trim()) return 'Enter a fundraiser name.';
+        if (!endDate) return 'Choose the last day supporters may place orders.';
+        if (!orgContactId) {
+            return ctx && ctx.coordinatorCandidates.length === 0
+                ? 'This organization has no contacts yet. Add one to choose a primary coordinator.'
+                : 'Choose the primary coordinator who will set this fundraiser up.';
+        }
+        if (familyCount === 0) return 'Select at least one bundle option for the coordinator to choose from.';
+        if (selectionLimit < 1) return 'The coordinator must choose at least one bundle option.';
+        if (selectionLimit > familyCount) {
+            return `You have asked the coordinator to choose ${selectionLimit}, but only offered ${familyCount}.`;
+        }
+        return null;
+    })();
 
     return (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4">
@@ -268,11 +302,38 @@ export function LaunchFundraiserDialog({
                             <div>
                                 <label htmlFor="lf-coord" className="mb-1 block text-xs font-bold text-slate-500">Primary coordinator</label>
                                 {ctx.coordinatorCandidates.length === 0 ? (
-                                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
-                                        This organization has no active contacts. Add one before launching.
-                                    </p>
+                                    /* FR-ACCEPTANCE-1 — a dead end became a next step.
+                                       This used to say only "add one before launching", with
+                                       nowhere to add one, so the tenant had to cancel the dialog
+                                       and go hunting. Anyone who enquires now becomes an
+                                       organization contact automatically, so this state should be
+                                       rare; when it happens, it links straight to the place that
+                                       fixes it. */
+                                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900 dark:bg-amber-950/40">
+                                        <p className="text-xs text-amber-800 dark:text-amber-300">
+                                            This organization has no contacts on file yet. A fundraiser needs
+                                            one person to set it up and receive the secure link.
+                                        </p>
+                                        <a
+                                            href={`/customers/${ctx.organization.id}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700"
+                                        >
+                                            <UserPlus size={13} /> Add a contact
+                                        </a>
+                                        <p className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+                                            Opens the organization in a new tab. Come back and reopen this
+                                            dialog once the contact is saved.
+                                        </p>
+                                    </div>
                                 ) : (
                                     <select id="lf-coord" className={inputCls} value={orgContactId} onChange={(e) => setOrgContactId(e.target.value)}>
+                                        {/* Deliberately unselected until the tenant chooses. The
+                                            person who filled in the enquiry form is a contact of the
+                                            organization, which is not the same as having agreed to
+                                            run the fundraiser — so they are offered, never assumed. */}
+                                        <option value="">Choose a coordinator…</option>
                                         {ctx.coordinatorCandidates.map((c) => (
                                             <option key={c.orgContactId} value={c.orgContactId}>
                                                 {c.displayName}{c.email ? ` · ${c.email}` : ''}
@@ -323,17 +384,25 @@ export function LaunchFundraiserDialog({
                             </p>
                         </div>
 
-                        <div className="flex justify-end gap-2">
-                            <button onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold dark:border-slate-700">Cancel</button>
-                            <button
-                                onClick={submit}
-                                disabled={!canSubmit}
-                                aria-busy={busy}
-                                className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
-                            >
-                                {busy ? <Loader2 className="animate-spin" size={15} /> : <Rocket size={15} />}
-                                Create &amp; Prepare Coordinator Setup
-                            </button>
+                        <div className="flex flex-col items-end gap-2">
+                            {blockingReason && (
+                                <p aria-live="polite" className="text-right text-xs font-semibold text-amber-700 dark:text-amber-400">
+                                    {blockingReason}
+                                </p>
+                            )}
+                            <div className="flex justify-end gap-2">
+                                <button onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold dark:border-slate-700">Cancel</button>
+                                <button
+                                    onClick={submit}
+                                    disabled={!canSubmit}
+                                    aria-busy={busy}
+                                    title={blockingReason ?? undefined}
+                                    className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                                >
+                                    {busy ? <Loader2 className="animate-spin" size={15} /> : <Rocket size={15} />}
+                                    Create &amp; Prepare Coordinator Setup
+                                </button>
+                            </div>
                         </div>
                     </div>
                 )}
