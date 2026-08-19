@@ -4,7 +4,8 @@ import { prisma } from '@/lib/db';
 import { resolveVariantSize, getServingMultiplier } from '@/lib/serving_multipliers';
 import { buildBundlePriceMap, findInactiveBundleNames } from '@/lib/pricing';
 import { resolveCampaignOrderMode, validateBundleEligibility } from '@/lib/campaignOrderBundles';
-import { isCampaignClosed } from '@/lib/campaignBundleSelection';
+import { isCampaignClosed, isCampaignPastOrderDeadline } from '@/lib/campaignBundleSelection';
+import { isValidIanaTimeZone } from '@/lib/tenantTimezone';
 import { validateSubmissionKey, buildSubmissionFingerprint } from '@/lib/orderIdempotency';
 import { normalizeSlug, NO_SUCH_SLUG } from '@/lib/publicIdentity';
 
@@ -138,9 +139,12 @@ export async function POST(req: Request) {
         // Must run BEFORE buildBundlePriceMap, order creation, payment, or email.
         // Non-campaign orders skip this (no campaignId → no campaign → no gate).
         if (campaign) {
+            // Supporter submission, so the ordering deadline applies. The zone
+            // is the server-resolved Business row — never anything the client sent.
             const bundleMode = await resolveCampaignOrderMode(
                 campaign,
-                businessId
+                businessId,
+                business.timezone
             );
             const eligibility = validateBundleEligibility(bundleMode, bundleIds);
             if (!eligibility.ok) {
@@ -328,13 +332,30 @@ export async function POST(req: Request) {
                 // is NOT re-run inside the transaction — it performs its own queries
                 // against the base client and re-running it here was outside the
                 // authorized scope for this phase.
+                //
+                // FR-ORDERABILITY-1: the ordering deadline is rechecked here too,
+                // for the same reason the closed state is. A campaign can cross
+                // midnight between the preflight and the insert, and a deadline
+                // enforced only in the stale preflight would let that order through.
                 if (campaign) {
                     const currentCampaign = await tx.fundraiserCampaign.findUnique({
                         where: { id: campaign.id },
-                        select: { closed_at: true, status: true },
+                        select: {
+                            closed_at: true, status: true, end_date: true,
+                            // FR-ORDERABILITY-1-R: re-read the tenant zone from the
+                            // durable Business row inside the transaction rather than
+                            // trusting the value captured during preflight, so the
+                            // deadline decision here rests on current stored data.
+                            customer: { select: { business: { select: { timezone: true } } } },
+                        },
                     });
 
-                    if (!currentCampaign || isCampaignClosed(currentCampaign)) {
+                    const tenantZone = currentCampaign?.customer?.business?.timezone;
+
+                    if (!currentCampaign
+                        || isCampaignClosed(currentCampaign)
+                        || !isValidIanaTimeZone(tenantZone)
+                        || isCampaignPastOrderDeadline(currentCampaign, tenantZone)) {
                         throw new CampaignClosedError();
                     }
                 }

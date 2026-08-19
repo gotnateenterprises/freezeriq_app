@@ -15,6 +15,19 @@ model Business {
   custom_domain          String?            @unique
   logo_url               String?
   contact_email          String?
+  // FR-TENANT-TZ-1 — the tenant's authoritative IANA timezone.
+  //
+  // A fundraiser's end_date is a date-only business deadline, so deciding
+  // whether it has passed is a question about a calendar day in SOMEBODY's
+  // timezone. There was no such authority before this field, and the only
+  // alternatives were all wrong for a SaaS product: the server's zone, the
+  // database's zone (UTC), or the browser's. This is the answer, and it is
+  // read from the durable tenant row on every check.
+  //
+  // "America/Chicago" is the LAUNCH DEFAULT for the one tenant running
+  // fundraisers today. It is deliberately NOT hardcoded in any comparison
+  // helper — a future tenant simply stores its own zone here.
+  timezone               String             @default("America/Chicago")
   created_at             DateTime           @default(now())
   current_period_end     DateTime?
   plan                   SubscriptionPlan   @default(BASE)

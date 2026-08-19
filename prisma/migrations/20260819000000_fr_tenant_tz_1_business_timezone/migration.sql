@@ -1,0 +1,41 @@
+-- FR-TENANT-TZ-1 · Tenant timezone authority
+--
+-- WHAT THIS ADDS
+-- One column: businesses.timezone, an IANA timezone identifier.
+--
+-- WHY IT EXISTS
+-- FundraiserCampaign.end_date is a DATE — a date-only supporter ordering
+-- deadline with no time component. Deciding whether that deadline has passed is
+-- therefore a question about a calendar day, and a calendar day only exists
+-- inside some timezone. FreezerIQ had no authority for that question. Every
+-- available substitute was wrong for a multi-tenant product:
+--
+--   the database's zone   — this cluster runs UTC, so a Central fundraiser
+--                           advertised as ending August 31 would have stopped
+--                           taking orders at 7:00 PM Central on August 31;
+--   the server's zone     — a deployment-region accident, not a business fact;
+--   the browser's zone    — supplied by the client, so not authority at all.
+--
+-- This column is the answer, and it is read from the durable tenant row on
+-- every eligibility decision — both the public listing and the authoritative
+-- order-submission recheck.
+--
+-- ABOUT THE DEFAULT
+-- 'America/Chicago' is the LAUNCH DEFAULT. It is correct for the single tenant
+-- currently running fundraisers and it makes this migration a pure backfill-free
+-- addition: all three existing rows become valid immediately. It is deliberately
+-- NOT hardcoded in any comparison helper — a future tenant stores its own zone
+-- here and the same code follows it.
+--
+-- WHY THIS IS SAFE TO APPLY BEFORE THE CODE THAT USES IT
+-- The column is additive, NOT NULL with a default, and referenced by no existing
+-- query. Currently deployed application code selects explicit column lists and
+-- Prisma models that do not mention `timezone`, so it simply ignores the new
+-- column. That makes migration-first release choreography safe.
+--
+-- WHAT IS DELIBERATELY NOT HERE
+-- No table rebuild, no index, no enum change, no data write beyond the column
+-- default, and nothing touching fundraiser_campaigns, orders or invoices. The
+-- parked password-reset work is not part of this migration.
+
+ALTER TABLE "businesses" ADD COLUMN "timezone" TEXT NOT NULL DEFAULT 'America/Chicago';

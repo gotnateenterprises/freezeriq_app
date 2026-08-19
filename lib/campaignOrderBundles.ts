@@ -24,7 +24,8 @@
  */
 
 import { prisma } from '@/lib/db';
-import { isCampaignClosed } from '@/lib/campaignBundleSelection';
+import { isCampaignClosed, isCampaignPastOrderDeadline } from '@/lib/campaignBundleSelection';
+import { isValidIanaTimeZone } from '@/lib/tenantTimezone';
 import { normalizeStrictServingTier } from '@/lib/serving_multipliers';
 
 // ── Domain types ─────────────────────────────────────────────────────────────
@@ -67,7 +68,13 @@ export type BundleEligibilityResult =
  */
 export async function resolveCampaignOrderMode(
     campaign: any,
-    businessId: string
+    businessId: string,
+    /**
+     * The tenant's IANA zone, from the durable Business row. Supplied ONLY by
+     * supporter-facing callers; see the deadline block below for why the
+     * tenant-facing tools deliberately omit it. Never client-supplied.
+     */
+    deadlineTimeZone?: string | null
 ): Promise<CampaignOrderBundleMode> {
     // 1. Closed: Check campaign dates/status first.
     if (isCampaignClosed(campaign)) {
@@ -78,6 +85,47 @@ export async function resolveCampaignOrderMode(
             safeMessage: 'Campaign is closed. Order changes are no longer permitted.',
             activeOrderableBundleIds: []
         };
+    }
+
+    // 1b. FR-ORDERABILITY-1-R: the SUPPORTER ordering deadline.
+    //
+    // Checked BEFORE the bundle-selection matrix so it applies to every mode.
+    // The original defect was never a legacy-bypass problem: CRM4 Runtime Test
+    // reached `selected` through the modern coordinator gate and stayed
+    // orderable weeks past its end_date, because nothing on the order path
+    // consulted the deadline at all. Sitting ahead of the branch is what makes
+    // legacy and modern campaigns expire identically.
+    //
+    // WHY THE TIMEZONE IS A PARAMETER, AND WHY IT IS OPTIONAL
+    // The deadline is a supporter-facing rule. Only the two public paths — the
+    // fundraiser page and the public order route — pass a zone, and they pass
+    // the durable Business.timezone. The tenant-facing callers (coordinator
+    // portal, tracker, pickup sheet, flyer, packet, promo scripts) deliberately
+    // pass none: a coordinator must still be able to pull a tracker or a
+    // pickup sheet after supporter ordering has closed, which is exactly when
+    // they need it most. Omitting the zone therefore means "this caller is not
+    // a supporter ordering path", not "skip the check for convenience".
+    if (deadlineTimeZone !== undefined && deadlineTimeZone !== null) {
+        // A tenant whose zone cannot be resolved must not keep selling. Fail
+        // closed, and say nothing about the configuration to the customer.
+        if (!isValidIanaTimeZone(deadlineTimeZone)) {
+            return {
+                allowed: false,
+                mode: 'invalid',
+                reasonCode: 'timezone_unavailable',
+                safeMessage: 'This fundraiser is temporarily unavailable. Please try again later.',
+                activeOrderableBundleIds: []
+            };
+        }
+        if (isCampaignPastOrderDeadline(campaign, deadlineTimeZone)) {
+            return {
+                allowed: false,
+                mode: 'closed',
+                reasonCode: 'deadline_passed',
+                safeMessage: 'This fundraiser is no longer accepting orders.',
+                activeOrderableBundleIds: []
+            };
+        }
     }
 
     const { bundle_selection_status, bundle_selection_limit, id: campaignId } = campaign;

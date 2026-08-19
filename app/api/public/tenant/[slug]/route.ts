@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { PUBLIC_BUNDLE_VISIBILITY } from '@/lib/storefrontEligibility';
 import { normalizeSlug, NO_SUCH_SLUG } from '@/lib/publicIdentity';
+import { isValidIanaTimeZone } from '@/lib/tenantTimezone';
 
 /**
  * Safely coerce a JSONB field from $queryRaw into a plain JS array.
@@ -39,7 +40,10 @@ export async function GET(
         const business = await prisma.business.findFirst({
             // FR-PUBLIC-IDENTITY-1: literal slug, never a LIKE pattern.
             where: { slug: normalizeSlug(slug) ?? NO_SUCH_SLUG },
-            select: { id: true, name: true, slug: true, logo_url: true }
+            // FR-ORDERABILITY-1-R: timezone is the tenant's authoritative zone
+            // for the fundraiser ordering deadline. Server-side only; it is not
+            // part of the public payload.
+            select: { id: true, name: true, slug: true, logo_url: true, timezone: true }
         });
 
         if (!business) {
@@ -132,8 +136,21 @@ export async function GET(
         console.log(`[Storefront API] Metadata ready for ${Object.keys(recipeMetadata).length} recipes`);
 
         // 4. Fetch Active Fundraisers
+        //
+        // FR-ORDERABILITY-1-R: discovery must use the SAME business-day rule as
+        // the order path. This cluster runs UTC, so CURRENT_DATE is the UTC date
+        // and would drop a Central fundraiser five hours early every evening —
+        // the listing and the order gate would silently disagree. The tenant's
+        // stored zone is applied instead.
+        //
+        // A tenant whose zone cannot be resolved lists NOTHING rather than
+        // falling back to UTC: an unlistable fundraiser is a far smaller problem
+        // than one advertised after the order path has begun refusing it. The
+        // zone is validated in application code first, so an unusable value can
+        // never reach the query and break the whole storefront payload.
         console.log(`[Storefront API] Fetching active fundraisers for business ${business.id}`);
-        const fundraisers: any[] = await prisma.$queryRaw`
+        const tenantZone = business.timezone;
+        const fundraisers: any[] = !isValidIanaTimeZone(tenantZone) ? [] : await prisma.$queryRaw`
             SELECT fc.id, fc.name, fc.about_text, fc.mission_text, fc.payment_instructions, 
                    fc.external_payment_link, fc.end_date, fc.goal_amount, fc.total_sales,
                    fc.participant_label,
@@ -141,8 +158,24 @@ export async function GET(
             FROM fundraiser_campaigns fc
             JOIN customers c ON fc.customer_id = c.id
             WHERE c.business_id = ${business.id}
-            AND fc.status = 'ACTIVE'
-            AND fc.end_date >= CURRENT_TIMESTAMP
+            -- FR-ORDERABILITY-1: the stored vocabulary is 'Active'. This read
+            -- 'ACTIVE', which matches nothing on a case-sensitive comparison, so
+            -- the storefront silently listed no fundraiser at all. Corrected to
+            -- the value the application actually writes rather than papered over
+            -- with a case-insensitive match, which would also admit vocabulary
+            -- that was never intended to be live.
+            AND fc.status = 'Active'
+            -- end_date is a DATE. Comparing it to CURRENT_TIMESTAMP cast it to
+            -- midnight, which dropped the campaign on the morning of its own
+            -- deadline; CURRENT_DATE alone would use the cluster's UTC day. The
+            -- tenant's own calendar day is the contract, matching
+            -- isCampaignPastOrderDeadline(). The zone is a bound parameter from
+            -- the durable Business row, never interpolated text.
+            AND fc.end_date >= (CURRENT_TIMESTAMP AT TIME ZONE ${tenantZone})::date
+            -- Discovery must not advertise what authority will refuse: a campaign
+            -- still awaiting the coordinator's bundle selection cannot take an
+            -- order, so it does not belong in the public list.
+            AND fc.bundle_selection_status <> 'pending'
         `;
         // Handle potential column name mismatch in raw query
         fundraisers.forEach(f => {

@@ -14,6 +14,7 @@
 
 import { prisma } from '@/lib/db';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
+import { calendarDateInTimeZone, calendarDateOfDateOnlyValue } from '@/lib/tenantTimezone';
 
 // ── Canonical tier constants ─────────────────────────────────────────────────
 
@@ -170,6 +171,54 @@ export function isCampaignClosed(campaign: {
     Boolean(campaign.closed_at) ||
     (CLOSED_STATUSES as readonly string[]).includes(campaign.status)
   );
+}
+
+/**
+ * FR-ORDERABILITY-1-R — the supporter ordering deadline, in the tenant's day.
+ *
+ * `end_date` is a DATE with no time component, so "has the deadline passed?" is
+ * a question about calendar days, not instants — and a calendar day only exists
+ * inside a timezone. Comparing instants in UTC gets this wrong twice over: a
+ * naive `now > end_date` expires the deadline the moment its day begins, and
+ * even a day-inclusive UTC cutoff closes a Central fundraiser at 7:00 PM local
+ * on its final day. Both were rejected.
+ *
+ * THE CONTRACT: orders are accepted while the tenant's local calendar date is
+ * still on or before end_date, and stop when the next LOCAL day begins. For an
+ * America/Chicago tenant with end_date 2026-08-31, 11:59:59 PM Central on
+ * August 31 is open and 12:00:00 AM Central on September 1 is closed.
+ *
+ * `businessTimeZone` is REQUIRED and comes from the durable Business row. This
+ * function reads no global, no environment variable and no default zone, and it
+ * hardcodes no zone of its own — America/Chicago is only a column default.
+ *
+ * DST is the timezone engine's problem, never ours: America/Chicago is UTC-5 in
+ * September and UTC-6 in December, and offset arithmetic cannot know that.
+ *
+ * FAIL CLOSED: an unresolvable timezone returns true. A misconfigured tenant
+ * must not leave a fundraiser collecting money. Callers should detect the
+ * invalid zone first and say something more useful; this is the backstop.
+ *
+ * A null end_date is not a deadline — legacy rows never had one, and they are
+ * governed by status and bundle setup alone. FR-FLOW-2 is where a required
+ * end_date belongs for new campaigns.
+ */
+export function isCampaignPastOrderDeadline(
+  campaign: { end_date: Date | string | null | undefined },
+  businessTimeZone: string,
+  now: Date = new Date()
+): boolean {
+  if (!campaign.end_date) return false;
+
+  const endCalendarDate = calendarDateOfDateOnlyValue(campaign.end_date);
+  // An unparseable deadline must not silently close a live fundraiser.
+  if (!endCalendarDate) return false;
+
+  const tenantToday = calendarDateInTimeZone(businessTimeZone, now);
+  if (!tenantToday) return true; // unusable zone → fail closed
+
+  // ISO-8601 dates are lexicographically ordered, so this is a date comparison.
+  return tenantToday > endCalendarDate;
 }
 
 // ── Candidate-family resolution ───────────────────────────────────────────────

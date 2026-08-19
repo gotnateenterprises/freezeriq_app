@@ -127,7 +127,10 @@ async function getData(slug: string, fundraiserId: string) {
     // 1. Fetch Business
     const business = await prisma.business.findUnique({
         where: { slug },
-        select: { id: true, name: true, slug: true, logo_url: true }
+        // FR-ORDERABILITY-1-R: timezone is the tenant's authoritative zone for
+        // the supporter ordering deadline. It stays server-side — it is used to
+        // compute orderMode and is never passed across the client boundary.
+        select: { id: true, name: true, slug: true, logo_url: true, timezone: true }
     });
 
     if (!business) return null;
@@ -235,7 +238,9 @@ async function getData(slug: string, fundraiserId: string) {
 
     // 5. Fetch Bundles based on the authoritative orderMode
 
-    const orderMode = await resolveCampaignOrderMode(campaign, business.id);
+    // Supporter-facing, so the ordering deadline applies: pass the tenant's
+    // durable timezone so the final day is evaluated in the tenant's calendar.
+    const orderMode = await resolveCampaignOrderMode(campaign, business.id, business.timezone);
 
     // 6. Fetch Bundles based on the authoritative orderMode
     let bundles: any[] = [];
