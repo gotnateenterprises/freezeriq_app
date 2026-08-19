@@ -110,17 +110,34 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
             }
         }
 
-        // Replace all assignments in a transaction.
-        // Empty bundleIds array = clear all assignments = storefront falls back to all active bundles.
+        // Replace the ACTIVE assignments in a transaction.
+        // Empty bundleIds array = clear all active assignments = storefront falls back
+        // to all active bundles.
+        //
+        // FR-FLOW-2B — `state: 'active'` on BOTH statements is load-bearing, not
+        // decoration. CampaignBundle holds two different things in one table:
+        // 'candidate' is the tenant's approved bundle-family pool, which the
+        // coordinator has not chosen from yet, and 'active' is the concrete
+        // sellable assignment. This endpoint edits the sellable list only — its own
+        // GET above has always read `state: 'active'`, so that is the contract.
+        //
+        // Without the filter the delete took the candidate pool with it and the
+        // create wrote rows back with the default state ('active'), so a campaign
+        // awaiting coordinator setup came out of this route with no pool to choose
+        // from and a set of bundles already on sale — while bundle_selection_status
+        // still said 'pending'. That was survivable only while nothing in
+        // production had a candidate pool. FR-FLOW-2 creates them, so it is not
+        // survivable now.
         await prisma.$transaction([
             (prisma as any).campaignBundle.deleteMany({
-                where: { campaign_id: id }
+                where: { campaign_id: id, state: 'active' }
             }),
             ...(bundleIds.length > 0
                 ? [(prisma as any).campaignBundle.createMany({
                     data: bundleIds.map((bundleId: string, index: number) => ({
                         campaign_id: id,
                         bundle_id: bundleId,
+                        state: 'active',
                         position: index
                     }))
                 })]

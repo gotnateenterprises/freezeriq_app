@@ -39,6 +39,7 @@ import type { CampaignTriage } from '@/lib/growth/nextAction';
 import { formatBundleProgress } from '@/lib/growth/campaignSections';
 import { detailSections, detailDateLine } from '@/lib/growth/campaignContextUi';
 import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
+import { campaignDisplayStage } from '@/lib/campaignDisplayStage';
 
 interface CoordinatorInfo {
     contact_name: string | null;
@@ -110,6 +111,11 @@ export function CampaignContextDrawer({
     const progress = formatBundleProgress(c.weighted_bundles_sold, c.bundle_goal, c.progress_percent);
     const action = c.triage.action;
     const isActiveish = sections.lifecycle === 'active' || sections.lifecycle === 'ended_open';
+    const awaitingCoordinatorSetup = campaignDisplayStage({
+        status: c.status,
+        closed_at: c.closed_at ?? null,
+        bundle_selection_status: (c as any).bundle_selection_status ?? null,
+    }).awaitingCoordinatorSetup;
 
     return (
         <div
@@ -151,9 +157,17 @@ export function CampaignContextDrawer({
                             <div className="mt-2 flex flex-wrap items-center gap-2">
                                 {/* ONE primary signal: health for running campaigns,
                                     lifecycle stage for everything else. */}
-                                {isActiveish
+                                {/* FR-FLOW-2B: a campaign still awaiting coordinator setup is
+                                    not running yet, so a health badge would be measuring a
+                                    fundraiser that has not started. The setup state is the
+                                    one true signal until the coordinator submits. */}
+                                {isActiveish && !awaitingCoordinatorSetup
                                     ? <CampaignHealthBadge health={c.health} />
-                                    : <StageChip status={c.closed_at ? 'Closed' : c.status} />}
+                                    : <StageChip
+                                        status={c.closed_at ? 'Closed' : c.status}
+                                        bundleSelectionStatus={c.bundle_selection_status ?? null}
+                                        closedAt={c.closed_at ?? null}
+                                    />}
                                 {dateLine && (
                                     <span className="text-xs font-bold text-slate-500 dark:text-slate-400">{dateLine}</span>
                                 )}

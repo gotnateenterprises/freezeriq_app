@@ -49,10 +49,14 @@ const MODELS = [
     'fundraiserInquiry', 'fundraiserOpportunity',
     // FR-PUBLIC-IDENTITY-1: duplicate-organization disambiguation reads these.
     'fundraiserOrganizationContact',
+    // FR-FLOW-2A: the campaign's primary coordinator.
+    'fundraiserCampaignCoordinator',
 ];
 
 const METHODS = [
     'findFirst', 'findUnique', 'findMany', 'create', 'update', 'updateMany',
+    // FR-FLOW-2B: the launch writes its candidate pool with createMany.
+    'createMany',
     'upsert', 'count', 'delete', 'deleteMany',
 ];
 
@@ -84,8 +88,11 @@ export function createPrismaMock(config: PrismaMockConfig = {}): PrismaMock {
                 const fallback =
                     method === 'findMany' ? []
                         : method === 'count' ? 0
-                            : method === 'create' || method === 'update' || method === 'upsert'
-                                ? { id: `${model}-generated-id`, ...(args?.data || {}) }
+                            // createMany returns a count, exactly as Prisma does.
+                            : method === 'createMany' || method === 'updateMany' || method === 'deleteMany'
+                                ? { count: Array.isArray(args?.data) ? args.data.length : 1 }
+                                : method === 'create' || method === 'update' || method === 'upsert'
+                                    ? { id: `${model}-generated-id`, ...(args?.data || {}) }
                                 : null;
                 return resolve(key, args, fallback);
             });

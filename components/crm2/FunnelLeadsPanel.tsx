@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Mail, CalendarCheck, CalendarClock, Rocket, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { LaunchFundraiserDialog } from '@/components/crm2/LaunchFundraiserDialog';
 
 type Bucket = 'new_leads' | 'needs_follow_up' | 'waiting_on_date' | 'ready_to_create_campaign' | 'closed';
 
@@ -60,6 +61,8 @@ export function FunnelLeadsPanel() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
     const [busyId, setBusyId] = useState<string | null>(null);
+    // FR-FLOW-2B: which opportunity, if any, is being launched right now.
+    const [launchingId, setLaunchingId] = useState<string | null>(null);
 
     const load = useCallback(() => {
         setLoading(true);
@@ -178,10 +181,18 @@ export function FunnelLeadsPanel() {
                                             />
                                         </label>
 
+                                        {/* FR-FLOW-2B: this was a dead label telling the tenant to go
+                                            somewhere else, and there was nowhere else to go — conversion
+                                            did not exist. It is now the action itself. */}
                                         {o.status === 'date_confirmed' && (
-                                            <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
-                                                <Rocket size={13} /> Ready — launch from the organization profile
-                                            </span>
+                                            <button
+                                                type="button"
+                                                disabled={busyId === o.id}
+                                                onClick={() => setLaunchingId(o.id)}
+                                                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+                                            >
+                                                <Rocket size={13} /> Launch Fundraiser
+                                            </button>
                                         )}
 
                                         <select
@@ -205,6 +216,16 @@ export function FunnelLeadsPanel() {
             <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
                 <XCircle size={12} /> Leads marked not proceeding are kept, never deleted — the reason is what tells you where prospects drop out.
             </p>
+
+            {launchingId && (
+                <LaunchFundraiserDialog
+                    opportunityId={launchingId}
+                    onClose={() => setLaunchingId(null)}
+                    // A launched opportunity leaves this panel entirely — it is now a
+                    // campaign, and the campaign surfaces are authoritative from here.
+                    onLaunched={() => load()}
+                />
+            )}
         </div>
     );
 }

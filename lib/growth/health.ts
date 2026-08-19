@@ -240,8 +240,17 @@ export function evaluateCampaignHealth(c: CampaignHealthInput, now: Date): Campa
     }
 
     // FACTUAL: ordering stays locked until the coordinator chooses bundles.
-    if (c.bundle_selection_status === 'pending' && c.bundle_selection_at instanceof Date) {
-        const pendingDays = wholeDaysBetween(c.bundle_selection_at, now);
+    //
+    // FR-FLOW-2B — the clock runs from `created_at`, not from `bundle_selection_at`.
+    // `bundle_selection_at` is the moment the coordinator SUBMITTED a selection, so
+    // it is null for exactly as long as the status is 'pending' and only becomes a
+    // Date once the status has moved to 'selected'. Requiring both at once asked for
+    // a campaign that had submitted and not submitted simultaneously, so this reason
+    // — and the "Review bundle selection" next action that depends on it — could
+    // never fire for anybody. A campaign has been waiting on its coordinator since
+    // the moment it was created, which is what `created_at` measures.
+    if (c.bundle_selection_status === 'pending') {
+        const pendingDays = wholeDaysBetween(c.created_at, now);
         if (pendingDays >= HEALTH_THRESHOLDS.bundleSelectionPendingDays) {
             reasons.push({
                 code: 'bundle_selection_pending',

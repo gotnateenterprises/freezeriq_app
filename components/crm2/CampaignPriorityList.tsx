@@ -45,6 +45,8 @@ export interface PriorityListCampaign extends CampaignForTriage {
     weighted_bundles_sold?: number;
     progress_percent?: number;
     bundle_goal?: number;
+    /** FR-FLOW-2B — drives the "Awaiting Coordinator Setup" chip. */
+    bundle_selection_status?: string | null;
 }
 
 const SECTION_DOT: Record<CampaignPriority, string> = {
@@ -289,7 +291,11 @@ function CampaignRow({
             <div className="xl:w-56 xl:flex-none">
                 {isActiveRow
                     ? <CampaignHealthBadge health={c.health} reasons={c.health_reasons} />
-                    : <StageChip status={c.closed_at ? 'Closed' : c.status} />}
+                    : <StageChip
+                        status={c.closed_at ? 'Closed' : c.status}
+                        bundleSelectionStatus={c.bundle_selection_status ?? null}
+                        closedAt={c.closed_at ?? null}
+                    />}
             </div>
 
             {/* WHAT MATTERS RIGHT NOW */}

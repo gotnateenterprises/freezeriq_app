@@ -11,7 +11,13 @@ export function CampaignCard({ c, businessSlug }: { c: any; businessSlug?: strin
         <section className="mb-3.5 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
             <div className="flex items-center gap-2.5">
                 <h3 className="text-[15px] font-black text-slate-900 dark:text-white">{c.name}</h3>
-                <StageChip status={closed ? 'Closed' : c.status} />
+                {/* FR-FLOW-2B: an Active-but-pending campaign reads "Awaiting Coordinator
+                    Setup" rather than a green ACTIVE it has not earned. */}
+                <StageChip
+                    status={closed ? 'Closed' : c.status}
+                    bundleSelectionStatus={c.bundle_selection_status ?? null}
+                    closedAt={c.closed_at ?? null}
+                />
             </div>
             <p className="mb-2.5 mt-0.5 text-[11px] text-slate-500">
                 {closed && c.closed_at ? `Closed ${new Date(c.closed_at).toLocaleDateString()}` :

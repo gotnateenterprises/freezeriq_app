@@ -605,6 +605,10 @@ model FundraiserCampaign {
   // if any. At most one — see the @unique on FundraiserOpportunity.campaign_id.
   // Legacy campaigns created before the funnel existed simply have none.
   funnel_opportunity    FundraiserOpportunity? @relation("OpportunityCampaign")
+  // FR-FLOW-2A: the ONE primary coordinator running this campaign's setup.
+  // Optional because every campaign predating FR-FLOW-2 has none and no
+  // backfill invents one. "At most one" is the child's PRIMARY KEY, not a flag.
+  primary_coordinator   FundraiserCampaignCoordinator? @relation("CampaignPrimaryCoordinator")
 
   // FR-FUNNEL-1: intentionally redundant with the primary key on `id`.
   // FundraiserCampaign has no business_id, so there is no [business_id, id] for
@@ -1029,7 +1033,16 @@ model FundraiserOrganizationContact {
 
   contact                 FundraiserContact @relation("ContactRelationships", fields: [business_id, contact_id], references: [business_id, id], onDelete: Restrict)
   customer                Customer          @relation("OrgRelationship", fields: [business_id, customer_id], references: [business_id, id], onDelete: Restrict)
+  // FR-FLOW-2A: campaigns whose primary coordinator is THIS relationship.
+  campaign_assignments    FundraiserCampaignCoordinator[] @relation("CoordinatorRelationshipAssignments")
 
+  // FR-FLOW-2A: intentionally redundant with the primary key on `id`, exactly as
+  // FundraiserCampaign.@@unique([customer_id, id]) is. It exists to be a compound
+  // FK TARGET: a campaign-coordinator row referencing [customer_id, org_contact_id]
+  // can then only resolve to a relationship belonging to the SAME organization.
+  // Adding it cannot fail — `id` is already unique by virtue of the primary key,
+  // so every existing row satisfies it and no backfill is possible or needed.
+  @@unique([customer_id, id])
   @@index([business_id, customer_id])
   @@index([business_id, contact_id])
   @@map("fundraiser_organization_contacts")
@@ -1997,4 +2010,71 @@ model CoordinatorSession {
   @@index([campaign_id])
   @@index([expires_at])
   @@map("coordinator_sessions")
+}
+
+// ── FR-FLOW-2A · Campaign primary coordinator ───────────────────────────────
+// Appended at end-of-file so the parked PasswordResetToken hunk earlier in this
+// file is never touched or reordered.
+//
+// WHY THIS TABLE EXISTS
+// "Who is coordinating THIS fundraiser" had no home. The coordinator's name was
+// read from Customer.contact_name — a field on the ORGANIZATION. An organization
+// that runs a fundraiser every autumn has one of those and many campaigns, so
+// naming this year's coordinator silently rewrote who ran last year's. History
+// that rewrites itself is not history, and FR-HISTORY-1 is built on it.
+//
+// WHY IT POINTS AT THE RELATIONSHIP, NOT THE PERSON
+// Referencing FundraiserContact directly would prove only that the person and
+// the campaign share a TENANT — not that this person has anything to do with
+// this ORGANIZATION. A tenant's whole address book would be selectable for any
+// campaign. Pointing at FundraiserOrganizationContact instead carries the
+// organization in the reference itself, so "is this a coordinator OF this
+// organization" stops being a question application code has to remember to ask.
+//
+// HOW POSTGRES PROVES SAME-ORGANIZATION
+// One customer_id column feeds BOTH foreign keys:
+//
+//   (customer_id, campaign_id)     -> fundraiser_campaigns(customer_id, id)
+//   (customer_id, org_contact_id)  -> fundraiser_organization_contacts(customer_id, id)
+//
+// A row cannot exist unless the campaign AND the coordinator relationship both
+// belong to that same Customer. Cross-organization is not "validated" — it is
+// unrepresentable. Tenancy follows for free: the relationship row is already
+// pinned to its tenant by its own compound FKs onto customers(business_id, id)
+// and fundraiser_contacts(business_id, id), so a business_id column here would
+// be a copy with nothing left to check.
+//
+// WHY THE PRIMARY KEY IS campaign_id
+// The product rule is ONE primary coordinator per campaign. A boolean plus a
+// partial unique index would say the same thing in two places and default to
+// true, which is how a second primary gets in. Making campaign_id the primary
+// key makes a second row a key collision. There is no is_primary flag to
+// disagree with, and no started_at/ended_at: this table answers exactly one
+// question — who is set up to run this campaign — and replacement is an UPDATE.
+// Relationship history already lives on FundraiserOrganizationContact, which is
+// never rewritten in place (it is ended and a successor created), and RESTRICT
+// below stops a relationship a campaign points at from being deleted. So a
+// campaign keeps naming the coordinator it launched with even after the
+// organization moves on to somebody else.
+model FundraiserCampaignCoordinator {
+  /// PRIMARY KEY — this is what "exactly one per campaign" means here.
+  campaign_id    String   @id
+  /// The organization. Deliberately duplicated from the campaign so that both
+  /// foreign keys below can be keyed on it; that duplication IS the invariant.
+  customer_id    String
+  /// The organization-contact relationship acting as coordinator.
+  org_contact_id String
+  assigned_at    DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  campaign    FundraiserCampaign            @relation("CampaignPrimaryCoordinator", fields: [customer_id, campaign_id], references: [customer_id, id], onDelete: Restrict)
+  org_contact FundraiserOrganizationContact @relation("CoordinatorRelationshipAssignments", fields: [customer_id, org_contact_id], references: [customer_id, id], onDelete: Restrict)
+
+  /// Required by Prisma on the defining side of the 1-1 campaign relation, and
+  /// already implied by the primary key on campaign_id alone — a campaign has
+  /// exactly one customer_id, so this can never be unique when campaign_id is
+  /// not. It constrains nothing new; it just names the guarantee for Prisma.
+  @@unique([customer_id, campaign_id])
+  @@index([customer_id, org_contact_id])
+  @@map("fundraiser_campaign_coordinators")
 }

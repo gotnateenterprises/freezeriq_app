@@ -1,5 +1,7 @@
 'use client';
 
+import { campaignDisplayStage } from '@/lib/campaignDisplayStage';
+
 // CRM-CC-5: restyled onto the Command Center's one chip recipe — rounded-lg,
 // bordered, dark-mode aware — keeping each stage's existing hue. Purely
 // presentational; stage semantics and isClosedFamily are untouched.
@@ -14,13 +16,33 @@ const STAGE_STYLES: Record<string, string> = {
     settled:    'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700',
     archived:   'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700',
     completed:  'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-900',
+    // FR-FLOW-2B: deliberately amber, not emerald. A campaign waiting on its
+    // coordinator is outstanding work, and green is what told tenants otherwise.
+    awaiting_setup: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900',
 };
 
-export function StageChip({ status }: { status: string }) {
-    const key = (status || '').toLowerCase();
+/**
+ * FR-FLOW-2B — `bundleSelectionStatus` is optional so every existing caller keeps
+ * working untouched; when it is supplied, an Active-but-pending campaign is
+ * labelled "Awaiting Coordinator Setup" instead of a green ACTIVE.
+ */
+export function StageChip({
+    status,
+    bundleSelectionStatus,
+    closedAt,
+}: {
+    status: string;
+    bundleSelectionStatus?: string | null;
+    closedAt?: string | null;
+}) {
+    const stage = campaignDisplayStage({
+        status: status || '',
+        closed_at: closedAt ?? null,
+        bundle_selection_status: bundleSelectionStatus ?? null,
+    });
     return (
-        <span className={`inline-flex items-center rounded-lg border px-2.5 py-1 text-[10px] font-black uppercase tracking-wide ${STAGE_STYLES[key] ?? 'bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'}`}>
-            {status}
+        <span className={`inline-flex items-center rounded-lg border px-2.5 py-1 text-[10px] font-black uppercase tracking-wide ${STAGE_STYLES[stage.key] ?? 'bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'}`}>
+            {stage.label}
         </span>
     );
 }

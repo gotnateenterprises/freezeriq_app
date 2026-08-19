@@ -114,7 +114,8 @@ describe('4. each reason fires on its own', () => {
     it('bundle_selection_pending — ordering is still locked', () => {
         expect(codes({
             bundle_selection_status: 'pending',
-            bundle_selection_at: daysAgo(HEALTH_THRESHOLDS.bundleSelectionPendingDays),
+            // FR-FLOW-2B: null, exactly as a pending campaign really is.
+            bundle_selection_at: null,
         })).toContain('bundle_selection_pending');
     });
 });
@@ -137,11 +138,30 @@ describe('5. threshold boundaries', () => {
     });
 
     it('bundle selection is patient until its threshold', () => {
-        const pending = { bundle_selection_status: 'pending' as const };
-        expect(codes({ ...pending, bundle_selection_at: daysAgo(HEALTH_THRESHOLDS.bundleSelectionPendingDays - 1) }))
+        // FR-FLOW-2B — the clock runs from created_at, not bundle_selection_at.
+        // This test used to vary bundle_selection_at, which is null for exactly as
+        // long as the status is 'pending' and only becomes a Date once the status
+        // has moved to 'selected'. The pair it was constructing could not occur, so
+        // the reason it pinned could never fire for a real campaign.
+        const pending = { bundle_selection_status: 'pending' as const, bundle_selection_at: null };
+        const justUnder = HEALTH_THRESHOLDS.bundleSelectionPendingDays - 1;
+        expect(codes({ ...pending, created_at: daysAgo(justUnder), start_date: daysAgo(justUnder) }))
             .not.toContain('bundle_selection_pending');
-        expect(codes({ ...pending, bundle_selection_at: daysAgo(HEALTH_THRESHOLDS.bundleSelectionPendingDays) }))
-            .toContain('bundle_selection_pending');
+        expect(codes({
+            ...pending,
+            created_at: daysAgo(HEALTH_THRESHOLDS.bundleSelectionPendingDays),
+            start_date: daysAgo(HEALTH_THRESHOLDS.bundleSelectionPendingDays),
+        })).toContain('bundle_selection_pending');
+    });
+
+    it('fires for a campaign awaiting coordinator setup, which never has a selection timestamp', () => {
+        // Exactly the row FR-FLOW-2 writes: pending, and bundle_selection_at null.
+        expect(codes({
+            bundle_selection_status: 'pending',
+            bundle_selection_at: null,
+            created_at: daysAgo(HEALTH_THRESHOLDS.bundleSelectionPendingDays),
+            start_date: daysAgo(HEALTH_THRESHOLDS.bundleSelectionPendingDays),
+        })).toContain('bundle_selection_pending');
     });
 
     it('behind_pace fires just below the ratio and not just above it', () => {
@@ -254,7 +274,7 @@ describe('8. determinism and honesty of output', () => {
             ['behind_pace', { weightedBundlesSold: 5 }],
             ['no_recent_orders', { lastOrderAt: daysAgo(30) }],
             ['no_coordinator_activity', { coordinatorActionCount: 0 }],
-            ['bundle_selection_pending', { bundle_selection_status: 'pending', bundle_selection_at: daysAgo(9) }],
+            ['bundle_selection_pending', { bundle_selection_status: 'pending', bundle_selection_at: null }],
         ];
         for (const [code, over] of cases) {
             const reason = run(over).reasons.find(x => x.code === code);
