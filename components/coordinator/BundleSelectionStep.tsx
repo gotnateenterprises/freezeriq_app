@@ -19,6 +19,11 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import {
+    CoordinatorSetupFields,
+    type CoordinatorSetupFieldValues,
+    type CoordinatorLockedInfo,
+} from '@/components/coordinator/CoordinatorSetupFields';
+import {
     Loader2,
     CheckCircle2,
     AlertCircle,
@@ -113,6 +118,13 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
         completed: false,
     });
 
+    // FR-FLOW-3 — coordinator logistics, submitted with the bundle choice.
+    const [setupFields, setSetupFields] = useState<CoordinatorSetupFieldValues>({
+        checksPayable: '', pickupLocation: '', deliveryTime: '',
+        paymentInstructions: '', paymentLink: '',
+    });
+    const [lockedInfo, setLockedInfo] = useState<CoordinatorLockedInfo | null>(null);
+
     const apiPath = '/api/coordinator/bundle-selection';
 
     // ── Fetch current selection state ─────────────────────────────────────
@@ -159,6 +171,22 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
                 onSelectionComplete();
                 return data;
             }
+
+            // FR-FLOW-3: seed the logistics form and the read-only tenant facts.
+            const extra = data as unknown as {
+                setup?: Record<string, string | null>;
+                locked?: CoordinatorLockedInfo;
+            };
+            if (extra.setup) {
+                setSetupFields({
+                    checksPayable: extra.setup.checksPayable ?? '',
+                    pickupLocation: extra.setup.pickupLocation ?? '',
+                    deliveryTime: extra.setup.deliveryTime ?? '',
+                    paymentInstructions: extra.setup.paymentInstructions ?? '',
+                    paymentLink: extra.setup.paymentLink ?? '',
+                });
+            }
+            if (extra.locked) setLockedInfo(extra.locked);
 
             const isAlreadySelected = data.campaign.selectionStatus === 'selected';
 
@@ -236,8 +264,19 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
             const res = await fetch(apiPath, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                // POST body contains ONLY familyIds — no tenant, business, campaign, or bundle IDs
-                body: JSON.stringify({ familyIds: submittedFamilyIds }),
+                // The body carries the coordinator's own answers and nothing else:
+                // no tenant, business, campaign or bundle id, and no delivery date,
+                // deadline, organization share or selection limit. Those are tenant
+                // authority and the server would refuse them anyway — not sending
+                // them means there is nothing to refuse.
+                body: JSON.stringify({
+                    familyIds: submittedFamilyIds,
+                    checksPayable: setupFields.checksPayable,
+                    pickupLocation: setupFields.pickupLocation,
+                    deliveryTime: setupFields.deliveryTime,
+                    paymentInstructions: setupFields.paymentInstructions,
+                    paymentLink: setupFields.paymentLink,
+                }),
             });
 
             const body = await res.json().catch(() => null);
@@ -545,6 +584,16 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
                                 </li>
                             ))}
                     </ul>
+                    {/* FR-FLOW-3 — the fundraiser's logistics, confirmed in the same
+                        step and saved by the same submission. Deliberately below the
+                        bundle choice: the coordinator answers "what are we selling"
+                        before "where and when do people collect it". */}
+                    <CoordinatorSetupFields
+                        values={setupFields}
+                        locked={lockedInfo}
+                        disabled={state.submitting}
+                        onChange={(patch) => setSetupFields((prev) => ({ ...prev, ...patch }))}
+                    />
                     <button
                         onClick={handleSubmit}
                         disabled={!readyToSubmit || state.submitting}

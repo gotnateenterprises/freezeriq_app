@@ -1,0 +1,23 @@
+-- FR-FLOW-3 · Campaign delivery/pickup time
+--
+-- One nullable text column. Nothing else.
+--
+-- WHY TEXT AND NOT time
+-- Fundraisers state a pickup time the way a person would: "4:45 PM", "3–5 PM",
+-- "TBD". A window is not a clock reading, so a SQL time could not hold half the
+-- values the product already collects. The CRM has gathered this exact free text
+-- for years into Customer.fundraiser_info — an ORGANIZATION-level JSON blob — and
+-- the public fundraiser page already reads `campaign.delivery_time`, a column
+-- that until now did not exist, so that read resolved to undefined on every
+-- request and silently fell through to the organization value.
+--
+-- WHY NULLABLE, NO DEFAULT, NO BACKFILL
+-- A campaign that launched before this has no recorded pickup time. Copying the
+-- organization's current value onto it would be inventing history for campaigns
+-- that may have used a different time — the same defect FR-FLOW-2A refused to
+-- create for coordinators. Existing organization values continue to reach new
+-- campaigns through the established fundraiser_info sync.
+--
+-- NOT TOUCHED: every other table and every other column. No DROP, no data
+-- statement, no index, no constraint, no deadline_time.
+ALTER TABLE "fundraiser_campaigns" ADD COLUMN "delivery_time" TEXT;

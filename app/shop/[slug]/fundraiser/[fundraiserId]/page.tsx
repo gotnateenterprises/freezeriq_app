@@ -181,7 +181,7 @@ async function getData(slug: string, fundraiserId: string) {
     // publicCampaign projection near the end of this function.
     const campaigns: any[] = await prisma.$queryRaw`
         SELECT fc.id, fc.name, fc.about_text, fc.participant_label,
-               fc.end_date, fc.delivery_date, fc.pickup_location,
+               fc.end_date, fc.delivery_date, fc.pickup_location, fc.delivery_time,
                fc.payment_instructions, fc.external_payment_link,
                fc.bundle_goal, fc.total_sales,
                fc.status, fc.closed_at,

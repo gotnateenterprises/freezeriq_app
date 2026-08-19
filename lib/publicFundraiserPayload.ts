@@ -25,6 +25,10 @@ export const PUBLIC_CAMPAIGN_FIELDS = [
     'end_date',
     'delivery_date',
     'pickup_location',
+    // FR-FLOW-3: the coordinator's confirmed pickup time. Already public — the
+    // page has always rendered a time from customer_fundraiser_info; this makes
+    // the campaign-specific value the one supporters see.
+    'delivery_time',
     'payment_instructions',
     'external_payment_link',
     'organization_name',

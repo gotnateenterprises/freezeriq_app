@@ -544,6 +544,20 @@ model FundraiserCampaign {
   settlement_notes      String?    // Optional admin notes for the settlement record
   // ─────────────────────────────────────────────────────────────────────────
   pickup_location       String?
+  // FR-FLOW-3: the pickup/delivery TIME, as free text beside pickup_location.
+  //
+  // Deliberately String, not a SQL time. Real fundraisers say "4:45 PM", "3–5 PM"
+  // or "TBD", and a window is not a clock reading. The CRM has collected exactly
+  // this text for years — it just had nowhere campaign-scoped to land, so it sat
+  // in Customer.fundraiser_info, an ORGANIZATION-level JSON blob shared by every
+  // campaign that organization ever runs. The public fundraiser page already
+  // reads `campaign.delivery_time`; until now that read resolved to undefined on
+  // every request and fell through to the organization value.
+  //
+  // Nullable with no default: a campaign that predates this simply has no time,
+  // and inventing one would be a lie. Separate from delivery_date on purpose —
+  // the date is locked tenant authority, the time is coordinator logistics.
+  delivery_time         String?
   checks_payable        String?
   goal_amount           Decimal?   @db.Decimal(10, 2)
   bundle_goal           Int?       @default(100)

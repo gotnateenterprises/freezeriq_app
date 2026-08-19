@@ -39,6 +39,13 @@ import {
   type BundleSelectionNotRequired,
 } from '@/lib/campaignBundleSelection';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
+import { lockCampaignSelection } from '@/lib/campaignSelectionLock';
+import {
+  BUNDLE_SELECTION_LOCKED_MESSAGE,
+  checkCoordinatorSetup,
+  isSetupRefusal,
+  type CoordinatorSetupValues,
+} from '@/lib/coordinatorSetup';
 
 // ── Concurrency config ───────────────────────────────────────────────────────
 
@@ -110,7 +117,35 @@ export async function GET(req: Request): Promise<NextResponse> {
 
     const selectionStatus = campaign.bundle_selection_status as 'pending' | 'selected';
 
-    const response: BundleSelectionGetResponse = {
+    // ── FR-FLOW-3: the setup context the coordinator needs ─────────────────
+    //
+    // Locked values are sent so the form can SHOW them, not so it can send them
+    // back: the POST accepts no date, deadline, share or limit at all. Also
+    // reports whether ordering has begun, so the UI can explain the lock rather
+    // than presenting controls that will be refused.
+    const setup = await prisma.fundraiserCampaign.findUnique({
+      where: { id: campaign.id },
+      select: {
+        delivery_date: true,
+        end_date: true,
+        checks_payable: true,
+        pickup_location: true,
+        delivery_time: true,
+        payment_instructions: true,
+        external_payment_link: true,
+        customer: {
+          select: {
+            name: true,
+          },
+        },
+      },
+    }).catch(() => null);
+
+    const liveOrders = await prisma.order.count({
+      where: { campaign_id: campaign.id, canceled_at: null },
+    });
+
+    const response: BundleSelectionGetResponse & Record<string, unknown> = {
       selectionRequired: true,
       campaign: {
         id: campaign.id,
@@ -121,6 +156,22 @@ export async function GET(req: Request): Promise<NextResponse> {
       },
       candidateFamilies,
       selectedFamilyIds,
+      // Read-only tenant authority, for display.
+      locked: {
+        organizationName: setup?.customer?.name ?? null,
+        deliveryDate: dateToIso(setup?.delivery_date ?? null),
+        orderDeadline: dateToIso(setup?.end_date ?? null),
+      },
+      // Coordinator-editable logistics, current values.
+      setup: {
+        checksPayable: setup?.checks_payable ?? null,
+        pickupLocation: setup?.pickup_location ?? null,
+        deliveryTime: setup?.delivery_time ?? null,
+        paymentInstructions: setup?.payment_instructions ?? null,
+        paymentLink: setup?.external_payment_link ?? null,
+      },
+      // True once a supporter has ordered: bundle choices are then locked.
+      ordersStarted: liveOrders > 0,
     };
 
     return NextResponse.json(response);
@@ -189,6 +240,28 @@ export async function POST(req: Request): Promise<NextResponse> {
       );
     }
 
+    // ── FR-FLOW-3: the coordinator's logistics, validated before any write ──
+    //
+    // Absent entirely when the client sends none, which keeps every pre-FR-FLOW-3
+    // caller working. Present-but-invalid is refused here rather than inside the
+    // transaction, so a bad payment link costs no database work.
+    const sentSetup = ['checksPayable', 'pickupLocation', 'deliveryTime', 'paymentInstructions', 'paymentLink']
+      .some((k) => rawBody[k] !== undefined);
+    let setupValues: CoordinatorSetupValues | null = null;
+    if (sentSetup) {
+      const setup = checkCoordinatorSetup({
+        checksPayable: rawBody.checksPayable,
+        pickupLocation: rawBody.pickupLocation,
+        deliveryTime: rawBody.deliveryTime,
+        paymentInstructions: rawBody.paymentInstructions,
+        paymentLink: rawBody.paymentLink,
+      });
+      if (isSetupRefusal(setup)) {
+        return NextResponse.json({ error: setup.error, code: setup.code }, { status: 400 });
+      }
+      setupValues = setup.values;
+    }
+
     if (familyIds.length === 0) {
       return NextResponse.json(
         { error: 'familyIds must be a non-empty array of strings' },
@@ -240,7 +313,8 @@ export async function POST(req: Request): Promise<NextResponse> {
         const result = await runActivationTransaction(
           campaign.id,
           campaign.businessId,
-            familyIds
+          familyIds,
+          setupValues
         );
         return result;
       } catch (err: unknown) {
@@ -307,10 +381,31 @@ export async function POST(req: Request): Promise<NextResponse> {
 async function runActivationTransaction(
   campaignId: string,
   expectedBusinessId: string,
-  familyIds: string[]
+  familyIds: string[],
+  /**
+   * FR-FLOW-3 logistics. Null when the caller sent none — a pre-FR-FLOW-3 client
+   * that submits only familyIds keeps working and leaves the logistics columns
+   * exactly as they were.
+   */
+  setupValues: CoordinatorSetupValues | null
 ): Promise<NextResponse> {
   return await prisma.$transaction(
     async (tx) => {
+      // ── Step 0: take the shared selection lock, FIRST ─────────────────────
+      //
+      // FR-FLOW-3. Reselection is legal only while the campaign has no supporter
+      // orders, which makes it a check-then-write; public order creation is the
+      // write that invalidates the check. Serializable alone does not help here,
+      // because the order path runs at READ COMMITTED and therefore never joins
+      // PostgreSQL's SSI dependency graph. This advisory lock is honoured at
+      // every isolation level, and app/api/public/order/route.ts takes the SAME
+      // lock, so exactly one of the two reaches its decision first.
+      //
+      // It must be the first statement: taken later, the two paths still queue,
+      // but each is already holding a snapshot from before the other committed —
+      // which is the bug rather than the fix.
+      await lockCampaignSelection(tx, campaignId);
+
       // ── Step 1-4: Re-read campaign and reconfirm ownership ────────────────
 
       const freshCampaign = await tx.fundraiserCampaign.findUnique({
@@ -359,7 +454,25 @@ async function runActivationTransaction(
       const currentStatus = freshCampaign.bundle_selection_status;
       const selectionLimit = freshCampaign.bundle_selection_limit;
 
-      // ── Step 5: Handle already-selected (idempotency / conflict) ─────────
+      // ── Step 4b: the first-order lock ─────────────────────────────────────
+      //
+      // FR-FLOW-3. The first non-cancelled supporter order is what freezes the
+      // coordinator's choices: once somebody has bought a specific bundle, the
+      // set of things on sale is no longer the coordinator's to change. Counted
+      // INSIDE the transaction and AFTER the lock above, so no order can appear
+      // between this count and the write it authorises.
+      //
+      // `canceled_at: null` is the owner's contract for a real order. It is
+      // deliberately narrower than CB-6's tenant reset, which blocks on ANY
+      // persisted order row including cancelled ones — a tenant correcting a
+      // mistake is a different, audited action from a coordinator revising their
+      // own setup.
+      const liveOrderCount = await tx.order.count({
+        where: { campaign_id: campaignId, canceled_at: null },
+      });
+      const ordersHaveStarted = liveOrderCount > 0;
+
+      // ── Step 5: Handle already-selected (idempotency / reselection) ───────
 
       if (currentStatus === 'selected') {
         // Derive which family IDs were previously selected from active rows
@@ -401,18 +514,43 @@ async function runActivationTransaction(
           });
         }
 
-        // Different submission after selection — conflict
+        // ── FR-FLOW-3: a DIFFERENT submission after selection ──────────────
+        //
+        // Previously this was refused outright, which made a coordinator's first
+        // submission irreversible even seconds later with nobody having ordered.
+        // The owner contract is narrower than "never": revision is allowed right
+        // up until the first supporter order, and forbidden from that moment on.
+        if (ordersHaveStarted) {
+          return NextResponse.json(
+            { error: BUNDLE_SELECTION_LOCKED_MESSAGE, code: 'orders_started' },
+            { status: 409 }
+          );
+        }
+        // Fall through: no orders yet, so this is a legal reselection and is
+        // handled by exactly the same activation path as a first submission.
+      }
+
+      // ── Step 6: Require a state this activation may write ─────────────────
+      //
+      // 'pending'  — the first submission.
+      // 'selected' — a reselection, reachable only by falling through the block
+      //              above, which returns before here whenever an order exists.
+      // Anything else ('not_required', or a value a future writer invents) is
+      // refused rather than guessed at.
+      if (currentStatus !== 'pending' && currentStatus !== 'selected') {
         return NextResponse.json(
           { error: 'Bundle selection has already been submitted' },
           { status: 409 }
         );
       }
 
-      // ── Step 6: Require pending ───────────────────────────────────────────
-
-      if (currentStatus !== 'pending') {
+      // Belt and braces: the fall-through above is the only path that reaches
+      // here with 'selected', and it is guarded by ordersHaveStarted. Asserting
+      // it again here means a future edit that reorders those blocks fails
+      // closed instead of silently permitting a post-order reselection.
+      if (ordersHaveStarted && currentStatus === 'selected') {
         return NextResponse.json(
-          { error: 'Bundle selection has already been submitted' },
+          { error: BUNDLE_SELECTION_LOCKED_MESSAGE, code: 'orders_started' },
           { status: 409 }
         );
       }
@@ -642,6 +780,13 @@ async function runActivationTransaction(
         data: {
           bundle_selection_status: 'selected',
           bundle_selection_at: now,
+          // FR-FLOW-3: the coordinator's logistics, written in the SAME
+          // transaction as the activation. Setup is one decision — a campaign
+          // must never go live carrying half of it. Only these five keys are
+          // spread; delivery_date, end_date, org_share_percent and
+          // bundle_selection_limit are tenant authority and are not present in
+          // `setupValues` at all, so no request body can reach them.
+          ...(setupValues ?? {}),
         },
       });
 
@@ -681,7 +826,27 @@ async function runActivationTransaction(
       });
     },
     {
-      isolationLevel: 'Serializable',
+      // ── FR-FLOW-3: READ COMMITTED, deliberately, and not a downgrade ────────
+      //
+      // CB-2 chose Serializable to stop two coordinator submissions interleaving.
+      // The advisory lock taken as this transaction's first statement now does
+      // that job directly and strictly: no two selection mutations for one
+      // campaign can overlap at all, whatever isolation level either is using.
+      //
+      // Serializable actively BREAKS the first-order check. A SERIALIZABLE
+      // transaction takes its snapshot at its first query — which is the lock
+      // acquisition, evaluated BEFORE it blocks. So a reselection that waits for
+      // a supporter order to commit then counts orders against a snapshot from
+      // before that order existed, sees zero, and proceeds to replace the bundles
+      // the order was just placed against. Postgres does not catch it either: SSI
+      // only arbitrates between transactions that are ALL serializable, and the
+      // public order path runs at READ COMMITTED.
+      //
+      // Under READ COMMITTED each statement takes a fresh snapshot, so the count
+      // after the lock reflects everything committed before it. This was found by
+      // tests/frFlow3Concurrency.test.ts, which reproduced both transactions
+      // committing against real PostgreSQL.
+      isolationLevel: 'ReadCommitted',
       // Timeout: 15 s — generous for a coordinated activation write, defensive ceiling
       timeout: 15000,
     }

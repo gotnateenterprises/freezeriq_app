@@ -464,7 +464,19 @@ export default function FundraiserClient({
     // Fallback: CRM stores these in customer.fundraiser_info (JSONB).
     const fi = campaign.customer_fundraiser_info || {};
     const deliveryDateStr = formatDate(campaign.delivery_date) || formatDate(fi.delivery_date);
-    const deliveryTimeStr = formatTime(campaign.delivery_date) || (campaign.delivery_time ? String(campaign.delivery_time) : null) || (fi.delivery_time ? String(fi.delivery_time) : null);
+    // FR-FLOW-3 — the pickup time, in the order of who actually knows it.
+    //
+    // The coordinator's confirmed campaign value comes first. The organization
+    // profile is the fallback for fundraisers that predate coordinator setup.
+    //
+    // formatTime(campaign.delivery_date) used to lead this chain and has been
+    // removed: delivery_date is a DATE column, so it arrives as UTC midnight, and
+    // reading it with LOCAL getters yields a real-looking clock time for every
+    // supporter west of Greenwich. A Chicago visitor was shown "7:00 PM" for a
+    // fundraiser with no pickup time recorded at all — and because it led the
+    // chain, it also outranked the true value once one existed.
+    const deliveryTimeStr = (campaign.delivery_time ? String(campaign.delivery_time) : null)
+        || (fi.delivery_time ? String(fi.delivery_time) : null);
     const pickupLocation = campaign.pickup_location || fi.pickup_location || null;
 
     const blocked = orderMode?.mode === 'closed' || orderMode?.mode === 'pending'

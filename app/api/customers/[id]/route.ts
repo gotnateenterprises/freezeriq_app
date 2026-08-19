@@ -406,7 +406,9 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
             const latestCampaign = await prisma.fundraiserCampaign.findFirst({
                 where: { customer_id: orgId },
                 orderBy: { created_at: 'desc' },
-                select: { id: true, closed_at: true, status: true },
+                // FR-FLOW-3: bundle_selection_status decides whether the campaign's
+                // delivery_time is the coordinator's answer or still unset.
+                select: { id: true, closed_at: true, status: true, bundle_selection_status: true },
             });
 
             // ── INV-A boundary ────────────────────────────────────────────────
@@ -443,6 +445,26 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
                         payment_instructions: fi.payment_instructions || undefined,
                         external_payment_link: fi.external_payment_link || undefined,
                         bundle_goal: fi.bundle_goal ? Number(fi.bundle_goal) : undefined,
+                        // ── FR-FLOW-3: delivery_time, with one extra guard ──────
+                        //
+                        // Every other field above is pushed unconditionally, which
+                        // is right for values the tenant owns. delivery_time is
+                        // different: once a coordinator has SUBMITTED SETUP they
+                        // have stated the pickup time for THIS fundraiser, and a
+                        // later edit of the organization profile — a form that
+                        // targets "whichever campaign was created most recently"
+                        // and carries a stale JSON value — must not silently
+                        // overwrite it.
+                        //
+                        // So the organization value flows through only while setup
+                        // is still outstanding. After 'selected', the campaign's own
+                        // value is authoritative and the tenant changes it through
+                        // the campaign, not the org profile. This is the same
+                        // reasoning as the INV-A closed-campaign boundary directly
+                        // above, applied to logistics instead of money.
+                        ...(latestCampaign.bundle_selection_status === 'selected'
+                            ? {}
+                            : { delivery_time: fi.delivery_time || undefined }),
                     },
                 });
             }

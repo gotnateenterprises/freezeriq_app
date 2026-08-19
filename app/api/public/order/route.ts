@@ -5,6 +5,7 @@ import { resolveVariantSize, getServingMultiplier } from '@/lib/serving_multipli
 import { buildBundlePriceMap, findInactiveBundleNames } from '@/lib/pricing';
 import { resolveCampaignOrderMode, validateBundleEligibility } from '@/lib/campaignOrderBundles';
 import { isCampaignClosed, isCampaignPastOrderDeadline } from '@/lib/campaignBundleSelection';
+import { lockCampaignSelection } from '@/lib/campaignSelectionLock';
 import { isValidIanaTimeZone } from '@/lib/tenantTimezone';
 import { validateSubmissionKey, buildSubmissionFingerprint } from '@/lib/orderIdempotency';
 import { normalizeSlug, NO_SUCH_SLUG } from '@/lib/publicIdentity';
@@ -20,6 +21,27 @@ class CampaignClosedError extends Error {
         super('CAMPAIGN_CLOSED');
         this.name = 'CampaignClosedError';
     }
+}
+
+/**
+ * FR-FLOW-3 — the campaign's sellable bundles changed between the preflight and
+ * this insert, so the basket no longer matches what the fundraiser offers.
+ *
+ * Identified by a marker field rather than `instanceof`. Subclassing a built-in
+ * loses the prototype link when the class is downlevelled, and this repository
+ * compiles at an ES5 target — an `instanceof` here would silently stop matching
+ * and send a routine conflict down the 500 path.
+ */
+class BundleSelectionChangedError extends Error {
+    readonly isBundleSelectionChanged = true as const;
+    constructor() {
+        super('BUNDLE_SELECTION_CHANGED');
+        this.name = 'BundleSelectionChangedError';
+    }
+}
+
+function isBundleSelectionChanged(e: unknown): e is BundleSelectionChangedError {
+    return typeof e === 'object' && e !== null && (e as any).isBundleSelectionChanged === true;
 }
 
 export async function POST(req: Request) {
@@ -280,6 +302,30 @@ export async function POST(req: Request) {
         let txResult: { order: any; createdCustomer: boolean };
         try {
             txResult = await prisma.$transaction(async (tx) => {
+                // ── FR-FLOW-3: join the campaign's selection lock, FIRST ──────
+                //
+                // A coordinator may revise the fundraiser's bundles right up until
+                // the first supporter order exists. That makes their update a
+                // check-then-write, and THIS insert is the write that invalidates
+                // their check. Both paths take the same transaction-scoped advisory
+                // lock so exactly one reaches its decision first:
+                //
+                //   this order first        -> the order commits, and the
+                //                              coordinator's reselection then sees
+                //                              it and is refused.
+                //   reselection first       -> the new bundles are committed, and
+                //                              the recheck below rejects a basket
+                //                              built from the old ones.
+                //
+                // Serializable on the coordinator side alone could not do this:
+                // this transaction runs at READ COMMITTED, so it never joins
+                // PostgreSQL's SSI dependency graph and neither side would abort.
+                // Only campaign orders take it — the ordinary storefront path is
+                // untouched and contends for nothing.
+                if (campaign) {
+                    await lockCampaignSelection(tx, campaign.id);
+                }
+
                 // 2. Find or Create Customer (Individual)
                 // We try to find by email AND type='Individual' to avoid mixing with Org contacts
                 let dbCustomer = await tx.customer.findFirst({
@@ -342,6 +388,8 @@ export async function POST(req: Request) {
                         where: { id: campaign.id },
                         select: {
                             closed_at: true, status: true, end_date: true,
+                            // FR-FLOW-3: read by the bundle-selection recheck below.
+                            bundle_selection_status: true,
                             // FR-ORDERABILITY-1-R: re-read the tenant zone from the
                             // durable Business row inside the transaction rather than
                             // trusting the value captured during preflight, so the
@@ -357,6 +405,41 @@ export async function POST(req: Request) {
                         || !isValidIanaTimeZone(tenantZone)
                         || isCampaignPastOrderDeadline(currentCampaign, tenantZone)) {
                         throw new CampaignClosedError();
+                    }
+
+                    // ── FR-FLOW-3: the bundle-selection recheck ───────────────
+                    //
+                    // Narrow on purpose. It does NOT re-run the whole eligibility
+                    // matrix; it answers the one question the lock above made
+                    // answerable: are the bundles in this basket still the ones
+                    // this fundraiser sells?
+                    //
+                    // 'pending' means a coordinator has reopened setup and nothing
+                    // is on sale — before FR-FLOW-3 a campaign could only become
+                    // pending by tenant action, but reselection makes that window
+                    // reachable in ordinary use.
+                    //
+                    // 'not_required' is the legacy contract where every active
+                    // bundle is available, so there is no selected set to check
+                    // against and the basket is left alone.
+                    const selectionStatus = (currentCampaign as any).bundle_selection_status;
+
+                    if (selectionStatus === 'pending') {
+                        throw new BundleSelectionChangedError();
+                    }
+
+                    if (selectionStatus === 'selected') {
+                        const activeRows = await tx.campaignBundle.findMany({
+                            where: { campaign_id: campaign.id, state: 'active' },
+                            select: { bundle_id: true },
+                        });
+                        const sellable = new Set(activeRows.map((r) => r.bundle_id));
+                        const ordered = resolvedItems
+                            .map((i: any) => i.bundleId)
+                            .filter((b: any) => b && b !== 'manual_upsell');
+                        if (ordered.some((b: string) => !sellable.has(b))) {
+                            throw new BundleSelectionChangedError();
+                        }
                     }
                 }
 
@@ -437,6 +520,16 @@ export async function POST(req: Request) {
                 return NextResponse.json({
                     error: 'This campaign is closed and is no longer accepting orders.',
                     code: 'CAMPAIGN_CLOSED',
+                }, { status: 409 });
+            }
+
+            // FR-FLOW-3: the fundraiser's bundles changed while this order was in
+            // flight. Nothing was written. The supporter is told to refresh rather
+            // than shown anything about coordinators or internal selection state.
+            if (isBundleSelectionChanged(txErr)) {
+                return NextResponse.json({
+                    error: 'This fundraiser\'s options just changed. Please refresh and place your order again.',
+                    code: 'BUNDLE_SELECTION_CHANGED',
                 }, { status: 409 });
             }
 
