@@ -151,6 +151,75 @@ describe('the response dialog only claims what it has confirmed', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// FR-ACCEPTANCE-1D — a successful launch must not unmount its own success dialog
+//
+// LaunchFundraiserDialog sets its OWN local `result` state (the coordinator
+// setup URL, the copy buttons) the moment the launch API succeeds, then calls
+// the parent's onLaunched. Before this fix, onLaunched triggered a NON-silent
+// load() in FunnelLeadsPanel, which sets `loading` and hits the panel's early
+// return — replacing the whole tree (dialog included) with a spinner. The
+// dialog's local state doesn't get corrupted; the component holding it is
+// destroyed. This is the same class of bug FR-ACCEPTANCE-1C fixed for
+// RespondToInquiryDialog via mutate()'s load(true); this is the one call site
+// that had not been converted.
+//
+// SOURCE-TEXT: React components are not executable in this repo's Jest setup.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('a successful launch does not destroy its own success dialog', () => {
+    const leads = read('components/crm2/FunnelLeadsPanel.tsx');
+
+    it('onLaunched triggers a SILENT refresh, not a blocking one', () => {
+        expect(leads).toMatch(/onLaunched=\{\(\) => load\(true\)\}/);
+        expect(leads).not.toMatch(/onLaunched=\{\(\) => load\(\)\}/);
+        expect(leads).not.toMatch(/onLaunched=\{load\}/);
+    });
+
+    it('a silent load cannot reach the panel-replacing early return', () => {
+        // load(true) skips setLoading(true) entirely, so `if (loading)` at the
+        // top of the render can never fire because of this callback.
+        const loadFn = leads.slice(leads.indexOf('const load = useCallback'), leads.indexOf('useEffect(() => { load()'));
+        expect(loadFn).toMatch(/if \(!silent\) setLoading\(true\);/);
+    });
+
+    it('the dialog stays mounted across the refresh — launchingId is untouched by it', () => {
+        // onLaunched must not itself clear launchingId (that would also unmount
+        // the dialog, just via a different path). Only onClose does.
+        const onLaunchedLine = leads.slice(leads.indexOf('onLaunched={'), leads.indexOf('onLaunched={') + 200);
+        expect(onLaunchedLine).not.toMatch(/setLaunchingId/);
+    });
+
+    it('the coordinator setup URL is rendered from the dialog\'s OWN state, not a prop the parent could clear', () => {
+        const dialog = read('components/crm2/LaunchFundraiserDialog.tsx');
+        expect(dialog).toMatch(/const \[result, setResult\] = useState/);
+        expect(dialog).toMatch(/result\.url/);
+        // Set from the launch response, not from any parent-supplied prop.
+        expect(dialog).toMatch(/setResult\(\{ campaignId: data\.campaignId, url: data\.coordinatorAccessUrl/);
+    });
+
+    it('closing remains user-controlled: only onClose (Done/Cancel), never the refresh', () => {
+        const dialog = read('components/crm2/LaunchFundraiserDialog.tsx');
+        // The refresh callback used by the panel is onLaunched, which never
+        // calls onClose — only the dialog's own Done/Cancel buttons do.
+        const onLaunchedCall = dialog.slice(dialog.indexOf('onLaunched?.('), dialog.indexOf('onLaunched?.(') + 40);
+        expect(onLaunchedCall).not.toMatch(/onClose/);
+    });
+
+    it('nothing about this fix touches the launch request itself — no duplicate-submit risk introduced', () => {
+        // The launch POST and its busy-guard are unchanged by this phase; the
+        // fix is scoped entirely to the parent's post-success refresh call.
+        const dialog = read('components/crm2/LaunchFundraiserDialog.tsx');
+        expect(dialog).toMatch(/const \[busy, setBusy\] = useState/);
+        expect((dialog.match(/setResult\(/g) || []).length).toBe(1);
+    });
+
+    it('server launch authority is untouched by this phase', () => {
+        const launchRoute = stripComments(read('app/api/opportunities/[id]/launch/route.ts'));
+        expect(launchRoute).toMatch(/checkPrimaryCoordinator\(/);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // DEFECT 3 — the intro email belongs to the tenant sending it  (EXECUTED)
 // ═══════════════════════════════════════════════════════════════════════════
 

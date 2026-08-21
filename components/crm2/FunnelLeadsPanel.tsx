@@ -336,7 +336,14 @@ export function FunnelLeadsPanel() {
                     onClose={() => setLaunchingId(null)}
                     // A launched opportunity leaves this panel entirely — it is now a
                     // campaign, and the campaign surfaces are authoritative from here.
-                    onLaunched={() => load()}
+                    // FR-ACCEPTANCE-1D: silent, for the same reason mutate() is.
+                    // A plain load() sets `loading`, and the early return above
+                    // swaps the WHOLE panel for a spinner — unmounting this
+                    // dialog while it is showing the coordinator setup link the
+                    // tenant is about to copy. The dialog stays mounted because
+                    // launchingId does not change here; only its own Done/Cancel
+                    // buttons close it.
+                    onLaunched={() => load(true)}
                 />
             )}
         </div>
