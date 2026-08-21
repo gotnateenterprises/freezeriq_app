@@ -130,18 +130,33 @@ export function FunnelLeadsPanel() {
     // FR-ACCEPTANCE-1: which lead, if any, we are replying to.
     const [respondingTo, setRespondingTo] = useState<RespondTarget | null>(null);
 
-    const load = useCallback(() => {
-        setLoading(true);
+    /**
+     * FR-ACCEPTANCE-1C: `silent` refreshes without tearing the panel down.
+     *
+     * A plain load() sets `loading`, and the early return below swaps the whole
+     * panel for a spinner — which unmounts any open dialog mid-request. That is
+     * why the respond dialog could never learn whether its own save worked: it
+     * was gone before the answer came back. Refreshes triggered by a mutation
+     * are silent; only the first load and an explicit retry show the spinner.
+     */
+    const load = useCallback((silent = false) => {
+        if (!silent) setLoading(true);
         fetch('/api/opportunities?open=1')
             .then((r) => (r.ok ? r.json() : Promise.reject(new Error('load failed'))))
             .then((d) => { setRows(d.opportunities || []); setError(false); })
-            .catch(() => setError(true))
-            .finally(() => setLoading(false));
+            .catch(() => { if (!silent) setError(true); })
+            .finally(() => { if (!silent) setLoading(false); });
     }, []);
 
     useEffect(() => { load(); }, [load]);
 
-    const mutate = async (id: string, body: Record<string, unknown>, okMsg: string) => {
+    /**
+     * Returns whether the change was actually persisted.
+     *
+     * The caller needs this. A dialog that reports "recorded" on the strength of
+     * having *asked* is telling the tenant something it does not know.
+     */
+    const mutate = async (id: string, body: Record<string, unknown>, okMsg: string): Promise<boolean> => {
         setBusyId(id);
         try {
             const res = await fetch(`/api/opportunities/${id}`, {
@@ -149,12 +164,15 @@ export function FunnelLeadsPanel() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
             });
-            const data = await res.json();
+            // A gateway can answer with HTML; parsing it must not become the error.
+            const data = await res.json().catch(() => ({} as any));
             if (!res.ok) throw new Error(data.error || 'Update failed');
             toast.success(okMsg);
-            load();
+            load(true);
+            return true;
         } catch (e: any) {
             toast.error(e.message);
+            return false;
         } finally {
             setBusyId(null);
         }
@@ -165,7 +183,7 @@ export function FunnelLeadsPanel() {
     }
     if (error) {
         return <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-            Could not load fundraiser leads. <button onClick={load} className="font-bold underline">Try again</button>
+            Could not load fundraiser leads. <button onClick={() => load()} className="font-bold underline">Try again</button>
         </div>;
     }
     if (rows.length === 0) {
@@ -303,10 +321,12 @@ export function FunnelLeadsPanel() {
                     onClose={() => setRespondingTo(null)}
                     // Only a genuinely successful send records the response — the
                     // whole point of this control is that what we store matches
-                    // what actually left the building.
-                    onResponded={() => {
-                        mutate(respondingTo.opportunityId, { action: 'mark_responded' }, 'Response recorded');
-                    }}
+                    // what actually left the building. Returning the outcome lets
+                    // the dialog say whether the record actually landed, instead
+                    // of assuming it did.
+                    onResponded={() =>
+                        mutate(respondingTo.opportunityId, { action: 'mark_responded' }, 'Response recorded')
+                    }
                 />
             )}
 

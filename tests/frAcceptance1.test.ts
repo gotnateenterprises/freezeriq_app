@@ -151,14 +151,31 @@ describe('the inquiry submitter becomes an organization contact', () => {
         await ensureInquiryOrganizationContact(m.client, {
             businessId: BIZ, customerId: ORG, name: 'N', email: 'n@x.com',
         });
-        const where = m.firstCall('fundraiserContactPoint.findFirst')!.args.where;
+        const where = m.firstCall('fundraiserContactPoint.findMany')!.args.where;
         expect(where.business_id).toBe(BIZ);
         expect(where.type).toBe('email');
         expect(where.is_current).toBe(true);
     });
 
-    it('REUSES an existing person rather than creating a duplicate', async () => {
-        const m = tx({ 'fundraiserContactPoint.findFirst': { contact_id: 'existing-contact' } });
+    // FR-ACCEPTANCE-1C. The lookup is org-scoped FIRST: the strongest evidence
+    // that this is the same person is that they are already a contact of this
+    // very organization.
+    it('asks about THIS organization before it asks the whole address book', async () => {
+        const m = tx();
+        await ensureInquiryOrganizationContact(m.client, {
+            businessId: BIZ, customerId: ORG, name: 'N', email: 'n@x.com',
+        });
+        const first = m.firstCall('fundraiserContactPoint.findMany')!.args;
+        expect(first.where.contact.org_contacts.some).toMatchObject({
+            customer_id: ORG, ended_at: null,
+        });
+        // And it is ORDERED. An unordered findFirst over a set of people is the
+        // whole defect: Postgres returns whichever row it likes.
+        expect(first.orderBy).toEqual({ contact_id: 'asc' });
+    });
+
+    it('REUSES the person already attached to this organization', async () => {
+        const m = tx({ 'fundraiserContactPoint.findMany': [{ contact_id: 'existing-contact' }] });
         const r = await ensureInquiryOrganizationContact(m.client, {
             businessId: BIZ, customerId: ORG, name: 'Nathan', email: 'nathan@example.com',
         });

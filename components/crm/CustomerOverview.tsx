@@ -417,9 +417,28 @@ export default function CustomerOverview({ customer, onUpdateCustomer, onEditPro
                     context: activeEmailContext
                 })
             });
-            const data = await res.json();
+            const data = await res.json().catch(() => ({} as any));
             if (res.ok) {
-                alert(data.mocked ? "Email Simulated (No API Key)" : "Email Sent Successfully!");
+                // FR-ACCEPTANCE-1C: a simulated send must not advance the stage.
+                //
+                // Email sending is switched off whenever EMAIL_LIVE is not
+                // exactly 'true'. In that state this endpoint returns a 200 and
+                // contacts no provider — so treating the 200 as delivery moved
+                // the customer forward for a message nobody received, and on the
+                // marketing path it also flipped the campaign to Active.
+                //
+                // Note the old wording blamed a missing API key. That was wrong
+                // whenever a key exists and only the switch is off, which is the
+                // usual case.
+                if (data.mocked) {
+                    alert(
+                        "No email was sent — email sending is switched off for this environment.\n\n" +
+                        "Nothing reached this contact, so the stage has not moved forward."
+                    );
+                    setIsEmailModalOpen(false);
+                    return;
+                }
+                alert("Email Sent Successfully!");
                 setIsEmailModalOpen(false);
 
                 // Update local status based on email context

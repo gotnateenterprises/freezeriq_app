@@ -78,6 +78,48 @@ function isSubmissionKeyViolation(e: Prisma.PrismaClientKnownRequestError): bool
     return /submission_key/i.test(asText);
 }
 
+/**
+ * FR-ACCEPTANCE-1C — which unique index actually fired?
+ *
+ * This used to be a two-way question: submission key, or else the
+ * open-opportunity race. "Or else" was true when exactly two unique indexes
+ * were reachable inside this transaction. FR-ACCEPTANCE-1 added the address-book
+ * writes and made it five, so a contact collision was being diagnosed as an
+ * opportunity race — retried three times under conditions that could not change,
+ * and then rethrown as a generic 500 that rolled back a customer, an opportunity
+ * and an inquiry that had all been written successfully. The lead was lost, and
+ * because the swallowed attempts logged nothing, invisibly.
+ *
+ * On PostgreSQL, Prisma reports meta.target as the COLUMN LIST parsed out of the
+ * error detail, never the index name — the same for a partial index defined in
+ * raw SQL, which Prisma does not know exists. So classification is by column set.
+ */
+const constraintKey = (cols: string[]) => [...cols].sort().join(',');
+
+/** fundraiser_opportunities_one_open_per_org — the genuine concurrency race. */
+const OPEN_OPPORTUNITY_TARGET = constraintKey(['business_id', 'customer_id']);
+
+/** The three address-book indexes ensureInquiryOrganizationContact can trip. */
+const ADDRESS_BOOK_TARGETS = new Set([
+    constraintKey(['contact_id', 'type', 'normalized_value']), // ..._one_current_value
+    constraintKey(['contact_id', 'type']),                     // ..._one_primary_current
+    constraintKey(['contact_id', 'customer_id']),              // ..._one_active
+]);
+
+function violationTarget(e: Prisma.PrismaClientKnownRequestError): string {
+    const t = e.meta?.target;
+    const cols = Array.isArray(t) ? t.map(String) : typeof t === 'string' ? [t] : [];
+    return constraintKey(cols);
+}
+
+function isAddressBookViolation(e: Prisma.PrismaClientKnownRequestError): boolean {
+    return ADDRESS_BOOK_TARGETS.has(violationTarget(e));
+}
+
+function isOpenOpportunityViolation(e: Prisma.PrismaClientKnownRequestError): boolean {
+    return violationTarget(e) === OPEN_OPPORTUNITY_TARGET;
+}
+
 export async function POST(req: Request) {
     try {
         const body = await req.json();
@@ -340,13 +382,75 @@ export async function POST(req: Request) {
                     //    'coordinator' — filling in a form is not agreeing to run
                     //    the fundraiser, and FR-FLOW-2A's campaign coordinator
                     //    remains the only record of that deliberate tenant choice.
-                    await ensureInquiryOrganizationContact(tx, {
-                        businessId,
-                        customerId,
-                        name: contactName,
-                        email: contactEmail,
-                        phone: contactPhone,
-                    });
+                    //    FR-ACCEPTANCE-1C: behind a SAVEPOINT.
+                    //
+                    //    These are the LAST writes in the transaction, so before
+                    //    this a unique violation here destroyed everything above
+                    //    it — the customer, the opportunity and the inquiry all
+                    //    rolled back, and the volunteer was told to try again
+                    //    while their lead evaporated. Losing a real fundraiser
+                    //    inquiry is a far worse outcome than an address-book row
+                    //    that has to be added by hand later.
+                    //
+                    //    Postgres marks the whole transaction aborted after an
+                    //    error, so catching alone is not enough: without rolling
+                    //    back to a savepoint, every later statement fails with
+                    //    25P02. Prisma has no API for savepoints, hence raw SQL.
+                    //    A SAVEPOINT ALONE IS NOT ENOUGH — it has to RECONCILE.
+                    //
+                    //    The relationship is written LAST, after the contact and
+                    //    its contact points. So a collision on a contact-point
+                    //    index rolls back past the relationship that was never
+                    //    reached, and the lead commits with no contact attached
+                    //    to the organization. The volunteer's inquiry survives,
+                    //    Launch Fundraiser then says "this organization has no
+                    //    contacts on file yet", and the walkthrough this release
+                    //    exists to fix is broken again by the fix itself.
+                    //
+                    //    So the rollback is followed by ONE more attempt. This
+                    //    transaction is READ COMMITTED, which is what makes that
+                    //    work: after ROLLBACK TO SAVEPOINT the next statement
+                    //    takes a fresh snapshot, so the second pass SEES the
+                    //    rows the winner committed. It resolves onto the winner's
+                    //    contact, skips the point that now exists, and creates
+                    //    the relationship — or finds the winner already made it.
+                    //    Either way the organization ends up with a usable
+                    //    contact, which is the outcome that actually matters.
+                    let addressBookOk = false;
+                    for (let contactTry = 0; contactTry < 2 && !addressBookOk; contactTry++) {
+                        await tx.$executeRawUnsafe('SAVEPOINT fr_address_book');
+                        try {
+                            await ensureInquiryOrganizationContact(tx, {
+                                businessId,
+                                customerId,
+                                name: contactName,
+                                email: contactEmail,
+                                phone: contactPhone,
+                            });
+                            await tx.$executeRawUnsafe('RELEASE SAVEPOINT fr_address_book');
+                            addressBookOk = true;
+                        } catch (contactErr) {
+                            // Only the three known address-book indexes are swallowed.
+                            // Anything else is a real failure and still takes the lead
+                            // down with it, because it means something unexamined broke.
+                            if (!isUniqueViolation(contactErr) || !isAddressBookViolation(contactErr)) throw contactErr;
+                            await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT fr_address_book');
+                            console.warn(
+                                `[FUNDRAISER_REQUEST] address-book attempt ${contactTry + 1}/2 lost a race ` +
+                                `(columns: ${JSON.stringify((contactErr as Prisma.PrismaClientKnownRequestError).meta?.target)})` +
+                                (contactTry === 0 ? '; re-reading the winner and reconciling' : '')
+                            );
+                        }
+                    }
+                    if (!addressBookOk) {
+                        // Twice beaten. The inquiry is still safe — that is the
+                        // point of the savepoint — but somebody has to add this
+                        // person by hand, so say so where it will be seen.
+                        console.error(
+                            '[FUNDRAISER_REQUEST] address-book reconciliation failed twice; the inquiry was ' +
+                            'KEPT but customer ' + customerId + ' has no contact from this inquiry'
+                        );
+                    }
 
                     return { customerId, opportunityId, inquiryId: inquiry.id, createdCustomer };
                 });
@@ -373,9 +477,27 @@ export async function POST(req: Request) {
                     );
                 }
 
-                // Otherwise it is the open-opportunity index: another request
-                // created this organization's opportunity a moment ago. Re-run;
-                // the next pass finds it and appends to it.
+                // FR-ACCEPTANCE-1C: name the index instead of assuming it.
+                //
+                // The open-opportunity index means another request created this
+                // organization's opportunity a moment ago — re-run, and the next
+                // pass finds it and appends to it. An address-book violation that
+                // escaped the savepoint above is also a lost race worth one more
+                // pass. Anything else is NOT a race, and retrying it just burns
+                // two more transactions before failing the same way, so it fails
+                // now, with the constraint named in the log.
+                if (!isOpenOpportunityViolation(txErr) && !isAddressBookViolation(txErr)) {
+                    console.error(
+                        '[FUNDRAISER_REQUEST] unique violation on an unrecognised constraint ' +
+                        `(columns: ${JSON.stringify(txErr.meta?.target)}); not retrying`,
+                        txErr
+                    );
+                    throw txErr;
+                }
+                console.warn(
+                    `[FUNDRAISER_REQUEST] attempt ${attempt + 1}/${OPPORTUNITY_RACE_RETRIES} lost a race ` +
+                    `(columns: ${JSON.stringify(txErr.meta?.target)}); re-running`
+                );
                 if (attempt === OPPORTUNITY_RACE_RETRIES - 1) throw txErr;
             }
         }

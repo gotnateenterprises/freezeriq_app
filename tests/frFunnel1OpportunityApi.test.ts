@@ -146,9 +146,41 @@ describe('date workflow', () => {
         expect(d.status).toBe('date_confirmed');
     });
 
-    it('confirming also backfills first_response_at when it was never set', async () => {
+    // FR-ACCEPTANCE-1C. This test used to assert the opposite — that confirming a
+    // date backfilled first_response_at — on the theory that you cannot agree a
+    // date without having spoken. But a tenant can confirm a date they were given
+    // across a table at a school fair, and stamping it here wrote "we replied at
+    // 12:20" into permanent CRM history for a reply that never happened. The
+    // response-time figure derived from it was fiction too.
+    it('confirming a date does NOT fabricate a first reply', async () => {
         await patch({ action: 'confirm_date', confirmed_delivery_date: '2026-10-17' });
-        expect(mock.firstCall('fundraiserOpportunity.updateMany')!.args.data.first_response_at).toBeInstanceOf(Date);
+        const data = mock.firstCall('fundraiserOpportunity.updateMany')!.args.data;
+        expect(data.first_response_at).toBeUndefined();
+        // The things confirming a date IS allowed to do must still happen —
+        // date_confirmed is the sole launch gate.
+        expect(data.status).toBe('date_confirmed');
+        expect(data.confirmed_delivery_date).toBeInstanceOf(Date);
+    });
+
+    it('confirming a date leaves an EXISTING first reply alone', async () => {
+        useMock(openOpportunity({
+            'fundraiserOpportunity.findFirst': {
+                id: OPP,
+                status: 'in_conversation',
+                first_response_at: new Date('2026-10-01T15:00:00.000Z'),
+                preferred_delivery_date: null,
+            },
+        }));
+        await patch({ action: 'confirm_date', confirmed_delivery_date: '2026-10-17' });
+        const data = mock.firstCall('fundraiserOpportunity.updateMany')!.args.data;
+        expect(data.first_response_at).toBeUndefined();
+        expect(data.status).toBe('date_confirmed');
+    });
+
+    it('an explicit "I replied elsewhere" is STILL the way a reply gets recorded', async () => {
+        await patch({ action: 'mark_responded' });
+        expect(mock.firstCall('fundraiserOpportunity.updateMany')!.args.data.first_response_at)
+            .toBeInstanceOf(Date);
     });
 
     it('requires a date to confirm', async () => {

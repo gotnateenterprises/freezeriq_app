@@ -104,7 +104,26 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
                 // FundraiserCampaign.delivery_date, never start_date.
                 data.confirmed_delivery_date = confirmed;
                 data.status = 'date_confirmed';
-                if (!current.first_response_at) data.first_response_at = new Date();
+                // FR-ACCEPTANCE-1C: booking a date is NOT a reply.
+                //
+                // This branch used to stamp first_response_at, on the reasoning
+                // that you cannot agree a date without having talked. But the
+                // tenant can confirm a date they were told over a table at a
+                // school fair, or one a volunteer left on voicemail. Stamping it
+                // here wrote "we replied at 12:20" into permanent CRM history for
+                // a reply that may never have happened, and response_hours then
+                // reported that fabricated interval as a real response time.
+                //
+                // first_response_at now has exactly two sources, both of which
+                // mean a person actually answered: a real platform email that
+                // provably left the building, and the explicit "I replied
+                // elsewhere" control. Both arrive as `mark_responded` above.
+                //
+                // Leaving it null here is safe: date_confirmed is the sole launch
+                // gate (lib/fundraiserLaunch.ts), and both triage functions test
+                // for date_confirmed BEFORE they test first_response_at, so the
+                // lead moves on as normal — it simply stops claiming a reply it
+                // cannot vouch for.
                 break;
             }
 

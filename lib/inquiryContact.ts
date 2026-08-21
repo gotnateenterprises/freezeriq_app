@@ -37,6 +37,23 @@ export function normalizeContactValue(value: string): string {
     return value.trim().toLowerCase();
 }
 
+/**
+ * Is this plausibly the same person's name?
+ *
+ * Deliberately conservative — collapse whitespace and case, nothing more. No
+ * nickname table, no initials, no fuzzy distance. This decides whether to file
+ * one person's inquiry under another person's record, and the cost of a false
+ * match (a volunteer's enquiry attached to a stranger) is much higher than the
+ * cost of a false miss (a new contact row flagged for review).
+ */
+export function namesMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+    const norm = (v: string | null | undefined) =>
+        (v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const x = norm(a);
+    const y = norm(b);
+    return x !== '' && x === y;
+}
+
 export interface InquiryContactInput {
     businessId: string;
     /** The organisation the inquiry resolved to. Already tenant-verified by the caller. */
@@ -81,24 +98,93 @@ export async function ensureInquiryOrganizationContact(
 
     const normalizedEmail = normalizeContactValue(email);
 
-    // ── 1. Is this person already in THIS tenant's address book? ─────────────
-    // Matched on a CURRENT email point, which is what the uniqueness rule keys
-    // on. Scoped by business_id: two tenants may each know a different person at
-    // the same address, and they must never collide.
-    const existingPoint = await tx.fundraiserContactPoint.findFirst({
+    // ── 1. Which person in the address book is this? ─────────────────────────
+    //
+    // FR-ACCEPTANCE-1C. This used to be a single tenant-wide `findFirst` on the
+    // email, with no ordering — so when one address mapped to several people,
+    // Postgres handed back whichever row it felt like and the submitter was
+    // silently filed as somebody else. Production already contains exactly that
+    // shape: one volunteer who coordinates for three different county groups is
+    // three contacts sharing one address, which is not a bug — the address book
+    // deliberately keeps one contact per person per organisation, so that
+    // ending a relationship with one group does not disturb the other two.
+    //
+    // A shared office inbox makes it worse: two genuinely different people at
+    // office@school.org would collapse into one, and the second person's name
+    // was thrown away without ever being compared.
+    //
+    // Resolution now goes narrowest-first, and refuses to guess at the end. It
+    // is the same shape the customer-identity resolver in the intake route uses.
+
+    // 1a. Someone already attached to THIS organisation with this address. This
+    //     is the strongest evidence available and it settles every duplicate in
+    //     Production today, because no organisation has two active contacts.
+    const orgScoped = await tx.fundraiserContactPoint.findMany({
+        where: {
+            business_id: businessId,
+            type: 'email',
+            normalized_value: normalizedEmail,
+            is_current: true,
+            contact: { org_contacts: { some: { customer_id: customerId, ended_at: null } } },
+        },
+        select: { contact_id: true },
+        orderBy: { contact_id: 'asc' },
+    });
+
+    // 1b. Nobody here yet — look tenant-wide, but take the whole set, ordered.
+    //     `findFirst` is what caused this defect; the fix is not a better
+    //     `findFirst`, it is refusing to reduce a set of people to one row.
+    const tenantWide = orgScoped.length > 0 ? [] : await tx.fundraiserContactPoint.findMany({
         where: {
             business_id: businessId,
             type: 'email',
             normalized_value: normalizedEmail,
             is_current: true,
         },
-        select: { contact_id: true },
+        select: { contact_id: true, contact: { select: { id: true, display_name: true } } },
+        orderBy: { contact_id: 'asc' },
     });
 
-    let contactId = existingPoint?.contact_id ?? null;
+    let contactId: string | null = null;
+    let ambiguousCandidates = 0;
+
+    if (orgScoped.length === 1) {
+        // Unambiguous: this person, this organisation, this address.
+        contactId = orgScoped[0].contact_id;
+    } else if (orgScoped.length > 1) {
+        // Should not happen — one active relationship per (contact, org) is an
+        // index — but if it ever does, that is precisely a case for not guessing.
+        ambiguousCandidates = orgScoped.length;
+    } else if (tenantWide.length === 1) {
+        // One person tenant-wide on this address. Reuse them, but only if the
+        // name agrees: a lone match on a shared inbox is still the wrong person.
+        const only = tenantWide[0];
+        if (namesMatch(only.contact?.display_name, displayName)) {
+            contactId = only.contact_id;
+        } else {
+            ambiguousCandidates = 1;
+        }
+    } else if (tenantWide.length > 1) {
+        // Several people share this address and none of them is attached to this
+        // organisation. A name match would have to be unique to be evidence.
+        const byName = tenantWide.filter((p) => namesMatch(p.contact?.display_name, displayName));
+        if (byName.length === 1) {
+            contactId = byName[0].contact_id;
+        } else {
+            ambiguousCandidates = tenantWide.length;
+        }
+    }
+
     let createdContact = false;
 
     if (!contactId) {
+        // Either nobody matched, or too many did. Both end here, and neither
+        // attaches this inquiry to a person we are not sure about.
+        //
+        // Creating a fresh contact is safe under every uniqueness rule on these
+        // tables — they are all keyed on a surrogate id or on contact_id, so a
+        // new row always fits — and it converges rather than multiplying: the
+        // next inquiry from this address for this organisation matches at 1a.
         const contact = await tx.fundraiserContact.create({
             data: {
                 business_id: businessId,
@@ -114,6 +200,19 @@ export async function ensureInquiryOrganizationContact(
                 // in words. Adding an enum value would be a schema change this
                 // acceptance pass is not authorised to make.
                 source: 'tenant',
+                // Flag the ambiguous ones for a human. The columns already exist
+                // and the rebooking review surface already reads them. Recording
+                // the doubt without surfacing it would leave nobody to resolve it.
+                ...(ambiguousCandidates > 0
+                    ? {
+                        needs_review: true,
+                        review_reason:
+                            `IDENTITY REVIEW: this address book already holds ${ambiguousCandidates} ` +
+                            `contact${ambiguousCandidates === 1 ? '' : 's'} using ${email}, and none could be ` +
+                            `matched to "${displayName}" with confidence. A new contact was recorded rather ` +
+                            `than attaching this inquiry to the wrong person. Merge them if they are the same.`,
+                    }
+                    : {}),
             },
             select: { id: true },
         });

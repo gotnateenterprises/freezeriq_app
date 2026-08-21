@@ -1,60 +1,12 @@
 
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
+import { EMAIL_TEMPLATES } from '@/lib/emailTemplates';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const EMAIL_TEMPLATES = {
-    'lead_intro': (name: string, orgName?: string) => ({
-        subject: `Delicious, stress-free fundraising for ${orgName || 'your group'}`,
-        html: `
-            <p>Hi ${name || 'there'}!</p>
-            <p>I’d love to help <strong>${orgName || 'your organization'}</strong> raise funds in a way that truly supports your families—by solving dinner time!</p>
-            <p>With a Freezer Chef fundraiser, you aren't just raising money; you're giving families the gift of a wholesome, homemade dinner without the prep work.</p>
-            
-            <h3>Why moms and groups love this:</h3>
-            <ul>
-                <li><strong>Families Love It:</strong> Everyone needs dinner! These are comforting, ready-to-go meals (like delicious casseroles and crockpot favorites) that make weeknights easier.</li>
-                <li><strong>Totally Stress-Free:</strong> We handle all the prep and sorting. You just smile and hand out the boxes.</li>
-                <li><strong>Meaningful Profit:</strong> Your group keeps <strong>20%</strong> of every sale to support your goals.</li>
-            </ul>
-
-            <h3>It’s super simple:</h3>
-            <ol>
-                <li><strong>Pick a Date:</strong> choose a Tuesday, Wednesday, or Thursday for delivery.</li>
-                <li><strong>Share the Love:</strong> We provide beautiful flyers and forms plus your own online order page and a personal Coordinator Dashboard to track everything in real time.</li>
-                <li><strong>Delivery Day:</strong> We bring the meals right to you—distribution takes just 15-30 minutes!</li>
-            </ol>
-
-            <p><strong>Ready to simplify dinner for your community?</strong><br>
-            I’d love to get a tentative date on the calendar for you or just chat about how we can make this your easiest fundraiser yet.</p>
-            
-            <p>Just reply to let me know which month you're thinking of!</p>
-            
-            <p>Warmly,</p>
-            <p><strong>Laurie</strong><br>
-            <a href="mailto:Laurie@MyFreezerChef.com">Laurie@MyFreezerChef.com</a><br>
-            <a href="https://MyFreezerChef.com">MyFreezerChef.com</a></p>
-        `
-    }),
-    'thank_you': (name: string, orgName?: string) => ({
-        subject: `Congratulations on a Successful Fundraiser!`,
-        html: `
-            <p>Hi ${name || 'there'}!</p>
-            <p>Congratulations again on a fantastic fundraiser for <strong>${orgName || 'your organization'}</strong>! It was a pleasure working with you to bring delicious, stress-free meals to your community.</p>
-            <p>We hope everyone is enjoying their meals. We'd love to help you reach your next goal—it's never too early to get a tentative date on the calendar for your next round!</p>
-            
-            <p><strong>Could you help us out?</strong><br>
-            If you loved your experience, would you mind sharing a brief testimonial? We’d love to feature your success on our Facebook, Google, and future sales materials to show other groups how easy fundraising can be.</p>
-            
-            <p>Just reply to this email with your thoughts!</p>
-            
-            <p>Warmly,</p>
-            <p><strong>The Freezer Chef Team</strong><br>
-            <a href="https://MyFreezerChef.com">MyFreezerChef.com</a></p>
-        `
-    })
-};
+// FR-ACCEPTANCE-1C: the stock bodies moved to lib/emailTemplates.ts so they can
+// be rendered and read by a test. See that file for why they had to change.
 
 export async function POST(req: Request) {
     try {
@@ -79,7 +31,33 @@ export async function POST(req: Request) {
         if (!finalHtml || !finalSubject) {
             const templateGen = EMAIL_TEMPLATES[template as keyof typeof EMAIL_TEMPLATES];
             if (templateGen) {
-                const generated = templateGen(customerName, organizationName);
+                // FR-ACCEPTANCE-1C: render the stock body as THIS tenant.
+                //
+                // Read from Business, which is the same row getTenantSender uses
+                // to build the From header — so the signature inside the message
+                // and the name on the envelope cannot disagree.
+                //
+                // Deliberately NOT TenantBranding: its business_name column
+                // defaults to the literal "Freezer Chef", so a tenant who has
+                // never opened the branding screen would sign their mail with
+                // another company's name — the exact failure this replaces.
+                const { prisma } = await import('@/lib/db');
+                const business = await prisma.business.findUnique({
+                    where: { id: session.user.businessId },
+                    select: { name: true, contact_email: true, slug: true },
+                });
+                const base = process.env.NEXTAUTH_URL?.replace(/\/+$/, '');
+                const generated = templateGen(
+                    customerName,
+                    organizationName,
+                    business
+                        ? {
+                            name: business.name,
+                            email: business.contact_email ?? undefined,
+                            site: business.slug && base ? `${base}/shop/${business.slug}` : undefined,
+                        }
+                        : undefined
+                );
                 if (!finalSubject) finalSubject = generated.subject;
                 if (!finalHtml) finalHtml = generated.html;
             } else if (!customHtml) {
@@ -120,22 +98,23 @@ export async function POST(req: Request) {
 
         if (!isLive) {
             console.log(`[SAFETY MODE / MOCK EMAIL] To: ${to}, Bcc: ${bcc?.length || 0}, Attachments: ${processedAttachments?.length || 0}`);
-            // Still update status so the workflow appears to progress in the UI
-            if (customerId && context && verifiedCustomer) {
-                try {
-                    const { progressStatus } = await import('@/lib/statusWorkflow');
-                    const status = verifiedCustomer.status;
-                    if (context === 'intro' && status === 'LEAD') {
-                        await progressStatus(customerId, 'email_intro', session.user.businessId);
-                    } else if (context === 'info' && status === 'SEND_INFO') {
-                        await progressStatus(customerId, 'email_info', session.user.businessId);
-                    } else if (context === 'marketing' && status === 'FLYERS') {
-                        await progressStatus(customerId, 'email_marketing', session.user.businessId);
-                    }
-                } catch (err) {
-                    console.error("Error updating status in mock mode:", err);
-                }
-            }
+            // FR-ACCEPTANCE-1C: safety mode records NOTHING.
+            //
+            // This branch used to advance the customer's pipeline status here —
+            // "Still update status so the workflow appears to progress in the UI".
+            // That was written for a demo, where nobody is waiting on the email.
+            // In a tenant's account it moved a real organization from Lead to
+            // Send Info because of a message that never left the building, and
+            // nothing anywhere recorded that the advance was fictional.
+            //
+            // Safety mode is not a demo switch: it is on whenever EMAIL_LIVE is
+            // not exactly 'true', which is the state Production is in. The
+            // tenants getting the fabricated progress were the paying ones.
+            //
+            // A simulated send now does exactly what it says — it logs, and it
+            // tells the caller `mocked: true` so the caller can be honest too.
+            // Demos that need to move a customer forward can use the explicit
+            // status endpoint, which is what it is for.
             return NextResponse.json({ success: true, mocked: true });
         }
 
