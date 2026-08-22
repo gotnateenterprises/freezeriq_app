@@ -38,6 +38,7 @@ interface ResolvedInvitation {
     html: string;
     setupUrl: string;
     alreadySentAt: Date | null;
+    claimedAt: Date | null;
 }
 
 /**
@@ -71,6 +72,7 @@ async function resolveInvitation(
     const coordinator = await prisma.fundraiserCampaignCoordinator.findUnique({
         where: { campaign_id: campaignId },
         select: {
+            setup_email_claimed_at: true,
             setup_email_sent_at: true,
             org_contact: {
                 select: {
@@ -139,6 +141,7 @@ async function resolveInvitation(
             html: rendered.html,
             setupUrl,
             alreadySentAt: coordinator.setup_email_sent_at,
+            claimedAt: coordinator.setup_email_claimed_at,
         },
     };
 }
@@ -155,13 +158,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         if (!resolved.ok) {
             return NextResponse.json({ error: resolved.error }, { status: resolved.status });
         }
-        const { to, coordinatorName, organizationName, subject, html, alreadySentAt } = resolved.data;
+        const { to, coordinatorName, organizationName, subject, html, alreadySentAt, claimedAt } = resolved.data;
+        // The three durable states, named once so the client never has to infer
+        // "sent" from a claim.
+        const state = alreadySentAt ? 'sent' : claimedAt ? 'unresolved' : 'ready';
         // setupUrl is deliberately NOT returned. The preview shows the tenant
         // what the coordinator will read; the credential is not part of that,
         // and the launch dialog already has its own Copy Setup Link fallback.
         return NextResponse.json({
             to, coordinatorName, organizationName, subject, html,
+            state,
             alreadySentAt,
+            claimedAt,
             sent: false,
         });
     } catch (e: any) {
@@ -238,24 +246,42 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         // ever reached. This is the same reasoning as the FR-FLOW-3 selection
         // lock, expressed as a conditional write rather than an advisory lock,
         // because here there is a row to condition on.
+        //
+        // THE CLAIM IS ITS OWN COLUMN, and that distinction is the whole point.
+        // An earlier version claimed by writing setup_email_sent_at, which
+        // prevented duplicates but made the column lie: a process that died
+        // between claiming and sending left a row asserting an email had gone
+        // out when none had. `setup_email_claimed_at` records the attempt;
+        // `setup_email_sent_at` records the provider accepting it. Nothing but
+        // provider acceptance may ever write the second one.
         const claim = await prisma.fundraiserCampaignCoordinator.updateMany({
-            where: { campaign_id: id, setup_email_sent_at: null },
-            data: { setup_email_sent_at: new Date() },
+            where: { campaign_id: id, setup_email_claimed_at: null, setup_email_sent_at: null },
+            data: { setup_email_claimed_at: new Date() },
         });
 
         if (claim.count === 0) {
-            // Somebody already sent it — a moment ago in another tab, or last
-            // week. Either way this request must not put a second credential in
-            // the world. The tenant is told plainly, and Copy Setup Link remains
-            // for the case where the coordinator genuinely lost the first one.
+            // Either it is already sent, or an earlier attempt claimed and never
+            // resolved. Neither may call the provider again: one would duplicate
+            // a credential, the other might. Which of the two it is decides what
+            // the tenant is told, so read it rather than guessing.
             const current = await prisma.fundraiserCampaignCoordinator.findUnique({
                 where: { campaign_id: id },
-                select: { setup_email_sent_at: true },
+                select: { setup_email_claimed_at: true, setup_email_sent_at: true },
             });
+            if (current?.setup_email_sent_at) {
+                return NextResponse.json({
+                    success: false,
+                    alreadySent: true,
+                    sentAt: current.setup_email_sent_at,
+                }, { status: 409 });
+            }
+            // Claimed but never confirmed. Saying "sent" would be a guess and
+            // saying "failed" would be a different guess; the truth is that we
+            // do not know, and Copy Setup Link is the way through.
             return NextResponse.json({
                 success: false,
-                alreadySent: true,
-                sentAt: current?.setup_email_sent_at ?? null,
+                unresolved: true,
+                claimedAt: current?.setup_email_claimed_at ?? null,
             }, { status: 409 });
         }
 
@@ -291,28 +317,56 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         }
 
         if (data.error) {
-            // An explicit provider rejection. Nothing was queued, so the claim is
-            // false and releasing it is the truthful thing to do — this is the
-            // one case where we KNOW no credential is in the world.
+            // An EXPLICIT provider rejection: the one outcome where we know for
+            // certain nothing was queued. The claim describes an attempt that
+            // provably did not happen, so it is released and the tenant may
+            // genuinely retry. sent_at was never touched and stays null.
             console.error('[COORDINATOR_EMAIL] provider rejected the send:', data.error);
             await prisma.fundraiserCampaignCoordinator.updateMany({
                 where: { campaign_id: id },
-                data: { setup_email_sent_at: null },
+                data: { setup_email_claimed_at: null },
             }).catch((releaseErr) => {
-                // Could not release. The row now says sent for an email that was
-                // not. Loud, because only a human can reconcile it.
+                // Could not release. The row now blocks a retry for a send that
+                // never happened. Loud, because only a human can reconcile it —
+                // and note it still does NOT claim the email was sent.
                 console.error(
                     '[COORDINATOR_EMAIL] could not release the claim for campaign ' + id +
-                    ' — setup_email_sent_at is set but NO email was sent',
+                    ' — claimed_at is set but NO email was sent; sent_at remains null',
                     releaseErr
                 );
             });
             return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
         }
 
-        // Claimed and sent. The timestamp already written IS the record, so there
-        // is no second write to fail — the partial-success window the previous
-        // review found is closed by construction rather than by handling.
+        // ── THE ONLY WRITE THAT MAY SET sent_at ─────────────────────────────
+        //
+        // The provider has accepted the message. Only now is "sent" a fact, and
+        // only here is it recorded.
+        //
+        // This write can still fail on its own — it is a separate system — and
+        // that is genuine partial success: the coordinator has the email, and we
+        // could not write down that they do. The claim is deliberately LEFT IN
+        // PLACE so no normal request can send a second credential, and the row
+        // rests at claimed-but-not-sent, which is exactly what we know.
+        try {
+            await prisma.fundraiserCampaignCoordinator.update({
+                where: { campaign_id: id },
+                data: { setup_email_sent_at: new Date() },
+            });
+        } catch (recordErr) {
+            console.error(
+                '[COORDINATOR_EMAIL] SENT but NOT RECORDED for campaign ' + id +
+                ' — the provider accepted it; claim held, sent_at still null',
+                recordErr
+            );
+            return NextResponse.json({
+                success: true,
+                mocked: false,
+                recorded: false,
+                id: data.data?.id ?? null,
+            });
+        }
+
         return NextResponse.json({ success: true, mocked: false, recorded: true, id: data.data?.id ?? null });
     } catch (e: any) {
         console.error('[COORDINATOR_EMAIL]', e);

@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Rocket, Copy, Check, Lock, UserPlus, Mail, Send, X } from 'lucide-react';
+import { Loader2, Rocket, Copy, Check, Lock, UserPlus, Mail, Send, X, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { AWAITING_COORDINATOR_SETUP_LABEL } from '@/lib/campaignDisplayStage';
 
@@ -79,6 +79,12 @@ export function LaunchFundraiserDialog({
     const [sendingEmail, setSendingEmail] = useState(false);
     /** Set ONLY from a real provider success reported by the server. */
     const [emailSentAt, setEmailSentAt] = useState<string | null>(null);
+    /**
+     * A send was attempted and its outcome could not be confirmed. NOT "sent" —
+     * the coordinator may or may not have the invitation, and the honest thing
+     * is to say so rather than pick whichever guess reads better.
+     */
+    const [emailUnresolved, setEmailUnresolved] = useState(false);
 
     const [name, setName] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -228,7 +234,8 @@ export function LaunchFundraiserDialog({
                 return;
             }
             setEmailPreview({ to: data.to, subject: data.subject, html: data.html });
-            if (data.alreadySentAt) setEmailSentAt(String(data.alreadySentAt));
+            if (data.state === 'sent') setEmailSentAt(String(data.alreadySentAt));
+            else if (data.state === 'unresolved') setEmailUnresolved(true);
         } catch {
             toast.error('Could not prepare that email.');
         } finally {
@@ -263,8 +270,23 @@ export function LaunchFundraiserDialog({
                     });
                     return;
                 }
+                if (data?.unresolved) {
+                    // An earlier attempt claimed the send and never resolved.
+                    // Not sent, not failed — unknown, and blocked from retrying.
+                    setEmailUnresolved(true);
+                    setEmailPreview(null);
+                    toast.warning('Delivery status unresolved', {
+                        description:
+                            'An earlier attempt could not be confirmed, so FreezerIQ will not send '
+                            + 'again automatically. Use Copy Setup Link if the coordinator never received it.',
+                        duration: 12000,
+                    });
+                    return;
+                }
                 if (data?.uncertain) {
-                    // Send outcome unknown, claim held. Do not invite a retry.
+                    // This attempt's outcome is unknown, claim held. Not a retry
+                    // prompt — a second send could duplicate a live credential.
+                    setEmailUnresolved(true);
                     setEmailPreview(null);
                     toast.warning('Could not confirm that send', {
                         description: data.error,
@@ -283,11 +305,22 @@ export function LaunchFundraiserDialog({
                 setEmailPreview(null);
                 return;
             }
-            // Sent AND recorded — the claim was written before the provider was
-            // called, so there is no window in which one is true and the other
-            // is not.
-            setEmailSentAt(new Date().toISOString());
+            // The provider accepted it. That much is certain either way.
             setEmailPreview(null);
+            if (data?.recorded === false) {
+                // Sent, but we could not write sent_at. The row rests at
+                // claimed-but-not-sent, so the honest screen is "uncertain" —
+                // and above all, not an invitation to send a second credential.
+                setEmailUnresolved(true);
+                toast.warning('Sent — but not recorded', {
+                    description:
+                        'The coordinator has the setup email. FreezerIQ could not save that it was sent, '
+                        + 'so it will show as unconfirmed. Do not send it again.',
+                    duration: 12000,
+                });
+                return;
+            }
+            setEmailSentAt(new Date().toISOString());
             toast.success('Setup email sent to the coordinator.');
         } catch {
             toast.error("We couldn't send that email. Please try again.");
@@ -374,6 +407,21 @@ export function LaunchFundraiserDialog({
                                     <p className="mt-1 text-xs text-emerald-800 dark:text-emerald-300">
                                         If they never received it, use Copy Setup Link below rather
                                         than sending a second link.
+                                    </p>
+                                </>
+                            ) : emailUnresolved ? (
+                                /* Claimed, never confirmed. Saying "sent" would be a guess and
+                                   "failed" would be a different guess — the truth is that we do
+                                   not know, and a second send could duplicate a live credential. */
+                                <>
+                                    <p className="flex items-center gap-1.5 text-sm font-bold text-amber-800 dark:text-amber-300">
+                                        <AlertTriangle size={14} /> Delivery status not confirmed
+                                    </p>
+                                    <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+                                        FreezerIQ could not confirm whether the coordinator invitation
+                                        was delivered, so it will not send again automatically. Check
+                                        with {'them'} — and if it never arrived, use Copy Setup Link
+                                        below rather than sending a second link.
                                     </p>
                                 </>
                             ) : (

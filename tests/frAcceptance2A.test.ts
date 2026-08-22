@@ -403,23 +403,25 @@ describe('the coordinator email route', () => {
         expect(branch).not.toMatch(/resend/i);
     });
 
-    it('PROVIDER FAILURE leaves no sent state behind', () => {
+    it('PROVIDER FAILURE releases the claim and never writes sent_at', () => {
         const post = route.slice(route.indexOf('export async function POST'));
         const fail = post.slice(post.indexOf('if (data.error)'));
-        // The claim is released back to null, and the caller is told it failed.
-        expect(fail).toMatch(/setup_email_sent_at: null/);
+        // The CLAIM is released — the provider told us nothing was queued.
+        expect(fail).toMatch(/setup_email_claimed_at: null/);
         expect(fail).toMatch(/status: 500/);
-        expect(fail).not.toMatch(/setup_email_sent_at: new Date\(\)/);
+        // sent_at was never set on this path, so nothing about it is touched
+        // before the caller is told the send failed.
+        expect(fail.slice(0, fail.indexOf('status: 500'))).not.toMatch(/setup_email_sent_at/);
     });
 
-    it('the timestamp is written exactly once, BEFORE the provider call', () => {
-        // FR-ACCEPTANCE-2A confirmation changed this deliberately. Writing it
-        // after the send left a window where two concurrent requests could both
-        // email; the write is now the claim that makes the send exclusive.
+    it('sent_at is written exactly once, AFTER the provider accepts', () => {
+        // THE SEMANTIC GATE. An earlier draft used sent_at as the claim, which
+        // meant a crash between claiming and sending left a row asserting an
+        // email had gone out when none had. sent_at may only follow acceptance.
         const post = route.slice(route.indexOf('export async function POST'));
         expect((post.match(/setup_email_sent_at: new Date\(\)/g) || []).length).toBe(1);
-        expect(post.indexOf('if (!isLive)')).toBeLessThan(post.indexOf('setup_email_sent_at: new Date()'));
-        expect(post.indexOf('setup_email_sent_at: new Date()')).toBeLessThan(post.indexOf('resend.emails.send'));
+        expect(post.indexOf('resend.emails.send')).toBeLessThan(post.indexOf('setup_email_sent_at: new Date()'));
+        expect(post.indexOf('if (data.error)')).toBeLessThan(post.indexOf('setup_email_sent_at: new Date()'));
     });
 
     it('uses the canonical secure-link builder, not a hand-rolled URL', () => {
@@ -633,15 +635,19 @@ describe('ADVERSARIAL: exactly one invitation, enforced by the database', () => 
         expect(claim).toBeLessThan(post.indexOf('resend.emails.send'));
     });
 
-    it('the claim is conditional on the timestamp still being null', () => {
-        expect(post).toMatch(/where: \{ campaign_id: id, setup_email_sent_at: null \}/);
+    it('the claim is its own column, conditional on BOTH timestamps being null', () => {
+        expect(post).toMatch(/where: \{ campaign_id: id, setup_email_claimed_at: null, setup_email_sent_at: null \}/);
+        expect(post).toMatch(/data: \{ setup_email_claimed_at: new Date\(\) \}/);
     });
 
-    it('losing the claim stops BEFORE the provider and returns already-sent', () => {
+    it('losing the claim stops BEFORE the provider, and distinguishes sent from unresolved', () => {
         const lost = post.slice(post.indexOf('if (claim.count === 0)'), post.indexOf('const { Resend }'));
         expect(lost).toMatch(/alreadySent: true/);
+        expect(lost).toMatch(/unresolved: true/);
         expect(lost).toMatch(/status: 409/);
         expect(lost).not.toMatch(/resend/i);
+        // "sent" is decided by sent_at, never by the claim alone.
+        expect(lost).toMatch(/if \(current\?\.setup_email_sent_at\)/);
     });
 
     it('safety mode never consumes the claim', () => {
@@ -651,7 +657,7 @@ describe('ADVERSARIAL: exactly one invitation, enforced by the database', () => 
 
     it('an EXPLICIT provider rejection releases the claim — nothing was sent', () => {
         const rejected = post.slice(post.indexOf('if (data.error)'));
-        expect(rejected).toMatch(/setup_email_sent_at: null/);
+        expect(rejected).toMatch(/setup_email_claimed_at: null/);
         expect(rejected).toMatch(/status: 500/);
     });
 
@@ -666,11 +672,22 @@ describe('ADVERSARIAL: exactly one invitation, enforced by the database', () => 
         expect(post).toMatch(/could not release the claim/);
     });
 
-    it('there is no post-send write, so the partial-success window is closed by construction', () => {
-        // The timestamp is written before the send; success needs no second write.
-        const afterSend = post.slice(post.indexOf('if (data.error)'));
-        expect(afterSend).not.toMatch(/setup_email_sent_at: new Date\(\)/);
-        expect((post.match(/setup_email_sent_at: new Date\(\)/g) || []).length).toBe(1);
+    it('a failed sent_at write leaves claimed-but-not-sent, never a false sent', () => {
+        // Genuine partial success: the coordinator has the email and we could
+        // not write that down. The claim is HELD so no normal request can send a
+        // second credential, and the row rests at exactly what is known.
+        const partial = post.slice(post.indexOf('catch (recordErr)'));
+        expect(partial).toMatch(/success: true/);
+        expect(partial).toMatch(/recorded: false/);
+        expect(partial.slice(0, partial.indexOf('return NextResponse'))).not.toMatch(/setup_email_claimed_at: null/);
+        expect(post).toMatch(/SENT but NOT RECORDED/);
+    });
+
+    it('CRASH between claim and send is representable, and is not "sent"', () => {
+        // The durable row after a crash is claimed_at set, sent_at null. Nothing
+        // reads that as sent: the GET names the state, and it is not 'sent'.
+        const get = route.slice(route.indexOf('export async function GET'), route.indexOf('export async function POST'));
+        expect(get).toMatch(/const state = alreadySentAt \? 'sent' : claimedAt \? 'unresolved' : 'ready'/);
     });
 
     it('no general resend feature was added', () => {
@@ -729,15 +746,17 @@ describe('ADVERSARIAL: coordinator reassignment cannot inherit a stale invitatio
         // Exactly one create (launch). No upsert anywhere.
         expect(hits.filter((h) => h.endsWith('.create'))).toHaveLength(1);
         expect(hits.filter((h) => h.endsWith('.upsert'))).toHaveLength(0);
-        // Every write from the email route touches ONLY the timestamp — the
-        // claim, its release, and nothing else. org_contact_id is never
-        // reassigned, so no invitation state can follow a different person.
+        // Every write from the email route touches ONLY the two email
+        // timestamps — the claim, its release, and the sent record.
+        // org_contact_id is never reassigned, so no invitation state can follow
+        // a different person.
         const email = stripComments(read('app/api/campaigns/[id]/coordinator-email/route.ts'));
-        for (const m of email.match(/fundraiserCampaignCoordinator\.updateMany\(\{[\s\S]{0,220}?\}\)/g) || []) {
+        const writes = email.match(/fundraiserCampaignCoordinator\.(updateMany|update)\(\{[\s\S]{0,240}?\}\)/g) || [];
+        expect(writes.length).toBeGreaterThanOrEqual(3);
+        for (const m of writes) {
             expect(m).not.toMatch(/org_contact_id/);
-            expect(m).toMatch(/setup_email_sent_at/);
+            expect(m).toMatch(/setup_email_(claimed|sent)_at/);
         }
-        expect(hits.filter((h) => /\.update$/.test(h))).toHaveLength(0);
     });
 });
 
@@ -804,11 +823,12 @@ describe('FR-ACCEPTANCE-2A schema', () => {
         expect(block).not.toMatch(/setup_email_sent_at DateTime\?\s*@default/);
     });
 
-    it('the migration is exactly two additive columns', () => {
+    it('the migration is exactly three additive columns', () => {
         const sql = read(MIGRATION);
         const statements = sql.split('\n').filter((l) => /^\s*[A-Z]/.test(l) && !l.startsWith('--'));
-        expect(statements).toHaveLength(2);
+        expect(statements).toHaveLength(3);
         expect(sql).toMatch(/ALTER TABLE "businesses" ADD COLUMN "display_name" TEXT;/);
+        expect(sql).toMatch(/ALTER TABLE "fundraiser_campaign_coordinators" ADD COLUMN "setup_email_claimed_at" TIMESTAMP\(3\);/);
         expect(sql).toMatch(/ALTER TABLE "fundraiser_campaign_coordinators" ADD COLUMN "setup_email_sent_at" TIMESTAMP\(3\);/);
     });
 

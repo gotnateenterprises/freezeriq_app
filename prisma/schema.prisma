@@ -2091,12 +2091,29 @@ model FundraiserCampaignCoordinator {
   /// The organization-contact relationship acting as coordinator.
   org_contact_id String
   assigned_at    DateTime @default(now())
-  /// FR-ACCEPTANCE-2A — when the coordinator setup invitation ACTUALLY went out.
+  /// FR-ACCEPTANCE-2A — the single-send CLAIM. Not a delivery record.
+  ///
+  /// Set by the one request that wins the right to call the email provider, in a
+  /// conditional write, before the call is made. Every concurrent request loses
+  /// that race and stops without contacting the provider, so a coordinator can
+  /// never receive two working credentials from a double click.
+  ///
+  /// This exists as its own column because it answers a different question from
+  /// the one below. An earlier draft used `setup_email_sent_at` for both, which
+  /// meant a process that died between the claim and the provider call left a
+  /// row asserting an email had been sent when none had. A claim is an intent;
+  /// a send is a fact; they are not the same and they get separate columns.
+  setup_email_claimed_at DateTime?
+  /// FR-ACCEPTANCE-2A — when the provider ACCEPTED the invitation.
   ///
   /// Written only after a real provider send succeeds. Never on preview, never
-  /// on send-begin, never on provider failure, and never in safety mode — a
+  /// on claim, never on provider failure, and never in safety mode — a
   /// simulated send leaves this null so the tenant keeps seeing "not sent yet",
   /// which is the truth.
+  ///
+  /// claimed_at set with this still null is the honest representation of "we
+  /// tried and could not confirm the outcome" — the state a crash or a network
+  /// timeout leaves behind. It is never rendered as "sent".
   ///
   /// Not recorded in EmailDeliveryAttempt: that model requires an
   /// outreach_batch_id / outreach_recipient_id / outreach_message_id chain, and

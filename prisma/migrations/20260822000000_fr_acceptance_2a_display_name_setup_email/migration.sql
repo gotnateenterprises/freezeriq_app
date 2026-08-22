@@ -28,7 +28,27 @@
 ALTER TABLE "businesses" ADD COLUMN "display_name" TEXT;
 
 -- ────────────────────────────────────────────────────────────────────────────
--- 2. fundraiser_campaign_coordinators.setup_email_sent_at
+-- 2. fundraiser_campaign_coordinators.setup_email_claimed_at
+--
+-- THE CONCURRENCY PRIMITIVE, kept deliberately separate from the delivery fact.
+--
+-- One request wins the right to call the email provider by moving this column
+-- out of null in a conditional write; every concurrent request matches zero rows
+-- and stops before the provider is reached. That is what stops a double click
+-- putting two working credentials in a coordinator's inbox.
+--
+-- An earlier draft of this migration used setup_email_sent_at for both jobs.
+-- That prevented duplicates but corrupted the meaning of the column: a process
+-- that died between claiming and sending left a row asserting an email had gone
+-- out when none had, and that assertion would have become durable history. A
+-- claim is an intent and a send is a fact, so they are separate columns.
+--
+-- claimed_at set with sent_at still null is a real and useful state: "we tried,
+-- and we could not confirm what happened". It is never displayed as sent.
+ALTER TABLE "fundraiser_campaign_coordinators" ADD COLUMN "setup_email_claimed_at" TIMESTAMP(3);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 3. fundraiser_campaign_coordinators.setup_email_sent_at
 --
 -- WHY NOT EmailDeliveryAttempt
 -- That model is the right shape for bulk outreach and the wrong shape for this.
@@ -50,7 +70,7 @@ ALTER TABLE "businesses" ADD COLUMN "display_name" TEXT;
 -- defect FR-ACCEPTANCE-1C existed to remove.
 --
 -- It is written ONLY after a real provider send succeeds: never on preview,
--- never on send-begin, never on provider failure, never in safety mode.
+-- never on claim, never on provider failure, never in safety mode.
 ALTER TABLE "fundraiser_campaign_coordinators" ADD COLUMN "setup_email_sent_at" TIMESTAMP(3);
 
 -- NOT TOUCHED: every other table and column. No DROP, no data statement, no
