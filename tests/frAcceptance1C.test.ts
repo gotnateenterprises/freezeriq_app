@@ -304,7 +304,9 @@ describe('the lead intro email is the sending tenant', () => {
         // so an unconfigured tenant would sign as a competitor.
         const route = stripComments(read('app/api/email/send/route.ts'));
         expect(route).toMatch(/prisma\.business\.findUnique/);
-        expect(route).toMatch(/select: \{ name: true, contact_email: true, slug: true \}/);
+        // FR-ACCEPTANCE-2A widened this select with display_name and
+        // custom_domain. What matters here is unchanged: the source is Business.
+        expect(route).toMatch(/select: \{ name: true,[^}]*contact_email: true, slug: true \}/);
         expect(route).not.toMatch(/tenantBranding/i);
     });
 
@@ -761,11 +763,13 @@ describe('safety mode advances no workflow anywhere', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('FR-ACCEPTANCE-1C needs no schema change', () => {
-    it('the migration ledger is untouched at 13', () => {
+    it('FR-ACCEPTANCE-1C itself added no migration', () => {
+        // Scoped to this phase rather than to a global count: FR-ACCEPTANCE-2A
+        // later added one deliberately, under its own approval.
         const migrations = fs.readdirSync(path.join(ROOT, 'prisma/migrations'))
             .filter((d) => /^\d{14}_/.test(d));
-        expect(migrations).toHaveLength(13);
-        expect(migrations[migrations.length - 1]).toBe('20260821000000_fr_flow_3_campaign_delivery_time');
+        expect(migrations).toContain('20260821000000_fr_flow_3_campaign_delivery_time');
+        expect(migrations.filter((m) => /acceptance_1c/i.test(m))).toHaveLength(0);
     });
 
     it('the review columns it relies on already exist', () => {

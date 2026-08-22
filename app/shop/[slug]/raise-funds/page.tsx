@@ -110,7 +110,7 @@ export default function RaiseFundsPage() {
                 <h2 className="text-3xl font-black text-slate-900 dark:text-white">Simple, Profitable, and Stress-Free!</h2>
                 <p className="text-lg text-slate-600 dark:text-slate-300 leading-relaxed">
                     When you choose Freezer Chef, you're offering more than a fundraiser—you're delivering delicious, homemade-style meals that bring comfort to tables and support to your Cause &amp; Community!
-                    With over 10 years of experience, we know what it takes to make your event a success. Your group <strong>earns 20% of all sales</strong>, and we're with you every step of the way.
+                    With over 10 years of experience, we know what it takes to make your event a success. Your group <strong>keeps its agreed fundraising percentage</strong>, and we're with you every step of the way.
                 </p>
             </section>
 
@@ -121,8 +121,8 @@ export default function RaiseFundsPage() {
                         <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center text-emerald-600 mb-4">
                             <DollarSign size={24} />
                         </div>
-                        <h3 className="text-xl font-black mb-2">You Keep 20%</h3>
-                        <p className="text-slate-500 text-sm">Full payment is due 10 days before delivery. You pay us the total due and keep your 20% profit instantly.</p>
+                        <h3 className="text-xl font-black mb-2">You Keep Your Share</h3>
+                        <p className="text-slate-500 text-sm">Final orders are due two weeks before delivery. Your organization keeps its agreed fundraising percentage off the top, and we invoice the remaining balance shortly after final orders come in — payment due upon receipt.</p>
                     </div>
                     <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-lg border border-slate-100 dark:border-slate-700">
                         <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center text-indigo-600 mb-4">
@@ -159,9 +159,9 @@ export default function RaiseFundsPage() {
                         {[
                             { title: 'Schedule Your Fundraiser', desc: 'Choose your delivery date (Tue, Wed, or Thu) and location. Contact us to book.' },
                             { title: 'Pick Your Menu', desc: 'Choose 2 meal bundles. Each bundle has 5 dinners (3 slow-cooker, 2 oven-ready). Customize to suit your audience.' },
-                            { title: 'Set Deadlines & Promote', desc: 'Collect orders usually 2 weeks prior to delivery. We provide marketing materials. You collect payments (checks to your org).' },
+                            { title: 'Set Deadlines & Promote', desc: 'Final orders are due two weeks before delivery. We provide your marketing materials, a private coordinator panel for tracking the fundraiser, and your own public ordering page for customers to order from.' },
                             { title: 'Delivery & Distribution', desc: 'We arrive 15–30 mins early. Have volunteers ready to help unload. Families pick up their fresh meals.' },
-                            { title: 'Enjoy Your Profits', desc: 'Your organization keeps 20% of the proceeds. Simple as that!' }
+                            { title: 'Enjoy Your Profits', desc: 'Your organization keeps its agreed fundraising percentage. Simple as that!' }
                         ].map((step, i) => (
                             <div key={i} className="flex gap-6 items-start">
                                 <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-black text-xl text-slate-400 flex-shrink-0 border-4 border-white dark:border-slate-900 shadow-sm z-10">

@@ -44,17 +44,24 @@ export async function POST(req: Request) {
                 const { prisma } = await import('@/lib/db');
                 const business = await prisma.business.findUnique({
                     where: { id: session.user.businessId },
-                    select: { name: true, contact_email: true, slug: true },
+                    select: { name: true, display_name: true, custom_domain: true, contact_email: true, slug: true },
                 });
+                // FR-ACCEPTANCE-2A: the brand a CUSTOMER should read, and the
+                // tenant's own website — not the platform storefront path when
+                // they have a domain of their own. Both resolved in one place so
+                // no template has to know the rules.
+                const { resolveTenantBrand } = await import('@/lib/tenantBrand');
                 const base = process.env.NEXTAUTH_URL?.replace(/\/+$/, '');
+                const brand = business ? resolveTenantBrand(business, base) : null;
                 const generated = templateGen(
                     customerName,
                     organizationName,
-                    business
+                    business && brand
                         ? {
-                            name: business.name,
+                            name: brand.name,
                             email: business.contact_email ?? undefined,
-                            site: business.slug && base ? `${base}/shop/${business.slug}` : undefined,
+                            site: brand.websiteUrl ?? undefined,
+                            siteLabel: brand.websiteLabel ?? undefined,
                         }
                         : undefined
                 );
@@ -108,7 +115,10 @@ export async function POST(req: Request) {
             // nothing anywhere recorded that the advance was fictional.
             //
             // Safety mode is not a demo switch: it is on whenever EMAIL_LIVE is
-            // not exactly 'true', which is the state Production is in. The
+            // not exactly 'true'. (An earlier version of this comment asserted
+            // that Production was in that state; it was never verified and is
+            // now known to be false — EMAIL_LIVE is on. The code is correct in
+            // either mode, which is the point.) The
             // tenants getting the fabricated progress were the paying ones.
             //
             // A simulated send now does exactly what it says — it logs, and it

@@ -1,0 +1,58 @@
+-- FR-ACCEPTANCE-2A · Customer-facing brand + coordinator setup-email truth
+--
+-- Two nullable columns on two tables. Nothing else.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- 1. businesses.display_name
+--
+-- WHY A NEW COLUMN AND NOT TenantBranding.business_name
+-- The autoresponder footer needs the name a volunteer should read, which is not
+-- always the internal business identity: this tenant is "My Freezer Chef"
+-- internally and "Freezer Chef" to its customers. The only existing candidate
+-- was TenantBranding.business_name, and it fails on three counts. It is keyed on
+-- user_id, not business_id, so a business with several users has no defined
+-- answer — this tenant has two users and one branding row. It carries
+-- DEFAULT 'Freezer Chef', so any tenant who never opened the branding screen
+-- would sign their fundraiser mail as another company; two of the three
+-- businesses in Production have no row at all. And the one row that exists holds
+-- exactly that default, so its apparent correctness is a coincidence, not a
+-- configured value.
+--
+-- WHY NULLABLE, NO DEFAULT
+-- Null means "no separate customer-facing brand", and the application falls back
+-- to businesses.name, which is never wrong for anyone. A default here would
+-- reintroduce the precise failure this column exists to avoid.
+--
+-- NO BACKFILL. Setting this tenant's value is a separate, guarded, single-row
+-- operation in the release phase — not a blanket UPDATE in a migration.
+ALTER TABLE "businesses" ADD COLUMN "display_name" TEXT;
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 2. fundraiser_campaign_coordinators.setup_email_sent_at
+--
+-- WHY NOT EmailDeliveryAttempt
+-- That model is the right shape for bulk outreach and the wrong shape for this.
+-- Every row requires outreach_batch_id, outreach_recipient_id and
+-- outreach_message_id, all NOT NULL with foreign keys; outreach_batches requires
+-- a seasonal_offering_id and is UNIQUE per offering. Recording one transactional
+-- coordinator invitation there would mean fabricating a SeasonalOffering, an
+-- OutreachBatch, an OutreachRecipient and an OutreachMessage — synthetic rows
+-- that the rebooking and seasonal-lineup surfaces read as real audiences. That
+-- is duplicated state pointed the wrong way, so this records the fact where the
+-- fact belongs: on the coordinator assignment it describes.
+--
+-- WHY NULLABLE, NO DEFAULT, NO BACKFILL
+-- Null means "the setup invitation has not provably been delivered". Every
+-- campaign that launched before this release is in exactly that state, and the
+-- one campaign already live in Production genuinely never received a platform
+-- coordinator email — its link was copied by hand. Stamping a timestamp on it
+-- would be inventing a send that did not happen, which is the whole class of
+-- defect FR-ACCEPTANCE-1C existed to remove.
+--
+-- It is written ONLY after a real provider send succeeds: never on preview,
+-- never on send-begin, never on provider failure, never in safety mode.
+ALTER TABLE "fundraiser_campaign_coordinators" ADD COLUMN "setup_email_sent_at" TIMESTAMP(3);
+
+-- NOT TOUCHED: every other table and column. No DROP, no data statement, no
+-- index, no constraint, no change to businesses.name, businesses.custom_domain,
+-- or tenant_branding.

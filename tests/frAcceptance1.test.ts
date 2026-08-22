@@ -520,8 +520,14 @@ describe('the coordinator picker and the disabled CTA', () => {
     });
 
     it('the empty state offers a next step instead of a dead end', () => {
-        expect(code).toMatch(/Add a contact/);
-        expect(code).toMatch(/href=\{`\/customers\/\$\{ctx\.organization\.id\}`\}/);
+        // FR-ACCEPTANCE-2A improved on what this phase shipped. The original fix
+        // linked out to the organization page in a new tab and asked the tenant
+        // to come back and reopen the dialog; the contact can now be added
+        // inline, without leaving the launch flow at all. The property this test
+        // exists to defend — that the empty state is never a dead end — is
+        // strictly better served, so it is asserted against the current path.
+        expect(code).toMatch(/Add a different coordinator/);
+        expect(code).toMatch(/\/api\/organizations\/\$\{ctx\.organization\.id\}\/contacts/);
         expect(code).not.toMatch(/Add one before launching\./);
     });
 
@@ -567,10 +573,14 @@ describe('no schema was added', () => {
         expect(schema).not.toMatch(/public_inquiry/); // no new ContactSource value
     });
 
-    it('no new migration directory was created', () => {
+    it('FR-ACCEPTANCE-1 itself added no migration', () => {
+        // Scoped to this phase's own claim rather than to a global count. The
+        // count moved when FR-ACCEPTANCE-2A added Business.display_name and
+        // FundraiserCampaignCoordinator.setup_email_sent_at; that is a later,
+        // separately approved change and does not weaken what this phase proved.
         const migrations = fs.readdirSync(path.join(ROOT, 'prisma/migrations'))
             .filter((d) => /^\d{14}_/.test(d));
-        expect(migrations).toHaveLength(13);
-        expect(migrations[migrations.length - 1]).toBe('20260821000000_fr_flow_3_campaign_delivery_time');
+        expect(migrations).toContain('20260821000000_fr_flow_3_campaign_delivery_time');
+        expect(migrations.filter((m) => /acceptance_1/i.test(m))).toHaveLength(0);
     });
 });

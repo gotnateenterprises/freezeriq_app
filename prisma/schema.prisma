@@ -11,6 +11,18 @@ datasource db {
 model Business {
   id                     String             @id @default(uuid())
   name                   String
+  /// FR-ACCEPTANCE-2A — the CUSTOMER-FACING brand, when it differs from `name`.
+  ///
+  /// `name` is the canonical internal identity ("My Freezer Chef") and stays the
+  /// authority for the From header and every internal surface. This is what a
+  /// volunteer should read in an email footer ("Freezer Chef").
+  ///
+  /// Nullable with NO default, deliberately. TenantBranding.business_name
+  /// defaults to the literal "Freezer Chef", so any tenant who never opened the
+  /// branding screen would sign their mail as another company — which is why it
+  /// is not the authority here. A null here means "no separate brand", and the
+  /// fallback is `name`, which is never wrong for anyone.
+  display_name           String?
   slug                   String             @unique
   custom_domain          String?            @unique
   logo_url               String?
@@ -2079,6 +2091,19 @@ model FundraiserCampaignCoordinator {
   /// The organization-contact relationship acting as coordinator.
   org_contact_id String
   assigned_at    DateTime @default(now())
+  /// FR-ACCEPTANCE-2A — when the coordinator setup invitation ACTUALLY went out.
+  ///
+  /// Written only after a real provider send succeeds. Never on preview, never
+  /// on send-begin, never on provider failure, and never in safety mode — a
+  /// simulated send leaves this null so the tenant keeps seeing "not sent yet",
+  /// which is the truth.
+  ///
+  /// Not recorded in EmailDeliveryAttempt: that model requires an
+  /// outreach_batch_id / outreach_recipient_id / outreach_message_id chain, and
+  /// OutreachBatch is keyed one-per-SeasonalOffering. Recording one
+  /// transactional email there would mean fabricating a seasonal lineup and an
+  /// audience that the rebooking surfaces would then read as real.
+  setup_email_sent_at DateTime?
   updated_at     DateTime @updatedAt
 
   campaign    FundraiserCampaign            @relation("CampaignPrimaryCoordinator", fields: [customer_id, campaign_id], references: [customer_id, id], onDelete: Restrict)

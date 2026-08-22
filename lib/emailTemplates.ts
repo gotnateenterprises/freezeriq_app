@@ -40,6 +40,35 @@
  * Names, organisation names and tenant names are all user-controlled and must
  * never reach an email body as raw markup.
  */
+/**
+ * Make a user-derived value safe to place in a SUBJECT header.
+ *
+ * Organization and business names reach the subject line, and both are typed by
+ * people. A name containing CR or LF would be emitted into a mail header, where
+ * a newline ends the header and whatever follows becomes a NEW one — that is
+ * how `Bcc:` gets appended to somebody else's message. Whether a given provider
+ * happens to sanitize this is not something a caller should have to rely on.
+ *
+ * Control characters are stripped rather than escaped, because a subject has no
+ * escaping mechanism: there is no representation of a newline inside a header
+ * value. Runs of whitespace collapse so a stripped name still reads normally.
+ */
+/**
+ * C0 control characters and DEL — everything a mail header value must never
+ * carry. Built with explicit escapes so the source stays free of raw control
+ * bytes.
+ */
+const SUBJECT_CONTROL_CHARS = new RegExp('[\\u0000-\\u001F\\u007F]+', 'g');
+
+function safeSubject(value: string): string {
+    return value
+        // Controls only. Nothing printable is touched, so a name like
+        // "Ben & Jerry's" survives intact.
+        .replace(SUBJECT_CONTROL_CHARS, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 function escapeHtml(value: unknown): string {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -58,12 +87,24 @@ function escapeHtml(value: unknown): string {
  * other two are genuinely optional and every use is conditional.
  */
 export interface TemplateTenant {
-    /** The tenant's business name. Never blank. */
+    /**
+     * The CUSTOMER-FACING business name — `display_name` falling back to `name`,
+     * resolved by lib/tenantBrand. Never blank.
+     */
     name: string;
     /** Reply address, when the tenant has configured one. */
     email?: string;
-    /** Absolute URL of the tenant's storefront, when they have a slug. */
+    /**
+     * Absolute URL of the tenant's public site: their own domain when they have
+     * one, the storefront URL otherwise.
+     */
     site?: string;
+    /**
+     * How that URL is shown to a human — "myfreezerchef.com", not the full
+     * href. A volunteer should see the tenant's address, not a long platform
+     * path. Falls back to `site` when absent.
+     */
+    siteLabel?: string;
 }
 
 /**
@@ -82,7 +123,9 @@ function signature(tenant?: TemplateTenant): string {
         lines.push(`<a href="mailto:${escapeHtml(tenant.email)}">${escapeHtml(tenant.email)}</a>`);
     }
     if (tenant?.site) {
-        lines.push(`<a href="${escapeHtml(tenant.site)}">${escapeHtml(tenant.site)}</a>`);
+        // The href is the real URL; the text is the tenant's own address.
+        const label = (tenant.siteLabel ?? '').trim() || tenant.site;
+        lines.push(`<a href="${escapeHtml(tenant.site)}">${escapeHtml(label)}</a>`);
     }
     return `<p>Warmly,</p>\n            <p>${lines.join('<br>')}</p>`;
 }
@@ -103,23 +146,27 @@ export const EMAIL_TEMPLATES = {
     'lead_intro': (name: string, orgName?: string, tenant?: TemplateTenant) => {
         const org = escapeHtml(orgName || 'your organization');
         return {
-            subject: `Let's get ${orgName || 'your group'} a fundraiser date`,
+            subject: safeSubject(`Let's get ${orgName || 'your group'} a fundraiser date`),
             html: `
             <p>Hi ${escapeHtml(name || 'there')}!</p>
             <p>Thank you for asking about a fundraiser for <strong>${org}</strong> — I'd love to help.</p>
-            <p>A meal fundraiser is an easy one to run: families are going to eat dinner anyway, so you are not asking anyone to buy something they do not need. We handle the cooking, the packing and the sorting, and your volunteers hand out boxes.</p>
+            <p>A meal fundraiser is an easy way to raise money by offering families something they already need&mdash;dinner. We handle the meal prep, freezing, packing, and delivery to your organization, and your team simply sorts and distributes the orders at the designated pickup time and location.</p>
 
             <h3>The next step is picking a date</h3>
-            <p>Almost everything else follows from the delivery day, so that is the piece worth settling first.</p>
+            <p>Most of the fundraiser timeline is built around the delivery date, so that&rsquo;s the first thing we need to settle. Our preferred delivery days are Tuesday, Wednesday, or Thursday&mdash;please choose the day, date, and time that works best for your organization.</p>
             <ul>
                 <li><strong>A preferred date</strong> — the delivery or pickup day that suits ${org} best.</li>
                 <li><strong>A backup date</strong> — delivery days fill up, and having a second option usually saves a week of back-and-forth.</li>
             </ul>
 
+            <h3>Who will coordinate the fundraiser?</h3>
+            <p>Who will be the main contact/coordinator for the fundraiser? Please send us their name, email address, and phone number. If that will be you, just let us know.</p>
+
             <h3>What happens after that</h3>
             <ol>
                 <li><strong>We confirm the details</strong> — your date, your delivery location, and what your organization earns.</li>
                 <li><strong>You get everything you need to share it</strong> — flyers and order forms, your own online order page, and a coordinator dashboard for watching orders arrive in real time.</li>
+                <li><strong>Final orders and payment</strong> — final orders are due two weeks before the delivery date. The organization will keep its fundraising percentage off the top, and an invoice for the remaining balance due will be sent shortly after final orders are received, with payment due upon receipt.</li>
                 <li><strong>Delivery day</strong> — we bring the meals to you and your families collect them.</li>
             </ol>
 
@@ -146,3 +193,51 @@ export const EMAIL_TEMPLATES = {
         `,
     }),
 };
+
+/**
+ * FR-ACCEPTANCE-2A — the coordinator's setup invitation.
+ *
+ * THE SECURE LINK IS THE HREF AND NOTHING ELSE.
+ *
+ * The coordinator credential lives in the URL fragment
+ * (`/coordinator/access#<credential>`), which browsers never transmit — that
+ * is the whole of FR-COORD-SEC. Two rules follow and both are load-bearing:
+ *
+ *   1. The raw URL is NEVER printed as visible text. A coordinator who can
+ *      see a secret can paste it into a chat, and a support screenshot
+ *      becomes a credential leak. They see a button.
+ *   2. There is no plain-text alternative offered anywhere in this body for
+ *      the same reason.
+ *
+ * A separate operator gate applies before this ships: provider click
+ * tracking rewrites hrefs through a redirect host, which would carry the
+ * fragment into a query string and into that host's logs. That must be off.
+ */
+export const coordinatorSetupTemplate = (
+    coordinatorName: string,
+    orgName: string,
+    setupUrl: string,
+    tenant?: TemplateTenant
+) => ({
+    subject: safeSubject(`Your ${orgName} fundraiser is ready to set up`),
+    html: `
+        <p>Hi ${escapeHtml(coordinatorName || 'there')}!</p>
+        <p>Good news — the fundraiser for <strong>${escapeHtml(orgName)}</strong> is set up on our end and ready for you to finish.</p>
+
+        <p>There are two things to do, and they take a few minutes:</p>
+        <ol>
+            <li><strong>Choose your meal bundles</strong> — pick the options your families will be able to order.</li>
+            <li><strong>Confirm the remaining details</strong> — pickup time, location, and how your supporters will pay.</li>
+        </ol>
+
+        <p>Once that is done you will have your coordinator panel, where you can share the fundraiser and watch orders arrive as they come in.</p>
+
+        <p style="margin: 28px 0;">
+            <a href="${escapeHtml(setupUrl)}" style="background:#4f46e5;color:#ffffff;padding:14px 24px;border-radius:10px;font-weight:bold;text-decoration:none;display:inline-block;">Select Bundles &amp; Set Up Fundraiser</a>
+        </p>
+
+        <p style="font-size:13px;color:#64748b;">This link is personal to you — please don't forward it.</p>
+
+        ${signature(tenant)}
+    `,
+});

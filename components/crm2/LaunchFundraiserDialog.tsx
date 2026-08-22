@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Rocket, Copy, Check, Lock, UserPlus } from 'lucide-react';
+import { Loader2, Rocket, Copy, Check, Lock, UserPlus, Mail, Send, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { AWAITING_COORDINATOR_SETUP_LABEL } from '@/lib/campaignDisplayStage';
 
@@ -67,6 +67,18 @@ export function LaunchFundraiserDialog({
     const [busy, setBusy] = useState(false);
     const [copied, setCopied] = useState<'link' | 'message' | null>(null);
     const [result, setResult] = useState<{ campaignId: string; url: string | null } | null>(null);
+    // FR-ACCEPTANCE-2A — adding the real coordinator without leaving the flow.
+    const [addingContact, setAddingContact] = useState(false);
+    const [savingContact, setSavingContact] = useState(false);
+    const [newName, setNewName] = useState('');
+    const [newEmail, setNewEmail] = useState('');
+    const [newPhone, setNewPhone] = useState('');
+    // FR-ACCEPTANCE-2A — coordinator setup email: review, then send.
+    const [emailPreview, setEmailPreview] = useState<{ to: string; subject: string; html: string } | null>(null);
+    const [loadingPreview, setLoadingPreview] = useState(false);
+    const [sendingEmail, setSendingEmail] = useState(false);
+    /** Set ONLY from a real provider success reported by the server. */
+    const [emailSentAt, setEmailSentAt] = useState<string | null>(null);
 
     const [name, setName] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -109,6 +121,7 @@ export function LaunchFundraiserDialog({
                 if (alive) setLoading(false);
             }
         })();
+
         return () => { alive = false; };
     }, [opportunityId, onClose]);
 
@@ -153,6 +166,135 @@ export function LaunchFundraiserDialog({
             setBusy(false);
         }
     }, [busy, opportunityId, name, endDate, orgContactId, orgShare, picked, selectionLimit, onLaunched]);
+
+    /**
+     * FR-ACCEPTANCE-2A — save a new organization contact, then refresh the picker.
+     *
+     * Refreshes ONLY coordinatorCandidates. Re-reading the whole context would
+     * throw away the name, dates and bundle choices the tenant has already made
+     * in this dialog.
+     *
+     * It deliberately does NOT select the new person. Creating a contact and
+     * appointing a coordinator are different decisions — appointing them mints a
+     * credential and makes them responsible for setup — so the tenant still picks
+     * from the dropdown.
+     */
+    const addContact = useCallback(async () => {
+        if (savingContact || !ctx) return;
+        setSavingContact(true);
+        try {
+            const res = await fetch(`/api/organizations/${ctx.organization.id}/contacts`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ name: newName.trim(), email: newEmail.trim(), phone: newPhone.trim() }),
+            });
+            const data = await res.json().catch(() => ({} as any));
+            if (!res.ok) {
+                toast.error(data?.error || 'Could not save that contact.');
+                return;
+            }
+
+            const refreshed = await fetch(`/api/opportunities/${opportunityId}/launch`, { credentials: 'same-origin' });
+            const fresh = await refreshed.json().catch(() => null);
+            if (refreshed.ok && fresh?.coordinatorCandidates) {
+                setCtx((prev) => (prev ? { ...prev, coordinatorCandidates: fresh.coordinatorCandidates } : prev));
+            }
+
+            toast.success(data?.created === false ? 'That person was already a contact here.' : 'Contact added.');
+            setAddingContact(false);
+            setNewName(''); setNewEmail(''); setNewPhone('');
+        } catch {
+            toast.error('Could not save that contact.');
+        } finally {
+            setSavingContact(false);
+        }
+    }, [savingContact, ctx, newName, newEmail, newPhone, opportunityId]);
+
+    /**
+     * Load the preview. Opening it is NOT sending it — this is a GET, and the
+     * server writes nothing on that path.
+     */
+    const openEmailReview = useCallback(async () => {
+        if (!result) return;
+        setLoadingPreview(true);
+        try {
+            const res = await fetch(`/api/campaigns/${result.campaignId}/coordinator-email`, {
+                credentials: 'same-origin',
+            });
+            const data = await res.json().catch(() => ({} as any));
+            if (!res.ok) {
+                toast.error(data?.error || 'Could not prepare that email.');
+                return;
+            }
+            setEmailPreview({ to: data.to, subject: data.subject, html: data.html });
+            if (data.alreadySentAt) setEmailSentAt(String(data.alreadySentAt));
+        } catch {
+            toast.error('Could not prepare that email.');
+        } finally {
+            setLoadingPreview(false);
+        }
+    }, [result]);
+
+    /**
+     * Send it for real.
+     *
+     * FR-ACCEPTANCE-1C truth rules apply unchanged: a safety-mode response says
+     * so and records nothing, a failure claims nothing, and only a genuine
+     * provider success is reported as sent.
+     */
+    const sendCoordinatorEmail = useCallback(async () => {
+        if (!result || sendingEmail) return;
+        setSendingEmail(true);
+        try {
+            const res = await fetch(`/api/campaigns/${result.campaignId}/coordinator-email`, {
+                method: 'POST',
+                credentials: 'same-origin',
+            });
+            const data = await res.json().catch(() => ({} as any));
+            if (!res.ok) {
+                if (data?.alreadySent) {
+                    // The server refused a second credential. Reflect that state
+                    // rather than reporting a failure the tenant should retry.
+                    setEmailSentAt(data.sentAt ? String(data.sentAt) : new Date().toISOString());
+                    setEmailPreview(null);
+                    toast.info('That invitation has already been sent.', {
+                        description: 'Use Copy Setup Link if the coordinator never received it.',
+                    });
+                    return;
+                }
+                if (data?.uncertain) {
+                    // Send outcome unknown, claim held. Do not invite a retry.
+                    setEmailPreview(null);
+                    toast.warning('Could not confirm that send', {
+                        description: data.error,
+                        duration: 12000,
+                    });
+                    return;
+                }
+                toast.error(data?.error || "We couldn't send that email. Please try again.");
+                return;
+            }
+            if (data?.mocked) {
+                // Nothing left the building, so nothing is claimed or recorded.
+                toast.message('No email was sent — sending is switched off for this environment.', {
+                    description: 'The coordinator has not been contacted. Use Copy Setup Link instead.',
+                });
+                setEmailPreview(null);
+                return;
+            }
+            // Sent AND recorded — the claim was written before the provider was
+            // called, so there is no window in which one is true and the other
+            // is not.
+            setEmailSentAt(new Date().toISOString());
+            setEmailPreview(null);
+            toast.success('Setup email sent to the coordinator.');
+        } catch {
+            toast.error("We couldn't send that email. Please try again.");
+        } finally {
+            setSendingEmail(false);
+        }
+    }, [result, sendingEmail]);
 
     const copy = useCallback(async (what: 'link' | 'message', text: string) => {
         try {
@@ -214,10 +356,55 @@ export function LaunchFundraiserDialog({
                             The fundraiser exists and is not yet taking orders. It stays hidden from the
                             public storefront until the coordinator finishes setup.
                         </p>
+
+                        {/* FR-ACCEPTANCE-2A — the normal way to hand off.
+                            Copying a link and pasting it into another inbox still works and
+                            stays below, but it should not be the only route. Nothing is sent
+                            by launching: the tenant reviews the message first, then sends. */}
+                        <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 dark:border-indigo-900 dark:bg-indigo-950/40">
+                            {emailSentAt ? (
+                                <>
+                                    <p className="flex items-center gap-1.5 text-sm font-bold text-emerald-700 dark:text-emerald-400">
+                                        <Check size={14} /> Setup email sent to the coordinator
+                                    </p>
+                                    {/* No resend button, deliberately. One credential-bearing
+                                        invitation per coordinator, enforced server-side. If the
+                                        coordinator never got it, Copy Setup Link below hands the
+                                        tenant the same single link to pass on themselves. */}
+                                    <p className="mt-1 text-xs text-emerald-800 dark:text-emerald-300">
+                                        If they never received it, use Copy Setup Link below rather
+                                        than sending a second link.
+                                    </p>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="text-sm font-bold text-indigo-900 dark:text-indigo-200">
+                                        Send the coordinator their setup email
+                                    </p>
+                                    <p className="mt-1 text-xs text-indigo-800 dark:text-indigo-300">
+                                        Nothing has been sent yet. Review the message, then send it from
+                                        your business.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={openEmailReview}
+                                        disabled={loadingPreview}
+                                        aria-busy={loadingPreview}
+                                        className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+                                    >
+                                        {loadingPreview ? <Loader2 className="animate-spin" size={13} /> : <Mail size={13} />}
+                                        Review &amp; send coordinator email
+                                    </button>
+                                </>
+                            )}
+                        </div>
+
                         {result.url && (
                             <>
                                 <div>
-                                    <label className="mb-1 block text-xs font-bold text-slate-500">Secure setup link</label>
+                                    <label className="mb-1 block text-xs font-bold text-slate-500">
+                                        Secure setup link <span className="font-medium text-slate-400">(manual fallback)</span>
+                                    </label>
                                     <div className="flex gap-2">
                                         <input readOnly value={result.url} className={inputCls} onFocus={(e) => e.currentTarget.select()} />
                                         <button
@@ -302,31 +489,10 @@ export function LaunchFundraiserDialog({
                             <div>
                                 <label htmlFor="lf-coord" className="mb-1 block text-xs font-bold text-slate-500">Primary coordinator</label>
                                 {ctx.coordinatorCandidates.length === 0 ? (
-                                    /* FR-ACCEPTANCE-1 — a dead end became a next step.
-                                       This used to say only "add one before launching", with
-                                       nowhere to add one, so the tenant had to cancel the dialog
-                                       and go hunting. Anyone who enquires now becomes an
-                                       organization contact automatically, so this state should be
-                                       rare; when it happens, it links straight to the place that
-                                       fixes it. */
-                                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900 dark:bg-amber-950/40">
-                                        <p className="text-xs text-amber-800 dark:text-amber-300">
-                                            This organization has no contacts on file yet. A fundraiser needs
-                                            one person to set it up and receive the secure link.
-                                        </p>
-                                        <a
-                                            href={`/customers/${ctx.organization.id}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700"
-                                        >
-                                            <UserPlus size={13} /> Add a contact
-                                        </a>
-                                        <p className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-400">
-                                            Opens the organization in a new tab. Come back and reopen this
-                                            dialog once the contact is saved.
-                                        </p>
-                                    </div>
+                                    <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+                                        This organization has no contacts on file yet. A fundraiser needs
+                                        one person to set it up and receive the secure link — add them below.
+                                    </p>
                                 ) : (
                                     <select id="lf-coord" className={inputCls} value={orgContactId} onChange={(e) => setOrgContactId(e.target.value)}>
                                         {/* Deliberately unselected until the tenant chooses. The
@@ -340,6 +506,53 @@ export function LaunchFundraiserDialog({
                                             </option>
                                         ))}
                                     </select>
+                                )}
+
+                                {/* FR-ACCEPTANCE-2A — add the real coordinator without leaving.
+                                    The person who filled in the enquiry form is very often not the
+                                    one who will run the fundraiser; the intake email now asks who
+                                    that will be. Before this the tenant had to cancel the launch,
+                                    go and find the organization in the CRM, add a contact, and
+                                    start over. */}
+                                {!addingContact ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setAddingContact(true)}
+                                        className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:underline dark:text-indigo-400"
+                                    >
+                                        <UserPlus size={13} /> Add a different coordinator
+                                    </button>
+                                ) : (
+                                    <div className="mt-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
+                                        <p className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                                            New contact for {ctx.organization.name}
+                                        </p>
+                                        <input className={inputCls} placeholder="Full name" value={newName}
+                                            onChange={(e) => setNewName(e.target.value)} />
+                                        <input className={inputCls} type="email" placeholder="Email address" value={newEmail}
+                                            onChange={(e) => setNewEmail(e.target.value)} />
+                                        <input className={inputCls} placeholder="Phone (optional)" value={newPhone}
+                                            onChange={(e) => setNewPhone(e.target.value)} />
+                                        <div className="flex items-center justify-end gap-2">
+                                            <button type="button" onClick={() => setAddingContact(false)}
+                                                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold dark:border-slate-700">
+                                                Cancel
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={addContact}
+                                                disabled={savingContact || !newName.trim() || !newEmail.trim()}
+                                                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
+                                            >
+                                                {savingContact ? <Loader2 className="animate-spin" size={13} /> : <UserPlus size={13} />}
+                                                Save contact
+                                            </button>
+                                        </div>
+                                        <p className="text-[11px] text-slate-500">
+                                            Saving adds them to this organization. You still choose the
+                                            coordinator above — nobody is selected automatically.
+                                        </p>
+                                    </div>
                                 )}
                             </div>
 
@@ -407,6 +620,63 @@ export function LaunchFundraiserDialog({
                     </div>
                 )}
             </div>
+
+            {/* FR-ACCEPTANCE-2A — review before send.
+                The tenant sees the recipient, the subject and the exact body the
+                coordinator will read. The secure link is NOT shown as text
+                anywhere: it lives only in the CTA's href, because a credential a
+                human can read is a credential a human can paste somewhere it
+                does not belong. */}
+            {emailPreview && (
+                <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-900/60 p-4">
+                    <div className="my-10 w-full max-w-xl rounded-2xl bg-white p-5 shadow-xl dark:bg-slate-900">
+                        <div className="mb-3 flex items-start justify-between gap-3">
+                            <h3 className="text-base font-black text-slate-900 dark:text-white">Review coordinator email</h3>
+                            <button onClick={() => setEmailPreview(null)} aria-label="Close"
+                                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        <dl className="mb-3 space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-800/60">
+                            <div className="flex gap-2">
+                                <dt className="w-16 shrink-0 font-bold text-slate-500">To</dt>
+                                <dd className="text-slate-700 dark:text-slate-200">{emailPreview.to}</dd>
+                            </div>
+                            <div className="flex gap-2">
+                                <dt className="w-16 shrink-0 font-bold text-slate-500">Subject</dt>
+                                <dd className="text-slate-700 dark:text-slate-200">{emailPreview.subject}</dd>
+                            </div>
+                        </dl>
+
+                        <label className="mb-1 block text-xs font-bold text-slate-500">Message</label>
+                        <div
+                            className="max-h-72 overflow-y-auto rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700"
+                            dangerouslySetInnerHTML={{ __html: emailPreview.html }}
+                        />
+                        <p className="mt-2 text-[11px] text-slate-500">
+                            The button in this message carries the coordinator&rsquo;s private setup
+                            link. It is not shown as text on purpose.
+                        </p>
+
+                        <div className="mt-4 flex justify-end gap-2">
+                            <button onClick={() => setEmailPreview(null)}
+                                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold dark:border-slate-700">
+                                Cancel
+                            </button>
+                            <button
+                                onClick={sendCoordinatorEmail}
+                                disabled={sendingEmail}
+                                aria-busy={sendingEmail}
+                                className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                            >
+                                {sendingEmail ? <Loader2 className="animate-spin" size={15} /> : <Send size={15} />}
+                                Send Coordinator Email
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
