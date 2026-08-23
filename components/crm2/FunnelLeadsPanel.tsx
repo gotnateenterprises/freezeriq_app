@@ -11,11 +11,12 @@
  * panel stops talking about it.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Loader2, Mail, CalendarCheck, CalendarClock, Rocket, XCircle, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { LaunchFundraiserDialog } from '@/components/crm2/LaunchFundraiserDialog';
 import { RespondToInquiryDialog, type RespondTarget } from '@/components/crm2/RespondToInquiryDialog';
+import { firstNameOf } from '@/lib/personName';
 
 type Bucket = 'new_leads' | 'needs_follow_up' | 'waiting_on_date' | 'ready_to_create_campaign' | 'closed';
 
@@ -39,6 +40,12 @@ interface Opportunity {
     auto_ack_sent_at: string | null;
     /** The reply that applies to the NEWEST inquiry, which first_response_at may predate by months. */
     manual_response_at: string | null;
+    /**
+     * FR-ACCEPTANCE-2A.2 — the LATEST recorded manual follow-up for the newest
+     * inquiry. Advances on every follow-up, where manual_response_at is the
+     * write-once first response. This is what "Followed up [date]" shows.
+     */
+    last_human_followup_at: string | null;
     /**
      * Whether first_response_at is recent enough to be about the NEWEST inquiry.
      *
@@ -95,56 +102,93 @@ function mailtoHref(email: string | null | undefined): string | null {
 }
 
 /**
- * FR-ACCEPTANCE-2A.1 — one line saying who has answered the newest inquiry.
+ * FR-ACCEPTANCE-2A.1/2A.2 — what has actually happened for the newest inquiry.
  *
- * Four states, because "answered" and "not answered" cannot express an
- * acknowledgement whose delivery was never confirmed — and that state is the one
- * where a tenant most needs to act, since a person may be sitting with nothing.
+ * FR-ACCEPTANCE-2A.2 changed this from "pick the one most relevant fact" to
+ * "show every true fact". The automatic acknowledgement and a human follow-up
+ * are two DIFFERENT events that can both be true at once — a machine sent the
+ * introduction, and separately the tenant reached out personally — and the
+ * previous version could only ever display one, chosen by priority. That
+ * silently dropped the acknowledgement line the moment a human response
+ * existed, which reads as "the acknowledgement never happened" when it did.
  *
- * The wording never claims more than the database can prove. `auto_ack_sent`
- * means the provider ACCEPTED the message, which is not the same as the
- * volunteer reading it, so it says "sent" and never "delivered" or "they know".
+ * So this renders each fact independently:
+ *   - the acknowledgement line, whenever `auto_ack_sent_at` is set — regardless
+ *     of what else is true;
+ *   - the follow-up line, whenever `manual_response_applies` is true — never
+ *     "You responded", because a human follow-up may now be EITHER the tenant
+ *     personally replying on-platform (a stale name for this action) or the
+ *     recorded external "Email {name}" click below. "Followed up" is honest
+ *     for both.
+ *
+ * Neither line ever claims more than the database can prove: "sent" means the
+ * provider ACCEPTED the message, not that the volunteer read it; "Followed up"
+ * means the tenant INITIATED contact, not that it was delivered — FreezerIQ has
+ * no way to know whether Gmail or Outlook completed the send.
+ *
+ * When NEITHER fact is true, this falls back to the acknowledgement-uncertain
+ * warning or the plain "nothing yet" line, exactly as before.
  */
 function ResponseStateNotice({ o }: { o: Opportunity }) {
     const stamp = (v: string | null) => (v ? new Date(v).toLocaleString() : null);
+    const lines: ReactNode[] = [];
 
-    if (o.response_state === 'manual_response') {
-        // manual_response_at, NOT first_response_at. The latter is the
-        // opportunity's first-ever reply and can be months older than the
-        // conversation on screen.
-        const at = stamp(o.manual_response_at ?? o.first_response_at);
-        return (
-            <p className="mt-2 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-                ✓ You responded{at ? ` · ${at}` : ''}
-            </p>
-        );
-    }
-    if (o.response_state === 'auto_ack_sent') {
+    if (o.auto_ack_sent_at) {
         const at = stamp(o.auto_ack_sent_at);
-        return (
-            <p className="mt-2 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+        lines.push(
+            <p key="ack" className="mt-2 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
                 ✓ Automatic acknowledgement sent{at ? ` · ${at}` : ''}
-                <span className="ml-1 font-normal text-slate-500">— they have your introduction; no reply from you yet.</span>
             </p>
         );
     }
-    if (o.response_state === 'auto_ack_uncertain') {
-        return (
-            <p className="mt-2 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
-                ⚠ Acknowledgement not confirmed
-                {/* Both directions of the ambiguity, because the row genuinely
-                    cannot tell them apart: the send may never have happened, or
-                    it may have been accepted and only the recording of it
-                    failed. The tenant is the one who can find out. */}
-                <span className="ml-1 font-normal text-slate-500">— an automatic introduction was started but never confirmed. They may have received nothing, or may have received it already; check before sending, or they could get it twice.</span>
+
+    if (o.manual_response_applies || o.last_human_followup_at) {
+        // FR-ACCEPTANCE-2A.2 — the LATEST follow-up leads, falling back through
+        // the first response to the opportunity's first-ever reply.
+        //
+        // last_human_followup_at advances on every recorded follow-up;
+        // manual_response_at is the write-once first response and would leave
+        // the tenant looking at a weeks-old date after they had just made
+        // contact. first_response_at is last because it is the opportunity's
+        // first-ever reply and can predate this conversation by months.
+        const at = stamp(o.last_human_followup_at ?? o.manual_response_at ?? o.first_response_at);
+        lines.push(
+            <p key="followup" className="mt-2 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                ✓ Followed up{at ? ` · ${at}` : ''}
+            </p>
+        );
+    } else if (o.auto_ack_sent_at) {
+        // Part K: the acknowledgement line must never be left implying a human
+        // has also weighed in. Say plainly that nobody has yet.
+        lines.push(
+            <p key="no-followup" className="mt-2 text-[11px] font-semibold text-slate-500">
+                No human follow-up yet.
             </p>
         );
     }
-    return (
-        <p className="mt-2 text-[11px] font-semibold text-slate-500">
-            Nothing has been sent to this inquiry yet.
-        </p>
-    );
+
+    if (lines.length === 0) {
+        if (o.response_state === 'auto_ack_uncertain') {
+            lines.push(
+                <p key="uncertain" className="mt-2 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                    ⚠ Acknowledgement not confirmed
+                    {/* Both directions of the ambiguity, because the row genuinely
+                        cannot tell them apart: the send may never have happened, or
+                        it may have been accepted and only the recording of it
+                        failed. The tenant is the one who can find out. */}
+                    <span className="ml-1 font-normal text-slate-500">— an automatic introduction was started but never confirmed. They may have received nothing, or may have received it already; check before sending, or they could get it twice.</span>
+                </p>
+            );
+        } else {
+            lines.push(
+                <p key="nothing" className="mt-2 text-[11px] font-semibold text-slate-500">
+                    Nothing has been sent to this inquiry yet.
+                </p>
+            );
+        }
+    }
+
+    return <>{lines}</>;
 }
 
 /**
@@ -234,7 +278,36 @@ const LOST_REASONS = [
 
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString(undefined, { timeZone: 'UTC' }) : '—');
 
-export function FunnelLeadsPanel() {
+interface FunnelLeadsPanelProps {
+    /**
+     * FR-ACCEPTANCE-2A.2 — reports the open-lead count up to the parent tab bar.
+     *
+     * Fired every time this panel's own data loads, from the SAME `rows` this
+     * component renders — never a second fetch, never a second derivation. That
+     * is what keeps a "Leads 3" tab badge from ever disagreeing with what the
+     * tenant sees after clicking into the tab: they are reading the same array.
+     */
+    onCountChange?: (count: number) => void;
+}
+
+export function FunnelLeadsPanel({ onCountChange }: FunnelLeadsPanelProps = {}) {
+    // A ref, not a `load()` dependency: the parent is not required to memoize
+    // this callback, and putting it in useCallback's deps would rebuild `load`
+    // on every parent render, which would rebuild the effect that calls it below
+    // — an infinite refetch loop the first time a caller passed an inline arrow.
+    /**
+     * FR-ACCEPTANCE-2A.2 — opportunity ids with a mutation currently in flight.
+     *
+     * A ref rather than state, because it has to be readable and writable
+     * SYNCHRONOUSLY inside a click handler; state would not have applied yet.
+     * Entries are removed in mutate()'s finally, so a later, intentional
+     * follow-up is never blocked — only a second click during the same request.
+     */
+    const inFlightRef = useRef<Set<string>>(new Set());
+
+    const onCountChangeRef = useRef(onCountChange);
+    useEffect(() => { onCountChangeRef.current = onCountChange; }, [onCountChange]);
+
     const [rows, setRows] = useState<Opportunity[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
@@ -257,7 +330,12 @@ export function FunnelLeadsPanel() {
         if (!silent) setLoading(true);
         fetch('/api/opportunities?open=1')
             .then((r) => (r.ok ? r.json() : Promise.reject(new Error('load failed'))))
-            .then((d) => { setRows(d.opportunities || []); setError(false); })
+            .then((d) => {
+                const opportunities = d.opportunities || [];
+                setRows(opportunities);
+                setError(false);
+                onCountChangeRef.current?.(opportunities.length);
+            })
             .catch(() => { if (!silent) setError(true); })
             .finally(() => { if (!silent) setLoading(false); });
     }, []);
@@ -270,13 +348,53 @@ export function FunnelLeadsPanel() {
      * The caller needs this. A dialog that reports "recorded" on the strength of
      * having *asked* is telling the tenant something it does not know.
      */
-    const mutate = async (id: string, body: Record<string, unknown>, okMsg: string): Promise<boolean> => {
+    const mutate = async (
+        id: string,
+        body: Record<string, unknown>,
+        okMsg: string,
+        /**
+         * FR-ACCEPTANCE-2A.2 — survive a same-click external navigation.
+         *
+         * The follow-up control hands off to the tenant's mail client in the
+         * same click that records the follow-up. Setting `location.href` to a
+         * `mailto:` normally leaves the page intact — the OS handler takes it —
+         * but that is not guaranteed, and a page teardown cancels an ordinary
+         * in-flight fetch. A follow-up the tenant saw acknowledged and the
+         * database never received is precisely the fabricated state this program
+         * refuses.
+         *
+         * `keepalive` moves the request out of the document's lifetime: the
+         * browser completes it even if the page goes away. Unlike sendBeacon it
+         * keeps the method, the JSON Content-Type and the same-origin session
+         * cookie, so the server sees an ordinary authenticated PATCH — no second
+         * endpoint and no weakened auth path. The 64KB keepalive body cap is not
+         * a constraint here; this body is one short JSON object.
+         */
+        opts?: { keepalive?: boolean }
+    ): Promise<boolean> => {
+        // FR-ACCEPTANCE-2A.2 — a SYNCHRONOUS in-flight guard.
+        //
+        // `busyId` disables the button, but it is React state: the re-render that
+        // applies `disabled` is not guaranteed to have happened before a second
+        // click's handler runs. In practice a human double-click is far slower
+        // than a render, so this is belt-and-braces rather than a live defect —
+        // but it costs one ref and removes the dependency on render timing
+        // entirely, which matters more here than elsewhere because this click
+        // also hands off to an external mail client.
+        //
+        // Deliberately NOT a substitute for the server-side monotonic guard on
+        // last_human_followup_at: nothing in the browser can order two requests
+        // that are already in flight, and the durable record has to be correct
+        // regardless of what the UI did.
+        if (inFlightRef.current.has(id)) return false;
+        inFlightRef.current.add(id);
         setBusyId(id);
         try {
             const res = await fetch(`/api/opportunities/${id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
+                keepalive: opts?.keepalive === true,
             });
             // A gateway can answer with HTML; parsing it must not become the error.
             const data = await res.json().catch(() => ({} as any));
@@ -288,6 +406,7 @@ export function FunnelLeadsPanel() {
             toast.error(e.message);
             return false;
         } finally {
+            inFlightRef.current.delete(id);
             setBusyId(null);
         }
     };
@@ -364,28 +483,61 @@ export function FunnelLeadsPanel() {
                                             inquiry must not remove the tenant's ability to answer a
                                             new one. Note this only ever WIDENS availability: when
                                             there is one inquiry the two are identical. */}
-                                        {/* FR-ACCEPTANCE-2A.1 — the mail-client handover.
+                                        {/* FR-ACCEPTANCE-2A.2 — the mail-client handover, now combined
+                                            with recording the follow-up.
 
-                                            Shown when the platform has nothing left to send: either the
-                                            lead is due a follow-up, or the acknowledgement already went
-                                            out and the next message must be a personal one.
+                                            Shown whenever the platform believes the tenant should be the
+                                            next one to speak: either a follow-up is due, or the
+                                            acknowledgement just went out and the tenant wants to reach out
+                                            personally right away.
 
-                                            A follow-up TEMPLATE is deliberately out of scope for this
-                                            phase, so this does not add one. It hands over the thing the
-                                            tenant actually needs — the address — and opens their own
-                                            mail client. Nothing is sent by the platform and nothing is
-                                            recorded, which is right for a message the platform never
-                                            sees; the tenant records it afterwards with "I replied
-                                            elsewhere". */}
+                                            ONE click does two independent things: it opens the tenant's
+                                            own mail client (native `window.location.href` handoff — no
+                                            popup blockers, works exactly like a normal mailto link), and
+                                            it records THIS as a human response via the same
+                                            `mark_responded` action "I replied elsewhere" already uses.
+                                            FreezerIQ cannot know whether Gmail or Outlook ultimately sent
+                                            the message — this records that the tenant INITIATED contact,
+                                            which is the honest and complete claim the owner approved. See
+                                            ResponseStateNotice above, which is what actually renders
+                                            "Followed up [time]" from the SAME human_response_at column
+                                            this write uses — there is no separate "latest follow-up"
+                                            field. A second click, once human_response_at is already set,
+                                            opens mail again but matches zero rows in the database and
+                                            does not move the displayed timestamp — see the write-once
+                                            discussion on FundraiserInquiry.human_response_at in the
+                                            schema, which this deliberately preserves rather than
+                                            silently reinterprets. */}
                                         {(o.action?.kind === 'send_follow_up' || o.response_state === 'auto_ack_sent') && (
                                             mailtoHref(o.customer.contact_email) ? (
-                                                <a
-                                                    href={mailtoHref(o.customer.contact_email)!}
-                                                    className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950"
-                                                    title="Opens your own email client. FreezerIQ sends and records nothing — use “I replied elsewhere” afterwards."
+                                                <button
+                                                    type="button"
+                                                    disabled={busyId === o.id}
+                                                    onClick={() => {
+                                                        const href = mailtoHref(o.customer.contact_email);
+                                                        if (!href) return;
+                                                        // ORDER IS DELIBERATE, and it is the opposite of the
+                                                        // obvious one.
+                                                        //
+                                                        // The request is STARTED first, with keepalive, and
+                                                        // NOT awaited. Starting it first means it exists
+                                                        // before any handoff can tear the page down; keepalive
+                                                        // means the browser finishes it even if that happens.
+                                                        // Not awaiting means the mail client still opens
+                                                        // instantly — the tenant never waits on the network.
+                                                        //
+                                                        // Opening mail first and firing the request after
+                                                        // would invert both properties: the fetch would be
+                                                        // issued into a document that may already be
+                                                        // unloading.
+                                                        mutate(o.id, { action: 'mark_responded' }, 'Follow-up recorded', { keepalive: true });
+                                                        window.location.href = href;
+                                                    }}
+                                                    className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950"
+                                                    title="Opens your email app and records that you followed up."
                                                 >
-                                                    <Mail size={13} /> Email {o.customer.contact_name || 'them'} yourself
-                                                </a>
+                                                    <Mail size={13} /> Email {firstNameOf(o.customer.contact_name) || 'them'}
+                                                </button>
                                             ) : (
                                                 // Otherwise this lead could render with NO control at all:
                                                 // a follow-up anchored on a manual reply hides the buttons

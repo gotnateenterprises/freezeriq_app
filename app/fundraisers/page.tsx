@@ -109,7 +109,24 @@ export default function FundraisersPage() {
     };
 
     // FR-RETENTION-1B-1: primary tab state (Campaigns / Organizations / Rebooking)
-    const [activeTab, setActiveTab] = useState<'leads' | 'campaigns' | 'organizations' | 'rebooking'>('campaigns');
+    //
+    // FR-ACCEPTANCE-2A.2 — reads an initial `?tab=` the same way `searchTerm`
+    // above already reads `?search=`. Without this, a dashboard link built to
+    // land a tenant on their fundraiser leads always opened Campaigns instead —
+    // the one existing deep-link candidate, /pipeline, has no page behind it.
+    const TAB_KEYS = ['leads', 'campaigns', 'organizations', 'rebooking'] as const;
+    type TabKey = (typeof TAB_KEYS)[number];
+    const tabParam = searchParams.get('tab');
+    const initialTab: TabKey = (TAB_KEYS as readonly string[]).includes(tabParam ?? '')
+        ? (tabParam as TabKey)
+        : 'campaigns';
+    const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
+
+    // FR-ACCEPTANCE-2A.2 — the Leads tab's own open-lead count, reported up by
+    // FunnelLeadsPanel from the exact rows it renders. Not a second fetch and
+    // not a second derivation of "what counts as an open lead" — see the prop's
+    // doc comment in FunnelLeadsPanel.tsx.
+    const [leadsCount, setLeadsCount] = useState<number | null>(null);
 
     // ── CRM-CC-4: Campaign Context drawer state ───────────────────────────
     const [detailCampaign, setDetailCampaign] = useState<(PriorityListCampaign & { triage: CampaignTriage }) | null>(null);
@@ -164,6 +181,28 @@ export default function FundraisersPage() {
     }, []);
 
     useEffect(() => { loadCampaigns(); }, [loadCampaigns]);
+
+    /**
+     * FR-ACCEPTANCE-2A.2 — the Leads badge, independent of which tab is open.
+     *
+     * FunnelLeadsPanel only mounts while `activeTab === 'leads'` (see the
+     * conditional render below), so its own `onCountChange` alone would leave
+     * the badge blank for a tenant who opens Campaigns first — precisely the
+     * "easy to miss on a different tab" problem this exists to fix. So the page
+     * runs its own small fetch against the SAME canonical endpoint on mount,
+     * independent of tab state. If the tenant does visit Leads, the panel's own
+     * `onCountChange` (below) reports the freshest count from its own live
+     * data — after a mutation, for instance — and simply overwrites this one.
+     */
+    useEffect(() => {
+        if (!hasAccess) return;
+        let cancelled = false;
+        fetch('/api/opportunities?open=1')
+            .then((r) => (r.ok ? r.json() : Promise.reject(new Error('load failed'))))
+            .then((d) => { if (!cancelled) setLeadsCount((d.opportunities || []).length); })
+            .catch(() => { /* the badge simply stays absent; not worth an error state */ });
+        return () => { cancelled = true; };
+    }, [hasAccess]);
 
 
     // ── Phase 7E-3: Closeout handler ──────────────────────────────────────
@@ -273,15 +312,14 @@ export default function FundraisersPage() {
                 role="tablist"
                 aria-label="Fundraiser CRM"
                 onKeyDown={(e) => {
-                    const keys = ['leads', 'campaigns', 'organizations', 'rebooking'] as const;
                     if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(e.key)) return;
                     e.preventDefault();
-                    const idx = keys.indexOf(activeTab);
+                    const idx = TAB_KEYS.indexOf(activeTab);
                     const next =
-                        e.key === 'ArrowRight' ? keys[(idx + 1) % keys.length]
-                        : e.key === 'ArrowLeft' ? keys[(idx + keys.length - 1) % keys.length]
-                        : e.key === 'Home' ? keys[0]
-                        : keys[keys.length - 1];
+                        e.key === 'ArrowRight' ? TAB_KEYS[(idx + 1) % TAB_KEYS.length]
+                        : e.key === 'ArrowLeft' ? TAB_KEYS[(idx + TAB_KEYS.length - 1) % TAB_KEYS.length]
+                        : e.key === 'Home' ? TAB_KEYS[0]
+                        : TAB_KEYS[TAB_KEYS.length - 1];
                     setActiveTab(next);
                     requestAnimationFrame(() => document.getElementById(`tab-${next}`)?.focus());
                 }}
@@ -307,6 +345,17 @@ export default function FundraisersPage() {
                         }`}
                     >
                         {t.label}
+                        {/* FR-ACCEPTANCE-2A.2 — the same pill FunnelLeadsPanel already
+                            uses for each of its own bucket headers, so a tenant who has
+                            learned what that badge means on the panel sees the identical
+                            shape here. `leadsCount === null` means the panel has not
+                            loaded yet (or the tab has never been opened this session) —
+                            rendering nothing rather than a misleading 0. */}
+                        {t.key === 'leads' && leadsCount !== null && leadsCount > 0 && (
+                            <span className="ml-1.5 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                {leadsCount}
+                            </span>
+                        )}
                     </button>
                 ))}
             </div>
@@ -316,7 +365,7 @@ export default function FundraisersPage() {
                 cannot become a fourth competing pipeline vocabulary. */}
             {activeTab === 'leads' && (
                 <div role="tabpanel" id="panel-leads" aria-labelledby="tab-leads">
-                    <FunnelLeadsPanel />
+                    <FunnelLeadsPanel onCountChange={setLeadsCount} />
                 </div>
             )}
 

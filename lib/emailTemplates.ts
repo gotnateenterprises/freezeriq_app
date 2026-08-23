@@ -69,6 +69,8 @@ export function safeSubject(value: string): string {
         .trim();
 }
 
+import { firstNameOf } from '@/lib/personName';
+
 function escapeHtml(value: unknown): string {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -145,10 +147,16 @@ export const EMAIL_TEMPLATES = {
      */
     'lead_intro': (name: string, orgName?: string, tenant?: TemplateTenant) => {
         const org = escapeHtml(orgName || 'your organization');
+        // FR-ACCEPTANCE-2A.2 — greet by first name.
+        //
+        // Presentation only: the submitted name is stored and reported exactly as
+        // it arrived everywhere else (the CRM, the coordinator record, the reply
+        // notification). Only this greeting reads a shortened form of it.
+        const greetingName = firstNameOf(name) || 'there';
         return {
             subject: safeSubject(`Let's get ${orgName || 'your group'} a fundraiser date`),
             html: `
-            <p>Hi ${escapeHtml(name || 'there')}!</p>
+            <p>Hi ${escapeHtml(greetingName)}!</p>
             <p>Thank you for asking about a fundraiser for <strong>${org}</strong> — we'd love to help.</p>
             <p>A meal fundraiser is an easy way to raise money by offering families something they already need&mdash;dinner. We handle the meal prep, freezing, packing, and delivery to your organization, and your team simply sorts and distributes the orders at the designated pickup time and location.</p>
 
@@ -165,7 +173,7 @@ export const EMAIL_TEMPLATES = {
             <h3>What happens after that</h3>
             <ol>
                 <li><strong>We confirm the details</strong> — your date, your delivery location, and what your organization earns.</li>
-                <li><strong>You get everything you need to share it</strong> — flyers and order forms, your own online order page, and a coordinator dashboard for watching orders arrive in real time.</li>
+                <li><strong>You get everything you need to run and share it</strong> — your own coordinator dashboard to track orders in real time, download and print flyers and order forms, and share your custom online ordering page with supporters.</li>
                 <li><strong>Final orders and payment</strong> — final orders are due two weeks before the delivery date. Orders submitted online or entered through the coordinator panel are received by us as they come in. Your organization keeps its agreed fundraising percentage off the top, and we&rsquo;ll send an invoice for the remaining balance shortly after the order deadline, with payment due upon receipt.</li>
                 <li><strong>Delivery day</strong> — we bring the meals to you and your families collect them.</li>
             </ol>

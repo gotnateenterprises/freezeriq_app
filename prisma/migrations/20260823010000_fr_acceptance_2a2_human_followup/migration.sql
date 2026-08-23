@@ -1,0 +1,90 @@
+-- FR-ACCEPTANCE-2A.2 · Latest HUMAN follow-up for a fundraiser inquiry
+--
+-- One nullable column on one table. Nothing else.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- WHY "HUMAN" AND NOT "MANUAL"
+--
+-- This column was first drafted as last_manual_followup_at, and adversarial
+-- review found that name false. Its writer, the mark_responded action, has three
+-- callers: the "Email {name}" mail-client handoff, the "I replied elsewhere"
+-- control, and — decisively — the respond dialog, which sends a lead_intro
+-- THROUGH FreezerIQ. That third path is a platform send, so calling the result
+-- "manual" would have been wrong on the day it shipped.
+--
+-- What all three genuinely share is that a PERSON acted, as opposed to the
+-- automatic acknowledgement recorded by ack_sent_at. The column answers exactly
+-- one question — when did a human last reach out about this inquiry — and every
+-- writer matches it.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- WHY A NEW COLUMN AT ALL
+--
+-- FR-ACCEPTANCE-2A.2's first pass deliberately shipped WITHOUT this and
+-- reported the limitation: a tenant who followed up a second time saw the CRM
+-- keep displaying the first contact date forever, because every existing
+-- timestamp that could have carried it means something else.
+--
+-- fundraiser_inquiries.human_response_at is write-once by design — it answers
+-- "has a person replied to this inquiry", and the per-inquiry response history
+-- built on it stops meaning anything if a repeat follow-up moves it.
+-- fundraiser_opportunities.first_response_at is the write-once first-ever
+-- response METRIC. Both were rejected for the same reason: they are first-
+-- response facts, and this is a latest-activity fact.
+--
+-- An exhaustive audit of the remaining schema found no truthful home:
+--
+--   * activities — right shape (manual note/call/email plus a timestamp) and
+--     the wrong grain. It keys on customer_id, the ORGANIZATION, with no
+--     opportunity_id and no foreign key. One organization can hold several
+--     opportunities, so "the last follow-up on this lead" is underivable from
+--     it, and reading it would attribute an old lead's activity to a new one —
+--     precisely the staleness bug this phase exists to avoid.
+--
+--   * email_delivery_attempts and the outreach chain — structurally
+--     unusable. Every row requires outreach_batch_id, outreach_recipient_id and
+--     outreach_message_id, outreach_batches is UNIQUE per seasonal_offering_id,
+--     and outreach_messages is UNIQUE per batch. Recording one ad-hoc
+--     pre-campaign follow-up there means fabricating a seasonal lineup and an
+--     audience that the rebooking surfaces then read as real. The schema
+--     already refuses exactly this on
+--     fundraiser_campaign_coordinators.setup_email_sent_at, which is the
+--     precedent: the same problem, solved the same way, with a dedicated column.
+--
+--   * coordinator_action_events — requires campaign_id. A pre-campaign lead has
+--     no campaign.
+--
+--   * updated_at — means "row last edited". A typed note would silence a cold
+--     lead's follow-up clock.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- WHY PER-INQUIRY AND NOT PER-OPPORTUNITY
+--
+-- One opportunity holds MANY inquiries. A follow-up recorded on the 3rd must
+-- not make an inquiry that arrived on the 20th appear followed up.
+--
+-- At the inquiry grain that protection is structural: resolveInquiryResponse()
+-- already resolves the newest inquiry and reads its columns, so this one is
+-- read off the same row and a stale follow-up is unreachable by construction.
+-- At the opportunity grain the same guarantee would need a timestamp
+-- comparison against the newest inquiry's received_at — correct, but a guard a
+-- later edit could drop without any test noticing the grain mismatch.
+--
+-- Only the NEWEST inquiry is ever stamped, so each inquiry keeps its own
+-- follow-up history rather than having an older one rewritten forward.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- WHY NULLABLE, NO DEFAULT, NO BACKFILL
+--
+-- Null means "no human follow-up has been recorded for this inquiry". Every
+-- inquiry taken before this release is in exactly that state — the action that
+-- writes it did not exist. Backfilling from human_response_at would restate a
+-- first response as a latest follow-up, which is the conflation this column was
+-- added to prevent, and would move follow-up clocks for real leads.
+ALTER TABLE "fundraiser_inquiries" ADD COLUMN "last_human_followup_at" TIMESTAMP(3);
+
+-- NOT TOUCHED: every other table and column. No DROP, no UPDATE, no INSERT, no
+-- DELETE, no DEFAULT, no backfill, no index, no constraint. In particular
+-- fundraiser_inquiries.human_response_at and
+-- fundraiser_opportunities.first_response_at keep their write-once semantics
+-- exactly as they are today.

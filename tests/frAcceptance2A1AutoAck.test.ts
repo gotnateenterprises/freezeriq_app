@@ -790,7 +790,9 @@ describe('every follow-up instruction has a means to act on it', () => {
         // told to follow up with every send control hidden.
         const src = panel();
         expect(src).toMatch(/o\.action\?\.kind === 'send_follow_up'/);
-        expect(src).toMatch(/href=\{mailtoHref\(o\.customer\.contact_email\)!\}/);
+        // FR-ACCEPTANCE-2A.2: the mailto handoff is now a button (it has a side
+        // effect — see the describe block below), not a plain anchor href.
+        expect(src).toMatch(/window\.location\.href = href;/);
     });
 
     it('also offers it once the acknowledgement has gone out', () => {
@@ -802,15 +804,20 @@ describe('every follow-up instruction has a means to act on it', () => {
         expect(src).toMatch(/o\.action\?\.kind === 'send_follow_up' \|\| o\.response_state === 'auto_ack_sent'/);
     });
 
-    it('the mail affordance neither sends nor records anything', () => {
+    it('FR-ACCEPTANCE-2A.2: the mail affordance now opens mail AND records the follow-up', () => {
+        // Superseded by owner decision. The previous contract — open mail,
+        // record NOTHING, tell the tenant to separately click "I replied
+        // elsewhere" afterwards — was replaced with one combined action: click
+        // once, mail opens, and FreezerIQ records that contact was initiated.
+        // See the "combined mailto + record" describe block below for the full
+        // behavioral proof.
         const src = panel();
         const block = src.slice(src.indexOf("o.action?.kind === 'send_follow_up' ||"), src.indexOf('{!o.manual_response_applies'));
-        // An anchor, not a button: no handler, no mutate, no state write.
-        expect(block).not.toMatch(/onClick|mutate\(|setRespondingTo/);
-        // It must also tell the tenant to record the reply afterwards, or the
-        // follow-up warning would never clear.
-        expect(block).toMatch(/sends and records nothing/);
-        expect(block).toMatch(/I replied elsewhere/);
+        expect(block).toMatch(/onClick/);
+        expect(block).toMatch(/mutate\(o\.id, \{ action: 'mark_responded' \}/);
+        // "I replied elsewhere" remains available as the SEPARATE off-platform
+        // path (phone, in person) — this block is not that button.
+        expect(block).not.toMatch(/setRespondingTo/);
     });
 
     it('warns about a possible duplicate when delivery was never confirmed', () => {

@@ -63,6 +63,10 @@ export async function GET(req: Request) {
                         // acknowledgement or reply must never answer for a newer
                         // one.
                         ack_claimed_at: true, ack_sent_at: true, human_response_at: true,
+                        // FR-ACCEPTANCE-2A.2 — the latest manual follow-up, which
+                        // advances on repeat contact while human_response_at stays
+                        // fixed at the first.
+                        last_human_followup_at: true,
                     },
                 },
             },
@@ -102,6 +106,11 @@ export async function GET(req: Request) {
                 manual_response_at: response.outreachAt && response.state === 'manual_response'
                     ? response.outreachAt
                     : null,
+                // FR-ACCEPTANCE-2A.2 — what the CRM renders as "Followed up
+                // [date]". Null until a follow-up is actually recorded, and read
+                // from the newest inquiry only, so an older inquiry's follow-up
+                // can never be displayed against a newer one.
+                last_human_followup_at: response.lastHumanFollowUpAt,
                 // Median/aggregate reporting is a later phase; per-row response
                 // time is cheap and immediately useful in the CRM list.
                 response_hours: o.first_response_at && firstInquiry

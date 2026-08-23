@@ -8,6 +8,7 @@ import Link from 'next/link';
 
 import RevenueModal from '@/components/RevenueModal';
 import CalendarWidget from '@/components/CalendarWidget';
+import { FundraiserLeadAttentionCard } from '@/components/FundraiserLeadAttentionCard';
 
 function ActivityItem({ activity, onRefresh }: { activity: any; onRefresh: () => void }) {
     const [isReplying, setIsReplying] = useState(false);
@@ -181,6 +182,14 @@ export default function DashboardClient({ session }: { session: any }) {
 
     if (isLoading) return <div className="p-12 text-center text-slate-500">Loading Dashboard...</div>;
 
+    // FR-ACCEPTANCE-2A.2 — same gate the Fundraiser CRM page itself uses
+    // (app/fundraisers/page.tsx). Without this, a BASE/PRO tenant would see the
+    // attention card, click it, and land on UpgradeRequired instead of a lead.
+    const fundraiserPlan = (session?.user as any)?.plan;
+    const fundraiserSuperAdmin = (session?.user as any)?.isSuperAdmin;
+    const hasFundraiserAccess = fundraiserPlan === 'ENTERPRISE' || fundraiserPlan === 'ULTIMATE'
+        || fundraiserPlan === 'FREE' || fundraiserSuperAdmin;
+
     // Calculate Dynamic Food Cost %
     const foodCostPercentage = (startFoodCost && data?.metrics?.revenue > 0)
         ? ((startFoodCost / data.metrics.revenue) * 100).toFixed(1)
@@ -206,6 +215,11 @@ export default function DashboardClient({ session }: { session: any }) {
                     </div>
                 </div>
             </div>
+
+            {/* FR-ACCEPTANCE-2A.2 — renders nothing when there is no actionable
+                fundraiser lead, or when the fetch fails. See the component's own
+                doc comment for the truthfulness rules. */}
+            <FundraiserLeadAttentionCard hasAccess={hasFundraiserAccess} />
 
             {/* Metrics Row */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

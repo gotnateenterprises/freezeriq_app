@@ -88,6 +88,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
          * within one tenant would let the wrong conversation be marked answered.
          */
         let respondsToInquiries = false;
+        /**
+         * FR-ACCEPTANCE-2A.2 — the newest inquiry, which carries the latest
+         * manual follow-up timestamp. Server-resolved from the opportunity for
+         * the same reason as above: never from the request body.
+         */
+        let followUpInquiryId: string | null = null;
 
         switch (action) {
             case 'mark_responded': {
@@ -122,6 +128,26 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
                     where: { opportunity_id: id, business_id: businessId, human_response_at: null },
                 });
                 respondsToInquiries = outstanding > 0;
+
+                // ── FR-ACCEPTANCE-2A.2: THE LATEST FOLLOW-UP ────────────────
+                //
+                // Everything above is FIRST-response truth and is deliberately
+                // write-once, which left a repeat follow-up with nowhere to go:
+                // a tenant who emailed a quiet lead a second time saw the CRM
+                // keep showing the first contact date forever.
+                //
+                // last_human_followup_at is the second fact, and it advances
+                // every time. Stamped on the NEWEST inquiry only — not every
+                // outstanding one — so each inquiry keeps its own follow-up
+                // history rather than having an older one rewritten forward, and
+                // so the newest-inquiry derivation in inquiryResponseState.ts
+                // reads it off the row it already resolves.
+                const newest = await prisma.fundraiserInquiry.findFirst({
+                    where: { opportunity_id: id, business_id: businessId },
+                    orderBy: { received_at: 'desc' },
+                    select: { id: true },
+                });
+                followUpInquiryId = newest?.id ?? null;
                 break;
             }
 
@@ -200,7 +226,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
                 return NextResponse.json({ error: 'Unknown action.' }, { status: 400 });
         }
 
-        if (Object.keys(data).length === 0 && !respondsToInquiries) {
+        if (Object.keys(data).length === 0 && !respondsToInquiries && !followUpInquiryId) {
             // Nothing to do — every inquiry on this opportunity already carries a
             // human response.
             //
@@ -266,6 +292,43 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
                         human_response_at: null,
                     },
                     data: { human_response_at: new Date() },
+                });
+            }
+            if (followUpInquiryId) {
+                // FR-ACCEPTANCE-2A.2 — the latest human follow-up.
+                //
+                // UNLIKE the write above this carries no `IS NULL` guard, because
+                // advancing on every repeat contact is the entire point of the
+                // column. What it carries instead is a MONOTONIC guard, and that
+                // is load-bearing.
+                //
+                // Two rapid clicks each stamp their own `new Date()` in the
+                // application, and nothing orders their commits: the request
+                // holding 10:00:00.100 can reach this statement AFTER the one
+                // holding 10:00:00.200. Without a predicate the later-committing,
+                // earlier-timestamped write would win and the row would go
+                // BACKWARDS — the tenant would watch "Followed up" jump to an
+                // older time than the one they just saw.
+                //
+                // So the update only applies when the stored value is absent or
+                // genuinely older. Under READ COMMITTED the statement takes the
+                // row lock and re-evaluates this qualifier against the committed
+                // value, so the loser matches zero rows and leaves the newer
+                // timestamp standing. Same conditional-write idiom as the
+                // acknowledgement claim in lib/inquiryAcknowledgement.ts, scoped
+                // to one row rather than a table-wide lock.
+                const followUpAt = new Date();
+                await tx.fundraiserInquiry.updateMany({
+                    where: {
+                        id: followUpInquiryId,
+                        business_id: businessId,
+                        opportunity_id: id,
+                        OR: [
+                            { last_human_followup_at: null },
+                            { last_human_followup_at: { lt: followUpAt } },
+                        ],
+                    },
+                    data: { last_human_followup_at: followUpAt },
                 });
             }
         });

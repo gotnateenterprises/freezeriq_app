@@ -1990,6 +1990,50 @@ model FundraiserInquiry {
   /// Never set by automatic acknowledgement — that is ack_sent_at, and
   /// conflating them would let a machine's reply count as a person's.
   human_response_at      DateTime?
+  /// FR-ACCEPTANCE-2A.2 — the MOST RECENT time a HUMAN reached out about this
+  /// inquiry.
+  ///
+  /// THE ONE QUESTION THIS ANSWERS: when did a person at the tenant last make
+  /// contact? Deliberately NOT "…by which channel" — every writer below is a
+  /// human act, and the column does not distinguish how the message travelled:
+  ///
+  ///   * the "Email {name}" control, which hands off to the tenant's own mail
+  ///     client;
+  ///   * "I replied elsewhere", recording a phone call or a personal inbox;
+  ///   * a lead_intro sent THROUGH FreezerIQ from the respond dialog.
+  ///
+  /// An earlier draft of this column was named last_manual_followup_at, which
+  /// the third writer made false: a platform-sent email is not manual. The
+  /// distinction that actually matters here is human versus the AUTOMATIC
+  /// acknowledgement (ack_sent_at), and the name now says exactly that.
+  ///
+  /// WHY IT IS SEPARATE FROM human_response_at
+  /// That column is deliberately write-once — it answers "has a person replied
+  /// to this inquiry at all", and a repeat follow-up must not move it or the
+  /// response-time history built on it stops meaning anything. So a tenant who
+  /// chased a quiet lead a second time had nowhere truthful to record it, and
+  /// the CRM went on showing the first contact date forever. This column is that
+  /// second fact, and it advances every time.
+  ///
+  /// WHY PER-INQUIRY AND NOT PER-OPPORTUNITY
+  /// One opportunity holds many inquiries. A follow-up recorded in August must
+  /// not make an inquiry that arrived in September look answered — the same
+  /// staleness rule human_response_at exists to enforce. Keeping this at the
+  /// inquiry grain means resolveInquiryResponse reads it off the SAME newest-
+  /// inquiry row it already resolves, so that protection is structural rather
+  /// than a comparison some later edit could forget. Only the newest inquiry is
+  /// ever stamped, so each inquiry keeps its own follow-up history intact.
+  ///
+  /// MONOTONIC. The write is conditional on the stored value being null or
+  /// older, so two overlapping requests cannot leave the row holding the EARLIER
+  /// of the two timestamps.
+  ///
+  /// WHAT IT DOES NOT MEAN
+  /// Not provider-confirmed delivery. For the mail-client handoff FreezerIQ
+  /// cannot know whether Gmail or Outlook completed the send — this records that
+  /// a person INITIATED contact, which is why the CRM says "Followed up" and
+  /// never "Email sent".
+  last_human_followup_at DateTime?
 
   business    Business              @relation("BusinessFunnelInquiries", fields: [business_id], references: [id], onDelete: Cascade)
   customer    Customer              @relation("OrgFunnelInquiries", fields: [business_id, customer_id], references: [business_id, id], onDelete: Restrict)

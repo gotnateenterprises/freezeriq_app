@@ -46,6 +46,14 @@ export interface InquiryAckFacts {
      * backfill.
      */
     human_response_at?: string | Date | null;
+    /**
+     * FR-ACCEPTANCE-2A.2 — the MOST RECENT manual follow-up for THIS inquiry.
+     *
+     * Distinct from human_response_at, which is the write-once FIRST response.
+     * This advances on every recorded follow-up, and is what the CRM displays
+     * and what the follow-up clock measures from.
+     */
+    last_human_followup_at?: string | Date | null;
 }
 
 /**
@@ -87,6 +95,16 @@ export interface InquiryResponseFacts {
      * a different clock entirely (UNANSWERED_INQUIRY_HOURS on received_at).
      */
     outreachAt: Date | null;
+    /**
+     * FR-ACCEPTANCE-2A.2 — the most recent recorded manual follow-up for the
+     * NEWEST inquiry, or null if none.
+     *
+     * This is what the CRM displays as "Followed up [date]". It advances on
+     * every follow-up; manualResponseApplies / the first-response facts do not.
+     * Read from the newest inquiry only, so a follow-up recorded before a newer
+     * inquiry arrived can never be shown against that newer inquiry.
+     */
+    lastHumanFollowUpAt: Date | null;
 }
 
 function toDate(value: string | Date | null | undefined): Date | null {
@@ -172,6 +190,13 @@ export function resolveInquiryResponse(
     const manualAt = perInquiryManualAt ?? (legacyManualApplies ? firstAt : null);
     const manualResponseApplies = manualAt !== null;
 
+    // FR-ACCEPTANCE-2A.2 — the newest inquiry's own latest follow-up, if any.
+    //
+    // Read from the SAME newest-inquiry row as everything above, which is what
+    // makes Part K's staleness rule structural: a follow-up recorded before this
+    // inquiry existed lives on a different row and is unreachable from here.
+    const lastHumanFollowUpAt = toDate(newest?.last_human_followup_at);
+
     if (manualResponseApplies) {
         // A person answering outranks a machine acknowledging, even when both
         // happened. The acknowledgement is still reported alongside; it just is
@@ -182,7 +207,11 @@ export function resolveInquiryResponse(
             autoAckSentAt,
             autoAckClaimedAt,
             manualResponseApplies,
-            outreachAt: manualAt,
+            // The follow-up clock measures from the LATEST contact, not the
+            // first. A lead followed up yesterday is not overdue merely because
+            // the first reply was three weeks ago.
+            outreachAt: lastHumanFollowUpAt ?? manualAt,
+            lastHumanFollowUpAt,
         };
     }
 
@@ -194,6 +223,7 @@ export function resolveInquiryResponse(
             autoAckClaimedAt,
             manualResponseApplies,
             outreachAt: autoAckSentAt,
+            lastHumanFollowUpAt,
         };
     }
 
@@ -208,6 +238,7 @@ export function resolveInquiryResponse(
             autoAckClaimedAt,
             manualResponseApplies,
             outreachAt: null,
+            lastHumanFollowUpAt,
         };
     }
 
@@ -218,5 +249,6 @@ export function resolveInquiryResponse(
         autoAckClaimedAt,
         manualResponseApplies,
         outreachAt: null,
+        lastHumanFollowUpAt,
     };
 }
