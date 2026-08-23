@@ -86,9 +86,22 @@ describe('tenant authentication and isolation', () => {
 
     it('re-applies the tenant scope on the write itself', async () => {
         await patch({ action: 'mark_responded' });
-        expect(mock.firstCall('fundraiserOpportunity.updateMany')!.args.where).toEqual({
-            id: OPP, business_id: TENANT_A,
-        });
+        // FR-ACCEPTANCE-2A.1 relaxed this from toEqual to toMatchObject. The
+        // point of the test is that the write carries the tenant scope, and
+        // exact equality made it a change-detector that failed when the WHERE
+        // clause got STRONGER — the concurrency guards below were added because
+        // the pre-flight read happens outside the transaction.
+        const where = mock.firstCall('fundraiserOpportunity.updateMany')!.args.where;
+        expect(where).toMatchObject({ id: OPP, business_id: TENANT_A });
+    });
+
+    it('guards the write against a concurrently changed row', async () => {
+        await patch({ action: 'mark_responded' });
+        const where = mock.firstCall('fundraiserOpportunity.updateMany')!.args.where;
+        // A terminal status must not be revivable by a reply that raced it.
+        expect(where.status).toEqual({ notIn: ['converted', 'lost'] });
+        // And the write-once metric must not be moved by two racing clicks.
+        expect(where.first_response_at).toBeNull();
     });
 });
 

@@ -14,6 +14,7 @@ import {
     funnelBucket,
     OPPORTUNITY_PRIORITY_RANK,
 } from '@/lib/growth/opportunityNextAction';
+import { resolveInquiryResponse } from '@/lib/growth/inquiryResponseState';
 import { OPEN_OPPORTUNITY_STATUSES } from '@/lib/fundraiserFunnel';
 
 export async function GET(req: Request) {
@@ -54,7 +55,15 @@ export async function GET(req: Request) {
                 // is how a tenant sees "they have asked us three times".
                 inquiries: {
                     orderBy: { received_at: 'asc' },
-                    select: { id: true, received_at: true, source_channel: true, source_detail: true },
+                    select: {
+                        id: true, received_at: true, source_channel: true, source_detail: true,
+                        // FR-ACCEPTANCE-2A.1 — the per-inquiry response facts.
+                        // Loaded for EVERY inquiry, not just the first: the CRM
+                        // asks about the NEWEST one, and an older inquiry's
+                        // acknowledgement or reply must never answer for a newer
+                        // one.
+                        ack_claimed_at: true, ack_sent_at: true, human_response_at: true,
+                    },
                 },
             },
             orderBy: { created_at: 'desc' },
@@ -70,12 +79,29 @@ export async function GET(req: Request) {
                 preferred_delivery_date: o.preferred_delivery_date,
                 confirmed_delivery_date: o.confirmed_delivery_date,
                 updated_at: o.updated_at,
+                inquiries: o.inquiries,
             };
             const triage = triageOpportunity(forTriage, now);
+            // FR-ACCEPTANCE-2A.1 — derived here so the list, the drawer and the
+            // next action all read the SAME answer rather than each re-deriving
+            // it from raw timestamps and drifting apart.
+            const response = resolveInquiryResponse(o.first_response_at, o.inquiries);
             return {
                 ...o,
                 inquiry_count: o.inquiries.length,
                 first_inquiry_at: firstInquiry?.received_at ?? null,
+                latest_inquiry_at: response.latestInquiryAt,
+                response_state: response.state,
+                auto_ack_sent_at: response.autoAckSentAt,
+                manual_response_applies: response.manualResponseApplies,
+                // The reply that actually applies to the NEWEST inquiry. Not
+                // first_response_at: in the spring/autumn case that column holds
+                // the reply to the spring inquiry, and showing it beside an
+                // autumn conversation would misdate the tenant's own history by
+                // months.
+                manual_response_at: response.outreachAt && response.state === 'manual_response'
+                    ? response.outreachAt
+                    : null,
                 // Median/aggregate reporting is a later phase; per-row response
                 // time is cheap and immediately useful in the CRM list.
                 response_hours: o.first_response_at && firstInquiry

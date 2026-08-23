@@ -1905,6 +1905,17 @@ enum FundraiserLostReason {
 
 /// One inquiry, exactly as it arrived. Immutable: there is no `updated_at`,
 /// because editing history is how funnel reporting starts lying.
+///
+/// FR-ACCEPTANCE-2A.1 narrowed that sentence rather than breaking it. What
+/// arrived is still frozen — every field describing the submission is written
+/// once and never touched again. The two `ack_*` columns are not part of that
+/// record: they describe what the PLATFORM did in response, and they live here
+/// because the acknowledgement is owed per inquiry and there is no other row
+/// that is one-per-inquiry. The opportunity holds many inquiries, so a flag
+/// there would mark a new inquiry as answered by an old one's reply.
+///
+/// The distinction to preserve: never make the SUBMISSION mutable. Reporting
+/// on what was asked, when, and by whom must keep reading a frozen row.
 model FundraiserInquiry {
   id                     String   @id @default(uuid())
   business_id            String
@@ -1935,6 +1946,50 @@ model FundraiserInquiry {
   /// have no dedicated columns and are not worth inventing any for at intake.
   context                String?
   storefront_slug        String?
+  /// FR-ACCEPTANCE-2A.1 — the automatic acknowledgement's CONCURRENCY PRIMITIVE.
+  ///
+  /// One request wins the right to call the email provider by moving this out of
+  /// null in a conditional write; concurrent requests match zero rows and stop
+  /// before the provider. Deliberately per-INQUIRY, not per-opportunity: an
+  /// organization that inquires again months later gets a second inquiry on the
+  /// same open opportunity, and that second inquiry deserves its own reply.
+  ///
+  /// Null with ack_sent_at also null means "eligible" — which is what lets a
+  /// legitimate retry recover an inquiry whose first request died before it
+  /// reached the provider. The claim is held by the DATABASE, not by whichever
+  /// HTTP request happened to create the row.
+  ack_claimed_at         DateTime?
+  /// FR-ACCEPTANCE-2A.1 — provider acceptance of the automatic acknowledgement.
+  ///
+  /// Written ONLY after Resend accepts the message: never on claim, never in
+  /// safety mode, never on provider rejection. claimed_at set with sent_at still
+  /// null is a real state — "we tried and cannot confirm what happened" — and is
+  /// never displayed as sent.
+  ///
+  /// This is NOT a human response. See human_response_at below, which automatic
+  /// acknowledgement must never write.
+  ack_sent_at            DateTime?
+  /// FR-ACCEPTANCE-2A.1 — a PERSON at the tenant answered THIS inquiry.
+  ///
+  /// WHY THIS COLUMN HAD TO EXIST
+  ///
+  /// FundraiserOpportunity.first_response_at is write-once by design — the
+  /// writer sets it only `if (!current.first_response_at)`, so it keeps meaning
+  /// "the first time anyone here replied" and the response-time metric built on
+  /// it stays honest.
+  ///
+  /// That is correct for a metric and useless as an answer to "has this inquiry
+  /// been replied to". An organization that asks in spring, is answered, and
+  /// asks again in autumn produces a second inquiry on the same opportunity —
+  /// and answering that second one writes NOTHING, because the column is
+  /// already set. The newest inquiry would read as unanswered forever, and the
+  /// control offering to answer it would silently do nothing.
+  ///
+  /// So the metric stays where it was and the per-inquiry FACT lives here. Set
+  /// when a tenant sends a real platform reply or records an off-platform one.
+  /// Never set by automatic acknowledgement — that is ack_sent_at, and
+  /// conflating them would let a machine's reply count as a person's.
+  human_response_at      DateTime?
 
   business    Business              @relation("BusinessFunnelInquiries", fields: [business_id], references: [id], onDelete: Cascade)
   customer    Customer              @relation("OrgFunnelInquiries", fields: [business_id, customer_id], references: [business_id, id], onDelete: Restrict)

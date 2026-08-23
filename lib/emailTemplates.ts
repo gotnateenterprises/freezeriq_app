@@ -60,7 +60,7 @@
  */
 const SUBJECT_CONTROL_CHARS = new RegExp('[\\u0000-\\u001F\\u007F]+', 'g');
 
-function safeSubject(value: string): string {
+export function safeSubject(value: string): string {
     return value
         // Controls only. Nothing printable is touched, so a name like
         // "Ben & Jerry's" survives intact.
@@ -149,7 +149,7 @@ export const EMAIL_TEMPLATES = {
             subject: safeSubject(`Let's get ${orgName || 'your group'} a fundraiser date`),
             html: `
             <p>Hi ${escapeHtml(name || 'there')}!</p>
-            <p>Thank you for asking about a fundraiser for <strong>${org}</strong> — I'd love to help.</p>
+            <p>Thank you for asking about a fundraiser for <strong>${org}</strong> — we'd love to help.</p>
             <p>A meal fundraiser is an easy way to raise money by offering families something they already need&mdash;dinner. We handle the meal prep, freezing, packing, and delivery to your organization, and your team simply sorts and distributes the orders at the designated pickup time and location.</p>
 
             <h3>The next step is picking a date</h3>
@@ -166,12 +166,12 @@ export const EMAIL_TEMPLATES = {
             <ol>
                 <li><strong>We confirm the details</strong> — your date, your delivery location, and what your organization earns.</li>
                 <li><strong>You get everything you need to share it</strong> — flyers and order forms, your own online order page, and a coordinator dashboard for watching orders arrive in real time.</li>
-                <li><strong>Final orders and payment</strong> — final orders are due two weeks before the delivery date. The organization will keep its fundraising percentage off the top, and an invoice for the remaining balance due will be sent shortly after final orders are received, with payment due upon receipt.</li>
+                <li><strong>Final orders and payment</strong> — final orders are due two weeks before the delivery date. Orders submitted online or entered through the coordinator panel are received by us as they come in. Your organization keeps its agreed fundraising percentage off the top, and we&rsquo;ll send an invoice for the remaining balance shortly after the order deadline, with payment due upon receipt.</li>
                 <li><strong>Delivery day</strong> — we bring the meals to you and your families collect them.</li>
             </ol>
 
             <p><strong>Which dates are you thinking about?</strong><br>
-            Just reply with a preferred day and a backup, and I'll check what's open.</p>
+            Just reply with a preferred day and a backup, and we'll check what's open.</p>
 
             ${signature(tenant)}
         `,
@@ -219,7 +219,16 @@ export const coordinatorSetupTemplate = (
     setupUrl: string,
     tenant?: TemplateTenant
 ) => ({
-    subject: safeSubject(`Your ${orgName} fundraiser is ready to set up`),
+    // FR-ACCEPTANCE-2A.1: the organization name leads.
+    //
+    // "Your ${orgName} fundraiser…" reads fine for "Oak Ridge PTO" and badly for
+    // any name that already starts with an article — "Your The Best Brew Test 3
+    // fundraiser is ready to set up". Dropping the possessive costs nothing and
+    // fixes every such name at once.
+    //
+    // safeSubject still strips control characters, and its trim() now governs
+    // the first character rather than the literal "Your ".
+    subject: safeSubject(`${orgName} fundraiser is ready to set up`),
     html: `
         <p>Hi ${escapeHtml(coordinatorName || 'there')}!</p>
         <p>Good news — the fundraiser for <strong>${escapeHtml(orgName)}</strong> is set up on our end and ready for you to finish.</p>

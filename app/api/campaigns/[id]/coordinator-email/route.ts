@@ -114,7 +114,11 @@ async function resolveInvitation(
     const brand = business ? resolveTenantBrand(business, base) : null;
 
     const setupUrl = buildCoordinatorAccessUrl(req, campaign.portal_token);
-    const organizationName = campaign.customer?.name ?? 'your organization';
+    // FR-ACCEPTANCE-2A.1: capitalised, because the organization name now LEADS
+    // the subject line. While it read "Your ${orgName} fundraiser…" the article
+    // hid a lowercase fallback; "your organization fundraiser is ready to set
+    // up" would now start a subject with a lowercase letter.
+    const organizationName = campaign.customer?.name ?? 'Your organization';
     const coordinatorName = coordinator.org_contact.contact.display_name;
 
     const rendered = coordinatorSetupTemplate(

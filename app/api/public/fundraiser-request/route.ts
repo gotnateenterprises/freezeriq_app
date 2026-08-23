@@ -51,6 +51,49 @@ import {
 import { resolveFundraiserCustomer, IDENTITY_REVIEW_TAG } from '@/lib/fundraiserCustomerResolution';
 import { ensureInquiryOrganizationContact } from '@/lib/inquiryContact';
 import { normalizeWebsiteUrl } from '@/lib/websiteUrl';
+import {
+    attemptInquiryAcknowledgement,
+    acknowledgementNeedsAttention,
+    type AcknowledgementOutcome,
+} from '@/lib/inquiryAcknowledgement';
+
+/**
+ * FR-ACCEPTANCE-2A.1 — one sentence for the tenant's lead alert saying what
+ * happened to the automatic acknowledgement.
+ *
+ * Every branch returns a FIXED LITERAL. Nothing user-supplied reaches this
+ * string, which matters because the notification template interpolates its
+ * fields into markup without escaping them.
+ *
+ * The wording never overstates. "Delivered" is claimed only where the provider
+ * accepted AND that acceptance is recorded; everything else says plainly that
+ * the person may still be waiting, because a tenant who believes a reply went
+ * out will stop chasing.
+ */
+function acknowledgementNotice(outcome: AcknowledgementOutcome): string {
+    switch (outcome) {
+        case 'sent':
+            return 'We sent them your standard introduction automatically, so they have already heard back.';
+        case 'sent_unrecorded':
+            return 'We sent them your standard introduction automatically, but could not record it — the CRM may still show this inquiry as unacknowledged.';
+        case 'uncertain':
+            return 'An automatic introduction was attempted but delivery could not be confirmed. Assume they may not have received it.';
+        case 'skipped_already_sent':
+            return 'They were already sent your standard introduction for this inquiry.';
+        case 'skipped_in_progress':
+            return 'An automatic introduction for this inquiry is already in progress.';
+        case 'skipped_no_recipient':
+            return 'No automatic introduction was sent — this inquiry has no email address on file.';
+        case 'skipped_not_live':
+        case 'rejected':
+        case 'failed':
+        default:
+            // Collapsed on purpose. The distinctions matter in the logs, not to
+            // a tenant reading their phone: in every one of these cases nobody
+            // has replied and the only useful instruction is the same.
+            return 'No automatic introduction was sent, so this inquiry still needs a reply from you.';
+    }
+}
 
 /**
  * Deliberately permissive: this only rejects input that cannot be an address at
@@ -215,6 +258,22 @@ export async function POST(req: Request) {
                         { status: 409 }
                     );
                 }
+                // FR-ACCEPTANCE-2A.1 — THE RECOVERY PATH.
+                //
+                // This is a legitimate retry of a submission we already hold, and
+                // it is exactly where an acknowledgement can be rescued. If the
+                // original request persisted this inquiry and then died before it
+                // reached the provider, the row is still unclaimed, and this
+                // attempt may claim and send the acknowledgement that was owed.
+                //
+                // If the original DID acknowledge it, the conditional claim
+                // matches zero rows and this returns without contacting the
+                // provider. Eligibility is a fact about the row.
+                //
+                // Deliberately NOT accompanied by a tenant lead alert: the tenant
+                // was told about this lead when it first arrived, and a retry is
+                // not news. The two idempotency contracts differ on purpose.
+                await attemptInquiryAcknowledgement(existing.id, businessId);
                 return NextResponse.json({
                     success: true, customerId: existing.customer_id,
                     opportunityId: existing.opportunity_id, inquiryId: existing.id,
@@ -507,10 +566,57 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
         }
 
+        // ── Automatic acknowledgement — the submitter's copy ───────────────────
+        //
+        // Runs for BOTH paths, and that asymmetry with the tenant alert below is
+        // deliberate.
+        //
+        // A concurrent loser (`replay`) resolved the same canonical inquiry the
+        // winner created. If the winner already acknowledged it, the conditional
+        // claim inside matches zero rows and nothing is sent. But if the winner
+        // committed and died before reaching the provider, this attempt is the
+        // one that rescues it — the person who filled in the form gets their
+        // reply instead of silence. Gating this on "did THIS request create the
+        // row" would have thrown that recovery away.
+        //
+        // Strictly after the transaction has closed. The provider call must never
+        // happen with a database transaction open — an unreachable mail host
+        // would otherwise hold locks on the customer and opportunity rows for the
+        // length of a network timeout.
+        //
+        // Never throws, so it cannot turn a saved lead into an error page.
+        const ack = await attemptInquiryAcknowledgement(settled.inquiryId, businessId);
+        if (acknowledgementNeedsAttention(ack.outcome)) {
+            // A real person wrote in and nothing went back to them. On the replay
+            // path no tenant alert is sent either, so without this line the only
+            // record would be the CRM state — ids only, never the submitter's
+            // details, which do not belong in logs.
+            console.warn(
+                `[FUNDRAISER_REQUEST] inquiry ${settled.inquiryId} was NOT acknowledged ` +
+                `(${ack.outcome}) — it still needs a first response`
+            );
+        }
+
         // ── Tenant notification — best effort, AFTER the lead is durable ───────
         // Deliberately outside the transaction and individually caught: a mail
         // outage must never be able to lose a lead that is already saved.
-        try {
+        //
+        // FR-ACCEPTANCE-2A.1 — `result && !replay`, which fixes a live defect.
+        //
+        // A duplicate submission reaches this point by one of two routes, and
+        // until now they behaved differently. One that arrives AFTER the winner
+        // has committed is caught by the fast path far above and returns before
+        // ever getting here. One that arrives CONCURRENTLY loses the race on the
+        // submission-key index, reads the winner back into `replay`, and then
+        // fell through to this block — mailing the tenant a second alert for a
+        // lead they had already been told about. Same input, different outcome,
+        // depending only on timing; the sort of thing that gets written off as a
+        // flake because it never reproduces on demand.
+        //
+        // `settled` is deliberately not the test. It is truthy for a replay too,
+        // which is exactly how the bug survived. Only `result` means THIS request
+        // is the one that created the lead.
+        if (result && !replay) try {
             const owner = await prisma.user.findFirst({
                 where: { business_id: businessId, role: 'ADMIN' as any },
                 select: { email: true },
@@ -527,6 +633,9 @@ export async function POST(req: Request) {
                     phone: contactPhone,
                     source: FUNDRAISER_INQUIRY_SOURCE,
                     notes: inquiryContext,
+                    // Part M: say what actually happened, so the tenant knows
+                    // whether this person is still waiting to hear anything.
+                    acknowledgement: acknowledgementNotice(ack.outcome),
                 }, businessId);
             }
         } catch (notifyError) {

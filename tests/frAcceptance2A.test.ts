@@ -176,9 +176,34 @@ describe('the lead autoresponder', () => {
     it('carries the owner-approved final-orders and invoice paragraph', () => {
         const { html } = render(TENANT);
         expect(html).toContain('final orders are due two weeks before the delivery date');
-        expect(html).toContain('keep its fundraising percentage off the top');
-        expect(html).toContain('invoice for the remaining balance due');
+        // FR-ACCEPTANCE-2A.1: "agreed", matching the public page's wording. The
+        // share is a per-campaign number nobody has set yet when this goes out.
+        expect(html).toContain('keeps its agreed fundraising percentage off the top');
         expect(html).toContain('payment due upon receipt');
+    });
+
+    it('says when orders reach us, and anchors the invoice to the DEADLINE', () => {
+        // FR-ACCEPTANCE-2A.1. The old wording — "shortly after final orders are
+        // received" — read as though someone had to hand orders over before
+        // anything happened. Online and coordinator-panel orders arrive
+        // continuously; the invoice is triggered by the deadline, not by a
+        // handover that never occurs.
+        const { html } = render(TENANT);
+        expect(html).toContain('Orders submitted online or entered through the coordinator panel are received by us as they come in');
+        expect(html).toContain('invoice for the remaining balance shortly after the order deadline');
+        expect(html).not.toContain('shortly after final orders are received');
+    });
+
+    it('speaks as the business, never as one unnamed person', () => {
+        // FR-ACCEPTANCE-2A.1. The From header is resolved per tenant, so a
+        // first-person-singular voice puts words in the mouth of whichever
+        // individual happens to own the sending address.
+        const { html } = render(TENANT);
+        expect(html).toContain("we'd love to help");
+        expect(html).toMatch(/we'll check what's open/);
+        // The trailing apostrophe-space guards "I'd"/"I'll" while leaving
+        // legitimate capital-I words ("If", "It") alone.
+        expect(html).not.toMatch(/\bI(['’]|\s)(d|ll|m|ve)\b/);
     });
 
     it('promises no percentage anywhere', () => {
@@ -286,7 +311,24 @@ describe('the coordinator setup email', () => {
     const render = () => coordinatorSetupTemplate('Dana', 'Oak Ridge PTO', SECRET, TENANT);
 
     it('names the organization in the subject', () => {
-        expect(render().subject).toBe('Your Oak Ridge PTO fundraiser is ready to set up');
+        expect(render().subject).toBe('Oak Ridge PTO fundraiser is ready to set up');
+    });
+
+    it('reads correctly for an organization whose name starts with an article', () => {
+        // FR-ACCEPTANCE-2A.1 — the defect the owner hit in Production:
+        // "Your The Best Brew Test 3 fundraiser is ready to set up".
+        const s = coordinatorSetupTemplate('Dana', 'The Best Brew Test 3', SECRET, TENANT).subject;
+        expect(s).toBe('The Best Brew Test 3 fundraiser is ready to set up');
+        expect(s).not.toMatch(/Your The /);
+    });
+
+    it('the organization name still leads after control characters are stripped', () => {
+        // safeSubject().trim() now governs the FIRST character rather than a
+        // literal "Your ", so a name with a leading control byte must not open
+        // the subject with whitespace.
+        const s = coordinatorSetupTemplate('Dana', '\u0001\u0000  Oak Ridge PTO', SECRET, TENANT).subject;
+        expect(s).toBe('Oak Ridge PTO fundraiser is ready to set up');
+        expect(s).not.toMatch(/^\s/);
     });
 
     it('explains bundles, remaining details, and the coordinator panel', () => {
@@ -843,9 +885,12 @@ describe('FR-ACCEPTANCE-2A schema', () => {
         expect(sql).not.toMatch(/tenant_branding/);
     });
 
-    it('is not yet applied — the ledger on disk is the previous 13 plus this one', () => {
-        const migrations = fs.readdirSync(path.join(ROOT, 'prisma/migrations')).filter((d) => /^\d{14}_/.test(d));
-        expect(migrations).toHaveLength(14);
-        expect(migrations[migrations.length - 1]).toBe('20260822000000_fr_acceptance_2a_display_name_setup_email');
+    it('sits at ledger position 14, where Production applied it', () => {
+        // FR-ACCEPTANCE-2A.1 updated this. It read "is not yet applied" and
+        // pinned the total at 14; both facts moved on. This migration WAS applied
+        // to Production (ledger 14), and 2A.1 has since added a fifteenth.
+        // What still matters is that 2A stayed put and nothing renamed it.
+        const migrations = fs.readdirSync(path.join(ROOT, 'prisma/migrations')).filter((d) => /^\d{14}_/.test(d)).sort();
+        expect(migrations[13]).toBe('20260822000000_fr_acceptance_2a_display_name_setup_email');
     });
 });

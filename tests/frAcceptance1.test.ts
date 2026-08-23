@@ -489,8 +489,15 @@ describe('responding to a new inquiry is a real action', () => {
         expect(leads).toMatch(/I replied elsewhere/);
         expect(leads).toMatch(/action: 'mark_responded'/);
         // The real action is filled; the fallback is outlined.
-        const respondIdx = leads.indexOf('Respond to inquiry');
-        const fallbackIdx = leads.indexOf('I replied elsewhere');
+        //
+        // FR-ACCEPTANCE-2A.1 tightened these two lookups from the bare phrases to
+        // the rendered buttons. The phrases now also appear in a tooltip and a
+        // comment further up the file, so a bare indexOf found those instead and
+        // reported the buttons as out of order while the DOM was unchanged.
+        // Pinning the icon+label pins the actual control, and still fails if the
+        // two buttons are ever swapped.
+        const respondIdx = leads.indexOf('<Send size={13} /> Respond to inquiry');
+        const fallbackIdx = leads.indexOf('<Mail size={13} /> I replied elsewhere');
         expect(respondIdx).toBeGreaterThan(-1);
         // The real action comes first in the DOM and carries the filled style;
         // the manual fallback follows and is outlined.

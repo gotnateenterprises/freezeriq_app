@@ -35,6 +35,22 @@ function parseCalendarDate(value: unknown): Date | null | undefined {
     return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
+/**
+ * FR-ACCEPTANCE-2A.1 — the opportunity vanished between the read and the write.
+ *
+ * Thrown to roll the transaction back, then mapped to the same 404 the
+ * pre-flight lookup returns. Identified by a own-property tag rather than
+ * `instanceof`: a class identity can differ across module instances, and a
+ * mis-identified sentinel here would silently downgrade a 404 into a 500.
+ */
+const OPPORTUNITY_NOT_FOUND = 'OPPORTUNITY_NOT_FOUND';
+class OpportunityNotFound extends Error {
+    readonly tag = OPPORTUNITY_NOT_FOUND;
+    constructor() { super(OPPORTUNITY_NOT_FOUND); }
+}
+const isOpportunityNotFound = (e: unknown): boolean =>
+    typeof e === 'object' && e !== null && (e as { tag?: unknown }).tag === OPPORTUNITY_NOT_FOUND;
+
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
         const session = await auth();
@@ -63,13 +79,49 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         }
 
         const data: Record<string, unknown> = {};
+        /**
+         * FR-ACCEPTANCE-2A.1 — whether this reply closes outstanding inquiries.
+         *
+         * The inquiries are resolved on the SERVER from the opportunity, never
+         * taken from the request body. A client-supplied inquiry id would let one
+         * tenant stamp a human response onto another tenant's inquiry, and even
+         * within one tenant would let the wrong conversation be marked answered.
+         */
+        let respondsToInquiries = false;
 
         switch (action) {
             case 'mark_responded': {
                 // Idempotent: the FIRST reply is the one that counts, so a second
-                // click must not move the response-time clock forward.
+                // click must not move the response-time clock forward. This
+                // column is the opportunity's first-ever-response METRIC and is
+                // deliberately write-once.
                 if (!current.first_response_at) data.first_response_at = new Date();
                 if (current.status === 'new') data.status = 'in_conversation';
+
+                // ── THE PER-INQUIRY FACT ────────────────────────────────────
+                //
+                // The metric above cannot answer "has this inquiry been replied
+                // to". Being write-once, answering a SECOND inquiry on the same
+                // opportunity writes nothing at all — which left the newest
+                // inquiry reading as unanswered forever while the control that
+                // offered to answer it silently did nothing.
+                //
+                // EVERY outstanding inquiry, not just the newest.
+                //
+                // A tenant replying to an organization answers the conversation,
+                // not one message in it — if two inquiries are both waiting, one
+                // reply addresses both. Targeting only the newest looked right
+                // and was not: a second click would then find the NEXT-oldest
+                // unanswered inquiry and stamp `now()` onto it, inventing a reply
+                // to a months-old message that nobody ever sent.
+                //
+                // Answering all of them also makes this naturally idempotent.
+                // After the first click nothing is outstanding, so a second one
+                // matches zero rows and correctly reports no change.
+                const outstanding = await prisma.fundraiserInquiry.count({
+                    where: { opportunity_id: id, business_id: businessId, human_response_at: null },
+                });
+                respondsToInquiries = outstanding > 0;
                 break;
             }
 
@@ -148,23 +200,83 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
                 return NextResponse.json({ error: 'Unknown action.' }, { status: 400 });
         }
 
-        if (Object.keys(data).length === 0) {
-            // Nothing to do (e.g. mark_responded on an already-answered lead).
+        if (Object.keys(data).length === 0 && !respondsToInquiries) {
+            // Nothing to do — every inquiry on this opportunity already carries a
+            // human response.
+            //
+            // FR-ACCEPTANCE-2A.1 added the second half of this condition, and it
+            // is the whole fix. Answering a SECOND inquiry produces an empty
+            // `data` (first_response_at is already set, status is already
+            // in_conversation), so this early return used to fire and the reply
+            // was never recorded anywhere. The tenant got a success toast for a
+            // write that did not happen.
             return NextResponse.json({ success: true, changed: false });
         }
 
-        // Conditional on business_id again: defence in depth against a future
-        // refactor that drops the lookup above.
-        const updated = await prisma.fundraiserOpportunity.updateMany({
-            where: { id, business_id: businessId },
-            data: data as any,
+        // Both writes or neither. A reply recorded on the opportunity but not on
+        // the inquiry — or the reverse — is exactly the split-brain state this
+        // phase exists to remove.
+        await prisma.$transaction(async (tx) => {
+            if (Object.keys(data).length > 0) {
+                // Every predicate that the pre-flight read checked is RE-ASSERTED
+                // here, because that read happened outside this transaction and
+                // another request can have changed the row since.
+                //
+                //   business_id — defence in depth if the lookup above is ever
+                //     refactored away.
+                //   status      — the route documents that it cannot reopen a
+                //     terminal opportunity, but the terminal check ran against
+                //     the earlier snapshot. Without this, a concurrent
+                //     "mark lost" and "I replied elsewhere" would both pass
+                //     their pre-flight and the reply would quietly revive a lost
+                //     lead.
+                //   first_response_at — only when this request is the one
+                //     setting it. The column is write-once, and two concurrent
+                //     requests both reading null would otherwise both write,
+                //     moving a response-time metric that is supposed to be
+                //     fixed at the first reply.
+                const guard: Record<string, unknown> = {
+                    id,
+                    business_id: businessId,
+                    status: { notIn: ['converted', 'lost'] },
+                };
+                if (data.first_response_at) guard.first_response_at = null;
+
+                const updated = await tx.fundraiserOpportunity.updateMany({
+                    where: guard as any,
+                    data: data as any,
+                });
+                if (updated.count !== 1) {
+                    // Lost a race, or the row moved. Roll back rather than
+                    // leaving the inquiry stamped against an opportunity whose
+                    // own update never applied.
+                    throw new OpportunityNotFound();
+                }
+            }
+            if (respondsToInquiries) {
+                // Every outstanding inquiry on this opportunity. Scoped by tenant
+                // AND opportunity at the point of the write, and conditional on
+                // human_response_at being null so a concurrent second request
+                // matches zero rows instead of moving a timestamp that has
+                // already passed.
+                await tx.fundraiserInquiry.updateMany({
+                    where: {
+                        business_id: businessId,
+                        opportunity_id: id,
+                        human_response_at: null,
+                    },
+                    data: { human_response_at: new Date() },
+                });
+            }
         });
-        if (updated.count !== 1) {
-            return NextResponse.json({ error: 'Opportunity not found' }, { status: 404 });
-        }
 
         return NextResponse.json({ success: true, changed: true });
     } catch (error: any) {
+        if (isOpportunityNotFound(error)) {
+            // Same answer as the pre-flight lookup, so a row deleted mid-request
+            // cannot be told apart from one that never existed.
+            return NextResponse.json({ error: 'Opportunity not found' }, { status: 404 });
+        }
         console.error('[OPPORTUNITY_PATCH]', error);
         return NextResponse.json({ error: 'Failed to update opportunity' }, { status: 500 });
     }

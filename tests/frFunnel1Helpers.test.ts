@@ -29,6 +29,7 @@ import {
     funnelBucket,
     UNANSWERED_INQUIRY_HOURS,
     STALLED_CONVERSATION_DAYS,
+    FOLLOW_UP_SILENCE_HOURS,
 } from '@/lib/growth/opportunityNextAction';
 
 const NOW = new Date('2026-08-20T12:00:00.000Z');
@@ -158,6 +159,90 @@ describe('triageOpportunity — pre-campaign next actions', () => {
             { status: 'in_conversation', received_at: hoursAgo(30), first_response_at: hoursAgo(29) }, NOW);
         expect(t.action?.kind).toBe('await_preferred_dates');
         expect(t.priority).toBe('on_pace');
+    });
+
+    // ── FR-ACCEPTANCE-2A.1 — the 48-hour follow-up signal ────────────────────
+    //
+    // What this closes: answering an inquiry used to remove it from the CRM's
+    // attention PERMANENTLY. `on_pace` / "Waiting for preferred dates" was
+    // terminal in practice — nothing escalated it, ever.
+
+    it('stays on_pace while the follow-up window is still open', () => {
+        const t = triageOpportunity({
+            status: 'in_conversation',
+            received_at: hoursAgo(FOLLOW_UP_SILENCE_HOURS + 5),
+            first_response_at: hoursAgo(FOLLOW_UP_SILENCE_HOURS - 1),
+        }, NOW);
+        expect(t.action?.kind).toBe('await_preferred_dates');
+        expect(t.priority).toBe('on_pace');
+    });
+
+    it('asks for a follow-up once the organization has been quiet past the window', () => {
+        const t = triageOpportunity({
+            status: 'in_conversation',
+            received_at: daysAgo(6),
+            first_response_at: hoursAgo(FOLLOW_UP_SILENCE_HOURS + 1),
+        }, NOW);
+        expect(t.action?.kind).toBe('send_follow_up');
+        expect(t.priority).toBe('worth_a_look');
+    });
+
+    // The anchor is load-bearing. `updated_at` would let a tenant silence a cold
+    // lead just by opening the drawer and typing a note.
+    it('measures silence from OUR reply, not from the last record edit', () => {
+        const t = triageOpportunity({
+            status: 'in_conversation',
+            received_at: daysAgo(30),
+            first_response_at: daysAgo(9),
+            updated_at: hoursAgo(1),
+        }, NOW);
+        expect(t.action?.kind).toBe('send_follow_up');
+    });
+
+    it('an unanswered inquiry is a first-response job, NOT a follow-up', () => {
+        // received_at alone must never start the follow-up clock. If nobody has
+        // answered, the faster UNANSWERED_INQUIRY_HOURS clock owns the lead —
+        // routing it to the 48-hour signal would let the slower threshold hide a
+        // person who has been waiting since the day they asked.
+        const t = triageOpportunity({
+            status: 'in_conversation', received_at: daysAgo(5), first_response_at: null,
+        }, NOW);
+        expect(t.action?.kind).toBe('respond_to_inquiry');
+        expect(t.priority).toBe('needs_attention');
+    });
+
+    it('never accuses the organization of failing to reply', () => {
+        // Inbound mail lands in the tenant's own inbox and is invisible here, so
+        // the copy must prompt, not assert.
+        const reason = triageOpportunity({
+            status: 'in_conversation', first_response_at: daysAgo(4),
+        }, NOW).action!.reason;
+        expect(reason).toMatch(/since you replied/);
+        expect(reason).not.toMatch(/not (yet )?(replied|responded|answered)|no reply|has not/i);
+    });
+
+    it('files the follow-up under the bucket that matches its action', () => {
+        // A drawer saying "Send a follow-up" while the list files it under
+        // "Waiting on Date" is the drift this guards.
+        const quiet = {
+            status: 'in_conversation', received_at: daysAgo(6),
+            first_response_at: hoursAgo(FOLLOW_UP_SILENCE_HOURS + 1),
+        };
+        expect(triageOpportunity(quiet, NOW).action?.kind).toBe('send_follow_up');
+        expect(funnelBucket(quiet, NOW)).toBe('needs_follow_up');
+
+        const fresh = { status: 'in_conversation', first_response_at: hoursAgo(2) };
+        expect(funnelBucket(fresh, NOW)).toBe('waiting_on_date');
+    });
+
+    it('a proposed date outranks silence — the tenant owes the next move', () => {
+        // Once a date is on the table the ball is ours, so the availability
+        // check must win even though our reply is long past the window.
+        const t = triageOpportunity({
+            status: 'in_conversation', first_response_at: daysAgo(10),
+            preferred_delivery_date: '2026-10-17', updated_at: hoursAgo(2),
+        }, NOW);
+        expect(t.action?.kind).toBe('check_date_availability');
     });
 
     it('asks the tenant to check availability once a date is proposed', () => {

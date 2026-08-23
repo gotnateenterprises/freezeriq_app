@@ -1,0 +1,116 @@
+-- FR-ACCEPTANCE-2A.1 · Automatic public-inquiry acknowledgement truth
+--
+-- Two nullable columns on one table. Nothing else.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- WHY NOT REUSE fundraiser_opportunities.first_response_at
+--
+-- That column means "a person at the tenant replied". An automatic
+-- acknowledgement is not that, and writing it there would destroy three things
+-- at once. The CRM would show that the tenant personally answered when nobody
+-- had. The "Respond to inquiry" and "I replied elsewhere" controls are both
+-- gated on first_response_at being null, so an automatic send would silently
+-- strip the tenant's ability to reply at all. And the response-time metric
+-- documented on that column — first_response_at minus the first inquiry's
+-- received_at — would collapse to the machine's latency for every lead,
+-- permanently, with no way to recover the human number afterwards.
+--
+-- Auto and manual are two different facts about two different actors. They get
+-- two different homes, and first_response_at is left exactly as it was.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- WHY PER-INQUIRY AND NOT PER-OPPORTUNITY
+--
+-- fundraiser_inquiries.opportunity_id is NOT NULL and one opportunity holds
+-- MANY inquiries (relation "OpportunityInquiries"): the intake appends to the
+-- organization's existing open opportunity rather than creating a second one,
+-- which is what the partial unique index fundraiser_opportunities_one_open_per_org
+-- enforces. So an organization that asks again in the autumn produces a second
+-- inquiry row on the same opportunity.
+--
+-- That second inquiry is a new person waiting on a reply and must get its own
+-- acknowledgement. Had these columns lived on the opportunity, the autumn
+-- inquiry would have been born already-acknowledged by the spring one.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- 1. fundraiser_inquiries.ack_claimed_at
+--
+-- THE CONCURRENCY PRIMITIVE, kept separate from the delivery fact for the same
+-- reason FR-ACCEPTANCE-2A split setup_email_claimed_at from setup_email_sent_at:
+-- a process that dies between claiming and sending must not leave a row
+-- asserting an email went out when none did.
+--
+-- One request moves this out of null in a conditional write
+-- (WHERE ack_claimed_at IS NULL AND ack_sent_at IS NULL); every concurrent
+-- request matches zero rows and stops before the provider is reached.
+--
+-- Null-and-null is deliberately the RECOVERABLE state. If a request persists an
+-- inquiry and then dies before claiming, a later legitimate retry resolving the
+-- same canonical inquiry can still claim and send the acknowledgement that was
+-- owed. Eligibility is a fact about the row, not about which HTTP request
+-- created it.
+ALTER TABLE "fundraiser_inquiries" ADD COLUMN "ack_claimed_at" TIMESTAMP(3);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 2. fundraiser_inquiries.ack_sent_at
+--
+-- Written ONLY after the email provider accepts the message. Never on claim,
+-- never in safety mode, never on provider rejection, never on an unknown
+-- outcome.
+--
+-- WHY NULLABLE, NO DEFAULT, NO BACKFILL
+-- Null means "no automatic acknowledgement has provably been delivered". Every
+-- inquiry taken before this release is in exactly that state — the feature did
+-- not exist when they arrived, so no acknowledgement was ever sent for any of
+-- them. Stamping a timestamp on existing rows would invent a send that did not
+-- happen and would suppress the CRM's "needs a first response" signal on real
+-- leads that may still be waiting. That is the class of defect FR-ACCEPTANCE-1C
+-- existed to remove.
+ALTER TABLE "fundraiser_inquiries" ADD COLUMN "ack_sent_at" TIMESTAMP(3);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 3. fundraiser_inquiries.human_response_at
+--
+-- A PERSON at the tenant answered THIS inquiry.
+--
+-- WHY THIS IS NOT fundraiser_opportunities.first_response_at
+--
+-- That column is WRITE-ONCE by design. Its only writer sets it under
+-- `if (!current.first_response_at)`, deliberately, so that it keeps meaning
+-- "the first time anyone here replied" and the response-time metric computed
+-- from it (first_response_at minus the first inquiry's received_at) stays a
+-- real measurement rather than a rolling one.
+--
+-- That makes it correct as a metric and unusable as an answer to "has this
+-- inquiry been replied to". One opportunity holds many inquiries. An
+-- organization answered in spring and writing again in autumn produces a second
+-- inquiry on the same opportunity, and answering THAT one writes nothing at all
+-- — the column is already set. The newest inquiry then reads as unanswered
+-- forever, and the control offering to answer it silently does nothing.
+--
+-- Overwriting the column instead would fix the display by destroying the
+-- metric: every opportunity's response time would collapse to its most recent
+-- reply, and the original number could not be recovered. Neither behaviour is
+-- acceptable, because they are two different facts. The metric stays where it
+-- was; the per-inquiry fact lives here.
+--
+-- WHY NULLABLE, NO DEFAULT, NO BACKFILL
+-- Null means "no human reply to this inquiry is recorded". Backfilling from
+-- first_response_at would be a guess: it would mark every inquiry on an
+-- answered opportunity as personally answered, including ones that arrived
+-- after that reply and are genuinely still waiting — inventing history in the
+-- exact direction that hides real leads.
+--
+-- Existing rows need no backfill because the application falls back to
+-- first_response_at when no inquiry carries this column, which is correct for
+-- every opportunity that has only ever had one inquiry. See
+-- resolveInquiryResponse() in lib/growth/inquiryResponseState.ts.
+--
+-- NEVER written by automatic acknowledgement. That fact is ack_sent_at above,
+-- and conflating them would let a machine's reply count as a person's.
+ALTER TABLE "fundraiser_inquiries" ADD COLUMN "human_response_at" TIMESTAMP(3);
+
+-- NOT TOUCHED: every other table and column. No DROP, no UPDATE, no INSERT, no
+-- DELETE, no DEFAULT, no backfill, no index, no constraint. In particular
+-- fundraiser_opportunities.first_response_at is not read, written, or altered:
+-- its write-once semantics are preserved exactly as they are today.

@@ -32,8 +32,119 @@ interface Opportunity {
     inquiry_count: number;
     first_inquiry_at: string | null;
     response_hours: number | null;
+    // FR-ACCEPTANCE-2A.1 — all four derived server-side by resolveInquiryResponse
+    // so the list, the drawer and the next action cannot drift apart.
+    latest_inquiry_at: string | null;
+    response_state: 'manual_response' | 'auto_ack_sent' | 'auto_ack_uncertain' | 'needs_first_response';
+    auto_ack_sent_at: string | null;
+    /** The reply that applies to the NEWEST inquiry, which first_response_at may predate by months. */
+    manual_response_at: string | null;
+    /**
+     * Whether first_response_at is recent enough to be about the NEWEST inquiry.
+     *
+     * The control gate below reads THIS and not first_response_at. One
+     * opportunity holds many inquiries, so a reply sent last spring is a real
+     * timestamp that answers nothing about an inquiry that arrived this morning —
+     * and gating on the raw column would leave the tenant no way to answer it.
+     */
+    manual_response_applies: boolean;
     customer: { id: string; name: string; contact_name: string | null; contact_email: string | null; contact_phone: string | null };
     action: { label: string; reason: string; kind: string } | null;
+}
+
+/**
+ * FR-ACCEPTANCE-2A.1 — a `mailto:` href built from a stored address, safely.
+ *
+ * The address is tenant data read back from the database, not a constant, so it
+ * is treated as untrusted:
+ *
+ *   - VALIDATED first. Only a plain single address passes. Anything carrying a
+ *     CR or LF is rejected outright, because those are what turn a mail-client
+ *     handoff into injected `Bcc:`/`Subject:` headers.
+ *   - ENCODED second, so a legal but awkward local-part cannot terminate the URL
+ *     and start a query of its own.
+ *   - The scheme is a literal. There is no path by which a stored value could
+ *     make this `javascript:` or `data:` — the value only ever lands after
+ *     `mailto:`, and a rejected value yields null and renders no link at all.
+ *
+ * No subject or body is attached. This phase deliberately ships no follow-up
+ * copy, and an empty mail draft is the honest version of that.
+ */
+function mailtoHref(email: string | null | undefined): string | null {
+    const v = (email ?? '').trim();
+    // Deliberately strict, and deliberately not a full RFC 5322 parser: this
+    // decides whether to render a link, so anything doubtful is simply not one.
+    if (!v || v.length > 254) return null;
+    // `@` is excluded from the local part so exactly one separator can exist —
+    // which is what makes restoring the encoded `@` below unambiguous.
+    //
+    // The domain deliberately allows `_` and non-ASCII. The public intake accepts
+    // anything matching /^[^\s@]+@[^\s@]+\.[^\s@]+$/, so addresses like
+    // `pta@central_district.org` are already stored; a stricter rule here would
+    // reject a perfectly real address and tell the tenant there was none on file.
+    // The safety of this function comes from excluding the STRUCTURAL characters
+    // above — whitespace, quotes, brackets, comma, semicolon, colon, backslash,
+    // which is also what makes a CR or LF impossible — not from validating
+    // hostnames.
+    if (!/^[^\s<>()[\],;:\\"@]+@[^\s<>()[\],;:\\"@]+\.[^\s<>()[\],;:\\"@]+$/.test(v)) return null;
+    // Encoding matters even after that regex: it still admits `?`, `&`, `#` and
+    // `%`, and a local part of `dana?subject=…` would otherwise stop being an
+    // address and start being a query. `@` is restored because it is legal
+    // unencoded in a mailto and every client renders it more readably.
+    return `mailto:${encodeURIComponent(v).replace(/%40/g, '@')}`;
+}
+
+/**
+ * FR-ACCEPTANCE-2A.1 — one line saying who has answered the newest inquiry.
+ *
+ * Four states, because "answered" and "not answered" cannot express an
+ * acknowledgement whose delivery was never confirmed — and that state is the one
+ * where a tenant most needs to act, since a person may be sitting with nothing.
+ *
+ * The wording never claims more than the database can prove. `auto_ack_sent`
+ * means the provider ACCEPTED the message, which is not the same as the
+ * volunteer reading it, so it says "sent" and never "delivered" or "they know".
+ */
+function ResponseStateNotice({ o }: { o: Opportunity }) {
+    const stamp = (v: string | null) => (v ? new Date(v).toLocaleString() : null);
+
+    if (o.response_state === 'manual_response') {
+        // manual_response_at, NOT first_response_at. The latter is the
+        // opportunity's first-ever reply and can be months older than the
+        // conversation on screen.
+        const at = stamp(o.manual_response_at ?? o.first_response_at);
+        return (
+            <p className="mt-2 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                ✓ You responded{at ? ` · ${at}` : ''}
+            </p>
+        );
+    }
+    if (o.response_state === 'auto_ack_sent') {
+        const at = stamp(o.auto_ack_sent_at);
+        return (
+            <p className="mt-2 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                ✓ Automatic acknowledgement sent{at ? ` · ${at}` : ''}
+                <span className="ml-1 font-normal text-slate-500">— they have your introduction; no reply from you yet.</span>
+            </p>
+        );
+    }
+    if (o.response_state === 'auto_ack_uncertain') {
+        return (
+            <p className="mt-2 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                ⚠ Acknowledgement not confirmed
+                {/* Both directions of the ambiguity, because the row genuinely
+                    cannot tell them apart: the send may never have happened, or
+                    it may have been accepted and only the recording of it
+                    failed. The tenant is the one who can find out. */}
+                <span className="ml-1 font-normal text-slate-500">— an automatic introduction was started but never confirmed. They may have received nothing, or may have received it already; check before sending, or they could get it twice.</span>
+            </p>
+        );
+    }
+    return (
+        <p className="mt-2 text-[11px] font-semibold text-slate-500">
+            Nothing has been sent to this inquiry yet.
+        </p>
+    );
 }
 
 /**
@@ -101,7 +212,10 @@ function LeadDateField({
 
 /** Display order matches the order a lead actually moves through them. */
 const BUCKETS: { key: Bucket; label: string; hint: string }[] = [
-    { key: 'needs_follow_up', label: 'Needs Follow-Up', hint: 'Waiting on a first reply for over a day' },
+    // FR-ACCEPTANCE-2A.1: this bucket now holds two things, and the hint has to
+    // say so — it collects both inquiries still owed a first reply and answered
+    // ones that have gone quiet since.
+    { key: 'needs_follow_up', label: 'Needs Follow-Up', hint: 'Owed a first reply, or quiet since you replied' },
     { key: 'new_leads', label: 'New Leads', hint: 'Inquired recently, not yet answered' },
     { key: 'waiting_on_date', label: 'Waiting on Date', hint: 'In conversation about the delivery day' },
     { key: 'ready_to_create_campaign', label: 'Ready to Create Campaign', hint: 'Delivery date agreed' },
@@ -232,14 +346,75 @@ export function FunnelLeadsPanel() {
                                         )}
                                     </div>
 
+                                    {/* FR-ACCEPTANCE-2A.1 — what has already gone out, stated plainly.
+                                        Without this the tenant cannot tell an inquiry nobody has
+                                        touched from one the platform already answered, and would
+                                        either re-introduce themselves or leave a person waiting. */}
+                                    <ResponseStateNotice o={o} />
+
                                     <div className="mt-3 flex flex-wrap items-center gap-2">
                                         {/* FR-ACCEPTANCE-1 — the real reply leads, and looks like it.
                                             "Mark responded" stays for a reply that happened on the
                                             phone or from a personal inbox, but as the quiet secondary
                                             action it actually is: it records history, it does not
-                                            contact anybody. */}
-                                        {!o.first_response_at && (
+                                            contact anybody.
+
+                                            FR-ACCEPTANCE-2A.1 — gated on manual_response_applies, not
+                                            on the raw first_response_at column. A reply to an earlier
+                                            inquiry must not remove the tenant's ability to answer a
+                                            new one. Note this only ever WIDENS availability: when
+                                            there is one inquiry the two are identical. */}
+                                        {/* FR-ACCEPTANCE-2A.1 — the mail-client handover.
+
+                                            Shown when the platform has nothing left to send: either the
+                                            lead is due a follow-up, or the acknowledgement already went
+                                            out and the next message must be a personal one.
+
+                                            A follow-up TEMPLATE is deliberately out of scope for this
+                                            phase, so this does not add one. It hands over the thing the
+                                            tenant actually needs — the address — and opens their own
+                                            mail client. Nothing is sent by the platform and nothing is
+                                            recorded, which is right for a message the platform never
+                                            sees; the tenant records it afterwards with "I replied
+                                            elsewhere". */}
+                                        {(o.action?.kind === 'send_follow_up' || o.response_state === 'auto_ack_sent') && (
+                                            mailtoHref(o.customer.contact_email) ? (
+                                                <a
+                                                    href={mailtoHref(o.customer.contact_email)!}
+                                                    className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950"
+                                                    title="Opens your own email client. FreezerIQ sends and records nothing — use “I replied elsewhere” afterwards."
+                                                >
+                                                    <Mail size={13} /> Email {o.customer.contact_name || 'them'} yourself
+                                                </a>
+                                            ) : (
+                                                // Otherwise this lead could render with NO control at all:
+                                                // a follow-up anchored on a manual reply hides the buttons
+                                                // below, and an unusable address hides the link above. Say
+                                                // why, rather than showing an instruction and nothing to
+                                                // act on.
+                                                <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                                                    No usable email address on file — reach out by phone.
+                                                </span>
+                                            )
+                                        )}
+
+                                        {!o.manual_response_applies && (
                                             <>
+                                                {/* FR-ACCEPTANCE-2A.1 — THE DUPLICATE-INTRODUCTION GATE.
+
+                                                    This button posts template: 'lead_intro' — the very
+                                                    message the automatic acknowledgement already sent. An
+                                                    earlier revision only RENAMED it after an
+                                                    acknowledgement, which changed the label and not the
+                                                    payload: one click still put a second identical
+                                                    introduction in the volunteer's inbox.
+
+                                                    So once the newest inquiry has a confirmed
+                                                    acknowledgement, the send is removed rather than
+                                                    reworded. What remains is the mail-client handover
+                                                    above and "I replied elsewhere" below — a personal
+                                                    reply and a way to record it. */}
+                                                {o.response_state !== 'auto_ack_sent' && (
                                                 <button
                                                     disabled={busyId === o.id}
                                                     onClick={() => setRespondingTo({
@@ -252,6 +427,7 @@ export function FunnelLeadsPanel() {
                                                 >
                                                     <Send size={13} /> Respond to inquiry
                                                 </button>
+                                                )}
                                                 <button
                                                     disabled={busyId === o.id}
                                                     onClick={() => mutate(o.id, { action: 'mark_responded' }, 'Marked as responded')}

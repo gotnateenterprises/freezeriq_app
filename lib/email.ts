@@ -1,4 +1,8 @@
 import { Resend } from 'resend';
+// FR-ACCEPTANCE-2A.1 — one subject sanitiser, not two. lib/emailTemplates.ts
+// imports nothing at all (deliberately, so its bodies stay testable without a
+// mail provider), so this dependency runs one way and cannot cycle.
+import { safeSubject } from '@/lib/emailTemplates';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -351,9 +355,39 @@ export async function sendFundraiserCoordinatorNotification(
 
 export async function sendLeadNotificationEmail(
     toBusinessEmail: string,
-    lead: { name: string, email: string, phone?: string, source: string, notes?: string },
+    lead: {
+        name: string, email: string, phone?: string, source: string, notes?: string,
+        /**
+         * FR-ACCEPTANCE-2A.1 — what happened to the automatic acknowledgement.
+         *
+         * A CALLER-CONTROLLED LITERAL, never user text and never provider error
+         * text. It comes from a fixed mapping — acknowledgementNotice() in the
+         * public intake route — so that this line cannot be made to say an
+         * acknowledgement was sent when one was not.
+         *
+         * It is escaped along with everything else below. The mapping contains no
+         * markup, so escaping is a no-op today; it is there so that a future
+         * edit which routes something less trustworthy through this field cannot
+         * reintroduce injection.
+         *
+         * Present so the tenant is never left guessing whether the person who
+         * wrote in has already heard something back.
+         */
+        acknowledgement?: string,
+    },
     businessId?: string
 ) {
+    // FR-ACCEPTANCE-2A.1 — every interpolated field in the body below is ESCAPED.
+    //
+    // These values arrive from the UNAUTHENTICATED public fundraiser form: name,
+    // email and phone are typed by the submitter, and `notes` is the assembled
+    // free text of their website, cause and message. They were interpolated raw,
+    // so anything typed into a public form on the open internet was rendered as
+    // markup inside the tenant's own inbox — including a working link to an
+    // attacker's site, sitting under a "New Lead!" heading the tenant trusts.
+    //
+    // The sibling sendFundraiserCoordinatorNotification already escaped every
+    // field; this one simply did not.
     if (!process.env.RESEND_API_KEY) return;
 
     const sender = businessId
@@ -365,17 +399,27 @@ export async function sendLeadNotificationEmail(
             from: sender.from,
             to: toBusinessEmail,
             replyTo: sender.replyTo,
-            subject: `New Lead Captured: ${lead.name}`,
+            // FR-ACCEPTANCE-2A.1 — a HEADER built from public input.
+            //
+            // Escaping is the wrong tool here and would not have helped: a header
+            // value has no escaping mechanism, and a newline inside one ENDS the
+            // header so that whatever follows becomes a new one. That is how a
+            // name typed into the public form becomes a `Bcc:` on the tenant's
+            // own lead alert. safeSubject strips C0 controls and DEL while
+            // leaving ordinary punctuation intact, so "Ben & Jerry's PTO"
+            // survives unchanged.
+            subject: safeSubject(`New Lead Captured: ${lead.name}`),
             html: `
                 <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
                     <h1 style="color: #4f46e5;">New Lead!</h1>
-                    <p>A new lead has been captured via the <strong>${lead.source}</strong>.</p>
+                    <p>A new lead has been captured via the <strong>${escapeHtml(lead.source)}</strong>.</p>
                     <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                        <p style="margin: 0;"><strong>Name:</strong> ${lead.name}</p>
-                        <p style="margin: 5px 0 0 0;"><strong>Email:</strong> ${lead.email}</p>
-                        ${lead.phone ? `<p style="margin: 5px 0 0 0;"><strong>Phone:</strong> ${lead.phone}</p>` : ''}
-                        ${lead.notes ? `<p style="margin: 10px 0 0 0; font-size: 14px; color: #6b7280;"><strong>Notes:</strong> ${lead.notes}</p>` : ''}
+                        <p style="margin: 0;"><strong>Name:</strong> ${escapeHtml(lead.name)}</p>
+                        <p style="margin: 5px 0 0 0;"><strong>Email:</strong> ${escapeHtml(lead.email)}</p>
+                        ${lead.phone ? `<p style="margin: 5px 0 0 0;"><strong>Phone:</strong> ${escapeHtml(lead.phone)}</p>` : ''}
+                        ${lead.notes ? `<p style="margin: 10px 0 0 0; font-size: 14px; color: #6b7280;"><strong>Notes:</strong> ${escapeHtml(lead.notes)}</p>` : ''}
                     </div>
+                    ${lead.acknowledgement ? `<p style="margin: 0 0 20px 0; font-size: 14px; color: #374151;">${escapeHtml(lead.acknowledgement)}</p>` : ''}
                     <a href="${process.env.NEXTAUTH_URL}/pipeline" style="display: inline-block; background: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">View Lead in CRM</a>
                 </div>
             `
