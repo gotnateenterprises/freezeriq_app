@@ -185,6 +185,11 @@ export default function DashboardClient({ session }: { session: any }) {
     // FR-ACCEPTANCE-2A.2 — same gate the Fundraiser CRM page itself uses
     // (app/fundraisers/page.tsx). Without this, a BASE/PRO tenant would see the
     // attention card, click it, and land on UpgradeRequired instead of a lead.
+    //
+    // NOTE: this component serves "/dashboard". The dashboard a tenant actually
+    // LANDS on after login is "/" — app/page.tsx — which is a near-duplicate of
+    // this file and carries the same card. Keep the two in step; a test asserts
+    // both mount it.
     const fundraiserPlan = (session?.user as any)?.plan;
     const fundraiserSuperAdmin = (session?.user as any)?.isSuperAdmin;
     const hasFundraiserAccess = fundraiserPlan === 'ENTERPRISE' || fundraiserPlan === 'ULTIMATE'

@@ -9,6 +9,7 @@ import Link from 'next/link';
 
 import RevenueModal from '@/components/RevenueModal';
 import CalendarWidget from '@/components/CalendarWidget';
+import { FundraiserLeadAttentionCard } from '@/components/FundraiserLeadAttentionCard';
 
 function ActivityItem({ activity, onRefresh }: { activity: any; onRefresh: () => void }) {
     const [isReplying, setIsReplying] = useState(false);
@@ -179,6 +180,18 @@ export default function Dashboard() {
 
     if (isLoading) return <div className="p-12 text-center text-slate-500">Loading Dashboard...</div>;
 
+    // FR-ACCEPTANCE-2A.2 — the same access contract app/fundraisers/page.tsx uses,
+    // so a tenant who can open the Fundraiser CRM is exactly the tenant who sees
+    // this card, and one who cannot is never shown a link into an upgrade wall.
+    //
+    // Read from useSession() rather than a server-rendered prop: the super-admin
+    // tenant switcher updates the session client-side, so this reflects the
+    // business currently being viewed.
+    const fundraiserPlan = session?.user?.plan;
+    const fundraiserSuperAdmin = session?.user?.isSuperAdmin;
+    const hasFundraiserAccess = fundraiserPlan === 'ENTERPRISE' || fundraiserPlan === 'ULTIMATE'
+        || fundraiserPlan === 'FREE' || fundraiserSuperAdmin;
+
     // Calculate Dynamic Food Cost %
     const foodCostPercentage = (startFoodCost && data?.metrics?.revenue > 0)
         ? ((startFoodCost / data.metrics.revenue) * 100).toFixed(1)
@@ -204,6 +217,23 @@ export default function Dashboard() {
                     </div>
                 </div>
             </div>
+
+            {/* FR-ACCEPTANCE-2A.2 — the fundraiser lead signal.
+
+                THIS FILE, and not only app/DashboardClient.tsx, is the dashboard a
+                tenant actually lands on: next-auth redirects to "/" after login
+                (auth.config.ts) and the authorized() callback treats "/" as the
+                dashboard. app/DashboardClient.tsx serves "/dashboard" — a
+                near-duplicate of this page — and the first version of this feature
+                was added only there, so the card was live but on a screen the owner
+                never opened. Both entry points now carry it, and a test asserts
+                both do, because the duplication itself is what made the mistake
+                invisible.
+
+                Placed directly under the page heading and ABOVE the metrics row:
+                full-width, inside the first viewport, and without displacing the
+                KPI grid. Renders nothing at all when there is no active lead. */}
+            <FundraiserLeadAttentionCard hasAccess={hasFundraiserAccess} />
 
             {/* Metrics Row */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
