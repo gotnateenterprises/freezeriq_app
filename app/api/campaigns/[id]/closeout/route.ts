@@ -11,10 +11,12 @@
  *   3. Batch-promotes fundraiser_hold orders to production_ready
  *
  * IDEMPOTENT: Re-calling on an already-closed campaign returns success
- * without re-promoting orders or overwriting an existing settlement_total.
+ * without re-promoting orders or overwriting an existing settlement_total, and
+ * returns the campaign's existing invoice rather than manufacturing a second.
  *
- * DOES NOT: process payments, create invoices, send emails, or touch
- * storefront/billing logic. INV-B is what will generate the draft invoice here.
+ * DOES NOT: process payments, send emails, mark an invoice SENT or PAID, record
+ * a check, or claim Square received anything. It creates a DRAFT invoice and
+ * stops. Settlement is INV-D.
  *
  * ── INV-A HARDENING ──────────────────────────────────────────────────────────
  * AUTHORIZATION: closeout freezes money, releases held orders, and records the
@@ -37,31 +39,58 @@
  * and, later, INV-B's invoice creation — run only after count === 1 proves this
  * request won the claim.
  *
- * KNOWN, DELIBERATELY UNCLOSED — PRE-INV-B FINANCIAL CORRECTNESS GATE:
- * a fundraiser order committed between this transaction's settlement read and
- * its commit is promoted but not counted in settlement_total. Making ONLY this
- * transaction Serializable does NOT fix it: PostgreSQL SSI detects the phantom
- * only if every participant is Serializable, and the racing writer
- * (app/api/public/order/route.ts) runs at Read Committed and takes no lock on
- * the campaign row. Closing it requires that writer to participate in a shared
- * lock — a Channel-1-locked path INV-A is not authorized to touch. Before INV-B
- * reaches Production this must be resolved.
+ * ── INV-B: THE SETTLEMENT RACE, NOW CLOSED ───────────────────────────────────
+ * INV-A recorded this as deliberately unclosed: an order committing between the
+ * settlement read and the commit was promoted but not counted, and it noted that
+ * fixing it needed the public order writer to join a shared lock.
+ *
+ * That writer ALREADY joins one. FR-FLOW-3 gave app/api/public/order/route.ts a
+ * `lockCampaignSelection` call as its transaction's first statement, after the
+ * INV-A note was written — so the note's claim that it "takes no lock on the
+ * campaign row" has been stale ever since. The lock exists, it is
+ * transaction-scoped, and it is honoured at every isolation level.
+ *
+ * So closeout simply joins the SAME lock, first, before reading anything. No
+ * second locking system and no isolation-level change. The invariant that buys:
+ * a supporter order either commits before the snapshot and is counted, or queues
+ * behind closeout and finds the campaign closed. There is no interleaving where
+ * a valid order lands outside the invoice.
  */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { CLOSED_STATUSES, isCampaignClosed } from '@/lib/campaignBundleSelection';
 import { mayCloseOutCampaign } from '@/lib/campaignCloseout';
+import { lockCampaignSelection } from '@/lib/campaignSelectionLock';
+import {
+    aggregateBundleLines,
+    assertLinesReconcile,
+    computeCloseoutFinancials,
+    CloseoutReconciliationError,
+    FOOD_TAX_DEFAULT_APPLIED,
+    roundCents,
+    type AggregatedLine,
+} from '@/lib/fundraiserCloseoutMath';
 
 /** Thrown inside the transaction when the conditional claim is not won. */
 class CampaignAlreadyClosedError extends Error {
     constructor() {
         super('Campaign was closed by another request');
+        // INV-B. Subclassing Error under an ES5 target breaks `instanceof`, and
+        // the catch below routes on exactly that check — so the LOSING side of a
+        // concurrent closeout was falling through to the generic handler and
+        // returning 500 instead of the idempotent success INV-A designed. The
+        // guard worked; only its answer was wrong. Found by an executed
+        // two-admin test, not by reading the code.
+        Object.setPrototypeOf(this, CampaignAlreadyClosedError.prototype);
         this.name = 'CampaignAlreadyClosedError';
     }
 }
 
+/** Prisma's unique-violation code; here it can only be invoices_one_per_campaign. */
+const UNIQUE_VIOLATION = 'P2002';
+
 export async function POST(
-    _req: Request,
+    req: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
@@ -127,10 +156,23 @@ export async function POST(
         }
         const userId = actor.id;
 
+        // ── INV-B: the owner's food-tax decision for THIS campaign ──
+        // An explicit business choice, never inferred from a jurisdiction. Absent
+        // from the body means "use the product default", which is derived from
+        // history (all five prior fundraiser invoices charged it) rather than
+        // assumed — see FOOD_TAX_DEFAULT_APPLIED.
+        let applyFoodTax = FOOD_TAX_DEFAULT_APPLIED;
+        try {
+            const body = await req.json();
+            if (body && typeof body.applyFoodTax === 'boolean') applyFoodTax = body.applyFoodTax;
+        } catch {
+            // No body, or not JSON. Keep the default.
+        }
+
         // ── Ownership check: campaign must belong to this tenant ──
         const campaign = await prisma.fundraiserCampaign.findUnique({
             where: { id: campaignId },
-            include: { customer: { select: { business_id: true } } }
+            include: { customer: { select: { id: true, business_id: true } } }
         });
 
         if (!campaign) {
@@ -145,6 +187,12 @@ export async function POST(
         //    This is a courtesy short-circuit only; the authoritative guard is
         //    the conditional claim inside the transaction below.
         if (isCampaignClosed(campaign)) {
+            // Return the campaign's existing invoice. A retry after a successful
+            // closeout must converge on the same document, not look like a no-op.
+            const existingInvoice = await prisma.invoice.findFirst({
+                where: { campaign_id: campaignId },
+                select: { id: true, status: true },
+            });
             return NextResponse.json({
                 success: true,
                 idempotent: true,
@@ -154,30 +202,101 @@ export async function POST(
                 settlement_total: campaign.settlement_total
                     ? Number(campaign.settlement_total)
                     : null,
-                promoted_order_count: 0
+                promoted_order_count: 0,
+                invoice_id: existingInvoice?.id ?? null,
+                invoice_status: existingInvoice?.status ?? null,
             });
         }
 
         // ── Execute closeout in a transaction ──
-        let result: { settlementTotal: number; closedAt: Date; promotedCount: number };
+        let result: {
+            settlementTotal: number;
+            closedAt: Date;
+            promotedCount: number;
+            invoiceId: string;
+            lines: AggregatedLine[];
+            financials: ReturnType<typeof computeCloseoutFinancials>;
+        };
         try {
             result = await prisma.$transaction(async (tx) => {
+                // 0. JOIN THE CAMPAIGN LOCK, FIRST — before reading a single order.
+                //    app/api/public/order/route.ts takes this same lock as its own
+                //    first statement, so a supporter checkout and this snapshot
+                //    genuinely queue behind one another. Taking it here rather than
+                //    after the read is the whole point: a read performed before the
+                //    lock could still be overtaken.
+                await lockCampaignSelection(tx, campaignId);
+
                 // 1. Compute settlement total from active, non-canceled orders.
                 //    Uses order.total_amount (the canonical per-order total) rather
-                //    than the denormalized campaign.total_sales which may drift.
-                //    This figure is GROSS: no share, no fee, no deduction.
+                //    than the denormalized campaign.total_sales which may drift —
+                //    Edgar proves the drift is real: total_sales counts a cancelled
+                //    order that active gross correctly excludes.
+                //    This figure is GROSS: no share, no tax, no fee, no deduction.
+                //
+                //    INCLUSION RULE: every submitted order that is not cancelled.
+                //    Payment status is deliberately NOT a filter — a legitimate
+                //    cash/check/offline order sold just as much food as a card one.
                 const activeOrders = await tx.order.findMany({
                     where: {
                         campaign_id: campaignId,
                         canceled_at: null
                     },
-                    select: { total_amount: true }
+                    select: {
+                        id: true,
+                        total_amount: true,
+                        items: {
+                            select: {
+                                bundle_id: true,
+                                quantity: true,
+                                unit_price: true,
+                                variant_size: true,
+                                item_name: true,
+                                bundle: { select: { name: true } },
+                            },
+                        },
+                    }
                 });
 
-                const settlementTotal = activeOrders.reduce(
+                const settlementTotal = roundCents(activeOrders.reduce(
                     (sum, o) => sum + Number(o.total_amount || 0),
                     0
+                ));
+
+                // 2. Aggregate to ONE line per bundle + serving size.
+                const lines = aggregateBundleLines(
+                    activeOrders.flatMap((o) =>
+                        o.items.map((it) => ({
+                            bundleId: it.bundle_id ?? null,
+                            description: it.bundle?.name || it.item_name || '(unnamed bundle)',
+                            variantSize: (it.variant_size as string | null) ?? null,
+                            quantity: Number(it.quantity) || 0,
+                            unitPrice: Number(it.unit_price ?? 0),
+                        }))
+                    )
                 );
+
+                // 3. HARD GATE. The bundle tally must equal the order totals, or
+                //    this is not a document anyone can act on. Name the offending
+                //    orders so the data can be repaired rather than guessed at.
+                const offenders = activeOrders
+                    .map((o) => ({
+                        orderId: o.id,
+                        orderTotal: Number(o.total_amount || 0),
+                        lineSum: roundCents(o.items.reduce(
+                            (s, it) => s + (Number(it.quantity) || 0) * Number(it.unit_price ?? 0), 0)),
+                    }))
+                    .filter((o) => Math.abs(o.orderTotal - o.lineSum) >= 0.005);
+
+                assertLinesReconcile(lines, settlementTotal, offenders);
+
+                // 4. The money. Organization share comes from the campaign's own
+                //    durable org_share_percent, never a current tenant default.
+                const financials = computeCloseoutFinancials({
+                    grossSales: settlementTotal,
+                    orgSharePercent: Number(campaign.org_share_percent),
+                    applyFoodTax,
+                });
 
                 const closedAt = new Date();
 
@@ -224,18 +343,82 @@ export async function POST(
                     }
                 });
 
+                // 5. Create exactly ONE DRAFT invoice, after the claim is won.
+                //
+                //    total_amount is the AMOUNT DUE (base remit + tax), matching
+                //    what the existing PDF and invoices UI already treat that
+                //    column as — the five historical invoices store the same
+                //    thing. Gross is NOT written here; it lives on the campaign's
+                //    settlement_total and is reproduced exactly by the line totals.
+                //
+                //    The 1% is carried in tax_amount, its own labelled column, so
+                //    the document can show it as its own line instead of hiding it
+                //    inside an unexplained 81%.
+                let invoiceId: string;
+                try {
+                    const invoice = await tx.invoice.create({
+                        data: {
+                            business_id: businessId,
+                            customer_id: campaign.customer.id,
+                            campaign_id: campaignId,
+                            status: 'DRAFT' as any,
+                            generated_at: closedAt,
+                            total_amount: financials.totalDue,
+                            tax_amount: financials.taxAmount,
+                            fundraiser_profit_percent: financials.orgSharePercent,
+                            fundraiser_profit_amount: financials.organizationAmount,
+                            items: {
+                                create: lines.map((l) => ({
+                                    bundle_id: l.bundleId,
+                                    description: l.description,
+                                    quantity: l.quantity,
+                                    unit_price: l.unitPrice,
+                                    total: l.total,
+                                    variant_size: (l.variantSize as any) ?? null,
+                                })),
+                            },
+                        },
+                        select: { id: true },
+                    });
+                    invoiceId = invoice.id;
+                } catch (invErr: any) {
+                    // invoices_one_per_campaign fired: this campaign already has
+                    // its authoritative invoice. Reuse it rather than manufacture
+                    // a second — the database, not a disabled button, is what
+                    // makes closeout idempotent.
+                    if (invErr?.code === UNIQUE_VIOLATION) {
+                        const existing = await tx.invoice.findFirst({
+                            where: { campaign_id: campaignId },
+                            select: { id: true },
+                        });
+                        if (!existing) throw invErr;
+                        invoiceId = existing.id;
+                    } else {
+                        throw invErr;
+                    }
+                }
+
                 return {
                     settlementTotal,
                     closedAt,
-                    promotedCount: promoted.count
+                    promotedCount: promoted.count,
+                    invoiceId,
+                    lines,
+                    financials,
                 };
             });
         } catch (txErr) {
             if (txErr instanceof CampaignAlreadyClosedError) {
                 // Re-read and answer with what is now true, rather than a 500.
+                // The winner's invoice is returned, so a retry converges on the
+                // same document instead of appearing to have produced nothing.
                 const current = await prisma.fundraiserCampaign.findUnique({
                     where: { id: campaignId },
                     select: { status: true, closed_at: true, settlement_total: true },
+                });
+                const existingInvoice = await prisma.invoice.findFirst({
+                    where: { campaign_id: campaignId },
+                    select: { id: true },
                 });
                 return NextResponse.json({
                     success: true,
@@ -246,8 +429,21 @@ export async function POST(
                     settlement_total: current?.settlement_total != null
                         ? Number(current.settlement_total)
                         : null,
-                    promoted_order_count: 0
+                    promoted_order_count: 0,
+                    invoice_id: existingInvoice?.id ?? null,
                 });
+            }
+            // INV-B: refuse rather than emit an invoice that contradicts itself.
+            // 409, not 500 — the request was well-formed; the DATA is not ready.
+            if (txErr instanceof CloseoutReconciliationError) {
+                return NextResponse.json({
+                    error: txErr.message,
+                    reconciliation: {
+                        bundle_line_total: txErr.lineSum,
+                        order_gross_total: txErr.grossSales,
+                        detail: txErr.detail,
+                    },
+                }, { status: 409 });
             }
             throw txErr;
         }
@@ -259,7 +455,20 @@ export async function POST(
             status: 'Closed',
             closed_at: result.closedAt,
             settlement_total: result.settlementTotal,
-            promoted_order_count: result.promotedCount
+            promoted_order_count: result.promotedCount,
+            invoice_id: result.invoiceId,
+            invoice_status: 'DRAFT',
+            financials: {
+                gross_sales: result.financials.grossSales,
+                org_share_percent: result.financials.orgSharePercent,
+                organization_amount: result.financials.organizationAmount,
+                base_remit: result.financials.baseRemit,
+                tax_applied: result.financials.taxApplied,
+                tax_rate_percent: result.financials.taxRatePercent,
+                tax_amount: result.financials.taxAmount,
+                total_due: result.financials.totalDue,
+            },
+            lines: result.lines,
         });
 
     } catch (e: any) {

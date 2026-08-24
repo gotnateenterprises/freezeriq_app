@@ -26,6 +26,7 @@ import { useDialogFocus } from '@/components/crm2/useDialogFocus';
 import type { CampaignTriage } from '@/lib/growth/nextAction';
 import { triageCampaign } from '@/lib/growth/nextAction';
 import type { CampaignHealth, CampaignHealthReason } from '@/lib/growth/health';
+import { FOOD_TAX_DEFAULT_APPLIED, FOOD_TAX_RATE_PERCENT } from '@/lib/fundraiserCloseoutMath';
 
 interface Fundraiser {
     id: string;
@@ -139,7 +140,34 @@ export default function FundraisersPage() {
         message: string;
         settlement_total?: number;
         promoted_order_count?: number;
+        // INV-B: the authoritative figures the server actually froze. Rendered
+        // after closeout rather than estimated before it — the campaign row's
+        // sales_total can drift from the real order totals (Edgar differs by a
+        // cancelled order), and it does not carry the org share at all, so any
+        // pre-confirmation dollar preview would be a number nobody should trust.
+        financials?: {
+            gross_sales: number;
+            org_share_percent: number;
+            organization_amount: number;
+            base_remit: number;
+            tax_applied: boolean;
+            tax_rate_percent: number;
+            tax_amount: number;
+            total_due: number;
+        };
     } | null>(null);
+
+    /**
+     * INV-B — the owner's 1% food-tax decision for this closeout.
+     *
+     * Starts ON because every fundraiser invoice this business has issued
+     * charged it (5 of 5), but it is a visible checkbox, never a hidden default:
+     * closeout freezes the invoice's financial values, so the choice has to be
+     * made before that happens, not explained afterwards. FreezerIQ does not
+     * infer tax from an address and gives no tax advice — this is the owner's
+     * business decision, entered by hand.
+     */
+    const [applyFoodTax, setApplyFoodTax] = useState(FOOD_TAX_DEFAULT_APPLIED);
     // CRM-CC-5: the closeout modal gets the same focus/scroll treatment as the
     // Campaign Context drawer — focus in on open, Tab contained, focus restored.
     const closeoutDialog = useDialogFocus(closeoutTarget !== null);
@@ -213,7 +241,11 @@ export default function FundraisersPage() {
         try {
             const res = await fetch(`/api/campaigns/${closeoutTarget.id}/closeout`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                // INV-B: the owner's explicit tax choice travels with the request
+                // that creates the draft invoice, so the frozen figures match what
+                // was on screen when they confirmed.
+                body: JSON.stringify({ applyFoodTax })
             });
             const data = await res.json();
             if (!res.ok) {
@@ -232,7 +264,8 @@ export default function FundraisersPage() {
                     success: true,
                     message: 'Campaign closed successfully.',
                     settlement_total: data.settlement_total,
-                    promoted_order_count: data.promoted_order_count
+                    promoted_order_count: data.promoted_order_count,
+                    financials: data.financials
                 });
             }
         } catch (e: any) {
@@ -254,7 +287,14 @@ export default function FundraisersPage() {
         setCloseoutTarget(null);
         setCloseoutResult(null);
         setCloseoutLoading(false);
+        // Each closeout is its own decision: reset to the visible default rather
+        // than silently carrying the last campaign's choice into the next one.
+        setApplyFoodTax(FOOD_TAX_DEFAULT_APPLIED);
     };
+
+    /** Two-decimal currency for the closeout summary. */
+    const money = (v: number) =>
+        Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     // CRM-CC-1: one clock per render so every row is triaged consistently.
     const triageNow = new Date();
@@ -531,6 +571,44 @@ export default function FundraisersPage() {
                                     Settlement total: ${Number(closeoutResult.settlement_total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>
                             )}
+
+                            {/* INV-B — the exact figures the server froze onto the
+                                draft invoice. Shown after closeout because these
+                                are authoritative; a pre-confirmation estimate
+                                would have come from a drifting sales_total. */}
+                            {closeoutResult.financials && (
+                                <div className="pt-2 mt-2 border-t border-emerald-200 dark:border-emerald-700 space-y-1 font-mono text-sm">
+                                    <div className="flex justify-between text-emerald-800 dark:text-emerald-300">
+                                        <span className="font-bold">Total fundraiser sales</span>
+                                        <span className="font-black">${money(closeoutResult.financials.gross_sales)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-emerald-700 dark:text-emerald-400">
+                                        <span className="font-bold">
+                                            Organization earned ({closeoutResult.financials.org_share_percent}%)
+                                        </span>
+                                        <span className="font-black">${money(closeoutResult.financials.organization_amount)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-emerald-700 dark:text-emerald-400">
+                                        <span className="font-bold">Base amount to remit</span>
+                                        <span className="font-black">${money(closeoutResult.financials.base_remit)}</span>
+                                    </div>
+                                    {closeoutResult.financials.tax_applied && (
+                                        <div className="flex justify-between text-emerald-700 dark:text-emerald-400">
+                                            <span className="font-bold">
+                                                Food tax ({closeoutResult.financials.tax_rate_percent}%)
+                                            </span>
+                                            <span className="font-black">${money(closeoutResult.financials.tax_amount)}</span>
+                                        </div>
+                                    )}
+                                    <div className="flex justify-between pt-1 border-t border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200">
+                                        <span className="font-black">Final amount due</span>
+                                        <span className="font-black">${money(closeoutResult.financials.total_due)}</span>
+                                    </div>
+                                    <p className="pt-1 font-sans text-xs font-bold text-emerald-700/80 dark:text-emerald-400/80">
+                                        Draft invoice created. Nothing has been sent or marked paid.
+                                    </p>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -568,6 +646,32 @@ export default function FundraisersPage() {
                             <p className="font-bold text-slate-500 dark:text-slate-500">
                                 This does not charge anyone or process any payments.
                             </p>
+
+                            {/* INV-B — the owner's tax decision, made BEFORE the
+                                invoice is created and its figures frozen. */}
+                            <label
+                                htmlFor="closeout-food-tax"
+                                className="flex items-start gap-3 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 cursor-pointer"
+                            >
+                                <input
+                                    id="closeout-food-tax"
+                                    type="checkbox"
+                                    checked={applyFoodTax}
+                                    disabled={closeoutLoading}
+                                    onChange={(e) => setApplyFoodTax(e.target.checked)}
+                                    className="mt-0.5 w-4 h-4 rounded accent-indigo-600 disabled:opacity-50"
+                                />
+                                <span className="text-sm">
+                                    <span className="font-black text-slate-900 dark:text-white block">
+                                        Apply {FOOD_TAX_RATE_PERCENT}% food tax
+                                    </span>
+                                    <span className="font-medium text-slate-500 dark:text-slate-400">
+                                        Adds {FOOD_TAX_RATE_PERCENT}% of gross fundraiser sales to the
+                                        invoice as its own separate line. Turn this off for a fundraiser
+                                        that is not taxed.
+                                    </span>
+                                </span>
+                            </label>
                         </div>
                     )}
 
