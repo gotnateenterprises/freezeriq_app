@@ -118,26 +118,52 @@ describe('the fundraiser access gate is the SAME contract everywhere', () => {
         expect(plansIn(gateOf('app/DashboardClient.tsx', 'hasFundraiserAccess'))).toEqual(crm);
     });
 
-    it('"/" reads the LIVE session, so the super-admin tenant switcher is respected', () => {
-        // The switcher updates the JWT client-side (auth.config.ts jwt callback,
-        // trigger === 'update'). useSession() sees that; a session captured once
-        // in a server component and passed as a prop would not.
+    it('"/" reads the LIVE session, so the super-admin tenant switcher is respected', async () => {
+        // The switcher updates the JWT client-side. useSession() sees that; a
+        // session captured once in a server component and passed as a prop
+        // would not.
         const root = stripComments(read('app/page.tsx'));
         expect(root).toMatch(/useSession\(\)/);
         expect(root).toMatch(/session\?\.user\?\.plan/);
-        const authConfig = read('auth.config.ts');
-        expect(authConfig).toMatch(/trigger === 'update' && session\?\.businessId/);
-        expect(authConfig).toMatch(/if \(session\.plan\) token\.plan = session\.plan/);
+
+        // SEC-TENANT-1: this used to grep auth.config.ts for the literal string
+        // `trigger === 'update' && session?.businessId` — which pinned the
+        // cross-tenant vulnerability in place and would have blocked its fix.
+        // The switcher's real requirement is BEHAVIOURAL: a super admin's
+        // view-as update must move the effective tenant. Asserted as such, using
+        // the server-signed grant the switch endpoint issues.
+        process.env.AUTH_SECRET = process.env.AUTH_SECRET || 'test-secret-sec-tenant-1';
+        const { authConfig } = await import('@/auth.config');
+        const { signViewAsGrant, VIEW_AS_GRANT_TTL_SECONDS } = await import('@/lib/auth/viewAsGrant');
+
+        const grant = await signViewAsGrant({
+            sub: 'user-super', bid: 'biz-b', name: 'B', plan: 'ULTIMATE', status: 'active',
+            exp: Math.floor(Date.now() / 1000) + VIEW_AS_GRANT_TTL_SECONDS,
+        }, process.env.AUTH_SECRET as string);
+
+        const token = await (authConfig.callbacks as any).jwt({
+            token: { sub: 'user-super', businessId: 'biz-a', plan: 'FREE', isSuperAdmin: true, businessName: 'A' },
+            trigger: 'update',
+            session: { viewAsGrant: grant },
+        });
+        expect(token.businessId).toBe('biz-b');
+        expect(token.plan).toBe('ULTIMATE');
     });
 
-    it('the session actually carries plan and isSuperAdmin', () => {
+    it('the session actually carries plan and isSuperAdmin', async () => {
         // If either were absent the gate would silently evaluate false — which is
         // a plausible-looking alternative cause of the same symptom.
-        const authConfig = read('auth.config.ts');
-        expect(authConfig).toMatch(/\(session\.user as any\)\.plan = token\.plan/);
-        expect(authConfig).toMatch(/\(session\.user as any\)\.isSuperAdmin = token\.isSuperAdmin/);
-        expect(authConfig).toMatch(/token\.plan = \(user as any\)\.plan/);
-        expect(authConfig).toMatch(/token\.isSuperAdmin = \(user as any\)\.isSuperAdmin/);
+        const { authConfig } = await import('@/auth.config');
+        const token = await (authConfig.callbacks as any).jwt({
+            token: {},
+            user: { role: 'ADMIN', permissions: null, businessId: 'biz-a', plan: 'ULTIMATE', isSuperAdmin: true },
+        });
+        expect(token.plan).toBe('ULTIMATE');
+        expect(token.isSuperAdmin).toBe(true);
+
+        const s = await (authConfig.callbacks as any).session({ session: { user: {} }, token });
+        expect((s.user as any).plan).toBe('ULTIMATE');
+        expect((s.user as any).isSuperAdmin).toBe(true);
     });
 });
 

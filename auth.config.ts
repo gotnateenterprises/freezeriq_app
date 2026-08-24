@@ -1,5 +1,6 @@
 
 import type { NextAuthConfig } from 'next-auth';
+import { applySessionUpdate, applySignIn } from '@/lib/auth/sessionUpdate';
 
 export const authConfig = {
     pages: {
@@ -7,24 +8,22 @@ export const authConfig = {
     },
     callbacks: {
         async jwt({ token, user, trigger, session }) {
+            // Sign-in: authority is rebuilt from the database user, never from
+            // a request, and any previous view-as context is discarded.
             if (user) {
-                token.role = user.role;
-                token.permissions = user.permissions;
-                token.businessId = (user as any).businessId; // Store business in token
-
-                // SaaS Fields
-                token.plan = (user as any).plan;
-                token.subscriptionStatus = (user as any).subscriptionStatus;
-                token.isSuperAdmin = (user as any).isSuperAdmin;
-                token.businessLogo = (user as any).businessLogo;
-                token.businessName = (user as any).businessName;
+                applySignIn(token, user);
             }
 
-            // Handle session updates (e.g., Tenant Switcher)
-            if (trigger === 'update' && session?.businessId) {
-                token.businessId = session.businessId;
-                if (session.businessName) token.businessName = session.businessName;
-                if (session.plan) token.plan = session.plan;
+            // SEC-TENANT-1. `session` here is the browser's `update()` payload —
+            // an unvalidated request body, not server state. Every decision about
+            // what it may change lives in lib/auth/sessionUpdate.ts so there is
+            // exactly one place to audit.
+            if (trigger === 'update') {
+                await applySessionUpdate(
+                    token,
+                    session,
+                    process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+                );
             }
 
             return token;
@@ -45,6 +44,14 @@ export const authConfig = {
 
                 (session.user as any).businessLogo = token.businessLogo as string;
                 (session.user as any).businessName = token.businessName as string;
+
+                // SEC-TENANT-1 — view-as context, so the UI can show that this
+                // is an impersonated tenant and offer a way back. `businessId`
+                // above is the EFFECTIVE tenant; `baseBusinessId` is the real one.
+                (session.user as any).baseBusinessId = token.baseBusinessId ?? token.businessId;
+                (session.user as any).baseBusinessName = token.baseBusinessName ?? token.businessName;
+                (session.user as any).viewAsBusinessId = token.viewAsBusinessId ?? null;
+                (session.user as any).isViewingAsTenant = !!token.viewAsBusinessId;
             }
             return session;
         },

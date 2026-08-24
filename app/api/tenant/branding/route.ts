@@ -17,11 +17,16 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        // 1. Get current user's business context
-        const user = await prisma.user.findUnique({
-            where: { id: userId },
-            select: { business_id: true }
-        });
+        // 1. Get current user's business context.
+        //
+        // SEC-TENANT-1. This used to read the DURABLE users.business_id row.
+        // That happened to follow View As only because switching permanently
+        // rewrote that row — the destructive write this phase removed. Reading
+        // the row now would mean a super admin viewing Tenant B sees, and at
+        // line ~188 WRITES, their own home tenant's branding while the entire
+        // UI says Tenant B. The effective tenant is the session's businessId,
+        // which is exactly what the comment below already intended.
+        const user = { business_id: (session?.user as any)?.businessId as string | undefined };
 
         if (!user?.business_id) {
             return NextResponse.json({ error: 'No business context found' }, { status: 400 });
@@ -84,11 +89,12 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        // 1. Resolve business context
-        const user = await prisma.user.findUnique({
-            where: { id: userId },
-            select: { business_id: true }
-        });
+        // 1. Resolve business context — the EFFECTIVE tenant, not the durable
+        // users.business_id row. See the GET handler above; this is the write
+        // path, so reading the wrong one would silently overwrite the super
+        // admin's own tenant branding while they believe they are editing the
+        // tenant named in the switcher.
+        const user = { business_id: (session?.user as any)?.businessId as string | undefined };
 
         if (!user?.business_id) {
             return NextResponse.json({ error: 'No business context' }, { status: 400 });

@@ -93,14 +93,28 @@ export async function POST(
         const sessionUserId = (session.user as any).id as string | undefined;
         const sessionEmail = session.user.email ?? undefined;
 
+        // SEC-TENANT-1. This lookup used to require the actor to be a MEMBER of
+        // the tenant being closed out. That held for a super admin only because
+        // View As permanently rewrote users.business_id onto the viewed tenant —
+        // the destructive write this phase removed. A platform super admin is
+        // never a member of the tenant they are inspecting, so keeping the
+        // membership clause would make closeout impossible for them.
+        //
+        // INV-A's actual requirement is that closed_by resolves to a PERSISTED
+        // User.id rather than an email; tenant membership was only ever a proxy
+        // for that. A super admin's id is persisted, so it satisfies the invariant
+        // directly. Ordinary users are still required to be members.
+        const actingSuperAdmin = (session.user as any).isSuperAdmin === true;
+        const scope = actingSuperAdmin ? {} : { business_id: businessId };
+
         const actor = sessionUserId
             ? await prisma.user.findFirst({
-                where: { id: sessionUserId, business_id: businessId },
+                where: { id: sessionUserId, ...scope },
                 select: { id: true },
             })
             : sessionEmail
                 ? await prisma.user.findFirst({
-                    where: { email: sessionEmail, business_id: businessId },
+                    where: { email: sessionEmail, ...scope },
                     select: { id: true },
                 })
                 : null;
