@@ -50,10 +50,40 @@ export function shouldCreateFulfillmentOrder(input: FulfillmentDecisionInput): b
  * validation, so without this allowlist adding the enum values would instantly
  * make them spoofable by any authenticated tenant user.
  *
- * This is NOT the full invoice state machine — INV-C owns that. It is the
- * minimum gate that prevents INV-A's enum expansion from widening the API.
+ * INV-D REMOVED PAID from this list.
+ *
+ * PAID is the one status that asserts money changed hands, and this route can
+ * only ever set a bare status — it has no method, no date and no reference to
+ * record alongside it. That is precisely how Production acquired five PAID
+ * invoices that cannot say when or how they were paid. PAID now lives solely at
+ * POST /api/tenant/invoices/[id]/settle, which refuses to write it without those
+ * facts.
+ *
+ * This is NOT the full invoice state machine — INV-C owns SENT and INV-D owns
+ * PAID. It is the minimum gate that keeps a status meaning what it says.
  */
-export const CLIENT_SETTABLE_INVOICE_STATUSES = ['PENDING', 'PAID', 'OVERDUE', 'CANCELED'] as const;
+export const CLIENT_SETTABLE_INVOICE_STATUSES = ['PENDING', 'OVERDUE', 'CANCELED'] as const;
+
+/**
+ * Statuses the generic invoice API may not move an invoice OUT of.
+ *
+ * Removing PAID from the settable list stops a casual invoice edit from claiming
+ * payment, but on its own it would still let one silently UN-claim payment:
+ * saving an edit with `status: 'PENDING'` on a settled invoice would drop it
+ * back into Total Outstanding while leaving paid_at and payment_method behind,
+ * producing a row that is simultaneously outstanding and stamped with a payment
+ * date. Reversal has to be deliberate, so the generic editor refuses it.
+ *
+ * DRAFT is here for the mirror-image reason: INV-C's send route owns the
+ * DRAFT -> SENT transition, and a generic edit must not smuggle a draft into an
+ * issued status.
+ */
+export const GENERIC_EDIT_LOCKED_STATUSES = ['PAID', 'DRAFT'] as const;
+
+export function isGenericEditLockedStatus(value: unknown): boolean {
+    return typeof value === 'string'
+        && (GENERIC_EDIT_LOCKED_STATUSES as readonly string[]).includes(value);
+}
 
 export type ClientSettableInvoiceStatus = typeof CLIENT_SETTABLE_INVOICE_STATUSES[number];
 

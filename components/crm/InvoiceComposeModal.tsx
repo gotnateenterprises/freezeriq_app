@@ -67,7 +67,9 @@ export default function InvoiceComposeModal({
                 })));
                 setTaxAmount(Number(invoiceToEdit.tax_amount));
                 setDueDate(invoiceToEdit.due_date ? new Date(invoiceToEdit.due_date).toISOString().split('T')[0] : '');
-                setPaymentMethod(invoiceToEdit.payment_method || 'check');
+                // INV-D: `|| 'check'` here would turn "nobody chose" into "Check"
+                // the moment the invoice was opened for editing.
+                setPaymentMethod(invoiceToEdit.payment_method ?? '');
                 setProfitPercent(Number(invoiceToEdit.fundraiser_profit_percent) || 0);
                 setIsTaxExempt(Number(invoiceToEdit.tax_amount) === 0);
             } else if (preselectedCustomerId) {
@@ -183,7 +185,9 @@ export default function InvoiceComposeModal({
                     total_amount: finalBalance,
                     tax_amount: taxAmount,
                     due_date: dueDate || null,
-                    payment_method: paymentMethod,
+                    // INV-D: "" means the owner left it unspecified — send null so
+                    // the column records that, rather than an empty string.
+                    payment_method: paymentMethod || null,
                     fundraiser_profit_percent: profitPercent,
                     fundraiser_profit_amount: profitAmount,
                     status: invoiceToEdit?.status || 'PENDING'
@@ -355,6 +359,13 @@ export default function InvoiceComposeModal({
                                         onChange={(e) => setPaymentMethod(e.target.value)}
                                         className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border-none focus:ring-2 focus:ring-indigo-500/20 text-sm font-bold"
                                     >
+                                        {/* INV-D: an explicit "not specified" so an invoice
+                                            without a chosen method can stay that way. Without
+                                            it, opening a generated fundraiser invoice and
+                                            saving would silently stamp it "Check" — the same
+                                            invented method migration 17 removes at the schema
+                                            level, just re-entering through the edit path. */}
+                                        <option value="">Not specified</option>
                                         <option value="check">Check</option>
                                         <option value="venmo">Venmo</option>
                                         <option value="paypal">PayPal</option>

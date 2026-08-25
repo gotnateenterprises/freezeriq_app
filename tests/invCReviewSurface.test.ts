@@ -109,10 +109,19 @@ describe('DRAFT and SENT render intentionally', () => {
     });
 
     it('neither DRAFT nor SENT is counted as paid revenue', () => {
+        // INV-D moved this stat behind sumPaidThisMonth, so the property is now
+        // asserted by EXECUTING the rule rather than by matching the inline
+        // expression that used to implement it. It also got stricter: a PAID
+        // invoice with no recorded payment date is not counted either.
+        const { sumPaidThisMonth } = require('@/lib/invoiceSettlement');
+        const now = new Date(Date.UTC(2026, 7, 24, 12));
+        const at = '2026-08-10T12:00:00.000Z';
+        expect(sumPaidThisMonth([{ status: 'DRAFT', total_amount: '100', paid_at: at }], now)).toBe(0);
+        expect(sumPaidThisMonth([{ status: 'SENT', total_amount: '100', paid_at: at }], now)).toBe(0);
+        expect(sumPaidThisMonth([{ status: 'PAID', total_amount: '100', paid_at: at }], now)).toBe(100);
+
         const c = code(PAGE);
-        // The "Paid This Month" stat still filters strictly on PAID.
-        expect(c).toMatch(/i\.status === 'PAID'\)\.reduce/);
-        expect(c).not.toMatch(/i\.status === 'SENT'\)\.reduce\(\(acc, curr\) => acc \+ Number\(curr\.total_amount\), 0\)\.toFixed\(2\)}`, icon: CheckCircle2/);
+        expect(c).toContain('sumPaidThisMonth(invoices, new Date())');
     });
 });
 
@@ -185,10 +194,13 @@ describe('Total Outstanding counts issued, unpaid invoices', () => {
         expect(c).not.toMatch(/'Total Outstanding'[^\n]*i\.status === 'PENDING'\)\.reduce/);
     });
 
-    it('"Paid This Month" remains PAID-only', () => {
+    it('"Paid This Month" remains PAID-only and does not borrow the outstanding rule', () => {
         const c = code(PAGE);
         const stat = c.slice(c.indexOf("'Paid This Month'"), c.indexOf("'Paid This Month'") + 260);
-        expect(stat).toMatch(/i\.status === 'PAID'/);
+        // INV-D: the stat is now sumPaidThisMonth, which requires PAID *and* a
+        // paid_at inside the current month. The invariant this test exists for —
+        // that the paid stat and the outstanding stat never share a rule — holds.
+        expect(stat).toContain('sumPaidThisMonth');
         expect(stat).not.toMatch(/SENT|DRAFT|sumOutstandingInvoices/);
     });
 });
@@ -271,14 +283,22 @@ describe('PUT cannot rewrite a generated fundraiser invoice\'s frozen totals', (
             tax_amount: '2.5',
             fundraiser_profit_percent: '20',
             fundraiser_profit_amount: '50',
+            status: 'SENT',
+            payment_method: null,
         };
     });
 
+    // INV-D note: these used to drive the route with `status: 'PAID'`, because
+    // "Mark as Paid" was the flow that round-tripped a whole invoice through the
+    // generic PUT. PAID is no longer settable here at all — it is rejected before
+    // the update runs — so the vehicle changed to OVERDUE. The property under test
+    // is unchanged, and the original hazard is now strictly smaller: recording a
+    // payment does not reach this route.
     it('the frozen financial fields are preserved, not recomputed from the body', async () => {
         await put({
             id: 'inv-1',
             customer_id: 'cust-1',
-            status: 'PAID',
+            status: 'OVERDUE',
             items: [{ description: 'TAMPERED', quantity: 999, unit_price: 1, total: 999 }],
             tax_amount: 9999,
             fundraiser_profit_percent: 99,
@@ -295,7 +315,7 @@ describe('PUT cannot rewrite a generated fundraiser invoice\'s frozen totals', (
 
     it('the invoice lines are left completely alone', async () => {
         await put({
-            id: 'inv-1', customer_id: 'cust-1', status: 'PAID',
+            id: 'inv-1', customer_id: 'cust-1', status: 'OVERDUE',
             items: [{ description: 'TAMPERED', quantity: 999, unit_price: 1, total: 999 }],
         });
 
@@ -307,13 +327,33 @@ describe('PUT cannot rewrite a generated fundraiser invoice\'s frozen totals', (
 
     it('presentation fields still update normally', async () => {
         await put({
-            id: 'inv-1', customer_id: 'cust-1', status: 'PAID',
+            id: 'inv-1', customer_id: 'cust-1', status: 'OVERDUE',
             items: [], payment_method: 'check', due_date: '2026-09-01',
         });
         const update = calls.find((c) => c.op === 'invoice.update')!;
-        expect(update.args.data.status).toBe('PAID');
+        expect(update.args.data.status).toBe('OVERDUE');
         expect(update.args.data.payment_method).toBe('check');
         expect(update.args.data.due_date).toBeInstanceOf(Date);
+    });
+
+    // INV-D: the two silent defaults this route used to apply on every update.
+    it('an omitted status and method are PRESERVED, not reset to PENDING/check', async () => {
+        await put({ id: 'inv-1', customer_id: 'cust-1', items: [] });
+        const update = calls.find((c) => c.op === 'invoice.update')!;
+        // `status || 'PENDING'` would have thrown away the INV-C SENT state.
+        expect(update.args.data.status).toBe('SENT');
+        // `payment_method || 'check'` would have re-invented the schema default
+        // that migration 17 removes.
+        expect(update.args.data.payment_method).toBeNull();
+    });
+
+    it('refuses to move a settled invoice back out of PAID', async () => {
+        persistedInvoice = { ...persistedInvoice, status: 'PAID' };
+        const res: any = await put({
+            id: 'inv-1', customer_id: 'cust-1', status: 'PENDING', items: [],
+        });
+        expect(res.status).toBe(409);
+        expect(calls.some((c) => c.op === 'invoice.update')).toBe(false);
     });
 
     it('an ORDINARY manual invoice is completely unaffected by the guard', async () => {

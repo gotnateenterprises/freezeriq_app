@@ -1,0 +1,100 @@
+-- INV-D · Settlement truth: how and when an invoice was actually paid
+--
+-- Three additive columns and one DEFAULT removal. No table rewrite, no data
+-- write, no backfill, no index, no constraint, no new model.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- WHY payment_method LOSES ITS DEFAULT
+--
+-- The strongest evidence for this whole migration is already in Production. All
+-- six invoices read payment_method = 'check' — including #1FE67663, which is
+-- SENT and has never been paid. The column was answering "how was this paid?"
+-- for an invoice nobody had paid, because the default filled it in at INSERT.
+--
+-- So the field could never distinguish a recorded decision from a schema
+-- default, which makes it useless as settlement evidence on its own. Dropping
+-- the default is the whole fix: it changes no existing row, and stops new rows
+-- acquiring a payment method that nobody chose. INV-B's generated fundraiser
+-- invoices pass no payment_method at all, so from here they are created NULL
+-- and stay NULL until a human settles them.
+--
+-- The column is NOT being narrowed to an enum. Ordinary manual invoices use it
+-- legitimately for the EXPECTED method printed on the PDF, with a dropdown
+-- offering check/venmo/paypal/ach/credit/debit/cash/other. Turning it into
+-- 'square' | 'check' would break that. Instead the settlement endpoint validates
+-- what it writes, so a settled fundraiser invoice can only ever hold a method
+-- the owner actually selected.
+--
+-- Existing rows keep their stored values. DROP DEFAULT is metadata-only in
+-- PostgreSQL: no row is read, rewritten or locked beyond the catalog update.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- WHY paid_at IS A NEW COLUMN
+--
+-- Nothing existing can answer "when was this paid":
+--
+--   * updated_at is @updatedAt. It moves on any later edit, so a settlement date
+--     read from it would silently change the day someone corrected a typo. Four
+--     of the five historical PAID invoices share updated_at = 2026-03-25, which
+--     is when they were marked, not when five separate organizations paid.
+--   * created_at is the issue date, not the payment date.
+--   * status = PAID records THAT, never WHEN.
+--
+-- NULLABLE with no backfill. The five historical PAID invoices stay NULL because
+-- their real payment dates are genuinely unknown, and inventing them would be
+-- worse than admitting it. "Paid This Month" therefore excludes them rather than
+-- counting them into an arbitrary month — see PART K of the INV-D contract.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- WHY payment_reference IS A NEW COLUMN
+--
+-- A check number or a Square transaction reference is the one thing that lets a
+-- tenant reconcile a settlement against their own records later. Free text, and
+-- optional: it is a human's note. FreezerIQ makes no provider call and verifies
+-- nothing, so this must never be presented as confirmation by Square.
+--
+-- No bank routing number, no account number, no check image. Not wanted, not
+-- stored, not asked for.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- WHY settled_externally IS A BOOLEAN AND NOT A DATE
+--
+-- Edgar County Farm Bureau ($2,065.00 of real orders) and Coles County Farm
+-- Bureau ($1,410.00) were settled outside FreezerIQ. Both are Archived with
+-- closed_at NULL, settlement_total NULL and zero campaign-linked invoices, so any
+-- future rule shaped "orders exist and no invoice exists, therefore unpaid" would
+-- read them as outstanding debts.
+--
+-- A nullable settled_externally_at would create pressure to fill in a date, and
+-- the only date available would be fabricated. The truth actually known is
+-- binary: the obligation was met elsewhere. settlement_notes already exists for
+-- the human explanation of when and how.
+--
+-- DEFAULT false, NOT NULL: every existing campaign is correctly "not settled
+-- externally" until a human says otherwise. This migration marks nothing —
+-- Edgar and Coles are untouched here and marking them is a separate,
+-- owner-approved action.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- NOT TOUCHED
+--
+-- No invoice row is updated. No campaign row is updated. No invoice is created,
+-- deleted, or re-priced. InvoiceItems, fundraiser_profit_percent,
+-- fundraiser_profit_amount, tax_amount, total_amount and campaign
+-- settlement_total keep every value they have today, so the accepted
+-- #1FE67663 remains SENT at $202.50 with $50.00 earned and $2.50 tax.
+
+-- 1. When the tenant recorded this invoice as satisfied. NULL = not settled.
+ALTER TABLE "invoices" ADD COLUMN "paid_at" TIMESTAMP(3);
+
+-- 2. Optional check number / Square reference the tenant typed in.
+ALTER TABLE "invoices" ADD COLUMN "payment_reference" TEXT;
+
+-- 3. Stop new invoices inheriting a payment method nobody chose.
+--    Metadata-only; existing values are preserved exactly.
+ALTER TABLE "invoices" ALTER COLUMN "payment_method" DROP DEFAULT;
+
+-- 4. "This campaign's financial obligation was settled outside FreezerIQ."
+--    Nothing is marked true by this migration.
+ALTER TABLE "fundraiser_campaigns"
+  ADD COLUMN "settled_externally" BOOLEAN NOT NULL DEFAULT false;

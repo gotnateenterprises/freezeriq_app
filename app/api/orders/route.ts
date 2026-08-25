@@ -378,16 +378,28 @@ export async function PATCH(req: NextRequest) {
             // side effect correctly after normalization.
             // @ts-ignore
             if (dbSafeStatus === 'production_ready' && existingOrder.invoice_id) {
-                // @ts-ignore
-                await tx.invoice.update({
-                    // @ts-ignore
-                    where: { id: existingOrder.invoice_id },
-                    data: { status: 'PAID' }
-                });
+                // ── INV-D: the automatic "PAID" assertion was REMOVED here.
+                //
+                // This block used to run `invoice.update({ data: { status: 'PAID' }})`
+                // whenever an order was approved for production. Approving an order
+                // says the kitchen may start cooking; it says nothing whatsoever
+                // about whether the customer's money arrived. The two got welded
+                // together, so a production decision silently produced a financial
+                // claim — with no method, no date, no reference, and no human ever
+                // asserting they had been paid.
+                //
+                // It is also the exact inverse of what the settle endpoint now does
+                // (a recorded payment releases the order to production). Keeping
+                // both directions would make the two facts define each other:
+                // in production because paid, paid because in production.
+                //
+                // Payment is now recorded only at POST /api/tenant/invoices/[id]/settle,
+                // which cannot write PAID without a method and a date. The order
+                // lifecycle below is unchanged.
 
                 // Award loyalty points ONLY if NOT a fundraiser organization
-                // LOY-P0: new accrual is globally paused. The invoice sync above is
-                // deliberately OUTSIDE this gate and still runs.
+                // LOY-P0: new accrual is globally paused. (The invoice sync that
+                // used to run outside this gate is gone — see INV-D above.)
                 // @ts-ignore
                 const customer = existingOrder.customer;
                 if (LOYALTY_ACCRUAL_ENABLED && customer && customer.type !== 'fundraiser_org') {

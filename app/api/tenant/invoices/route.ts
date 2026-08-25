@@ -9,6 +9,7 @@ import { LOYALTY_ACCRUAL_ENABLED } from '@/lib/loyalty';
 import {
     shouldCreateFulfillmentOrder,
     isClientSettableInvoiceStatus,
+    isGenericEditLockedStatus,
 } from '@/lib/invoiceFulfillment';
 
 // ---------------------------------------------------------------------------
@@ -246,7 +247,14 @@ export async function POST(request: Request) {
                     total_amount: serverTotal,
                     tax_amount: serverTaxAmount,
                     due_date: due_date ? new Date(due_date) : null,
-                    payment_method: payment_method || 'check',
+                    // ── INV-D: a new invoice does not get a payment method it was
+                    //    never given. This `|| 'check'` was the application-level
+                    //    twin of the schema DEFAULT that migration 17 removes, and
+                    //    leaving it would have preserved the exact untruth the
+                    //    migration exists to end. The compose dialog still sends an
+                    //    explicit method for manual invoices; omitting it now means
+                    //    NULL, which reads as "nobody has said".
+                    payment_method: payment_method ?? null,
                     status: status || 'PENDING',
                     fundraiser_profit_percent: fundraiser_profit_percent || 0,
                     fundraiser_profit_amount: serverProfitAmount,
@@ -291,7 +299,11 @@ export async function POST(request: Request) {
                         customer_id: customer_id,
                         business_id: businessId,
                         invoice_id: invoice.id,
-                        status: status === 'PAID' ? 'production_ready' : 'pending',
+                        // INV-D: `status === 'PAID'` is unreachable now that PAID
+                        // cannot arrive through this route. Payment promotes the
+                        // order from the settle endpoint instead, where a method
+                        // and a date are recorded alongside it.
+                        status: 'pending',
                         total_amount: serverTotal,
                         delivery_address: invoice.customer.delivery_address,
                         items: {
@@ -307,6 +319,9 @@ export async function POST(request: Request) {
 
             // If created as PAID, add loyalty points (Direct Customers/Orgs only)
             // LOY-P0: new accrual is globally paused; invoice creation is unaffected.
+            // INV-D: additionally unreachable — an invoice can no longer be CREATED
+            // as PAID. Accrual moved to the settle endpoint, which is now the only
+            // place an invoice becomes paid, so un-pausing LOY-P0 still works.
             if (LOYALTY_ACCRUAL_ENABLED && status === 'PAID' && invoice.customer.type !== 'fundraiser_org') {
                 const points = Math.floor(serverTotal);
                 // @ts-ignore - Stale Prisma Client
@@ -397,9 +412,39 @@ export async function PUT(request: Request) {
                 tax_amount: true,
                 fundraiser_profit_percent: true,
                 fundraiser_profit_amount: true,
+                // ── INV-D: the current lifecycle and settlement facts, read so an
+                //    edit can preserve them instead of resetting them. See below.
+                status: true,
+                payment_method: true,
             },
         });
         const campaignId: string | null = persisted?.campaign_id ?? null;
+
+        // ── INV-D: an ordinary edit must not change the lifecycle status.
+        //
+        // Removing PAID from the settable allowlist stops an edit CLAIMING
+        // payment, but on its own it would still let one silently UN-claim it:
+        // saving a settled invoice with `status: 'PENDING'` would drop it back
+        // into Total Outstanding while leaving paid_at and payment_method in
+        // place — a row that is outstanding and stamped with a payment date at
+        // the same time. Reversing a settlement has to be deliberate, so it is
+        // refused here rather than allowed as a side effect of editing a due date.
+        //
+        // DRAFT is locked for the mirror-image reason: INV-C's send route can only
+        // transition an invoice it finds in DRAFT, so an edit that quietly moved a
+        // draft to PENDING would make it permanently unsendable.
+        if (
+            persisted
+            && status !== undefined
+            && status !== null
+            && status !== persisted.status
+            && isGenericEditLockedStatus(persisted.status)
+        ) {
+            const reason = persisted.status === 'PAID'
+                ? 'This invoice is recorded as paid. Its payment record cannot be changed by editing the invoice.'
+                : 'This invoice is still a draft. Send it to change its status.';
+            return NextResponse.json({ error: reason }, { status: 409 });
+        }
 
         // ── INV-C: a generated fundraiser invoice's totals are not editable here.
         //
@@ -462,8 +507,27 @@ export async function PUT(request: Request) {
                     total_amount: isGeneratedCampaignInvoice ? persisted!.total_amount : serverTotal,
                     tax_amount: isGeneratedCampaignInvoice ? persisted!.tax_amount : serverTaxAmount,
                     due_date: due_date ? new Date(due_date) : null,
-                    payment_method: payment_method || 'check',
-                    status: status || 'PENDING',
+                    // ── INV-D: an omitted field means "leave it alone", not
+                    //    "reset it".
+                    //
+                    //    `payment_method || 'check'` re-invented the schema default
+                    //    that migration 17 removes, so dropping the DEFAULT without
+                    //    fixing this line would have changed nothing. `status ||
+                    //    'PENDING'` was worse: any edit that did not happen to send
+                    //    a status silently reset the invoice to PENDING, which would
+                    //    have thrown away an INV-C SENT state — and, before the lock
+                    //    above, a settlement — without anyone touching the field.
+                    //    On a SETTLED invoice the method is settlement evidence,
+                    //    not a presentation field: the settle endpoint wrote it
+                    //    together with paid_at and validated it against
+                    //    square|check. Letting an ordinary edit change it to
+                    //    'venmo' would leave a PAID row whose recorded method
+                    //    never passed the settlement contract — exactly the
+                    //    ambiguity INV-D exists to remove. Frozen while PAID.
+                    payment_method: persisted?.status === 'PAID'
+                        ? persisted.payment_method
+                        : (payment_method ?? persisted?.payment_method ?? null),
+                    status: status ?? persisted?.status ?? 'PENDING',
                     fundraiser_profit_percent: isGeneratedCampaignInvoice
                         ? persisted!.fundraiser_profit_percent
                         : (fundraiser_profit_percent || 0),
@@ -522,7 +586,11 @@ export async function PUT(request: Request) {
                         where: { id: existingOrder.id },
                         data: {
                             total_amount: serverTotal,
-                            status: status === 'PAID' ? 'production_ready' : existingOrder.status,
+                            // INV-D: `status === 'PAID'` here is unreachable now
+                            // that PAID cannot arrive through this route. Payment
+                            // promotes the order from the settle endpoint instead,
+                            // where a method and date are recorded with it.
+                            status: existingOrder.status,
                             items: {
                                 create: fulfillableItems.map((i) => ({
                                     bundle_id: i.bundle_id,
@@ -553,7 +621,11 @@ export async function PUT(request: Request) {
                         business_id: businessId,
                         // @ts-ignore - New invoice_id field
                         invoice_id: invoice.id,
-                        status: status === 'PAID' ? 'production_ready' : 'pending',
+                        // INV-D: `status === 'PAID'` is unreachable now that PAID
+                        // cannot arrive through this route. Payment promotes the
+                        // order from the settle endpoint instead, where a method
+                        // and a date are recorded alongside it.
+                        status: 'pending',
                         total_amount: serverTotal,
                         delivery_address: invoice.customer.delivery_address,
                         items: {
@@ -570,6 +642,9 @@ export async function PUT(request: Request) {
             // If updated to PAID, add loyalty points (Direct Customers/Orgs only)
             // LOY-P0: new accrual is globally paused; the invoice status update is
             // unaffected and the reason-string lookup below is unreachable while paused.
+            // INV-D: additionally unreachable — PAID cannot arrive through this
+            // route. Accrual moved to the settle endpoint, keyed on the same
+            // `Invoice <id>` reason string so the two can never double-award.
             if (LOYALTY_ACCRUAL_ENABLED && status === 'PAID' && invoice.customer.type !== 'fundraiser_org') {
                 const points = Math.floor(serverTotal);
                 // Check if points already awarded? 

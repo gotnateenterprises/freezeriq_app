@@ -554,6 +554,22 @@ model FundraiserCampaign {
   closed_by             String?    // User ID of admin who triggered closeout
   settlement_total      Decimal?   @db.Decimal(10, 2) // Gross total frozen at closeout time
   settlement_notes      String?    // Optional admin notes for the settlement record
+  // ── INV-D: settled outside FreezerIQ ──────────────────────────────────────
+  // Real campaigns exist that were financially settled before FreezerIQ tracked
+  // settlement — Edgar County and Coles County Farm Bureau both carry genuine
+  // sales, no campaign-linked invoice and no settlement row. Without this flag
+  // any rule shaped "has orders and no invoice, therefore owed" would treat them
+  // as unpaid obligations forever.
+  //
+  // A BOOLEAN, not a timestamp, precisely because their true settlement dates
+  // are unknown. A nullable date would have to be filled with something, and the
+  // only available something would be invented. This records the one fact that
+  // is actually known — that the obligation was met elsewhere — and leaves the
+  // human explanation to settlement_notes.
+  //
+  // Nothing is marked by this migration. Marking any real campaign is a separate
+  // owner-approved action.
+  settled_externally    Boolean    @default(false)
   // ─────────────────────────────────────────────────────────────────────────
   pickup_location       String?
   // FR-FLOW-3: the pickup/delivery TIME, as free text beside pickup_location.
@@ -772,7 +788,25 @@ model Invoice {
   business_id               String
   customer_id               String
   status                    InvoiceStatus @default(PENDING)
-  payment_method            String?       @default("check")
+  // ── INV-D: settlement truth ───────────────────────────────────────────────
+  // payment_method LOST its @default("check"). The default was making every
+  // invoice claim a payment method it had never been given: the accepted INV-C
+  // invoice sat in SENT, unpaid, reading payment_method = 'check', which made
+  // "paid by check" and "nobody ever chose" indistinguishable. It stays a
+  // nullable free-text column — ordinary manual invoices legitimately use it to
+  // state an EXPECTED method on the printed PDF — but a fundraiser settlement
+  // only trusts it when written together with paid_at by the settlement
+  // endpoint, which validates it against 'square' | 'check'.
+  payment_method            String?
+  // When the tenant recorded that this invoice's obligation was satisfied.
+  // NULL for every invoice that has not been settled, and deliberately NULL for
+  // the five historical PAID invoices too — their real payment dates are not
+  // known, and updated_at is @updatedAt so it cannot stand in for one.
+  paid_at                   DateTime?
+  // Optional check number or Square transaction/reference the tenant entered.
+  // Free text on purpose: it is a human's note, not a provider-verified id.
+  payment_reference         String?
+  // ─────────────────────────────────────────────────────────────────────────
   total_amount              Decimal       @db.Decimal(10, 2)
   tax_amount                Decimal?      @default(0) @db.Decimal(10, 2)
   created_at                DateTime      @default(now())
@@ -968,7 +1002,6 @@ enum ResourceType {
   FAQ
 }
 
-
 enum InvoiceStatus {
   PENDING
   PAID
@@ -1118,7 +1151,6 @@ enum RelationshipEndReason {
   left
   tenant_ended
 }
-
 
 // ── FR-RETENTION-2 · Seasonal Lineup and audience ───────────────────────────
 // Appended at end-of-file so the parked PasswordResetToken hunk above is never
@@ -1439,7 +1471,6 @@ enum SuppressionEventType {
   not_interested_until
 }
 
-
 // ── FR-RETENTION-3 · Email preview, controlled send, delivery tracking ──────
 // Appended at end-of-file; the parked PasswordResetToken hunk above is untouched.
 //
@@ -1582,7 +1613,6 @@ enum ProviderEventType {
   complained
   deferred
 }
-
 
 // ── FR-RETENTION-4 · Rebooking response, revisions, opportunities ───────────
 // Appended at end-of-file; the parked PasswordResetToken hunk above is untouched.

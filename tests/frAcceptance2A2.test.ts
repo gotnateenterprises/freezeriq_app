@@ -787,8 +787,11 @@ describe('Part F/G/H: the latest-follow-up authority', () => {
         const fs = require('fs');
         const migrations = fs.readdirSync(require('path').join(process.cwd(), 'prisma/migrations'))
             .filter((d: string) => /^\d{14}_/.test(d)).sort();
-        expect(migrations).toHaveLength(16);
-        expect(migrations[migrations.length - 1]).toBe('20260823010000_fr_acceptance_2a2_human_followup');
+        // Pinned by POSITION, not by total count. This assertion is about migration
+        // 16 being the one that adds the column; later approved migrations (INV-D's
+        // 17) do not bear on that and should not break it.
+        expect(migrations.length).toBeGreaterThanOrEqual(16);
+        expect(migrations[15]).toBe('20260823010000_fr_acceptance_2a2_human_followup');
     });
 
     it('migration 16 is additive only — one nullable column, no default, no backfill', () => {

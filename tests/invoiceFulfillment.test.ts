@@ -53,11 +53,18 @@ describe('2. a campaign-linked invoice NEVER creates a fulfilment order', () => 
 });
 
 describe('3. DRAFT and SENT are not client-settable through the ordinary API', () => {
-    it('the four legacy statuses remain settable', () => {
-        expect(CLIENT_SETTABLE_INVOICE_STATUSES).toEqual(['PENDING', 'PAID', 'OVERDUE', 'CANCELED']);
-        for (const s of ['PENDING', 'PAID', 'OVERDUE', 'CANCELED']) {
+    it('the legacy statuses remain settable', () => {
+        expect(CLIENT_SETTABLE_INVOICE_STATUSES).toEqual(['PENDING', 'OVERDUE', 'CANCELED']);
+        for (const s of ['PENDING', 'OVERDUE', 'CANCELED']) {
             expect(isClientSettableInvoiceStatus(s)).toBe(true);
         }
+    });
+
+    it('refuses PAID — INV-D moved it to the settlement endpoint', () => {
+        // This route can only ever set a bare status; it has no method, date or
+        // reference to record alongside it, which is exactly how Production
+        // acquired five PAID invoices that cannot say when they were paid.
+        expect(isClientSettableInvoiceStatus('PAID')).toBe(false);
     });
 
     it('refuses DRAFT — that belongs to INV-B’s server-side generator', () => {

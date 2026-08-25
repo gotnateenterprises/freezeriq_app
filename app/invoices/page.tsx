@@ -16,7 +16,8 @@ import {
     Edit,
     Trash2,
     Tag,
-    Info
+    Info,
+    RotateCcw
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Link from 'next/link';
@@ -26,6 +27,17 @@ import InvoiceComposeModal from '@/components/crm/InvoiceComposeModal';
 import EmailComposeModal from '@/components/crm/EmailComposeModal';
 import UpgradeRequired from '@/components/UpgradeRequired';
 import { sumOutstandingInvoices } from '@/lib/invoiceSendTruth';
+import {
+    sumPaidThisMonth,
+    isSettleableInvoiceStatus,
+    hasDurableSettlement,
+    isLegacyUnrecordedPayment,
+    SETTLEMENT_METHOD_LABELS,
+    SETTLEMENT_PAYMENT_METHODS,
+    SETTLEMENT_REFERENCE_MAX_LENGTH,
+    utcNoonToCalendarDate,
+    type SettlementPaymentMethod,
+} from '@/lib/invoiceSettlement';
 
 interface Invoice {
     id: string;
@@ -36,6 +48,12 @@ interface Invoice {
     // treatment as OVERDUE, reading as an error rather than "ready for review".
     status: 'DRAFT' | 'SENT' | 'PENDING' | 'PAID' | 'OVERDUE' | 'CANCELED';
     campaign_id?: string | null;
+    // INV-D: the settlement facts. All three are null until someone records a
+    // payment, including on the five historical PAID invoices whose real payment
+    // dates nobody knows.
+    paid_at?: string | null;
+    payment_method?: string | null;
+    payment_reference?: string | null;
     total_amount: number;
     tax_amount: string | number;
     fundraiser_profit_percent: string | number | null;
@@ -53,6 +71,18 @@ interface Invoice {
         unit_price: number;
         total: number;
     }[];
+}
+
+/**
+ * Today, in the VIEWER's calendar, as YYYY-MM-DD.
+ *
+ * Deliberately local rather than UTC — see the note in openSettleDialog.
+ */
+function todayLocalIso(): string {
+    const d = new Date();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${m}-${day}`;
 }
 
 interface Branding {
@@ -95,6 +125,17 @@ function InvoicesContent() {
     const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
     const [previewContent, setPreviewContent] = useState({ subject: '', html: '', attachments: [] as any[] });
     const [prefilledItems, setPrefilledItems] = useState<any[] | undefined>(undefined);
+
+    // ── INV-D: the settlement dialog. `settlingInvoice` non-null == dialog open.
+    const [settlingInvoice, setSettlingInvoice] = useState<Invoice | null>(null);
+    const [settleMethod, setSettleMethod] = useState<SettlementPaymentMethod>('check');
+    const [settlePaidAt, setSettlePaidAt] = useState('');
+    const [settleReference, setSettleReference] = useState('');
+    const [settleSubmitting, setSettleSubmitting] = useState(false);
+    // ── INV-D: the payment-correction dialog. Separate state from the settle
+    //    dialog so the two can never be confused for one another.
+    const [undoingInvoice, setUndoingInvoice] = useState<Invoice | null>(null);
+    const [undoSubmitting, setUndoSubmitting] = useState(false);
 
     const userPlan = (session?.user as any)?.plan;
     const isSuperAdmin = (session?.user as any)?.isSuperAdmin;
@@ -460,33 +501,98 @@ function InvoicesContent() {
         }
     };
 
-    const handleMarkPaid = async (invoice: Invoice) => {
-        if (invoice.status === 'PAID') return;
+    // ── INV-D: recording a payment is a deliberate act, not a button.
+    //
+    // This used to PUT `status: 'PAID'` and nothing else — one click, no
+    // question asked, no evidence recorded. It also round-tripped the whole
+    // invoice (items, totals, profit) through the generic editor just to change
+    // a status, which is how a "Mark as Paid" click could re-price a historical
+    // invoice. Both problems are gone: the dialog collects the facts, and the
+    // dedicated settle endpoint writes only the settlement fields.
+    const openSettleDialog = (invoice: Invoice) => {
+        if (!isSettleableInvoiceStatus(invoice.status)) return;
+        setSettlingInvoice(invoice);
+        setSettleMethod('check');
+        // Defaults to today, which is the common case, but stays editable —
+        // a check that arrived last Tuesday should be recorded as last Tuesday.
+        //
+        // LOCAL date, not UTC: after 6pm US Central it is already tomorrow in
+        // UTC, and pre-filling tomorrow's date is exactly the kind of quiet
+        // wrongness this phase exists to remove. The server's one-day future
+        // tolerance is what makes a local "today" acceptable to it.
+        setSettlePaidAt(todayLocalIso());
+        setSettleReference('');
+    };
+
+    // ── INV-D: correcting a mistaken Record Payment.
+    //
+    // Offered ONLY for invoices carrying durable INV-D settlement truth. The five
+    // historical PAID invoices have no recorded payment date, so there is nothing
+    // to undo — the action is withheld from them rather than offered and refused.
+    const openUndoDialog = (invoice: Invoice) => {
+        if (!hasDurableSettlement(invoice)) return;
+        setUndoingInvoice(invoice);
+    };
+
+    const handleConfirmUndoPayment = async () => {
+        if (!undoingInvoice || undoSubmitting) return;
+        setUndoSubmitting(true);
         try {
-            const res = await fetch('/api/tenant/invoices', {
-                method: 'PUT',
+            const res = await fetch(`/api/tenant/invoices/${undoingInvoice.id}/settle`, {
+                method: 'DELETE',
+            });
+            const data = await res.json().catch(() => ({}));
+
+            if (!res.ok) {
+                toast.error(data?.error || 'Failed to undo this payment');
+                return;
+            }
+
+            toast.success(
+                data?.alreadyCorrected
+                    ? 'This invoice was already marked unpaid.'
+                    : 'Payment undone — the invoice is unpaid again',
+            );
+            setUndoingInvoice(null);
+            fetchInvoices();
+        } catch {
+            toast.error('Failed to undo this payment');
+        } finally {
+            setUndoSubmitting(false);
+        }
+    };
+
+    const handleConfirmSettlement = async () => {
+        if (!settlingInvoice || settleSubmitting) return;
+        setSettleSubmitting(true);
+        try {
+            const res = await fetch(`/api/tenant/invoices/${settlingInvoice.id}/settle`, {
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    id: invoice.id,
-                    customer_id: invoice.customer_id,
-                    items: invoice.items,
-                    total_amount: invoice.total_amount,
-                    tax_amount: invoice.tax_amount,
-                    due_date: invoice.due_date,
-                    status: 'PAID',
-                    fundraiser_profit_percent: invoice.fundraiser_profit_percent,
-                    fundraiser_profit_amount: invoice.fundraiser_profit_amount
-                })
+                    method: settleMethod,
+                    paidAt: settlePaidAt,
+                    reference: settleReference,
+                }),
             });
-            if (res.ok) {
-                toast.success('Invoice marked as paid');
-                fetchInvoices();
-            } else {
-                const err = await res.json();
-                toast.error(err.error || 'Failed to update invoice');
+            const data = await res.json().catch(() => ({}));
+
+            if (!res.ok) {
+                toast.error(data?.error || 'Failed to record this payment');
+                return;
             }
+
+            toast.success(
+                data?.alreadySettled
+                    ? 'This invoice was already recorded as paid.'
+                    : 'Payment recorded',
+            );
+            setSettlingInvoice(null);
+            fetchInvoices();
         } catch {
-            toast.error('Failed to mark invoice as paid');
+            toast.error('Failed to record this payment');
+        } finally {
+            setSettleSubmitting(false);
         }
     };
 
@@ -569,6 +675,170 @@ function InvoicesContent() {
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
+            {/* ── INV-D: record a payment ────────────────────────────────────
+                Deliberately a dialog and not a one-click action. Marking an
+                invoice paid is a financial assertion, it is the only status the
+                generic editor may not undo, and the two facts it needs — how and
+                when — are things only a human at the tenant knows. */}
+            {settlingInvoice && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+                    <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                        <div className="px-6 pt-6 pb-4 border-b border-slate-100 dark:border-slate-700">
+                            <h2 className="text-lg font-black text-slate-900 dark:text-white">Record Payment</h2>
+                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                {settlingInvoice.customer?.name} &middot; #{settlingInvoice.id.slice(0, 8).toUpperCase()} &middot;{' '}
+                                <span className="font-bold text-slate-700 dark:text-slate-200">
+                                    ${Number(settlingInvoice.total_amount).toFixed(2)}
+                                </span>
+                            </p>
+                        </div>
+
+                        <div className="px-6 py-5 space-y-5">
+                            <div>
+                                <label className="block text-[11px] font-black uppercase tracking-widest text-slate-500 mb-2">
+                                    How was it paid?
+                                </label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {SETTLEMENT_PAYMENT_METHODS.map((m) => (
+                                        <button
+                                            key={m}
+                                            type="button"
+                                            onClick={() => setSettleMethod(m)}
+                                            className={`px-4 py-2.5 rounded-xl text-sm font-bold border transition-all ${settleMethod === m
+                                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                                : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-200 border-slate-200 dark:border-slate-600 hover:border-indigo-300'
+                                                }`}
+                                        >
+                                            {SETTLEMENT_METHOD_LABELS[m]}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label htmlFor="settle-paid-at" className="block text-[11px] font-black uppercase tracking-widest text-slate-500 mb-2">
+                                    Date received
+                                </label>
+                                <input
+                                    id="settle-paid-at"
+                                    type="date"
+                                    value={settlePaidAt}
+                                    max={todayLocalIso()}
+                                    onChange={(e) => setSettlePaidAt(e.target.value)}
+                                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                />
+                            </div>
+
+                            <div>
+                                <label htmlFor="settle-reference" className="block text-[11px] font-black uppercase tracking-widest text-slate-500 mb-2">
+                                    {settleMethod === 'check' ? 'Check number' : 'Square reference'}{' '}
+                                    <span className="font-medium normal-case tracking-normal text-slate-400">(optional)</span>
+                                </label>
+                                <input
+                                    id="settle-reference"
+                                    type="text"
+                                    value={settleReference}
+                                    maxLength={SETTLEMENT_REFERENCE_MAX_LENGTH}
+                                    onChange={(e) => setSettleReference(e.target.value)}
+                                    placeholder={settleMethod === 'check' ? 'e.g. 1042' : 'e.g. Square receipt #'}
+                                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm font-medium text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                />
+                            </div>
+
+                            {/* Says plainly what FreezerIQ is and is not doing. Recording
+                                Square here is a note, not a confirmation from Square. */}
+                            <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/40 rounded-xl px-4 py-3">
+                                This records what you tell us. FreezerIQ does not contact Square
+                                or your bank to verify the payment. Once recorded, a payment
+                                can&apos;t be undone by editing the invoice.
+                            </p>
+                        </div>
+
+                        <div className="px-6 py-4 bg-slate-50 dark:bg-slate-900/40 flex items-center justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setSettlingInvoice(null)}
+                                disabled={settleSubmitting}
+                                className="px-4 py-2.5 rounded-xl text-sm font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleConfirmSettlement}
+                                disabled={settleSubmitting || !settlePaidAt}
+                                className="px-5 py-2.5 rounded-xl text-sm font-black bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {settleSubmitting ? 'Recording…' : 'Record Payment'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── INV-D: undo a mistaken payment ─────────────────────────────
+                Its own confirmation step, never reachable from ordinary invoice
+                editing, and worded so the consequence is unmistakable. */}
+            {undoingInvoice && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+                    <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                        <div className="px-6 pt-6 pb-4 border-b border-slate-100 dark:border-slate-700">
+                            <h2 className="text-lg font-black text-slate-900 dark:text-white">Undo Payment</h2>
+                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                {undoingInvoice.customer?.name} &middot; #{undoingInvoice.id.slice(0, 8).toUpperCase()} &middot;{' '}
+                                <span className="font-bold text-slate-700 dark:text-slate-200">
+                                    ${Number(undoingInvoice.total_amount).toFixed(2)}
+                                </span>
+                            </p>
+                        </div>
+
+                        <div className="px-6 py-5 space-y-4">
+                            <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+                                This marks the invoice <strong>unpaid again</strong> and clears the
+                                recorded payment details. It will go back into Total Outstanding.
+                            </p>
+
+                            <div className="text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/40 rounded-xl px-4 py-3 space-y-1">
+                                <div className="font-bold text-slate-600 dark:text-slate-300">Will be cleared:</div>
+                                <div>
+                                    {SETTLEMENT_METHOD_LABELS[undoingInvoice.payment_method as SettlementPaymentMethod]
+                                        ?? undoingInvoice.payment_method}
+                                    {undoingInvoice.paid_at
+                                        ? ` · ${utcNoonToCalendarDate(new Date(undoingInvoice.paid_at))}`
+                                        : ''}
+                                    {undoingInvoice.payment_reference ? ` · ${undoingInvoice.payment_reference}` : ''}
+                                </div>
+                            </div>
+
+                            <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                                Use this only to correct a payment recorded by mistake. It is not a
+                                refund, and no money moves. The invoice amount, items and the
+                                organization&apos;s earnings are not changed.
+                            </p>
+                        </div>
+
+                        <div className="px-6 py-4 bg-slate-50 dark:bg-slate-900/40 flex items-center justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setUndoingInvoice(null)}
+                                disabled={undoSubmitting}
+                                className="px-4 py-2.5 rounded-xl text-sm font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-50"
+                            >
+                                Keep payment
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleConfirmUndoPayment}
+                                disabled={undoSubmitting}
+                                className="px-5 py-2.5 rounded-xl text-sm font-black bg-rose-600 text-white hover:bg-rose-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {undoSubmitting ? 'Undoing…' : 'Undo Payment'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {isComposeOpen && (
                 <InvoiceComposeModal
                     isOpen={isComposeOpen}
@@ -628,7 +898,10 @@ function InvoicesContent() {
                     // not been issued to anyone. Rule and rounding live in
                     // lib/invoiceSendTruth.ts so they can be tested directly.
                     { label: 'Total Outstanding', value: `$${sumOutstandingInvoices(invoices).toFixed(2)}`, icon: Clock, color: 'text-amber-600', bg: 'bg-amber-100/50' },
-                    { label: 'Paid This Month', value: `$${invoices.filter(i => i.status === 'PAID').reduce((acc, curr) => acc + Number(curr.total_amount), 0).toFixed(2)}`, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-100/50' },
+                    // INV-D: was every PAID invoice ever recorded, labelled "this
+                    // month". Now requires a paid_at inside the current calendar
+                    // month, so a payment counts once, in the month it arrived.
+                    { label: 'Paid This Month', value: `$${sumPaidThisMonth(invoices, new Date()).toFixed(2)}`, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-100/50' },
                     { label: 'Overdue', value: `$${invoices.filter(i => i.status === 'OVERDUE').reduce((acc, curr) => acc + Number(curr.total_amount), 0).toFixed(2)}`, icon: AlertCircle, color: 'text-rose-600', bg: 'bg-rose-100/50' },
                     { label: 'Total Loyalty Issued', value: '1.2k pts', icon: Tag, color: 'text-indigo-600', bg: 'bg-indigo-100/50' },
                 ].map((stat, i) => (
@@ -727,19 +1000,57 @@ function InvoicesContent() {
                                             }`}>
                                             {inv.status}
                                         </span>
+                                        {/* INV-D: a PAID invoice shows the facts behind the
+                                            claim. The five historical ones have none, and say
+                                            so rather than implying a payment nobody recorded. */}
+                                        {inv.status === 'PAID' && (
+                                            <div className="mt-1.5 text-[11px] font-medium text-slate-400">
+                                                {inv.paid_at ? (
+                                                    <>
+                                                        {SETTLEMENT_METHOD_LABELS[inv.payment_method as SettlementPaymentMethod]
+                                                            ?? inv.payment_method}
+                                                        {' · '}
+                                                        {utcNoonToCalendarDate(new Date(inv.paid_at))}
+                                                        {inv.payment_reference ? ` · ${inv.payment_reference}` : ''}
+                                                    </>
+                                                ) : isLegacyUnrecordedPayment(inv) ? (
+                                                    // Settled before INV-D. Says so plainly instead
+                                                    // of implying a payment record that never existed.
+                                                    <span className="italic">recorded before payment details were tracked</span>
+                                                ) : (
+                                                    <span className="italic">payment date not recorded</span>
+                                                )}
+                                            </div>
+                                        )}
                                     </td>
                                     <td className="px-6 py-5 text-sm text-slate-500 font-medium">
                                         {new Date(inv.created_at).toLocaleDateString()}
                                     </td>
                                     <td className="px-6 py-5 text-right">
                                         <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            {inv.status !== 'PAID' && (
+                                            {/* INV-D: offered only for invoices that are
+                                                actually settleable. `!== 'PAID'` also
+                                                offered it on DRAFT invoices nobody had
+                                                sent yet, and on CANCELED ones. */}
+                                            {isSettleableInvoiceStatus(inv.status) && (
                                                 <button
-                                                    onClick={() => handleMarkPaid(inv)}
+                                                    onClick={() => openSettleDialog(inv)}
                                                     className="p-2 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg text-slate-400 hover:text-emerald-600 transition-all shadow-sm"
-                                                    title="Mark as Paid"
+                                                    title="Record Payment"
                                                 >
                                                     <CheckCircle2 className="w-4 h-4" />
+                                                </button>
+                                            )}
+                                            {/* INV-D: correction is offered only where there is a
+                                                recorded payment to correct. The historical PAID
+                                                invoices carry no paid_at, so they never show it. */}
+                                            {hasDurableSettlement(inv) && (
+                                                <button
+                                                    onClick={() => openUndoDialog(inv)}
+                                                    className="p-2 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg text-slate-400 hover:text-rose-600 transition-all shadow-sm"
+                                                    title="Undo Payment"
+                                                >
+                                                    <RotateCcw className="w-4 h-4" />
                                                 </button>
                                             )}
                                             <button

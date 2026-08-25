@@ -300,12 +300,16 @@ describe('this patch changed presentation only', () => {
         expect(route).toMatch(/last_human_followup_at: \{ lt: followUpAt \}/);
     });
 
-    it('migration 16 is still the latest, and no migration 17 was added', () => {
+    it('migration 16 is unchanged, and the only migration after it is INV-D\'s approved 17', () => {
         const migrations = require('fs')
             .readdirSync(require('path').join(process.cwd(), 'prisma/migrations'))
             .filter((d: string) => /^\d{14}_/.test(d)).sort();
-        expect(migrations).toHaveLength(16);
+        // This guarded "the 2A.2 dashboard patch added no schema", which is still
+        // true. Rather than relax it to "16 or more", it now names exactly which
+        // migration is allowed to follow — so an unapproved 18th still fails here.
+        expect(migrations).toHaveLength(17);
         expect(migrations[15]).toBe('20260823010000_fr_acceptance_2a2_human_followup');
+        expect(migrations[16]).toBe('20260825000000_inv_d_settlement_truth');
     });
 
     it('the acknowledgement and follow-up contracts are untouched', () => {
