@@ -53,6 +53,10 @@ interface Branding {
     business_name: string;
     logo_url?: string;
     primary_color: string;
+    // The tenant's own customer-facing contact email — see the footer note in
+    // generateInvoicePDF for why this must be the field the PDF footer uses,
+    // never `user.email` below.
+    contact_email?: string;
     user?: {
         email: string;
         phone: string | null;
@@ -343,11 +347,30 @@ function InvoicesContent() {
         doc.setTextColor(100, 100, 100);
 
         let footerY = y + 20;
-        if (branding?.user) {
-            const contactLine = `Questions? Email: ${branding.user.email}${branding.user.phone ? ` | Phone: ${branding.user.phone}` : ''}`;
+        // INV-B owner-acceptance correction. This used to read branding.user.email
+        // — the login email of whichever User row happens to own the
+        // TenantBranding record (app/api/tenant/branding/route.ts resolves it via
+        // `tenant_branding.user_id`, "the business admin or any user in this
+        // business") — which is a personal account, not a tenant identity. It
+        // read as "the customer's email" only because a test fundraiser's
+        // customer contact happened to be set to that same admin's address.
+        //
+        // Business.contact_email is the actual canonical field for this: it's
+        // the "Contact Email" the owner sets in Branding Settings
+        // (components/admin/BrandingSettings.tsx), and GET /api/tenant/branding
+        // already resolves it from the session's EFFECTIVE tenant (SEC-TENANT-1),
+        // so Super Admin View As Tenant B already receives Tenant B's
+        // contact_email with no further change required here.
+        //
+        // No fallback to any personal email when absent — the line is omitted
+        // instead, per the owner's contract that a missing tenant contact must
+        // never be papered over with someone's own address.
+        const tenantContactEmail = branding?.contact_email || '';
+        if (tenantContactEmail) {
+            const contactLine = `Questions? Email: ${tenantContactEmail}${branding?.user?.phone ? ` | Phone: ${branding.user.phone}` : ''}`;
             doc.text(contactLine, 306, footerY, { align: 'center' });
             footerY += 15;
-            if (branding.user.address) {
+            if (branding?.user?.address) {
                 doc.text(branding.user.address, 306, footerY, { align: 'center' });
             }
         }
