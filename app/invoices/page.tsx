@@ -25,11 +25,17 @@ import { useSession } from 'next-auth/react';
 import InvoiceComposeModal from '@/components/crm/InvoiceComposeModal';
 import EmailComposeModal from '@/components/crm/EmailComposeModal';
 import UpgradeRequired from '@/components/UpgradeRequired';
+import { sumOutstandingInvoices } from '@/lib/invoiceSendTruth';
 
 interface Invoice {
     id: string;
     customer_id: string;
-    status: 'PENDING' | 'PAID' | 'OVERDUE' | 'CANCELED';
+    // INV-C: DRAFT and SENT are the fundraiser lifecycle values INV-A added to
+    // the enum. Before this they were missing from the union, so a generated
+    // DRAFT fell through the badge's else-branch and rendered in rose — the same
+    // treatment as OVERDUE, reading as an error rather than "ready for review".
+    status: 'DRAFT' | 'SENT' | 'PENDING' | 'PAID' | 'OVERDUE' | 'CANCELED';
+    campaign_id?: string | null;
     total_amount: number;
     tax_amount: string | number;
     fundraiser_profit_percent: string | number | null;
@@ -408,13 +414,29 @@ function InvoicesContent() {
             const pdfDataUri = doc.output('datauristring');
             const base64Content = pdfDataUri.split(',')[1];
 
-            const subject = `Invoice from ${branding?.business_name || 'Your Meal Prep Business'} (#${invoice.id.slice(0, 8).toUpperCase()})`;
-            const html = `
+            // INV-C: a fundraiser closeout invoice is not "your recent order" —
+            // the recipient is a coordinator settling a fundraiser, not a shopper.
+            // The wording follows what the invoice actually is, and deliberately
+            // makes no claim about payment having been received.
+            const isFundraiserInvoice = Boolean(invoice.campaign_id);
+            const tenantName = branding?.business_name || 'Your Meal Prep Business';
+            const subject = isFundraiserInvoice
+                ? `Fundraiser invoice from ${tenantName} (#${invoice.id.slice(0, 8).toUpperCase()})`
+                : `Invoice from ${tenantName} (#${invoice.id.slice(0, 8).toUpperCase()})`;
+            const html = isFundraiserInvoice
+                ? `
+                <p>Hi ${invoice.customer.name},</p>
+                <p>Please find your fundraiser invoice attached. It shows the bundles sold, what your organization earned, and the amount to remit.</p>
+                <p>Amount Due: <strong>$${Number(invoice.total_amount).toFixed(2)}</strong></p>
+                <p>Thank you for your support!</p>
+                <p>Warmly,<br>${tenantName}</p>
+            `
+                : `
                 <p>Hi ${invoice.customer.name},</p>
                 <p>Please find your invoice attached for your recent order.</p>
                 <p>Total Amount: <strong>$${Number(invoice.total_amount).toFixed(2)}</strong></p>
                 <p>Thank you for your support!</p>
-                <p>Warmly,<br>${branding?.business_name || 'Your Meal Prep Team'}</p>
+                <p>Warmly,<br>${tenantName}</p>
             `;
 
             setPreviewContent({
@@ -497,27 +519,30 @@ function InvoicesContent() {
         if (!selectedInvoice) return;
 
         try {
-            const res = await fetch('/api/email/send', {
+            // INV-C: send through the invoice's own endpoint, not the generic
+            // mailer. That route resolves the recipient from the invoice server-
+            // side and owns the DRAFT -> SENT transition, so the status can only
+            // change when the provider actually accepted the message. The browser
+            // never asserts SENT — it just reports what the server decided.
+            const res = await fetch(`/api/tenant/invoices/${selectedInvoice.id}/send`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    to: selectedInvoice.customer.contact_email,
-                    subject,
-                    html,
-                    attachments
-                })
+                body: JSON.stringify({ subject, html, attachments })
             });
 
+            const result = await res.json().catch(() => ({}));
+
             if (res.ok) {
-                const result = await res.json();
                 if (result.mocked) {
-                    toast.info('Safety Mode: Email logged but not sent (EMAIL_LIVE is OFF)');
+                    toast.info('Safety Mode: email logged, not sent. Invoice stays a draft.');
                 } else {
-                    toast.success('Invoice emailed successfully');
+                    toast.success('Invoice sent');
                 }
+                // Re-read from the server rather than assuming a status here.
+                fetchInvoices();
             } else {
-                const err = await res.json();
-                toast.error(err.error || 'Failed to send email');
+                toast.error(result.error || 'Failed to send invoice');
+                fetchInvoices();
             }
         } catch (error) {
             toast.error('An error occurred while sending');
@@ -596,7 +621,13 @@ function InvoicesContent() {
             {/* Stats Overview */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 {[
-                    { label: 'Total Outstanding', value: `$${invoices.filter(i => i.status === 'PENDING').reduce((acc, curr) => acc + Number(curr.total_amount), 0).toFixed(2)}`, icon: Clock, color: 'text-amber-600', bg: 'bg-amber-100/50' },
+                    // INV-C: outstanding means ISSUED and unpaid — PENDING, SENT
+                    // and OVERDUE. This used to count PENDING alone, so a sent
+                    // fundraiser invoice was a real receivable that appeared
+                    // nowhere. DRAFT stays out: it is still under review and has
+                    // not been issued to anyone. Rule and rounding live in
+                    // lib/invoiceSendTruth.ts so they can be tested directly.
+                    { label: 'Total Outstanding', value: `$${sumOutstandingInvoices(invoices).toFixed(2)}`, icon: Clock, color: 'text-amber-600', bg: 'bg-amber-100/50' },
                     { label: 'Paid This Month', value: `$${invoices.filter(i => i.status === 'PAID').reduce((acc, curr) => acc + Number(curr.total_amount), 0).toFixed(2)}`, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-100/50' },
                     { label: 'Overdue', value: `$${invoices.filter(i => i.status === 'OVERDUE').reduce((acc, curr) => acc + Number(curr.total_amount), 0).toFixed(2)}`, icon: AlertCircle, color: 'text-rose-600', bg: 'bg-rose-100/50' },
                     { label: 'Total Loyalty Issued', value: '1.2k pts', icon: Tag, color: 'text-indigo-600', bg: 'bg-indigo-100/50' },
@@ -614,7 +645,7 @@ function InvoicesContent() {
             {/* Filters & Search */}
             <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white dark:bg-slate-800 p-4 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700">
                 <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-2xl w-full md:w-auto">
-                    {['ALL', 'PENDING', 'PAID', 'OVERDUE'].map((f) => (
+                    {['ALL', 'DRAFT', 'SENT', 'PENDING', 'PAID', 'OVERDUE'].map((f) => (
                         <button
                             key={f}
                             onClick={() => setFilter(f)}
@@ -682,9 +713,17 @@ function InvoicesContent() {
                                         <span className="font-black text-sm">${Number(inv.total_amount).toFixed(2)}</span>
                                     </td>
                                     <td className="px-6 py-5">
+                                        {/* INV-C status semantics:
+                                              DRAFT  neutral slate — generated, awaiting review. Not an error.
+                                              SENT   indigo — informational. Deliberately NOT the emerald
+                                                     used for PAID: sending is not payment.
+                                              PAID   emerald, unchanged.
+                                              PENDING amber; anything else rose, unchanged. */}
                                         <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${inv.status === 'PAID' ? 'bg-emerald-100 text-emerald-600' :
-                                            inv.status === 'PENDING' ? 'bg-amber-100 text-amber-600' :
-                                                'bg-rose-100 text-rose-600'
+                                            inv.status === 'SENT' ? 'bg-indigo-100 text-indigo-600' :
+                                                inv.status === 'DRAFT' ? 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300' :
+                                                    inv.status === 'PENDING' ? 'bg-amber-100 text-amber-600' :
+                                                        'bg-rose-100 text-rose-600'
                                             }`}>
                                             {inv.status}
                                         </span>

@@ -235,9 +235,23 @@ describe('BILL TO and SEND TO remain the invoice recipient — unaffected by the
     });
 
     it('the compose-email SEND TO still targets the invoice customer, not the tenant', () => {
+        // INV-C moved this property somewhere stronger. The browser used to post
+        // `to: selectedInvoice.customer.contact_email` to the shared mailer;
+        // delivery now goes through /api/tenant/invoices/[id]/send, which resolves
+        // the recipient from the invoice's own customer SERVER-side and ignores any
+        // `to` in the request body — so the recipient can no longer be influenced
+        // by the page at all. The property is unchanged; only its enforcement
+        // point moved, and it is executed in tests/invCSendTruth.test.ts.
         const c = code(PAGE);
-        expect(c).toMatch(/to: selectedInvoice\.customer\.contact_email,/);
+        expect(c).toMatch(/fetch\(`\/api\/tenant\/invoices\/\$\{selectedInvoice\.id\}\/send`/);
         expect(c).not.toMatch(/to: branding/);
+
+        const sendRoute = code('app/api/tenant/invoices/[id]/send/route.ts');
+        expect(sendRoute).toMatch(/const recipient = invoice\.customer\?\.contact_email\?\.trim\(\);/);
+        expect(sendRoute).toMatch(/to: \[recipient\]/);
+        // The tenant's own contact is the reply-to / footer authority, never the
+        // delivery target.
+        expect(sendRoute).not.toMatch(/to: \[?\s*sender\.replyTo/);
     });
 
     it('handleEmailInvoice still guards on the CUSTOMER having an email, not the tenant', () => {

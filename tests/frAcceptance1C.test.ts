@@ -743,6 +743,13 @@ describe('safety mode advances no workflow anywhere', () => {
         // The write required customerId AND context together. These send one or
         // neither, so they were never affected — recorded so that a future change
         // adding the missing field is caught here.
+        //
+        // INV-C: app/invoices/page.tsx no longer calls this route at all — invoice
+        // delivery moved to /api/tenant/invoices/[id]/send so the DRAFT -> SENT
+        // transition could be decided server-side. A caller that has stopped using
+        // the route satisfies this property MORE strongly than one that uses it
+        // carefully, so its absence is accepted here and the new route is checked
+        // directly below.
         for (const f of [
             'components/crm2/StartFundraiserWizard.tsx',
             'components/OrdersTable.tsx',
@@ -751,10 +758,24 @@ describe('safety mode advances no workflow anywhere', () => {
         ]) {
             const src = read(f);
             const at = src.indexOf("fetch('/api/email/send'");
-            expect(at).toBeGreaterThan(-1);
+            if (at === -1) continue;   // no longer a caller; nothing it could trigger
             const call = src.slice(at, at + 700);
             expect(call.includes('customerId') && call.includes('context:')).toBe(false);
         }
+    });
+
+    it('the INV-C invoice send route triggers no pipeline progress write either', () => {
+        // Invoice delivery gained its own server route. It must not quietly
+        // acquire the status-advancing behaviour this phase removed from the
+        // shared mailer.
+        const src = read('app/api/tenant/invoices/[id]/send/route.ts');
+        const code = src
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .split(/\r?\n/)
+            .filter((l) => !/^\s*(\/\/|\*)/.test(l))
+            .join('\n');
+        expect(code).not.toMatch(/progressStatus/);
+        expect(code).not.toMatch(/statusWorkflow/);
     });
 });
 

@@ -388,9 +388,36 @@ export async function PUT(request: Request) {
         //    campaign, and the fulfilment suppression must hold on every edit.
         const persisted = await prisma.invoice.findFirst({
             where: { id, business_id: businessId },
-            select: { campaign_id: true },
+            select: {
+                campaign_id: true,
+                // ── INV-C: the financial facts closeout froze. Read so an edit
+                //    to a generated fundraiser invoice can PRESERVE them rather
+                //    than recompute them from whatever the client posted.
+                total_amount: true,
+                tax_amount: true,
+                fundraiser_profit_percent: true,
+                fundraiser_profit_amount: true,
+            },
         });
         const campaignId: string | null = persisted?.campaign_id ?? null;
+
+        // ── INV-C: a generated fundraiser invoice's totals are not editable here.
+        //
+        // INV-B computed gross, the organization's share and the tax inside the
+        // campaign lock, reconciled the bundle lines against the frozen
+        // settlement_total, and the owner accepted the result. This endpoint
+        // deletes and recreates `items` from the request body and re-prices them
+        // through resolveInvoiceItems — so a bundle whose price changed AFTER
+        // closeout would silently rewrite a historical invoice's lines, and the
+        // printed document would stop agreeing with the campaign's settlement.
+        // "Mark as Paid" alone round-trips the whole invoice through here, which
+        // is enough to trigger it without anyone intending an edit.
+        //
+        // So for campaign-linked invoices the stored financial facts win and the
+        // lines are left alone. Presentation-level fields (status via the
+        // existing allowlist, due date, payment method) still update normally.
+        // Ordinary manual invoices are completely unaffected.
+        const isGeneratedCampaignInvoice = campaignId !== null;
 
         // --- SERVER-SIDE PRICE & VARIANT VALIDATION ---
         // Validate bundle prices and serving tiers before opening any transaction.
@@ -416,11 +443,14 @@ export async function PUT(request: Request) {
         );
 
         const result = await prisma.$transaction(async (tx) => {
-            // Delete existing items
-            // @ts-ignore
-            await tx.invoiceItem.deleteMany({
-                where: { invoice_id: id }
-            });
+            // INV-C: never touch the lines of a generated fundraiser invoice.
+            if (!isGeneratedCampaignInvoice) {
+                // Delete existing items
+                // @ts-ignore
+                await tx.invoiceItem.deleteMany({
+                    where: { invoice_id: id }
+                });
+            }
 
             // Update invoice and recreate items
             // @ts-ignore
@@ -428,13 +458,19 @@ export async function PUT(request: Request) {
                 where: { id, business_id: businessId },
                 data: {
                     customer: { connect: { id: customer_id } },
-                    total_amount: serverTotal,
-                    tax_amount: serverTaxAmount,
+                    // INV-C: stored values win for a generated fundraiser invoice.
+                    total_amount: isGeneratedCampaignInvoice ? persisted!.total_amount : serverTotal,
+                    tax_amount: isGeneratedCampaignInvoice ? persisted!.tax_amount : serverTaxAmount,
                     due_date: due_date ? new Date(due_date) : null,
                     payment_method: payment_method || 'check',
                     status: status || 'PENDING',
-                    fundraiser_profit_percent: fundraiser_profit_percent || 0,
-                    fundraiser_profit_amount: serverProfitAmount,
+                    fundraiser_profit_percent: isGeneratedCampaignInvoice
+                        ? persisted!.fundraiser_profit_percent
+                        : (fundraiser_profit_percent || 0),
+                    fundraiser_profit_amount: isGeneratedCampaignInvoice
+                        ? persisted!.fundraiser_profit_amount
+                        : serverProfitAmount,
+                    ...(isGeneratedCampaignInvoice ? {} : {
                     items: {
                         create: validatedItems.map((item) => ({
                             bundle_id: item.bundle_id || null,
@@ -452,6 +488,7 @@ export async function PUT(request: Request) {
                             variant_size: item.variant_size ?? null
                         }))
                     }
+                    }),
                 },
                 include: {
                     items: true,
