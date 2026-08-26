@@ -283,7 +283,24 @@ describe('triageOpportunity — pre-campaign next actions', () => {
 
     it('degrades safely when optional fields are missing', () => {
         expect(() => triageOpportunity({ status: 'new' }, NOW)).not.toThrow();
-        expect(triageOpportunity({ status: 'new' }, NOW).action?.kind).toBe('respond_to_inquiry');
+        // FR-REBOOK-1: a payload with NO inquiry now asks for the date rather than
+        // for a reply. This assertion previously expected 'respond_to_inquiry',
+        // which was the old output for an empty object — and which became a real
+        // untruth once the tenant could open an opportunity themselves. There is
+        // no inquiry on such a row and nobody is waiting for an answer.
+        expect(triageOpportunity({ status: 'new' }, NOW).action?.kind).toBe('await_preferred_dates');
+    });
+
+    it('an opportunity WITH an unanswered inquiry still asks for a reply', () => {
+        // The public-inquiry path is unchanged — this is the case
+        // 'respond_to_inquiry' exists for.
+        const o = {
+            status: 'new',
+            received_at: hoursAgo(3),
+            first_response_at: null,
+            inquiries: [{ received_at: hoursAgo(3), ack_sent_at: null, ack_claimed_at: null, human_response_at: null }],
+        };
+        expect(triageOpportunity(o, NOW).action?.kind).toBe('respond_to_inquiry');
     });
 });
 

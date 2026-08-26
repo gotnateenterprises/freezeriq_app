@@ -12,6 +12,12 @@ import { STATUS_COLORS, STATUS_LABELS, type CustomerStatus } from '@/lib/statusC
 // CRM-2: Organization profile components
 import { PipelineStepper } from '@/components/crm2/PipelineStepper';
 import { CampaignCard } from '@/components/crm2/CampaignCard';
+import { toast } from 'sonner';
+import {
+    evaluateRebookingEligibility,
+    rebookingActionLabel,
+    openCampaignNotice,
+} from '@/lib/fundraiserRebooking';
 
 export default function FundraiserProfilePage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
@@ -102,6 +108,62 @@ export default function FundraiserProfilePage({ params }: { params: Promise<{ id
     useEffect(() => {
         fetchCustomer();
     }, [id]);
+
+    // ── FR-REBOOK-1: start (or resume) this organization's next fundraiser.
+    //
+    // Everything the launch needs about the organization is already stored, so
+    // this asks for nothing. It opens a funnel cycle and hands the owner to the
+    // SAME date conversation a brand-new lead goes through — the campaign itself
+    // is still created by POST /api/opportunities/[id]/launch once a date is
+    // confirmed. No second launch pipeline, no fabricated inquiry, no email.
+    const [startingNext, setStartingNext] = useState(false);
+    const rebookingInput = {
+        archived: Boolean(customer?.archived),
+        campaigns: (customer?.campaigns ?? []).map((c: any) => ({
+            id: c.id,
+            status: c.status,
+            closed_at: c.closed_at,
+            settlement_total: c.settlement_total,
+            settled_externally: c.settled_externally,
+            invoice_statuses: Array.isArray(c.invoices) ? c.invoices.map((i: any) => String(i.status)) : undefined,
+            held_order_count: c.held_order_count,
+        })),
+    };
+    const startNextEligibility = evaluateRebookingEligibility(rebookingInput);
+    const canStartNext = startNextEligibility.ok;
+    const startNextBlockedReason = startNextEligibility.ok ? null : startNextEligibility.error;
+    // Advisory, not a gate: a running fundraiser is worth knowing about before
+    // planning the next one, but it is not a reason to refuse. Planning a date is
+    // not launching a campaign, and the public inquiry path has never refused it.
+    const startNextNotice = startNextEligibility.ok ? openCampaignNotice(rebookingInput) : null;
+    const startNextLabel = rebookingActionLabel(rebookingInput);
+
+    const handleStartNextFundraiser = async () => {
+        if (startingNext || !canStartNext) return;
+        setStartingNext(true);
+        try {
+            const res = await fetch('/api/opportunities', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ customerId: id }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                toast.error(data?.error || 'Could not start the next fundraiser');
+                return;
+            }
+            toast.success(data?.resumed
+                ? 'Picking up where this fundraiser left off'
+                : `Next fundraiser started for ${data?.organization?.name ?? 'this organization'}`);
+            // Straight to the funnel, where the date conversation and the existing
+            // Start Fundraiser control already live.
+            router.push('/fundraisers?tab=leads');
+        } catch {
+            toast.error('Could not start the next fundraiser');
+        } finally {
+            setStartingNext(false);
+        }
+    };
 
     const handleUpdateProfile = async (overrideData?: any) => {
         setIsSaving(true);
@@ -294,7 +356,35 @@ export default function FundraiserProfilePage({ params }: { params: Promise<{ id
 
             {/* ── CRM-2: Campaign history cards ── */}
             <div className="space-y-1">
-                <h2 className="mb-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Campaign History</h2>
+                {/* FR-REBOOK-1 — the returning-organization entrance.
+                    Placed at the head of Campaign History because that is where an
+                    owner already looks when thinking "when did they last run, and
+                    when are they running again". Everything this organization is
+                    already lives on this page, so there is nothing to re-enter. */}
+                <div className="mb-2 flex items-center justify-between gap-3">
+                    <h2 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Campaign History</h2>
+                    <button
+                        type="button"
+                        onClick={handleStartNextFundraiser}
+                        disabled={startingNext || !canStartNext}
+                        title={startNextBlockedReason || undefined}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-[11px] font-black text-white shadow-sm transition-all hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        <Megaphone size={13} aria-hidden="true" />
+                        {startingNext ? 'Starting…' : startNextLabel}
+                    </button>
+                </div>
+                {startNextBlockedReason && (
+                    <p className="mb-2 rounded-xl bg-rose-50 px-3.5 py-2 text-[11px] font-medium text-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
+                        {startNextBlockedReason}
+                    </p>
+                )}
+                {/* Information, not an obstacle — the button stays enabled. */}
+                {startNextNotice && (
+                    <p className="mb-2 rounded-xl bg-slate-50 px-3.5 py-2 text-[11px] font-medium text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+                        {startNextNotice}
+                    </p>
+                )}
 
                 {campaigns.length === 0 && (
                     <p className="py-10 text-center text-sm text-slate-400">No campaigns yet.</p>

@@ -167,7 +167,17 @@ export function triageOpportunity(o: OpportunityForTriage, now: Date): Opportuni
     // Not gated on `status === 'new'` any more. An organization already in
     // conversation that sends a FRESH inquiry is owed a reply to it, and the old
     // status gate would have filed that under "waiting on the organization".
-    if (response.state === 'needs_first_response') {
+    //
+    // FR-REBOOK-1: gated on an inquiry EXISTING. An opportunity the tenant opened
+    // themselves — "Start Next Fundraiser" for an organization they already know —
+    // has no inquiry at all, because nobody filled in the public form. Without
+    // this check `resolveInquiryResponse` reports needs_first_response for the
+    // empty list, and a returning organization the owner just chose to call was
+    // shown "Respond to new inquiry — a new fundraiser inquiry has not been
+    // answered yet". There is no inquiry and nobody is waiting; the real next step
+    // is the date, which the branches below already ask for.
+    const hasInquiry = (o.inquiries?.length ?? 0) > 0 || toDate(o.received_at) !== null;
+    if (hasInquiry && response.state === 'needs_first_response') {
         const waitingFrom = response.latestInquiryAt ?? toDate(o.received_at);
         const waiting = hoursSince(waitingFrom, now);
         const overdue = waiting !== null && waiting >= UNANSWERED_INQUIRY_HOURS;
