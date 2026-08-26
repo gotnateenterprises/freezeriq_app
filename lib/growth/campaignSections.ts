@@ -37,6 +37,14 @@ export const SECTION_META: Record<CampaignPriority, SectionMeta> = {
         description: 'Act on these first — warning signs, or ended with orders still held.',
         collapsedByDefault: false,
     },
+    // FR-HISTORY-1: money owed is work, and work is never folded away. This
+    // section exists precisely because closing a fundraiser used to file it under
+    // "Recently completed" — collapsed — while payment was still outstanding.
+    awaiting_payment: {
+        title: 'Closed — awaiting payment',
+        description: 'Ordering has finished and the money has not been collected yet.',
+        collapsedByDefault: false,
+    },
     worth_a_look: {
         title: 'Worth a look',
         description: 'One warning sign each. Not alarming, worth a glance.',

@@ -16,6 +16,11 @@ import {
     type CampaignForTriage,
     type CampaignTriage,
 } from './nextAction';
+import {
+    describeCampaignInvoice,
+    hasCampaignInvoice,
+    type CampaignInvoiceDisplay,
+} from './campaignLifecycle';
 
 /**
  * Presentation lifecycle:
@@ -29,7 +34,16 @@ export type CampaignDetailLifecycle = 'active' | 'ended_open' | 'completed' | 'u
 
 export function detailLifecycle(c: CampaignForTriage, now: Date): CampaignDetailLifecycle {
     const triage = triageCampaign(c, now);
-    if (triage.priority === 'completed') return 'completed';
+    // FR-HISTORY-1: `awaiting_payment` is OPERATIONALLY finished — ordering has
+    // closed — even though it is not financially finished. It maps here with
+    // `completed` so the drawer keeps hiding closeout and bundle-selection on a
+    // campaign nobody can still order from. Without this it fell through to
+    // 'active' and offered operational widgets on a closed fundraiser.
+    //
+    // The financial half of the story is NOT lost: it travels separately on
+    // `DetailSections.invoiceState`, which says whether the invoice is a draft,
+    // sent, paid or settled externally.
+    if (triage.priority === 'completed' || triage.priority === 'awaiting_payment') return 'completed';
     if (triage.priority === 'upcoming') return 'upcoming';
     if (c.status === 'Active' && c.end_date) {
         const end = new Date(c.end_date);
@@ -51,8 +65,11 @@ export interface DetailSections {
     showCoordinator: boolean;
     /** The existing closeout action. Only for real, not-yet-closed campaigns. */
     showCloseout: boolean;
-    /** The existing Create-invoice capability. Neutral, never a recommendation. */
+    /** The existing Create-invoice capability. Neutral, never a recommendation.
+     *  FR-HISTORY-1: now false once an invoice exists. */
     showInvoice: boolean;
+    /** FR-HISTORY-1: what the campaign's invoice is, so the drawer can say so. */
+    invoiceState: CampaignInvoiceDisplay;
 }
 
 /** One derivation per drawer open — deterministic, testable, no fetches. */
@@ -74,7 +91,20 @@ export function detailSections(c: CampaignForTriage, now: Date): DetailSections 
         showBundleSelection: isReal && (lifecycle === 'active' || lifecycle === 'ended_open'),
         showCoordinator: true,
         showCloseout: isReal && (lifecycle === 'active' || lifecycle === 'ended_open'),
-        showInvoice: isReal,
+        // FR-HISTORY-1: withdraw "Create invoice" once an invoice is KNOWN to
+        // exist. `isReal` alone offered it on every real campaign including ones
+        // already invoiced and already PAID, and the database's
+        // one-invoice-per-campaign index would reject the attempt anyway — so the
+        // button could only ever produce an error or a contradiction.
+        //
+        // Deliberately keyed on "known to exist", not on `canCreateInvoice`.
+        // A route that sends no invoice linkage yields `unknown`, and withdrawing
+        // a working capability because a payload is silent would be a regression
+        // dressed up as caution.
+        showInvoice: isReal && !hasCampaignInvoice(c),
+        // What the invoice actually IS, when one exists. Lets the drawer state the
+        // truth instead of falling silent.
+        invoiceState: describeCampaignInvoice(c),
     };
 }
 

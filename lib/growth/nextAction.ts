@@ -30,6 +30,7 @@
  */
 
 import type { CampaignHealth, CampaignHealthReason } from './health';
+import { classifyCampaignLifecycle, describeCampaignInvoice } from './campaignLifecycle';
 
 /** Mirrors isCampaignClosed() in app/fundraisers/page.tsx — keep in sync. */
 export const CLOSED_FAMILY = ['Closed', 'Settled', 'Completed', 'Archived'] as const;
@@ -37,6 +38,15 @@ export const CLOSED_FAMILY = ['Closed', 'Settled', 'Completed', 'Archived'] as c
 export type CampaignPriority =
     /** Acting now would help: GE-3 says at_risk, or the window ended with orders still held. */
     | 'needs_attention'
+    /**
+     * FR-HISTORY-1 — ordering has finished and the money has not arrived.
+     *
+     * Previously these fell into `completed`, which CRM-CC-2 renders collapsed as
+     * "Recently completed — Finished campaigns, kept for reference". Closing a
+     * fundraiser therefore folded it out of sight while it was still owed. Money
+     * outstanding is work, so it ranks above everything except an active alarm.
+     */
+    | 'awaiting_payment'
     /** GE-3 found exactly one adverse signal — worth a look, not alarming. */
     | 'worth_a_look'
     /** Running with no adverse signal (includes "too early to say"). */
@@ -49,10 +59,11 @@ export type CampaignPriority =
 /** Sort order for CRM-CC-2's grouped list: lower = shown first. */
 export const PRIORITY_RANK: Record<CampaignPriority, number> = {
     needs_attention: 0,
-    worth_a_look: 1,
-    on_pace: 2,
-    upcoming: 3,
-    completed: 4,
+    awaiting_payment: 1,
+    worth_a_look: 2,
+    on_pace: 3,
+    upcoming: 4,
+    completed: 5,
 };
 
 /** The subset of the /api/campaigns row this module reads. All optional fields
@@ -66,6 +77,13 @@ export interface CampaignForTriage {
     portal_token?: string | null;
     health?: CampaignHealth;
     health_reasons?: CampaignHealthReason[];
+    // ── FR-HISTORY-1 settlement inputs. Optional, and absent degrades to the
+    //    old behaviour (closed -> completed) rather than to a guess.
+    settlement_total?: number | string | null;
+    settled_externally?: boolean | null;
+    invoice_statuses?: readonly (string | null | undefined)[] | null;
+    has_settled_history?: boolean | null;
+    has_open_opportunity?: boolean | null;
 }
 
 export interface CampaignNextAction {
@@ -74,9 +92,13 @@ export interface CampaignNextAction {
     /** One sentence explaining WHY this action is suggested — shown, not hidden. */
     reason: string;
     /** Machine key for the UI to route on. Only capabilities that exist today. */
-    kind: 'closeout' | 'bundle_selection' | 'contact_coordinator' | 'review_campaign' | 'follow_up';
+    kind: 'closeout' | 'bundle_selection' | 'contact_coordinator' | 'review_campaign' | 'follow_up'
+        /** FR-HISTORY-1: raise or chase the campaign's invoice. */
+        | 'invoice';
     /** Where the control lives. The UI decides how to get there. */
-    destination: 'closeout_modal' | 'organization_profile';
+    destination: 'closeout_modal' | 'organization_profile'
+        /** FR-HISTORY-1: the invoices page, where the invoice itself lives. */
+        | 'invoices';
 }
 
 export interface CampaignTriage {
@@ -110,9 +132,33 @@ const hasReason = (c: CampaignForTriage, code: CampaignHealthReason['code']): bo
  * bundle selection beats a generic check-in.
  */
 export function triageCampaign(c: CampaignForTriage, now: Date): CampaignTriage {
-    // Finished campaigns are records. Invoice state is unknowable here (see
-    // header), so no action is ever suggested for them.
     if (isClosedFamily(c)) {
+        // FR-HISTORY-1: invoice state is no longer unknowable. /api/campaigns now
+        // sends invoice_statuses and settled_externally, so a closed campaign that
+        // is still owed is separated from one that is genuinely finished. The
+        // header's DELIBERATE OMISSION applied while the data was absent; it is
+        // present now, and guessing is no longer what would happen.
+        if (classifyCampaignLifecycle(c) === 'closed_awaiting_payment') {
+            const inv = describeCampaignInvoice(c);
+            return {
+                priority: 'awaiting_payment',
+                rank: PRIORITY_RANK.awaiting_payment,
+                action: inv.canCreateInvoice
+                    ? {
+                        label: 'Create invoice',
+                        reason: 'Ordering has closed and this fundraiser has not been invoiced yet.',
+                        kind: 'invoice',
+                        destination: 'organization_profile',
+                    }
+                    : {
+                        label: 'Review invoice',
+                        reason: `Ordering has closed and payment is outstanding — ${inv.label.toLowerCase()}.`,
+                        kind: 'invoice',
+                        destination: 'invoices',
+                    },
+            };
+        }
+        // Genuinely finished: paid, settled externally, or closed owing nothing.
         return { priority: 'completed', rank: PRIORITY_RANK.completed, action: null };
     }
 

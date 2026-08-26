@@ -39,11 +39,33 @@ const active = (over: Partial<CampaignForTriage> = {}): CampaignForTriage => ({
 
 describe('1. the priority order is fixed and complete', () => {
     it('ranks needs_attention first and completed last', () => {
-        expect(PRIORITY_RANK.needs_attention).toBe(0);
-        expect(PRIORITY_RANK.worth_a_look).toBe(1);
-        expect(PRIORITY_RANK.on_pace).toBe(2);
-        expect(PRIORITY_RANK.upcoming).toBe(3);
-        expect(PRIORITY_RANK.completed).toBe(4);
+        // Asserted as ORDER, not as literal integers. FR-HISTORY-1 inserted
+        // `awaiting_payment` between needs_attention and worth_a_look, which
+        // shifted every number below it without changing the property this test
+        // exists to protect. Ordering is the contract; the integers are an
+        // implementation detail that should not break on every insertion.
+        const order = (Object.keys(PRIORITY_RANK) as (keyof typeof PRIORITY_RANK)[])
+            .sort((a, b) => PRIORITY_RANK[a] - PRIORITY_RANK[b]);
+        expect(order).toEqual([
+            'needs_attention',
+            'awaiting_payment',
+            'worth_a_look',
+            'on_pace',
+            'upcoming',
+            'completed',
+        ]);
+        // Ranks are unique and contiguous from zero.
+        expect(Object.values(PRIORITY_RANK).sort((a, b) => a - b))
+            .toEqual(order.map((_, i) => i));
+    });
+
+    it('FR-HISTORY-1: money owed outranks every non-alarming state', () => {
+        // The whole point: a closed-but-unpaid fundraiser must sort above active
+        // work that has no warning sign, and far above finished records.
+        expect(PRIORITY_RANK.awaiting_payment).toBeGreaterThan(PRIORITY_RANK.needs_attention);
+        expect(PRIORITY_RANK.awaiting_payment).toBeLessThan(PRIORITY_RANK.on_pace);
+        expect(PRIORITY_RANK.awaiting_payment).toBeLessThan(PRIORITY_RANK.upcoming);
+        expect(PRIORITY_RANK.awaiting_payment).toBeLessThan(PRIORITY_RANK.completed);
     });
 
     it('rank on the result always equals the rank of its priority', () => {
@@ -53,22 +75,55 @@ describe('1. the priority order is fixed and complete', () => {
 });
 
 describe('2. finished campaigns are records, never tasks', () => {
-    it.each(CLOSED_FAMILY)('status %s is completed with no action', (status) => {
-        const t = triageCampaign(active({ status }), NOW);
+    /**
+     * FR-HISTORY-1: "finished" now means FINANCIALLY finished, and the row can
+     * finally say so — /api/campaigns sends invoice_statuses and
+     * settled_externally, which is what this module's header used to call
+     * UNKNOWABLE. These fixtures state their finishedness explicitly rather than
+     * relying on absent fields, because absence now means "we were not told" and
+     * fails conservatively into awaiting-payment.
+     */
+    const FINISHED = { invoice_statuses: [] as string[], settlement_total: 0, held_order_count: 0 };
+
+    it.each(CLOSED_FAMILY)('status %s owing nothing is completed with no action', (status) => {
+        const t = triageCampaign(active({ status, ...FINISHED }), NOW);
+        expect(t.priority).toBe('completed');
+        expect(t.action).toBeNull();
+    });
+
+    it('a PAID campaign-linked invoice is completed with no action', () => {
+        const t = triageCampaign(active({ status: 'Closed', invoice_statuses: ['PAID'], settlement_total: 250 }), NOW);
+        expect(t.priority).toBe('completed');
+        expect(t.action).toBeNull();
+    });
+
+    it('settled_externally is completed with no action', () => {
+        const t = triageCampaign(active({ status: 'Closed', settled_externally: true, invoice_statuses: [], settlement_total: 250 }), NOW);
         expect(t.priority).toBe('completed');
         expect(t.action).toBeNull();
     });
 
     it('closed_at wins even when status still says Active', () => {
-        const t = triageCampaign(active({ closed_at: days(-1) }), NOW);
+        const t = triageCampaign(active({ closed_at: days(-1), ...FINISHED }), NOW);
         expect(t.priority).toBe('completed');
         expect(t.action).toBeNull();
     });
 
-    it('never suggests Create invoice — invoice state is unknowable from this data', () => {
-        // A settled campaign may already be invoiced; the row cannot tell us.
+    it('but a closed campaign that is still OWED is work, not a record', () => {
+        // The defect this phase exists to remove: closing a fundraiser used to
+        // file it as a finished record while the money was still outstanding.
+        const t = triageCampaign(active({ status: 'Closed', invoice_statuses: ['SENT'], settlement_total: 250 }), NOW);
+        expect(t.priority).toBe('awaiting_payment');
+        expect(t.action?.kind).toBe('invoice');
+    });
+
+    it('invoice state is no longer unknowable — but absence still is', () => {
+        // A row that carries no linkage tells us nothing, so it stays visible
+        // rather than claiming to be finished.
         const t = triageCampaign(active({ status: 'Settled' }), NOW);
-        expect(t.action).toBeNull();
+        expect(t.priority).toBe('awaiting_payment');
+        // And it never offers to CREATE an invoice off a guess.
+        expect(t.action?.label).not.toBe('Create invoice');
     });
 });
 

@@ -11,15 +11,31 @@ export const money = (n: number) =>
     `$${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
 /**
- * Settled subtext, shown only when it tells the reader something new.
+ * Closed-out subtext, shown only when it tells the reader something new.
  * Never promoted to the headline: a group whose campaign is still running is
- * not worth $0, so lifetime stays primary and settled stays context.
+ * not worth $0, so lifetime stays primary and this stays context.
+ *
+ * ── FR-HISTORY-1: THE WORD "SETTLED" MOVED ──────────────────────────────────
+ *
+ * `settledSales` sums `FundraiserCampaign.settlement_total`, which closeout
+ * freezes. That is CLOSED OUT, not PAID — and it predates INV-D, which gave
+ * "settled" a second and much stronger meaning: money actually received, with a
+ * method and a date. Two meanings of one word on the same screen is how an owner
+ * ends up believing they have been paid when they have not.
+ *
+ * The figure is unchanged — it is a real and useful number — but the words now
+ * say which fact it is. Payment truth lives on the invoice, and the campaign
+ * card states it there.
+ *
+ * "none settled yet" was also actively misleading for Edgar and Coles: both were
+ * genuinely paid outside FreezerIQ, and both read as though nothing had ever
+ * been collected because closeout never ran on them.
  */
 export function settledNote(r: { lifetimeFundraiserSales: number; settledSales: number }): string | null {
     if (r.lifetimeFundraiserSales <= 0) return null;
-    if (r.settledSales >= r.lifetimeFundraiserSales) return 'all settled';
-    if (r.settledSales <= 0) return 'none settled yet';
-    return `${money(r.settledSales)} settled`;
+    if (r.settledSales >= r.lifetimeFundraiserSales) return 'all closed out';
+    if (r.settledSales <= 0) return 'none closed out yet';
+    return `${money(r.settledSales)} closed out`;
 }
 
 /** "3 months ago" style, from a factual day count. */

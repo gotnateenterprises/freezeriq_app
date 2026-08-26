@@ -26,16 +26,32 @@ describe('2. settledNote stays subtext-truthful', () => {
         expect(settledNote({ lifetimeFundraiserSales: 0, settledSales: 0 })).toBeNull();
     });
 
-    it('"all settled" when closeout froze everything', () => {
-        expect(settledNote({ lifetimeFundraiserSales: 500, settledSales: 500 })).toBe('all settled');
+    // FR-HISTORY-1: the FIGURE is unchanged — it still sums the settlement
+    // totals closeout froze. Only the WORDS changed, because INV-D gave "settled"
+    // a second meaning (money actually received, with a method and a date) and
+    // the same word carrying both meanings on one screen is how an owner comes to
+    // believe they have been paid when they have not. These now say "closed out",
+    // which is the fact this number actually reports.
+    it('"all closed out" when closeout froze everything', () => {
+        expect(settledNote({ lifetimeFundraiserSales: 500, settledSales: 500 })).toBe('all closed out');
     });
 
-    it('"none settled yet" when campaigns are still open', () => {
-        expect(settledNote({ lifetimeFundraiserSales: 500, settledSales: 0 })).toBe('none settled yet');
+    it('"none closed out yet" when campaigns are still open', () => {
+        expect(settledNote({ lifetimeFundraiserSales: 500, settledSales: 0 })).toBe('none closed out yet');
     });
 
-    it('partial settlement names the settled amount', () => {
-        expect(settledNote({ lifetimeFundraiserSales: 500, settledSales: 200 })).toBe('$200 settled');
+    it('partial closeout names the closed-out amount', () => {
+        expect(settledNote({ lifetimeFundraiserSales: 500, settledSales: 200 })).toBe('$200 closed out');
+    });
+
+    it('never claims payment — the word "paid" belongs to the invoice', () => {
+        for (const r of [
+            { lifetimeFundraiserSales: 500, settledSales: 500 },
+            { lifetimeFundraiserSales: 500, settledSales: 0 },
+            { lifetimeFundraiserSales: 500, settledSales: 200 },
+        ]) {
+            expect(settledNote(r)).not.toMatch(/paid/i);
+        }
     });
 });
 

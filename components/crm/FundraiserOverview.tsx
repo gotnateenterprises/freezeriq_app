@@ -603,8 +603,31 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
                     </div>
                 </div>
 
-                {/* Visual Status Pipeline */}
+                {/* Visual Status Pipeline
+                    ── FR-HISTORY-1: LABELLED, not repurposed. ─────────────────
+                    This is CustomerStatus (LEAD → … → INACTIVE), the customer
+                    relationship stage. It is shared with ordinary non-fundraiser
+                    customers via CustomerOverview and nothing in closeout, send or
+                    settlement ever advances it — which is why The Best Brew Test 2
+                    still reads LEAD after its fundraiser closed and its invoice was
+                    paid, and why five long-finished organizations still read LEAD
+                    today.
+
+                    Forcing it to PAID/ARCHIVED would be the wrong fix: it would
+                    corrupt a field the Customers page, marketing segmentation and
+                    growth analytics all route on, and it would still be answering
+                    the wrong question. The campaign is the fundraiser's truth and
+                    it lives in the Fundraisers tab. So this row says what it is,
+                    and stops implying anything about the fundraiser. */}
                 <div className="border-t border-slate-100 dark:border-slate-700/50 pt-6">
+                    <div className="mb-2 flex items-baseline gap-2">
+                        <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-400">
+                            Relationship stage
+                        </h3>
+                        <span className="text-[11px] font-medium text-slate-400">
+                            how far along this organization is with you — not the fundraiser&apos;s status
+                        </span>
+                    </div>
                     <StatusPipeline
                         currentStatus={status}
                         onStatusClick={handleManualStatusChange}

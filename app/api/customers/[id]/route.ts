@@ -78,7 +78,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
                 include: {
                     campaigns: {
                         orderBy: { created_at: 'desc' },
-                        take: 5
+                        take: 5,
+                        // ── FR-HISTORY-1: the organization page's campaign-history
+                        //    card reads invoice truth from here.
+                        //
+                        //    A bare include returns every campaign SCALAR — which
+                        //    now covers settlement_total and settled_externally — but
+                        //    the invoices relation has to be asked for. Without it
+                        //    the card could only guess, which is exactly what it used
+                        //    to do: it branched on `c.invoice_id`, a field no campaign
+                        //    row has ever carried, so it said "not yet invoiced" for
+                        //    every campaign including PAID ones.
+                        include: { invoices: { select: { status: true } } },
                     },
                     orders: {
                         orderBy: { created_at: 'desc' },

@@ -35,8 +35,15 @@ const onPace = (id: string): CampaignForTriage & { id: string } => ({
 const lead = (id: string): CampaignForTriage & { id: string } => ({
     id, status: 'Lead', is_placeholder: true,
 });
+// FR-HISTORY-1: these fixtures assert "a genuinely FINISHED campaign is a
+// record". They now say so explicitly — no invoice, and a known-zero gross —
+// instead of relying on absent fields. Absence now means "we were not told",
+// which fails conservatively into awaiting-payment so a fundraiser can never
+// hide itself while money may still be owed.
+const FINISHED = { invoice_statuses: [] as string[], settlement_total: 0, held_order_count: 0 };
+
 const closed = (id: string): CampaignForTriage & { id: string } => ({
-    id, status: 'Settled',
+    id, status: 'Settled', ...FINISHED,
 });
 
 describe('1. section metadata is complete and honestly worded', () => {
@@ -153,7 +160,14 @@ describe('4. section membership by lifecycle', () => {
         ['no-signal active', { status: 'Active', health: 'no_signal' }, 'on_pace'],
         ['placeholder lead', lead('x'), 'upcoming'],
         ['settled', closed('x'), 'completed'],
-        ['closed_at set', { status: 'Active', closed_at: days(-1) }, 'completed'],
+        ['closed_at set, nothing owed', { status: 'Active', closed_at: days(-1), ...FINISHED }, 'completed'],
+        // FR-HISTORY-1: the same row with money still outstanding does NOT go to
+        // completed. This is the case that used to fold itself away.
+        ['closed_at set, invoice SENT', { status: 'Active', closed_at: days(-1), invoice_statuses: ['SENT'], settlement_total: 250 }, 'awaiting_payment'],
+        ['closed_at set, sales but no invoice', { status: 'Active', closed_at: days(-1), invoice_statuses: [], settlement_total: 250 }, 'awaiting_payment'],
+        ['closed_at set, invoice PAID', { status: 'Active', closed_at: days(-1), invoice_statuses: ['PAID'], settlement_total: 250 }, 'completed'],
+        // Nobody told us about invoices — stays visible rather than hiding.
+        ['closed_at set, linkage unknown', { status: 'Active', closed_at: days(-1) }, 'awaiting_payment'],
     ];
     it.each(cases)('%s → its own section', (_label, campaign, expected) => {
         const sections = groupCampaignsByPriority([campaign], NOW);

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { StageChip } from './StageChip';
 import { BundleSelectionStatusCard } from './BundleSelectionStatusCard';
 import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
+import { describeCampaignInvoice } from '@/lib/growth/campaignLifecycle';
 
 export function CampaignCard({ c, businessSlug }: { c: any; businessSlug?: string }) {
     const closed = Boolean(c.closed_at) || ['Closed', 'Settled', 'Completed', 'Archived'].includes(c.status);
@@ -43,19 +44,36 @@ export function CampaignCard({ c, businessSlug }: { c: any; businessSlug?: strin
             {/* CB-6: Tenant bundle selection status — renders for open and closed campaigns */}
             <BundleSelectionStatusCard campaignId={c.id} />
 
-            {closed && c.settlement_total != null && (
-                <div className="mt-1 flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 px-3.5 py-2.5 dark:border-orange-900 dark:bg-orange-950">
-                    <span>💰</span>
-                    <span className="text-[12px] text-orange-900 dark:text-orange-200">
-                        <b className="text-sm tabular-nums">${Number(c.settlement_total).toLocaleString()}</b><br />
-                        Settlement frozen at closeout{c.invoice_id ? ' — invoiced ✓' : ' — not yet invoiced'}
-                    </span>
-                    {!c.invoice_id && (
-                        <Link href={`/customers/${c.customer_id}?tab=fundraisers&action=invoice&campaignId=${c.id}&amount=${c.settlement_total}`}
-                            className="ml-auto rounded-lg bg-indigo-600 px-3 py-1.5 text-[11px] font-extrabold text-white">Create invoice</Link>
-                    )}
-                </div>
-            )}
+            {/* FR-HISTORY-1: the settlement box now reads real invoice truth.
+                It used to branch on `c.invoice_id`, which is not a column on
+                FundraiserCampaign and was never sent by /api/campaigns — so it
+                was always undefined, and EVERY closed campaign read "not yet
+                invoiced" and offered "Create invoice", including one whose
+                invoice was already PAID. /api/campaigns now sends
+                invoice_statuses and settled_externally, and the wording and the
+                action both come from that. */}
+            {closed && c.settlement_total != null && (() => {
+                const inv = describeCampaignInvoice(c);
+                const tone = {
+                    good: 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
+                    pending: 'border-indigo-200 bg-indigo-50 text-indigo-900 dark:border-indigo-900 dark:bg-indigo-950 dark:text-indigo-200',
+                    warn: 'border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200',
+                    neutral: 'border-orange-200 bg-orange-50 text-orange-900 dark:border-orange-900 dark:bg-orange-950 dark:text-orange-200',
+                }[inv.tone];
+                return (
+                    <div className={`mt-1 flex items-center gap-3 rounded-xl border px-3.5 py-2.5 ${tone}`}>
+                        <span>{inv.tone === 'good' ? '✅' : '💰'}</span>
+                        <span className="text-[12px]">
+                            <b className="text-sm tabular-nums">${Number(c.settlement_total).toLocaleString()}</b><br />
+                            {inv.known ? <>Settlement frozen at closeout — {inv.label}</> : inv.label}
+                        </span>
+                        {inv.canCreateInvoice && (
+                            <Link href={`/customers/${c.customer_id}?tab=fundraisers&action=invoice&campaignId=${c.id}&amount=${c.settlement_total}`}
+                                className="ml-auto rounded-lg bg-indigo-600 px-3 py-1.5 text-[11px] font-extrabold text-white">Create invoice</Link>
+                        )}
+                    </div>
+                );
+            })()}
         </section>
     );
 }

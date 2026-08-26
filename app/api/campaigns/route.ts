@@ -624,6 +624,20 @@ export async function GET(req: Request) {
                     org_share_percent: true,
                     bundle_selection_status: true,
                     bundle_selection_at: true,
+                    // ── FR-HISTORY-1: settlement truth, so the dashboard can tell
+                    //    "ordering finished" apart from "money received".
+                    //
+                    //    Without these, lib/growth/nextAction.ts was right to call
+                    //    invoice state UNKNOWABLE and refuse to guess — and the
+                    //    consequence was that closeout alone filed a campaign as
+                    //    completed and collapsed it out of sight while it was still
+                    //    owed. Two scalars and a one-column relation close that gap.
+                    settlement_total: true,
+                    settled_externally: true,
+                    // Status only. No amounts, no dates, no customer — this feeds a
+                    // lifecycle bucket, not a financial display, and the invoice
+                    // page remains the authority for money.
+                    invoices: { select: { status: true } },
                     _count: { select: { coordinator_actions: true } },
                     // Include ALL coordinator-entered orders for settlement visibility
                     // (covers both new fundraiser_hold AND historical pending/completed)
@@ -648,6 +662,45 @@ export async function GET(req: Request) {
                     }
                 } as any // Use 'as any' for select to avoid TS errors on potential missing fields
             });
+
+            // ── FR-HISTORY-1: which organizations have SETTLED fundraiser history.
+            //
+            // The placeholder branch below fabricates a `status: 'Lead'` row for any
+            // customer with no campaign rows, which is why organizations that
+            // finished fundraisers years ago — Clark Co, Cumberland Co, Jasper Co,
+            // Ag in the Classroom, St John's — sit under "Leads & upcoming" today.
+            // Each has zero campaign rows but a PAID invoice, so existence alone was
+            // being read as a current lead.
+            //
+            // Existence is not a lead. A PAID invoice is durable proof this
+            // organization already completed business, so those placeholders are
+            // filed as history instead. Tenant-scoped, one grouped query, no writes.
+            const settledCustomerRows = await prisma.invoice.groupBy({
+                by: ['customer_id'],
+                where: { business_id: session.user.businessId, status: 'PAID' as any },
+            });
+            const customersWithSettledHistory = new Set(
+                settledCustomerRows.map((r: any) => r.customer_id as string),
+            );
+
+            // ── FR-HISTORY-1: which organizations have CURRENT interest.
+            //
+            // An open FundraiserOpportunity is the durable record of a live
+            // lead. Without it, "has paid history" alone would decide, and an
+            // organization that ran a fundraiser last year and has just asked
+            // about another would be filed as history — hiding precisely the
+            // rebooking business this dashboard exists to surface. Paid history
+            // must never suppress a real opportunity.
+            const openOpportunityRows = await prisma.fundraiserOpportunity.groupBy({
+                by: ['customer_id'],
+                where: {
+                    business_id: session.user.businessId,
+                    status: { in: ['new', 'in_conversation', 'date_confirmed'] as any },
+                },
+            });
+            const customersWithOpenOpportunity = new Set(
+                openOpportunityRows.map((r: any) => r.customer_id as string),
+            );
 
             // 3. In-Memory Join
             const results: any[] = [];
@@ -742,6 +795,19 @@ export async function GET(req: Request) {
                                 ? Number((fc as any).org_share_percent)
                                 : 20,
                             closed_at: (fc as any).closed_at ?? null,
+                            // ── FR-HISTORY-1: the facts that separate "ordering
+                            //    finished" from "money received". Additive — every
+                            //    existing consumer ignores them.
+                            settlement_total: (fc as any).settlement_total != null
+                                ? Number((fc as any).settlement_total)
+                                : null,
+                            settled_externally: Boolean((fc as any).settled_externally),
+                            // Statuses only, flattened. An empty array means closeout
+                            // has produced no invoice yet — which is a DIFFERENT fact
+                            // from "we do not know", and the UI may now rely on it.
+                            invoice_statuses: Array.isArray((fc as any).invoices)
+                                ? (fc as any).invoices.map((i: any) => String(i.status))
+                                : [],
                             // Settlement visibility — held order counts.
                             // These three metrics measure DIFFERENT things and are
                             // intentionally independent: order rows, dollars, and
@@ -772,6 +838,20 @@ export async function GET(req: Request) {
                         // A lead placeholder has no campaign and therefore no orders.
                         weighted_bundles_sold: 0,
                         progress_percent: 0,
+                        // ── FR-HISTORY-1: a placeholder is a stand-in for an
+                        //    organization, not a campaign, so it has no settlement
+                        //    facts. Sent explicitly rather than left undefined so the
+                        //    lifecycle classifier reads the same shape for every row.
+                        settlement_total: null,
+                        settled_externally: false,
+                        invoice_statuses: [],
+                        // True when this organization has already completed business
+                        // with a PAID invoice. The lifecycle classifier files those
+                        // as history rather than as a current lead.
+                        has_settled_history: customersWithSettledHistory.has(c.id),
+                        // An open opportunity means live interest, and outranks
+                        // history: this organization IS a lead right now.
+                        has_open_opportunity: customersWithOpenOpportunity.has(c.id),
                         // GE-3: a placeholder is not a running campaign to judge.
                         health: 'not_applicable',
                         health_reasons: [],

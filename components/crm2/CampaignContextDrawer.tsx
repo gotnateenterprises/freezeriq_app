@@ -345,6 +345,17 @@ export function CampaignContextDrawer({
                                         <Receipt size={13} aria-hidden="true" /> Create invoice
                                     </Link>
                                 )}
+                                {/* FR-HISTORY-1: when an invoice already exists, say what
+                                    it is and link to it, rather than offering to create a
+                                    second one the database would reject. */}
+                                {!sections.showInvoice && sections.invoiceState.known && (
+                                    <Link
+                                        href="/invoices"
+                                        className="inline-flex items-center gap-1.5 min-h-[44px] px-3.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                                    >
+                                        <Receipt size={13} aria-hidden="true" /> {sections.invoiceState.label}
+                                    </Link>
+                                )}
                             </div>
                         </div>
                     )}

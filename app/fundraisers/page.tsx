@@ -25,6 +25,7 @@ import { CampaignContextDrawer } from '@/components/crm2/CampaignContextDrawer';
 import { useDialogFocus } from '@/components/crm2/useDialogFocus';
 import type { CampaignTriage } from '@/lib/growth/nextAction';
 import { triageCampaign } from '@/lib/growth/nextAction';
+import { classifyCampaignLifecycle } from '@/lib/growth/campaignLifecycle';
 import type { CampaignHealth, CampaignHealthReason } from '@/lib/growth/health';
 import { FOOD_TAX_DEFAULT_APPLIED, FOOD_TAX_RATE_PERCENT } from '@/lib/fundraiserCloseoutMath';
 
@@ -305,6 +306,10 @@ export default function FundraisersPage() {
         const matchesFilter =
             filterStatus === 'all' ? true :
             filterStatus === 'attention' ? triageCampaign(f, triageNow).priority === 'needs_attention' :
+            // FR-HISTORY-1: closed with money still owed. Derived from the one
+            // canonical classifier so this pill can never disagree with the
+            // section the row lands in.
+            filterStatus === 'awaiting' ? classifyCampaignLifecycle(f) === 'closed_awaiting_payment' :
             filterStatus === 'closed' ? isCampaignClosed(f) :
             f.status.toLowerCase() === filterStatus.toLowerCase();
         return matchesSearch && matchesFilter;
@@ -479,7 +484,11 @@ export default function FundraisersPage() {
                         giving the strip's campaign chip a real destination. */}
                     {/* CRM-CC-5: 44px floor + aria-pressed to match the sibling
                         filter groups; labels are words, not raw filter keys. */}
-                    {(['all', 'attention', 'active', 'lead', 'closed'] as const).map(status => (
+                    {/* FR-HISTORY-1: 'awaiting' is its own pill. "Closed" alone
+                        conflated a fundraiser still owed money with one that had
+                        been paid, so there was no way to ask the question the
+                        owner actually asks: who still owes me? */}
+                    {(['all', 'attention', 'awaiting', 'active', 'lead', 'closed'] as const).map(status => (
                         <button
                             key={status}
                             type="button"
@@ -487,7 +496,7 @@ export default function FundraisersPage() {
                             aria-pressed={filterStatus === status}
                             className={`px-4 md:px-6 py-2 rounded-xl text-xs font-black uppercase transition-all min-h-[44px] ${filterStatus === status ? 'bg-white dark:bg-slate-800 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                         >
-                            {{ all: 'All', attention: 'Needs attention', active: 'Active', lead: 'Leads', closed: 'Closed' }[status]}
+                            {{ all: 'All', attention: 'Needs attention', awaiting: 'Awaiting payment', active: 'Active', lead: 'Leads', closed: 'Closed' }[status]}
                         </button>
                     ))}
                 </div>

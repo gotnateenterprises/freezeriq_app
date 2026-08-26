@@ -39,8 +39,8 @@ describe('1. presentation lifecycle mirrors triage + the end date', () => {
     });
 
     it('closed family → completed, even with a past end date', () => {
-        expect(detailLifecycle(active({ status: 'Settled', end_date: days(-30) }), NOW)).toBe('completed');
-        expect(detailLifecycle(active({ closed_at: days(-1) }), NOW)).toBe('completed');
+        expect(detailLifecycle(active({ status: 'Settled', end_date: days(-30), invoice_statuses: [], settlement_total: 0, held_order_count: 0 }), NOW)).toBe('completed');
+        expect(detailLifecycle(active({ closed_at: days(-1), invoice_statuses: [], settlement_total: 0, held_order_count: 0 }), NOW)).toBe('completed');
     });
 
     it('lead/placeholder → upcoming', () => {
@@ -93,7 +93,8 @@ describe('3. ended-with-held-orders context', () => {
 });
 
 describe('4. completed / settled context is quiet', () => {
-    const settled: CampaignForTriage = { status: 'Settled', end_date: days(-30) };
+    // FR-HISTORY-1: explicitly finished — no invoice, known-zero gross.
+    const settled: CampaignForTriage = { status: 'Settled', end_date: days(-30), invoice_statuses: [], settlement_total: 0, held_order_count: 0 };
 
     it('keeps the historical snapshot but drops every operational widget', () => {
         const s = detailSections(settled, NOW);

@@ -34,6 +34,7 @@ import {
 } from '@/lib/growth/campaignSections';
 import type { CampaignPriority } from '@/lib/growth/nextAction';
 import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
+import { describeCampaignInvoice, resolveCampaignInvoiceState } from '@/lib/growth/campaignLifecycle';
 
 export interface PriorityListCampaign extends CampaignForTriage {
     id: string;
@@ -51,6 +52,9 @@ export interface PriorityListCampaign extends CampaignForTriage {
 
 const SECTION_DOT: Record<CampaignPriority, string> = {
     needs_attention: 'bg-rose-500',
+    // FR-HISTORY-1: indigo, matching the SENT/awaiting-payment treatment the
+    // invoices page already uses. Deliberately not emerald — nothing is paid yet.
+    awaiting_payment: 'bg-indigo-500',
     worth_a_look: 'bg-amber-500',
     on_pace: 'bg-emerald-500',
     upcoming: 'bg-sky-500',
@@ -123,8 +127,24 @@ export function CampaignPriorityList({
 
     const sections = groupCampaignsByPriority(campaigns, now);
 
+    /**
+     * FR-HISTORY-1 — a search must never return an invisible result.
+     *
+     * A folded section does not render its rows at all (see `{!folded && …}`
+     * below), so the campaign name is not even in the DOM. Combined with
+     * "Recently completed" being collapsed by default, searching for a finished
+     * fundraiser produced a heading reading "Recently completed (1)" and no row —
+     * and browser find could not locate it either. That is the scavenger hunt the
+     * owner described.
+     *
+     * So while the user is actively narrowing — searching, or on any filter other
+     * than "all" — every section is expanded. A deliberate click still wins: an
+     * explicit entry in `collapsed` is honoured either way.
+     */
+    const isNarrowing = Boolean(searchTerm) || filterStatus !== 'all';
+
     const isCollapsed = (s: CampaignSection<PriorityListCampaign>) =>
-        collapsed[s.priority] ?? s.meta.collapsedByDefault;
+        collapsed[s.priority] ?? (isNarrowing ? false : s.meta.collapsedByDefault);
 
     return (
         <div className="space-y-5">
@@ -247,8 +267,17 @@ function CampaignRow({
     if (!c.is_placeholder && c.portal_token) {
         menuItems.push({ key: 'portal', label: 'Coordinator portal', href: buildCoordinatorAccessUrl(null, c.portal_token), newTab: true });
     }
+    // FR-HISTORY-1: only offer invoice creation when no invoice exists. The
+    // database enforces one invoice per campaign, so offering it afterwards could
+    // only ever produce an error — and on a PAID campaign it also reads as though
+    // the payment never happened. When one exists, the menu states its status.
     if (!c.is_placeholder) {
-        menuItems.push({ key: 'invoice', label: 'Create invoice', href: `/customers/${c.customer_id}?tab=fundraisers&action=invoice&campaignId=${c.id}` });
+        const inv = describeCampaignInvoice(c);
+        if (inv.canCreateInvoice) {
+            menuItems.push({ key: 'invoice', label: 'Create invoice', href: `/customers/${c.customer_id}?tab=fundraisers&action=invoice&campaignId=${c.id}` });
+        } else if (resolveCampaignInvoiceState(c) !== 'none') {
+            menuItems.push({ key: 'invoice', label: `Invoice: ${inv.label}`, href: '/invoices' });
+        }
     }
     if (!c.is_placeholder && c.triage.priority !== 'completed' && action?.kind !== 'closeout') {
         menuItems.push({ key: 'closeout', label: 'Close out fundraiser', onClick: () => onCloseout(c), warn: true });
