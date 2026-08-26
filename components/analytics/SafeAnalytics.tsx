@@ -25,15 +25,25 @@
  * So without this filter a coordinator pageview would POST the credential to
  * Vercel's collector. With it, nothing under /coordinator is ever reported.
  *
+ * OUTREACH-CONSENT-1 EXTENDS THE SAME REASONING TO /u
+ * The public unsubscribe page is /u/<sealed-token>, so the credential is in the
+ * PATH rather than the fragment — which is worse: the upstream script reports
+ * location.href, and a path is never stripped. Every recipient who opened an
+ * unsubscribe link would hand their sealed token to a third-party collector,
+ * and those tokens do not expire. The same drop applies.
+ *
  * SCOPE
- * Only the /coordinator surface is suppressed. Analytics for the rest of the
- * site is untouched — this closes a credential leak, it does not switch off
- * measurement.
+ * Only these credential-bearing surfaces are suppressed. Analytics for the rest
+ * of the site is untouched — this closes credential leaks, it does not switch
+ * off measurement.
  */
 import { Analytics } from '@vercel/analytics/react';
 
-/** Everything under this prefix is credential-adjacent and is never reported. */
-export const ANALYTICS_SUPPRESSED_PREFIX = '/coordinator';
+/** Every prefix here is credential-adjacent and is never reported. */
+export const ANALYTICS_SUPPRESSED_PREFIXES = ['/coordinator', '/u'] as const;
+
+/** @deprecated Kept so existing imports keep compiling. Prefer the list above. */
+export const ANALYTICS_SUPPRESSED_PREFIX = ANALYTICS_SUPPRESSED_PREFIXES[0];
 
 /**
  * True when an analytics event must be dropped.
@@ -56,8 +66,9 @@ export function shouldSuppressAnalyticsUrl(url: string): boolean {
     } catch {
         return true;
     }
-    return pathname === ANALYTICS_SUPPRESSED_PREFIX
-        || pathname.startsWith(`${ANALYTICS_SUPPRESSED_PREFIX}/`);
+    return ANALYTICS_SUPPRESSED_PREFIXES.some(
+        (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    );
 }
 
 export default function SafeAnalytics() {
@@ -65,8 +76,8 @@ export default function SafeAnalytics() {
         <Analytics
             beforeSend={(event) => {
                 // Covers /coordinator/access#<credential>, the tokenless
-                // /coordinator/portal, and any legacy /coordinator/<token> URL a
-                // coordinator still has bookmarked.
+                // /coordinator/portal, any legacy /coordinator/<token> URL a
+                // coordinator still has bookmarked, and /u/<unsubscribe-token>.
                 if (shouldSuppressAnalyticsUrl(event.url)) return null;
                 return event;
             }}

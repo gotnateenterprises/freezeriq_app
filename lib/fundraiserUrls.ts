@@ -76,6 +76,26 @@ export function resolveCoordinatorOrigin(source?: Request | string | null): stri
 }
 
 /**
+ * OUTREACH-CONSENT-1 — the origin an unsubscribe link must be built on.
+ *
+ * Pinned in Production for the same reason the coordinator link is, and the
+ * reason is worth stating because the alternative looks harmless: the outreach
+ * send route resolves its origin from the REQUEST, so whichever host the tenant
+ * admin happened to be using gets baked into every supporter's email. A tenant
+ * working from a Vercel preview URL — or from `freezeriq-app.vercel.app`, which
+ * is exactly what NEXTAUTH_URL is set to in .env.production — would mail out
+ * unsubscribe links on a host that is not the product's domain, may require
+ * preview authentication, and can be torn down. Those links never expire, so a
+ * bad origin is permanent for everyone who received it.
+ *
+ * Delegates rather than duplicates: the rule and its justification are identical
+ * to the coordinator link's, and two copies would be two things to drift.
+ */
+export function resolveOutreachOrigin(source?: Request | string | null): string {
+    return resolveCoordinatorOrigin(source);
+}
+
+/**
  * FR-COORD-SEC-1B — THE coordinator link.
  *
  * The credential goes after `#`. Browsers never transmit a fragment, so the

@@ -28,6 +28,13 @@ export interface ProviderSendInput {
     text: string;
     from: string;
     replyTo?: string;
+    /**
+     * OUTREACH-CONSENT-1 — per-message headers, currently List-Unsubscribe and
+     * List-Unsubscribe-Post, so a mailbox can offer its own one-click opt-out.
+     * Set by the send engine for every outreach message; transactional senders
+     * do not go through this provider and are unaffected.
+     */
+    headers?: Record<string, string>;
 }
 
 export type ProviderSendResult =
@@ -102,6 +109,7 @@ export class ResendOutreachProvider implements OutreachEmailProvider {
                 subject: input.subject,
                 html: input.html,
                 text: input.text,
+                ...(input.headers ? { headers: input.headers } : {}),
             });
 
             if (error) {

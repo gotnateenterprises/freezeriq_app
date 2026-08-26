@@ -70,10 +70,19 @@ function recipient(over: Partial<SendableRecipient> & { recipientId: string }): 
 
 const RENDER = () => ({ subject: 's', html: '<p>h</p>', text: 't' });
 
+// OUTREACH-CONSENT-1: runSend now refuses to send promotional outreach that a
+// recipient could not opt out of, so every run needs a configured secret and an
+// origin for the per-recipient unsubscribe link. Set here so these existing
+// tests keep exercising delivery behaviour rather than the consent gate — the
+// gate has its own tests in tests/outreachConsent1.test.ts.
+process.env.OUTREACH_UNSUBSCRIBE_SECRET =
+    process.env.OUTREACH_UNSUBSCRIBE_SECRET || 'test-unsubscribe-secret-at-least-32-chars-long';
+
 async function send(prisma: any, provider: RecordingOutreachProvider, recipients: SendableRecipient[], generation = 1) {
     return runSend({
         prisma, provider, businessId: 'biz', batchId: 'batch', messageId: 'msg',
         generation, recipients, render: RENDER, from: 'a@b.co', now: NOW,
+        unsubscribe: { origin: 'https://www.freezeriqapp.com', brandName: 'Freezer Chef' },
     });
 }
 

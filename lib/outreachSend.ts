@@ -16,6 +16,8 @@
 
 import type { PrismaClient, DeliveryFailureCategory } from '@prisma/client';
 import type { OutreachEmailProvider, ProviderSendInput } from '@/lib/outreachProvider';
+import { sealUnsubscribeToken, unsubscribeSecret } from '@/lib/outreachUnsubscribeToken';
+import { applyUnsubscribeFooter } from '@/lib/outreachUnsubscribeFooter';
 
 export interface SendableRecipient {
     recipientId: string;
@@ -43,6 +45,14 @@ export interface SendSummary {
     outcomes: SendOutcome[];
     /** Honest batch verdict the tenant sees. */
     batchStatus: 'completed' | 'completed_with_issues' | 'failed_before_send';
+    /**
+     * Set ONLY when the run was refused outright, before any recipient was
+     * claimed or any provider call made. Distinguishes "the server cannot send
+     * this safely" from "every delivery failed", which look identical in the
+     * counts but need opposite responses: the first is a configuration problem
+     * to report and retry unchanged, the second is a delivery problem.
+     */
+    refusal?: 'missing_unsubscribe_capability';
 }
 
 /** Deterministic — the same recipient and message always produce the same key. */
@@ -119,6 +129,15 @@ export interface SendRunInput {
     from: string;
     replyTo?: string;
     now: Date;
+    /**
+     * OUTREACH-CONSENT-1 — where the per-recipient unsubscribe link points.
+     *
+     * REQUIRED, and required for a reason: this is promotional outreach, and a
+     * promotional email a recipient cannot opt out of is the thing the whole
+     * consent prerequisite exists to prevent. Making it optional would let a
+     * future caller omit it by accident and never learn that they had.
+     */
+    unsubscribe: { origin: string; brandName?: string | null };
 }
 
 /**
@@ -130,9 +149,25 @@ export interface SendRunInput {
  * without re-sending to anyone who already received the message.
  */
 export async function runSend(input: SendRunInput): Promise<SendSummary> {
-    const { prisma, provider, businessId, batchId, messageId, generation, recipients, render, from, replyTo, now } = input;
+    const { prisma, provider, businessId, batchId, messageId, generation, recipients, render, from, replyTo, now, unsubscribe } = input;
 
     const outcomes: SendOutcome[] = [];
+
+    // ── OUTREACH-CONSENT-1 — REFUSE THE WHOLE RUN WITHOUT AN OPT-OUT ─────────
+    //
+    // Checked once, before the first claim, so a misconfigured server sends
+    // nobody a promotional email it could not let them escape — rather than
+    // failing recipient by recipient and leaving a trail of half-sent batches.
+    // No attempt row is written, so the batch stays cleanly retryable once the
+    // secret is configured.
+    if (!unsubscribeSecret() || !unsubscribe?.origin) {
+        return {
+            attempted: 0, accepted: 0, failed: 0, skipped: 0, alreadyAttempted: 0,
+            outcomes: [],
+            batchStatus: 'failed_before_send',
+            refusal: 'missing_unsubscribe_capability',
+        };
+    }
 
     for (const r of recipients) {
         const key = buildIdempotencyKey(messageId, r.recipientId, generation);
@@ -201,13 +236,38 @@ export async function runSend(input: SendRunInput): Promise<SendSummary> {
             continue;
         }
 
+        // ── OUTREACH-CONSENT-1 — THE FOOTER THE SENDER CANNOT REMOVE ─────────
+        //
+        // Applied to the OUTPUT of render(), so nothing a tenant or coordinator
+        // typed can delete it, reword it or retarget it: their text is already
+        // finished by the time this runs. The token is sealed per recipient, so
+        // one person's opt-out link can never appear in another's email.
+        const withFooter = applyUnsubscribeFooter(content, {
+            token: (await sealUnsubscribeToken({ businessId, email: r.normalizedEmail! })) ?? '',
+            origin: unsubscribe.origin,
+            brandName: unsubscribe.brandName ?? null,
+        });
+
+        if (!withFooter) {
+            // No footer means no send. Recorded as failed and therefore
+            // retryable — the recipient is not silently dropped.
+            const detail = "We couldn't add an unsubscribe link to this email.";
+            await prisma.emailDeliveryAttempt.update({
+                where: { id: attemptId },
+                data: { status: 'failed', failed_at: new Date(), failure_category: 'unknown', failure_detail: detail },
+            });
+            outcomes.push({ recipientId: r.recipientId, result: 'failed', failureCategory: 'unknown', failureDetail: detail });
+            continue;
+        }
+
         const payload: ProviderSendInput = {
             to: r.normalizedEmail!,
-            subject: content.subject,
-            html: content.html,
-            text: content.text,
+            subject: withFooter.subject,
+            html: withFooter.html,
+            text: withFooter.text,
             from,
             replyTo,
+            headers: withFooter.headers,
         };
 
         const result = await provider.send(payload);

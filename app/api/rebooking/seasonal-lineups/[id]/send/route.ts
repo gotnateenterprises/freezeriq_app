@@ -23,9 +23,12 @@ import { auth } from '@/auth';
 import { getTenantSender } from '@/lib/email';
 import { renderSeasonalUpdate, resolveRebookingCta, checkSenderReadiness } from '@/lib/outreachMessage';
 import { ResendOutreachProvider } from '@/lib/outreachProvider';
-import { runSend, type SendableRecipient } from '@/lib/outreachSend';
+import { runSend, checkSuppressionAtSend, type SendableRecipient } from '@/lib/outreachSend';
 import { mintRebookingToken } from '@/lib/rebookingToken';
-import { buildRebookingUrl, resolveRequestOrigin } from '@/lib/fundraiserUrls';
+import { buildRebookingUrl, resolveRequestOrigin, resolveOutreachOrigin } from '@/lib/fundraiserUrls';
+import { normalizeEmail } from '@/lib/seasonalAudience';
+import { sealUnsubscribeToken, unsubscribeSecret } from '@/lib/outreachUnsubscribeToken';
+import { applyUnsubscribeFooter } from '@/lib/outreachUnsubscribeFooter';
 
 function isPlausible(email: string): boolean {
     const v = email.trim();
@@ -85,10 +88,49 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
                 isTest: true,   // adds the visible TEST banner and subject prefix
             });
 
+            // ── OUTREACH-CONSENT-1 — THE PREVIEW IS NOT A BACK DOOR ──────────
+            //
+            // `testAddress` is whatever the tenant typed, and this branch calls
+            // the provider DIRECTLY rather than through runSend — so it inherits
+            // none of runSend's protections unless they are applied here. Left
+            // alone it would let an admin put promotional content in front of
+            // someone who had already opted out, with no unsubscribe link in it.
+            //
+            // Suppression is re-checked against the same canonical authority the
+            // real send uses, so an opted-out address is refused here too.
+            const previewSuppression = await checkSuppressionAtSend(
+                prisma, businessId,
+                { recipientId: 'preview', normalizedEmail: normalizeEmail(destination), displayName: 'Preview', contactIds: [], organizationNames: [] },
+                new Date(),
+            );
+            if (previewSuppression.suppressed) {
+                return NextResponse.json(
+                    { ok: false, error: 'That address has unsubscribed from promotional email, so the test was not sent.' },
+                    { status: 409 },
+                );
+            }
+
+            // And the preview carries the same footer and headers the real send
+            // does — a preview that differs from the real message is a preview
+            // that lies, and the footer is part of what the tenant is approving.
+            const testOrigin = resolveOutreachOrigin(req);
+            const previewToken = await sealUnsubscribeToken({ businessId, email: destination });
+            const previewContent = applyUnsubscribeFooter(rendered, previewToken && testOrigin
+                ? { token: previewToken, origin: testOrigin, brandName: business.name }
+                : null);
+            if (!previewContent) {
+                return NextResponse.json(
+                    { ok: false, error: 'Email sending is not fully configured yet, so the test was not sent.' },
+                    { status: 503 },
+                );
+            }
+
             const provider = new ResendOutreachProvider();
             const result = await provider.send({
-                to: destination, subject: rendered.subject, html: rendered.html, text: rendered.text,
+                to: destination, subject: previewContent.subject,
+                html: previewContent.html, text: previewContent.text,
                 from: sender.from, replyTo: sender.replyTo,
+                headers: previewContent.headers,
             });
 
             if (result.outcome === 'failed') {
@@ -138,6 +180,28 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         if (!message.approved_at) return NextResponse.json({ error: 'Approve the email before sending.' }, { status: 400 });
         if (batch.status !== 'audience_ready') {
             return NextResponse.json({ error: 'Review the audience before sending.' }, { status: 400 });
+        }
+
+        // ── OUTREACH-CONSENT-1 — READINESS GATE, BEFORE ANY STATE MOVES ─────
+        //
+        // runSend refuses a run it cannot attach an unsubscribe link to, but by
+        // the time it could tell us, this route has already moved the batch to
+        // 'sending' — and the guard above only lets an 'audience_ready' batch
+        // send. A missing secret would therefore strand the batch in 'sending'
+        // FOREVER and permanently brick that audience over a config problem.
+        //
+        // So it is checked here, with the other readiness gates, while the batch
+        // is still untouched. runSend's own refusal remains as a backstop for any
+        // future caller that skips this.
+        if (!unsubscribeSecret()) {
+            return NextResponse.json(
+                {
+                    ok: false,
+                    code: 'missing_unsubscribe_capability',
+                    error: 'Sending is not configured yet, so nothing was sent. Nobody was contacted and you can send this again once it is set up.',
+                },
+                { status: 503 },
+            );
         }
 
         // Frozen snapshot only — recipients are never recalculated at send time.
@@ -208,7 +272,40 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
                 });
             },
             from: sender.from, replyTo: sender.replyTo, now: new Date(),
+            // OUTREACH-CONSENT-1 — this is promotional outreach, so every
+            // message carries a per-recipient unsubscribe link and the
+            // List-Unsubscribe headers. runSend refuses the whole run rather
+            // than send without them.
+            unsubscribe: { origin: resolveOutreachOrigin(req), brandName: business.name },
         });
+
+        // ── OUTREACH-CONSENT-1 — A REFUSAL IS NOT A FAILED SEND ─────────────
+        //
+        // runSend refuses outright when the server has no unsubscribe capability:
+        // no recipient was claimed, no provider was called, nothing happened. So
+        // the batch and message are left EXACTLY as they were rather than being
+        // stamped failed — a configuration problem must not consume the tenant's
+        // one shot at this audience. Reported as a failure with a reason, not as
+        // `ok: true` with a silent zero.
+        if (summary.refusal) {
+            // Backstop only — the gate above should have caught this. Because
+            // the batch has already been moved to 'sending', it is put BACK so
+            // the audience stays sendable rather than being stranded outside the
+            // one status this route accepts.
+            await prisma.outreachBatch.update({ where: { id: batch.id }, data: { status: 'audience_ready' } });
+            await prisma.outreachMessage.update({
+                where: { id: message.id },
+                data: { status: 'approved', send_started_at: null },
+            });
+            return NextResponse.json(
+                {
+                    ok: false,
+                    code: summary.refusal,
+                    error: 'Sending is not configured yet, so nothing was sent. Nobody was contacted and you can send this again once it is set up.',
+                },
+                { status: 503 },
+            );
+        }
 
         await prisma.outreachBatch.update({ where: { id: batch.id }, data: { status: summary.batchStatus } });
         await prisma.outreachMessage.update({
