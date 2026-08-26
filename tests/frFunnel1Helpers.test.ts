@@ -283,12 +283,18 @@ describe('triageOpportunity — pre-campaign next actions', () => {
 
     it('degrades safely when optional fields are missing', () => {
         expect(() => triageOpportunity({ status: 'new' }, NOW)).not.toThrow();
-        // FR-REBOOK-1: a payload with NO inquiry now asks for the date rather than
-        // for a reply. This assertion previously expected 'respond_to_inquiry',
-        // which was the old output for an empty object — and which became a real
-        // untruth once the tenant could open an opportunity themselves. There is
-        // no inquiry on such a row and nobody is waiting for an answer.
-        expect(triageOpportunity({ status: 'new' }, NOW).action?.kind).toBe('await_preferred_dates');
+        // FR-REBOOK-1A: an ABSENT inquiries array is a thin payload, and the
+        // standing contract there is "fewer signals, never a wrong one" — so it
+        // keeps its original answer. It is a SUPPLIED empty array that means
+        // "there are none", and that case is covered below.
+        expect(triageOpportunity({ status: 'new' }, NOW).action?.kind).toBe('respond_to_inquiry');
+    });
+
+    it('a SUPPLIED empty inquiry list asks for the date, not for a reply', () => {
+        // The owner-initiated shape: /api/opportunities always selects the
+        // relation, so a returning organization reports [].
+        expect(triageOpportunity({ status: 'new', inquiries: [] }, NOW).action?.kind)
+            .toBe('await_preferred_dates');
     });
 
     it('an opportunity WITH an unanswered inquiry still asks for a reply', () => {

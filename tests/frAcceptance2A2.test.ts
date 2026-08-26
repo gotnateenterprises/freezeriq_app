@@ -971,8 +971,13 @@ describe('PART E — last_human_followup_at is named for what every writer does'
     it('the platform send path really does transmit through FreezerIQ', () => {
         // Confirms the third caller is not itself a mailto handoff.
         const dialog = read('components/crm2/RespondToInquiryDialog.tsx');
-        expect(dialog).toMatch(/fetch\('\/api\/email\/send'/);
-        expect(dialog).toMatch(/template: 'lead_intro'/);
+        // FR-REBOOK-1A: the send moved to an opportunity-scoped route so the
+        // RECIPIENT can be derived server-side instead of travelling from the
+        // browser. The property here — this caller really transmits through
+        // FreezerIQ rather than handing off to a mail client — is unchanged.
+        expect(dialog).toMatch(/\/respond/);
+        expect(dialog).toMatch(/method: 'POST'/);
+        expect(dialog).not.toMatch(/mailto:/);
     });
 
     it('the name says HUMAN, not MANUAL — the distinction is human vs. the automatic ack', () => {

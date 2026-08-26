@@ -10,10 +10,11 @@
  * that did work only recorded that a reply had happened somewhere else.
  *
  * This is the real reply. It reuses the existing authorised send path rather
- * than inventing an email stack: POST /api/email/send is session-authenticated,
- * resolves a tenant-branded sender through getTenantSender(), and already ships
- * a `lead_intro` template written for exactly this moment. Six production
- * surfaces already call it.
+ * than inventing an email stack. FR-REBOOK-1A moved it from the generic
+ * POST /api/email/send — which took the recipient from the browser — to
+ * POST /api/opportunities/[id]/respond, which derives the recipient from the
+ * opportunity inside this tenant and renders the body server-side. The canonical
+ * `lead_intro` template is still the only source of the message.
  *
  * The pattern is the one StartFundraiserWizard established and comments as
  * "user-initiated only, NEVER auto-sent": draft, review, edit, then send.
@@ -21,7 +22,7 @@
  * because a dialog opened either.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Loader2, Mail, Send, X } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -48,7 +49,18 @@ export function RespondToInquiryDialog({
      */
     onResponded: () => Promise<boolean>;
 }) {
-    const [to, setTo] = useState(target.contactEmail ?? '');
+    // ── FR-REBOOK-1A: the draft comes from the server, and so does the recipient.
+    //
+    // `to` used to be editable client state seeded from the row, and the send
+    // route took it verbatim — its tenant-ownership preflight keys on
+    // `customerId`, which this call never sent, so nothing tied the address to
+    // the organization being answered. It is now derived server-side from the
+    // opportunity's own customer and shown read-only.
+    const [to, setTo] = useState<string | null>(null);
+    const [subject, setSubject] = useState('');
+    const [text, setText] = useState('');
+    const [loadingDraft, setLoadingDraft] = useState(true);
+    const [draftError, setDraftError] = useState<string | null>(null);
     const [sending, setSending] = useState(false);
     const [sent, setSent] = useState(false);
     /** The platform accepted the request but sent nothing — see the truth gate below. */
@@ -58,22 +70,47 @@ export function RespondToInquiryDialog({
     /** The email is gone and the CRM did NOT store it. The worst case, said out loud. */
     const [recordFailed, setRecordFailed] = useState(false);
 
+    // Fetch the canonical draft — the SAME EMAIL_TEMPLATES.lead_intro the
+    // automatic acknowledgement renders, with this tenant's brand resolved
+    // server-side. Rendering a second copy in the browser would be a template
+    // that drifts from the one the platform actually sends.
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch(`/api/opportunities/${target.opportunityId}/respond`, {
+                    credentials: 'same-origin',
+                });
+                const data = await res.json().catch(() => ({}));
+                if (cancelled) return;
+                if (!res.ok) {
+                    setDraftError(data?.error || 'Could not load the draft.');
+                } else {
+                    setTo(data?.to ?? null);
+                    setSubject(data?.subject ?? '');
+                    setText(data?.text ?? '');
+                }
+            } catch {
+                if (!cancelled) setDraftError('Could not load the draft.');
+            } finally {
+                if (!cancelled) setLoadingDraft(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [target.opportunityId]);
+
     const send = useCallback(async () => {
-        if (sending || !to.trim()) return;
+        if (sending || !subject.trim() || !text.trim()) return;
         setSending(true);
         try {
-            const res = await fetch('/api/email/send', {
+            // Opportunity-scoped: the recipient is derived from the opportunity's
+            // customer inside this tenant. Only what the owner actually edited
+            // travels — no recipient, no template key, no identity.
+            const res = await fetch(`/api/opportunities/${target.opportunityId}/respond`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'same-origin',
-                body: JSON.stringify({
-                    to: to.trim(),
-                    // The existing lead-response template. The server fills subject
-                    // and body from it and signs with this tenant's sender identity.
-                    template: 'lead_intro',
-                    customerName: target.contactName ?? '',
-                    organizationName: target.organizationName,
-                }),
+                body: JSON.stringify({ subject: subject.trim(), text }),
             });
             const data = await res.json().catch(() => ({}));
 
@@ -88,7 +125,7 @@ export function RespondToInquiryDialog({
 
             // ── THE SAFETY-MODE TRUTH GATE ───────────────────────────────────
             //
-            // /api/email/send runs in a safety mode whenever RESEND_API_KEY is
+            // The respond route runs in a safety mode whenever RESEND_API_KEY is
             // absent or EMAIL_LIVE is not 'true'. In that mode it logs, returns
             // HTTP 200 with { mocked: true }, and CONTACTS NO PROVIDER. Nothing
             // reaches the volunteer.
@@ -247,33 +284,62 @@ export function RespondToInquiryDialog({
                 ) : (
                     <div className="space-y-4">
                         <div>
-                            <label htmlFor="respond-to" className="mb-1 block text-xs font-bold text-slate-500">Send to</label>
-                            <input
-                                id="respond-to"
-                                type="email"
-                                value={to}
-                                onChange={(e) => setTo(e.target.value)}
-                                placeholder="name@organization.org"
-                                className={inputCls}
-                            />
-                            {!target.contactEmail && (
+                            <label className="mb-1 block text-xs font-bold text-slate-500">Send to</label>
+                            {/* Read-only on purpose. The address is resolved server-side
+                                from the organization this opportunity belongs to, so a
+                                reply cannot be redirected from the browser. */}
+                            <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                                {loadingDraft ? 'Loading…' : (to ?? 'No email address on file')}
+                            </p>
+                            {!loadingDraft && !to && (
                                 <p className="mt-1 text-[11px] text-amber-600">
-                                    This inquiry has no email address on file. Enter one to reply.
+                                    This organization has no email address on file. Add one on their
+                                    profile, then reply.
                                 </p>
                             )}
                         </div>
 
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
-                            <p className="mb-1 flex items-center gap-1.5 font-bold text-slate-700 dark:text-slate-200">
-                                <Mail size={12} /> Your standard fundraiser introduction
-                            </p>
-                            <p>
-                                Sends your saved introduction — how the fundraiser works and an
-                                invitation to pick a preferred date and a backup — from your
-                                business, with replies coming back to you. It quotes no percentage;
-                                what the organization keeps is settled when you confirm the date.
+                        <div>
+                            <label htmlFor="respond-subject" className="mb-1 block text-xs font-bold text-slate-500">Subject</label>
+                            <input
+                                id="respond-subject"
+                                type="text"
+                                value={subject}
+                                onChange={(e) => setSubject(e.target.value)}
+                                disabled={loadingDraft}
+                                maxLength={200}
+                                className={inputCls}
+                            />
+                        </div>
+
+                        <div>
+                            <label htmlFor="respond-body" className="mb-1 block text-xs font-bold text-slate-500">
+                                <span className="inline-flex items-center gap-1.5"><Mail size={12} /> Message</span>
+                            </label>
+                            {/* The REAL outgoing body, prefilled from the canonical
+                                template and editable before it goes. This dialog used to
+                                DESCRIBE the message instead of showing it, so the owner
+                                could not read or personalise a word of what went out. */}
+                            <textarea
+                                id="respond-body"
+                                value={loadingDraft ? 'Loading your introduction…' : text}
+                                onChange={(e) => setText(e.target.value)}
+                                disabled={loadingDraft}
+                                rows={14}
+                                spellCheck
+                                className={inputCls + ' text-[13px] leading-relaxed'}
+                            />
+                            <p className="mt-1 text-[11px] text-slate-400">
+                                Your standard fundraiser introduction, ready to personalise. Sent from
+                                your business, with replies coming back to you.
                             </p>
                         </div>
+
+                        {draftError && (
+                            <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+                                {draftError}
+                            </p>
+                        )}
 
                         <div className="flex justify-end gap-2">
                             <button onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold dark:border-slate-700">
@@ -281,7 +347,7 @@ export function RespondToInquiryDialog({
                             </button>
                             <button
                                 onClick={send}
-                                disabled={sending || !to.trim()}
+                                disabled={sending || loadingDraft || !to || !subject.trim() || !text.trim()}
                                 aria-busy={sending}
                                 className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
                             >

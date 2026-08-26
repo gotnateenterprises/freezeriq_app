@@ -98,7 +98,12 @@ describe('the response dialog only claims what it has confirmed', () => {
     });
 
     it('the recovery retries the RECORD only — never the send', () => {
-        const retry = dialog.slice(dialog.indexOf('const retryRecord'), dialog.indexOf('return ('));
+        // FR-REBOOK-1A: the end anchor was 'return (', which now also matches the
+        // draft-loading effect's cleanup — `return () => { cancelled = true; }` —
+        // that sits ABOVE this function, making the slice empty. Anchored on the
+        // component's actual JSX return instead. The property is untouched: the
+        // recovery re-records and never re-sends.
+        const retry = dialog.slice(dialog.indexOf('const retryRecord'), dialog.indexOf('return (\n        <div'));
         expect(retry).toMatch(/onResponded\(\)/);
         expect(retry).not.toMatch(/fetch\(/);
         expect(retry).not.toMatch(/email\/send/);
@@ -317,8 +322,18 @@ describe('the lead intro email is the sending tenant', () => {
         // plainly that the share is settled later.
         const dialog = read('components/crm2/RespondToInquiryDialog.tsx');
         expect(dialog).not.toMatch(/how the fundraiser works, what the/);
-        expect(dialog).toMatch(/quotes no percentage/);
-        expect(dialog).toMatch(/settled when you confirm the date/);
+        // FR-REBOOK-1A: the descriptive blurb is gone entirely — the dialog now
+        // shows the ACTUAL message body instead of describing it, which is a
+        // stronger answer to the same worry. What must never happen is the dialog
+        // promising a share, so that is asserted directly.
+        expect(dialog).not.toMatch(/\d+\s*%/);
+        expect(dialog).not.toMatch(/what the organization keeps/i);
+        // And the real body is present and editable rather than summarised.
+        expect(dialog).toMatch(/id="respond-body"/);
+        // FR-REBOOK-1A adversarial review: the owner edits TEXT, not HTML —
+        // accepting markup from the browser would have made this a general HTML
+        // email composer rather than a personalisation box.
+        expect(dialog).toMatch(/onChange=\{\(e\) => setText\(e\.target\.value\)\}/);
     });
 });
 

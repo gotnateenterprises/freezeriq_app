@@ -404,8 +404,15 @@ describe('responding to a new inquiry is a real action', () => {
     });
 
     it('it reuses the existing authorized send path', () => {
-        expect(dialog).toMatch(/fetch\('\/api\/email\/send'/);
-        expect(dialog).toMatch(/template: 'lead_intro'/);
+        // FR-REBOOK-1A: still an authorized server route, now scoped to the
+        // opportunity so the recipient is derived rather than posted. The
+        // canonical lead_intro template is still the only source of the message —
+        // it is rendered server-side and returned to the dialog for editing, so
+        // there is no second copy to drift.
+        expect(dialog).toMatch(/opportunities\/\$\{target\.opportunityId\}\/respond/);
+        expect(dialog).toMatch(/credentials: 'same-origin'/);
+        const respondRoute = read('app/api/opportunities/[id]/respond/route.ts');
+        expect(respondRoute).toMatch(/EMAIL_TEMPLATES\.lead_intro/);
     });
 
     it('builds no email stack of its own', () => {

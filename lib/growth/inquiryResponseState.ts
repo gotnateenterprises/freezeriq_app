@@ -64,6 +64,22 @@ export interface InquiryAckFacts {
  * state is real: the provider was called and the outcome was never established.
  */
 export type InquiryResponseState =
+    /**
+     * FR-REBOOK-1A — there is no inquiry at all, so there is nothing to answer.
+     *
+     * An opportunity the tenant opened themselves ("Start Next Fundraiser" for an
+     * organization they already know) has no FundraiserInquiry: nobody filled in
+     * the public form. Until this state existed, an empty inquiry list fell
+     * through to `needs_first_response`, and every surface that trusted that
+     * answer told the owner an inquiry was waiting for a reply. Edgar County Farm
+     * Bureau — zero inquiries — was shown "0 inquiries · not yet answered",
+     * "Respond to new inquiry" and "A new fundraiser inquiry has not been answered
+     * yet" in Production.
+     *
+     * Absence of an inquiry is a different fact from an unanswered inquiry, and
+     * collapsing the two is what manufactured an obligation that did not exist.
+     */
+    | 'no_inquiry'
     /** A person at the tenant replied, and that reply applies to this inquiry. */
     | 'manual_response'
     /** The provider accepted an automatic acknowledgement for this inquiry. */
@@ -154,6 +170,42 @@ export function resolveInquiryResponse(
     const latestInquiryAt = toDate(newest?.received_at);
     const autoAckSentAt = toDate(newest?.ack_sent_at);
     const autoAckClaimedAt = toDate(newest?.ack_claimed_at);
+
+    // ── FR-REBOOK-1A: no inquiry, nothing to answer. Decided FIRST.
+    //
+    // Every branch below reasons about "the newest inquiry". With a supplied but
+    // EMPTY list there is no newest inquiry, and the function used to fall all the
+    // way through to needs_first_response — asserting that something nobody sent
+    // was waiting for a reply.
+    //
+    // AN EMPTY ARRAY IS NOT THE SAME AS AN ABSENT ONE, and the difference is the
+    // whole correctness of this branch:
+    //
+    //   inquiries: []        the caller looked and there are none  -> no_inquiry
+    //   inquiries: undefined the caller did not supply them        -> unchanged
+    //
+    // The standing thin-payload contract is "fewer signals, never a wrong one", so
+    // a caller that omits the relation keeps every prior behaviour. Only a caller
+    // that positively reports zero inquiries gets the new answer — and
+    // /api/opportunities always selects the relation, so Edgar reports [].
+    //
+    // Keyed on the rows, deliberately. An earlier fix for this same symptom keyed
+    // on a received_at timestamp, and the API supplies
+    // `firstInquiry?.received_at ?? o.created_at` — never null — so the guard
+    // never fired in Production while every unit test passed. received_at is not
+    // even a column on FundraiserOpportunity; it belongs to FundraiserInquiry and
+    // is synthesised for the triage payload. The rows are the only honest evidence.
+    if (Array.isArray(inquiries) && !newest) {
+        return {
+            state: 'no_inquiry',
+            latestInquiryAt: null,
+            autoAckSentAt: null,
+            autoAckClaimedAt: null,
+            manualResponseApplies: false,
+            outreachAt: null,
+            lastHumanFollowUpAt: null,
+        };
+    }
 
     // ── WHO ANSWERED THE NEWEST INQUIRY ─────────────────────────────────────
     //

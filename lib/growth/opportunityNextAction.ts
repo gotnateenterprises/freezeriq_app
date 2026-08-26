@@ -168,16 +168,18 @@ export function triageOpportunity(o: OpportunityForTriage, now: Date): Opportuni
     // conversation that sends a FRESH inquiry is owed a reply to it, and the old
     // status gate would have filed that under "waiting on the organization".
     //
-    // FR-REBOOK-1: gated on an inquiry EXISTING. An opportunity the tenant opened
-    // themselves — "Start Next Fundraiser" for an organization they already know —
-    // has no inquiry at all, because nobody filled in the public form. Without
-    // this check `resolveInquiryResponse` reports needs_first_response for the
-    // empty list, and a returning organization the owner just chose to call was
-    // shown "Respond to new inquiry — a new fundraiser inquiry has not been
-    // answered yet". There is no inquiry and nobody is waiting; the real next step
-    // is the date, which the branches below already ask for.
-    const hasInquiry = (o.inquiries?.length ?? 0) > 0 || toDate(o.received_at) !== null;
-    if (hasInquiry && response.state === 'needs_first_response') {
+    // FR-REBOOK-1A: `no_inquiry` is now its own state, decided by
+    // resolveInquiryResponse from the inquiry rows themselves, so this branch
+    // simply never matches for an owner-initiated opportunity.
+    //
+    // The first attempt at this guard lived here and read
+    // `inquiries.length > 0 || toDate(o.received_at) !== null`. It passed every
+    // unit test and still shipped the bug, because /api/opportunities sends
+    // `received_at: firstInquiry?.received_at ?? o.created_at` — always a real
+    // date — so the OR clause was permanently true against the only caller that
+    // matters. The lesson is in the fix: absence is decided from the rows, once,
+    // in the module that owns the question.
+    if (response.state === 'needs_first_response') {
         const waitingFrom = response.latestInquiryAt ?? toDate(o.received_at);
         const waiting = hoursSince(waitingFrom, now);
         const overdue = waiting !== null && waiting >= UNANSWERED_INQUIRY_HOURS;

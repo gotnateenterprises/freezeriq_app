@@ -519,10 +519,47 @@ describe('FR-REBOOK-1 · the owner lands on the date conversation, not a fake in
         expect(funnelBucket(ownerInitiated, NOW_T)).toBeTruthy();
     });
 
-    it('the gate is an inquiry EXISTING, not a status', () => {
-        const src = code('lib/growth/opportunityNextAction.ts');
-        expect(src).toContain('const hasInquiry =');
-        expect(src).toContain("hasInquiry && response.state === 'needs_first_response'");
+    it('the gate is a SUPPLIED-but-empty inquiry list, decided in one place', () => {
+        // FR-REBOOK-1A moved this decision into resolveInquiryResponse as its own
+        // state, so every surface reads one answer instead of each inferring it.
+        // The previous guard lived in triage and keyed on `received_at`, which
+        // /api/opportunities always populates — so it never fired in Production.
+        const st = code('lib/growth/inquiryResponseState.ts');
+        expect(st).toContain("| 'no_inquiry'");
+        expect(st).toContain('if (Array.isArray(inquiries) && !newest) {');
+        expect(st).toContain("state: 'no_inquiry'");
+
+        // And triage no longer carries a private copy of the rule.
+        const na = code('lib/growth/opportunityNextAction.ts');
+        expect(na).not.toContain('const hasInquiry =');
+    });
+
+    it('EXECUTED against the real API payload shape, which defeated the last fix', () => {
+        const { resolveInquiryResponse } = require('@/lib/growth/inquiryResponseState');
+        const { triageOpportunity, funnelBucket } = require('@/lib/growth/opportunityNextAction');
+        const now = new Date('2026-08-26T12:00:00.000Z');
+        // /api/opportunities sends `received_at: firstInquiry?.received_at ?? o.created_at`,
+        // so it is NEVER null. This is Edgar's actual row.
+        const edgar: any = {
+            status: 'new',
+            received_at: '2026-08-26T04:01:44.329Z',
+            first_response_at: null,
+            preferred_delivery_date: null,
+            confirmed_delivery_date: null,
+            updated_at: '2026-08-26T04:01:44.329Z',
+            inquiries: [],
+        };
+        expect(resolveInquiryResponse(edgar.first_response_at, edgar.inquiries).state).toBe('no_inquiry');
+        expect(triageOpportunity(edgar, now).action?.kind).toBe('await_preferred_dates');
+        expect(funnelBucket(edgar, now)).not.toBe('new_leads');
+    });
+
+    it('an ABSENT inquiries array keeps the thin-payload contract', () => {
+        const { resolveInquiryResponse } = require('@/lib/growth/inquiryResponseState');
+        // "Fewer signals, never a wrong one" — omitting the relation is not a
+        // claim that there are none.
+        expect(resolveInquiryResponse(null, undefined).state).toBe('needs_first_response');
+        expect(resolveInquiryResponse(null, []).state).toBe('no_inquiry');
     });
 });
 

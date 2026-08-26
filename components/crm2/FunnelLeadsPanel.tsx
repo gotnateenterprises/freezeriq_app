@@ -36,7 +36,7 @@ interface Opportunity {
     // FR-ACCEPTANCE-2A.1 — all four derived server-side by resolveInquiryResponse
     // so the list, the drawer and the next action cannot drift apart.
     latest_inquiry_at: string | null;
-    response_state: 'manual_response' | 'auto_ack_sent' | 'auto_ack_uncertain' | 'needs_first_response';
+    response_state: 'no_inquiry' | 'manual_response' | 'auto_ack_sent' | 'auto_ack_uncertain' | 'needs_first_response';
     auto_ack_sent_at: string | null;
     /** The reply that applies to the NEWEST inquiry, which first_response_at may predate by months. */
     manual_response_at: string | null;
@@ -447,10 +447,21 @@ export function FunnelLeadsPanel({ onCountChange }: FunnelLeadsPanelProps = {}) 
                                             <p className="truncate text-xs text-slate-500">
                                                 {o.customer.contact_name || '—'} · {o.customer.contact_email || '—'} · {o.customer.contact_phone || '—'}
                                             </p>
+                                            {/* FR-REBOOK-1A: "not yet answered" is about an inquiry,
+                                                so it is only said when one exists. An opportunity the
+                                                owner opened themselves has none — Edgar read
+                                                "0 inquiries · not yet answered", which invented a
+                                                reply nobody was owed. */}
                                             <p className="mt-1 text-xs text-slate-500">
-                                                {o.inquiry_count} inquir{o.inquiry_count === 1 ? 'y' : 'ies'}
-                                                {o.first_inquiry_at ? ` · first ${new Date(o.first_inquiry_at).toLocaleDateString()}` : ''}
-                                                {o.response_hours !== null ? ` · replied in ${Math.round(o.response_hours)}h` : ' · not yet answered'}
+                                                {o.response_state === 'no_inquiry' ? (
+                                                    'Started by you · no website inquiry'
+                                                ) : (
+                                                    <>
+                                                        {o.inquiry_count} inquir{o.inquiry_count === 1 ? 'y' : 'ies'}
+                                                        {o.first_inquiry_at ? ` · first ${new Date(o.first_inquiry_at).toLocaleDateString()}` : ''}
+                                                        {o.response_hours !== null ? ` · replied in ${Math.round(o.response_hours)}h` : ' · not yet answered'}
+                                                    </>
+                                                )}
                                             </p>
                                             <p className="mt-1 text-xs text-slate-500">
                                                 Preferred {fmtDate(o.preferred_delivery_date)} · Backup {fmtDate(o.alternate_delivery_date)} · Confirmed {fmtDate(o.confirmed_delivery_date)}
@@ -550,7 +561,13 @@ export function FunnelLeadsPanel({ onCountChange }: FunnelLeadsPanelProps = {}) 
                                             )
                                         )}
 
-                                        {!o.manual_response_applies && (
+                                        {/* FR-REBOOK-1A: inquiry-response actions require an inquiry.
+                                            "Respond to inquiry" and "I replied elsewhere" both record
+                                            an answer to something somebody sent. With no inquiry there
+                                            is nothing to answer and nothing to record, and offering
+                                            them manufactured an obligation Edgar never created. The
+                                            date controls below remain — they are the real next step. */}
+                                        {o.response_state !== 'no_inquiry' && !o.manual_response_applies && (
                                             <>
                                                 {/* FR-ACCEPTANCE-2A.1 — THE DUPLICATE-INTRODUCTION GATE.
 

@@ -650,7 +650,10 @@ describe('who answered the newest inquiry', () => {
         // The standing thin-payload contract: fewer signals, never a wrong one.
         expect(resolveInquiryResponse(hAgo(1), undefined).state).toBe('manual_response');
         expect(resolveInquiryResponse(null, undefined).state).toBe('needs_first_response');
-        expect(resolveInquiryResponse(null, []).state).toBe('needs_first_response');
+        // FR-REBOOK-1A: a SUPPLIED but empty list is 'no_inquiry' — the caller
+        // looked and there are none. An ABSENT list still degrades as before,
+        // which is what the two assertions above pin.
+        expect(resolveInquiryResponse(null, []).state).toBe('no_inquiry');
     });
 
     it('an unreadable received_at never drops an inquiry from view', () => {
@@ -812,7 +815,7 @@ describe('every follow-up instruction has a means to act on it', () => {
         // See the "combined mailto + record" describe block below for the full
         // behavioral proof.
         const src = panel();
-        const block = src.slice(src.indexOf("o.action?.kind === 'send_follow_up' ||"), src.indexOf('{!o.manual_response_applies'));
+        const block = src.slice(src.indexOf("o.action?.kind === 'send_follow_up' ||"), src.indexOf('!o.manual_response_applies'));
         expect(block).toMatch(/onClick/);
         expect(block).toMatch(/mutate\(o\.id, \{ action: 'mark_responded' \}/);
         // "I replied elsewhere" remains available as the SEPARATE off-platform
@@ -837,7 +840,7 @@ describe('every follow-up instruction has a means to act on it', () => {
         // the buttons, and an unusable address hides the link — leaving an
         // instruction with nothing at all to act on.
         const src = panel();
-        const block = src.slice(src.indexOf("o.action?.kind === 'send_follow_up' ||"), src.indexOf('{!o.manual_response_applies'));
+        const block = src.slice(src.indexOf("o.action?.kind === 'send_follow_up' ||"), src.indexOf('!o.manual_response_applies'));
         expect(block).toMatch(/No usable email address on file/);
         expect(block).toMatch(/mailtoHref\(o\.customer\.contact_email\) \? \(/);
     });
