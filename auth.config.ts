@@ -63,6 +63,7 @@ export const authConfig = {
                 nextUrl.pathname.startsWith('/settings') ||
                 nextUrl.pathname.startsWith('/admin') ||
                 nextUrl.pathname.startsWith('/recipes') ||
+                nextUrl.pathname.startsWith('/bundles') ||
                 nextUrl.pathname.startsWith('/commercial') ||
                 nextUrl.pathname.startsWith('/customers') ||
                 nextUrl.pathname.startsWith('/campaigns') ||

@@ -121,9 +121,16 @@ export async function POST(req: Request) {
                 for (const content of bundle.contents) {
                     let recipeId = null;
 
-                    // Try matching by SKU (Best)
+                    // Try matching by SKU (Best). BUNDLE-SECURITY-1: Recipe.sku
+                    // is globally unique, so this must be scoped to the importing
+                    // business or an export naming another tenant's SKU would
+                    // attach that tenant's recipe. The name match below was
+                    // already scoped; this one was not.
                     if (content.recipe?.sku) {
-                        const r = await prisma.recipe.findUnique({ where: { sku: content.recipe.sku } });
+                        const r = await prisma.recipe.findFirst({
+                            where: { sku: content.recipe.sku, business_id: businessId },
+                            select: { id: true }
+                        });
                         if (r) recipeId = r.id;
                     }
 

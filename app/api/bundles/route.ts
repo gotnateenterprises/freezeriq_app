@@ -87,6 +87,28 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'Name and SKU are required' }, { status: 400 });
         }
 
+        // BUNDLE-SECURITY-1. Create must prove recipe ownership before it
+        // writes, exactly as PUT /api/bundles/[id] already does. Without this,
+        // an explicit recipe_id belonging to another tenant (or to no tenant)
+        // could be attached to a new bundle and would then leak that recipe's
+        // name, SKU and derived costs back through GET /api/bundles.
+        if (data.contents && Array.isArray(data.contents)) {
+            const submittedRecipeIds: string[] = [...new Set(
+                data.contents.map((item: any) => item.recipe_id).filter(Boolean)
+            )] as string[];
+
+            if (submittedRecipeIds.length > 0) {
+                const ownedRecipes = await prisma.recipe.findMany({
+                    where: { id: { in: submittedRecipeIds }, business_id: session.user.businessId },
+                    select: { id: true }
+                });
+
+                if (ownedRecipes.length !== submittedRecipeIds.length) {
+                    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+                }
+            }
+        }
+
         // Create Bundle
         const bundle = await prisma.bundle.create({
             data: {
@@ -112,7 +134,12 @@ export async function POST(req: Request) {
 
                 // If we have a nested recipe object (from export), try to find by SKU
                 if (!recipeId && item.child_recipe?.sku) {
-                    const found = await prisma.recipe.findUnique({ where: { sku: item.child_recipe.sku } });
+                    // Recipe.sku is globally unique, so an unscoped lookup can
+                    // resolve to another tenant's recipe. Scope the match.
+                    const found = await prisma.recipe.findFirst({
+                        where: { sku: item.child_recipe.sku, business_id: session.user.businessId },
+                        select: { id: true }
+                    });
                     if (found) recipeId = found.id;
                 }
 
