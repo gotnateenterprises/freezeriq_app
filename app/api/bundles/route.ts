@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { calculateRecipeCost } from '@/lib/cost_engine';
+import {
+    resolveBundleContents,
+    isBundleContentsError,
+    type ResolvedBundleContent,
+} from '@/lib/bundleContents';
 
 export async function GET(req: Request) {
     try {
@@ -87,73 +92,52 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'Name and SKU are required' }, { status: 400 });
         }
 
-        // BUNDLE-SECURITY-1. Create must prove recipe ownership before it
-        // writes, exactly as PUT /api/bundles/[id] already does. Without this,
-        // an explicit recipe_id belonging to another tenant (or to no tenant)
-        // could be attached to a new bundle and would then leak that recipe's
-        // name, SKU and derived costs back through GET /api/bundles.
-        if (data.contents && Array.isArray(data.contents)) {
-            const submittedRecipeIds: string[] = [...new Set(
-                data.contents.map((item: any) => item.recipe_id).filter(Boolean)
-            )] as string[];
+        // BUNDLE-PERSISTENCE-FIX. Resolve and validate the entire intended
+        // recipe set BEFORE anything is written. This also carries the
+        // BUNDLE-SECURITY-1 ownership guarantee: resolveBundleContents proves
+        // every recipe belongs to this business, so a foreign recipe_id can
+        // neither be attached nor leak its costs back through GET /api/bundles.
+        let resolvedContents: ResolvedBundleContent[] = [];
+        if (data.contents !== undefined) {
+            try {
+                resolvedContents = await resolveBundleContents(
+                    prisma, data.contents, session.user.businessId
+                );
+            } catch (err) {
+                if (isBundleContentsError(err)) {
+                    return NextResponse.json({ error: err.message }, { status: err.status });
+                }
+                throw err;
+            }
+        }
 
-            if (submittedRecipeIds.length > 0) {
-                const ownedRecipes = await prisma.recipe.findMany({
-                    where: { id: { in: submittedRecipeIds }, business_id: session.user.businessId },
-                    select: { id: true }
+        // Bundle and its contents commit together, so a failure part-way
+        // through can no longer leave a bundle holding fewer recipes than the
+        // caller asked for while the response still reports success.
+        const bundle = await prisma.$transaction(async (tx) => {
+            const created = await tx.bundle.create({
+                data: {
+                    name: data.name,
+                    sku: data.sku,
+                    description: data.description,
+                    serving_tier: data.serving_tier || 'family',
+                    is_active: data.is_active ?? true,
+                    show_on_storefront: data.show_on_storefront ?? false,
+                    order_cutoff_date: data.order_cutoff_date ? new Date(data.order_cutoff_date) : null,
+                    price: data.price ? Number(data.price) : null,
+                    catalog_id: data.catalog_id || null, // Added catalog_id
+                    business_id: session.user.businessId
+                }
+            });
+
+            if (resolvedContents.length > 0) {
+                await tx.bundleContent.createMany({
+                    data: resolvedContents.map((c) => ({ ...c, bundle_id: created.id }))
                 });
-
-                if (ownedRecipes.length !== submittedRecipeIds.length) {
-                    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-                }
             }
-        }
 
-        // Create Bundle
-        const bundle = await prisma.bundle.create({
-            data: {
-                name: data.name,
-                sku: data.sku,
-                description: data.description,
-                serving_tier: data.serving_tier || 'family',
-                is_active: data.is_active ?? true,
-                show_on_storefront: data.show_on_storefront ?? false,
-                order_cutoff_date: data.order_cutoff_date ? new Date(data.order_cutoff_date) : null,
-                price: data.price ? Number(data.price) : null,
-                catalog_id: data.catalog_id || null, // Added catalog_id
-                business_id: session.user.businessId
-            }
+            return created;
         });
-
-        // 2. Handle Contents (If Importing)
-        if (data.contents && Array.isArray(data.contents)) {
-            for (const item of data.contents) {
-                // We expect item to have a child_recipe SKU or ID
-                // Ideally we match by SKU for portability
-                let recipeId = item.recipe_id; // Direct ID (if same DB)
-
-                // If we have a nested recipe object (from export), try to find by SKU
-                if (!recipeId && item.child_recipe?.sku) {
-                    // Recipe.sku is globally unique, so an unscoped lookup can
-                    // resolve to another tenant's recipe. Scope the match.
-                    const found = await prisma.recipe.findFirst({
-                        where: { sku: item.child_recipe.sku, business_id: session.user.businessId },
-                        select: { id: true }
-                    });
-                    if (found) recipeId = found.id;
-                }
-
-                if (recipeId) {
-                    await prisma.bundleContent.create({
-                        data: {
-                            bundle_id: bundle.id,
-                            recipe_id: recipeId,
-                            quantity: Number(item.quantity) || 1
-                        }
-                    });
-                }
-            }
-        }
 
         return NextResponse.json(bundle);
     } catch (e: any) {

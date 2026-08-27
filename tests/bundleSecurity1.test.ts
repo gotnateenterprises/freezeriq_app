@@ -57,6 +57,9 @@ beforeEach(() => {
     jest.clearAllMocks();
     db.bundle.findMany.mockResolvedValue([]);
     db.recipe.findMany.mockResolvedValue([]);
+    // BUNDLE-PERSISTENCE-FIX made create transactional, so the double has to
+    // actually run the callback rather than returning undefined.
+    db.$transaction.mockImplementation(async (fn: any) => fn(db));
 });
 
 // ===========================================================================
@@ -252,15 +255,25 @@ describe('property 5 — client-supplied ids are never proof of ownership', () =
     });
 
     it('a foreign recipe cannot be smuggled in by SKU instead of id', () => {
-        const src = read('app/api/bundles/route.ts');
-        expect(src).not.toContain('findUnique({ where: { sku: item.child_recipe.sku } })');
-        expect(src).toMatch(/sku: item\.child_recipe\.sku,\s*business_id: session\.user\.businessId/);
+        // BUNDLE-PERSISTENCE-FIX moved recipe resolution out of the route bodies
+        // and into one shared authority, so the scoping now lives there. The
+        // property is unchanged; only its home moved.
+        const src = read('lib/bundleContents.ts');
+        expect(src).not.toMatch(/findFirst\(\{\s*where:\s*\{\s*sku:\s*ref\.sku\s*\}/);
+        expect(src).toMatch(/sku: ref\.sku,\s*business_id: businessId/);
+        // No route may resolve a recipe by SKU on its own any more.
+        for (const p of ['app/api/bundles/route.ts', 'app/api/bundles/import/route.ts']) {
+            expect(read(p)).not.toMatch(/recipe\.find\w+\(\{\s*where:\s*\{\s*sku/);
+        }
     });
 
-    it('the import path resolves SKUs within the importing business only', () => {
+    it('the import path resolves recipes AND bundles within the business only', () => {
         const src = read('app/api/bundles/import/route.ts');
         expect(src).not.toContain('findUnique({ where: { sku: content.recipe.sku } })');
-        expect(src).toMatch(/sku: content\.recipe\.sku,\s*business_id: businessId/);
+        // Bundle.sku is globally unique too: an unscoped bundle lookup let an
+        // import target — and wipe — another tenant's bundle.
+        expect(src).not.toMatch(/bundle\.findUnique\(\{\s*where:\s*\{\s*sku/);
+        expect(src).toMatch(/sku: bundle\.sku,\s*business_id: businessId/);
     });
 
     it('no bundle write path trusts a client-supplied business_id', () => {
@@ -335,7 +348,10 @@ describe('property 6 — the owning tenant still works', () => {
         expect(res.status).toBe(200);
         expect(db.bundle.create).toHaveBeenCalled();
         expect(db.bundle.create.mock.calls[0][0].data.business_id).toBe(TENANT_A);
-        expect(db.bundleContent.create).toHaveBeenCalledTimes(2);
+        // BUNDLE-PERSISTENCE-FIX writes the whole validated set in one
+        // createMany inside the transaction, rather than a per-row loop.
+        expect(db.bundleContent.createMany).toHaveBeenCalledTimes(1);
+        expect(db.bundleContent.createMany.mock.calls[0][0].data).toHaveLength(2);
     });
 
     it('a bundle with no contents is unaffected by the new ownership gate', async () => {
@@ -355,16 +371,16 @@ describe('property 6 — the owning tenant still works', () => {
 
 // ===========================================================================
 describe('no-drift — this phase changed only the security boundary', () => {
-    it('BUNDLE-PERSISTENCE-FIX work was NOT smuggled in', () => {
+    it('the silent-skip that this suite once pinned is now gone (BUNDLE-PERSISTENCE-FIX)', () => {
         const create = read('app/api/bundles/route.ts');
         const imp = read('app/api/bundles/import/route.ts');
-        // The create loop is still non-transactional and still silently skips;
-        // fixing that is the next phase and must not ride along in a security
-        // release. If this fails, the phase boundary was crossed.
-        expect(create).toContain('if (recipeId) {');
-        expect(create).not.toContain('$transaction');
-        expect(imp).toContain('if (recipeId) {');
-        // image_url persistence is likewise deferred.
+        // This assertion previously pinned `if (recipeId) {` in place to prove
+        // the security release had not drifted into persistence work. That work
+        // is now done deliberately in its own phase, so the pin is inverted:
+        // no bundle write path may silently skip an unresolvable recipe again.
+        expect(create).not.toContain('if (recipeId) {');
+        expect(imp).not.toContain('if (recipeId) {');
+        // image_url persistence remains deferred.
         expect(create).not.toContain('image_url');
     });
 

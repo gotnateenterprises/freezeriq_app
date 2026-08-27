@@ -2,6 +2,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
+import {
+    resolveBundleContents,
+    isBundleContentsError,
+    type ResolvedBundleContent,
+} from '@/lib/bundleContents';
 
 export async function POST(req: Request) {
     try {
@@ -62,100 +67,115 @@ export async function POST(req: Request) {
             }
         }
 
-        // 2. Process Bundles
+        // 2. Plan every bundle — READ ONLY.
+        //
+        // BUNDLE-PERSISTENCE-FIX. Import is the path that could destroy data:
+        // it deleted a bundle's contents and only then tried to resolve the
+        // replacements, skipping whatever it could not match. A five-recipe
+        // export naming two unmatchable recipes left three rows behind and
+        // still returned success. Nothing is written now until the entire
+        // payload has been resolved, so an import this server cannot fully
+        // honour fails with every existing bundle untouched.
+        const planned: {
+            target: { id: string } | null;
+            bundle: any;
+            catalogId: string | null;
+            contents: ResolvedBundleContent[] | null;
+        }[] = [];
+
         for (const bundle of bundles) {
             // Map Catalog ID
             const newCatalogId = bundle.catalog_id && catalogMap.has(bundle.catalog_id)
-                ? catalogMap.get(bundle.catalog_id)
+                ? catalogMap.get(bundle.catalog_id) ?? null
                 : null;
 
             // Check existence by name (or SKU)
             let existing = await prisma.bundle.findFirst({
-                where: { business_id: businessId, name: bundle.name }
+                where: { business_id: businessId, name: bundle.name },
+                select: { id: true }
             });
 
             if (!existing && bundle.sku) {
-                existing = await prisma.bundle.findUnique({
-                    where: { sku: bundle.sku }
+                // Bundle.sku is globally unique, so this lookup must be scoped:
+                // unscoped, an export naming another tenant's bundle SKU
+                // resolved to THEIR bundle and the replacement below then wiped
+                // its contents.
+                existing = await prisma.bundle.findFirst({
+                    where: { sku: bundle.sku, business_id: businessId },
+                    select: { id: true }
                 });
             }
 
-            if (existing) {
-                // Update basic fields
-                await prisma.bundle.update({
-                    where: { id: existing.id },
-                    data: {
-                        description: bundle.description,
-                        price: Number(bundle.menu_price || bundle.price || 0),
-                        serving_tier: bundle.serving_tier,
-                        is_active: bundle.is_active,
-                        catalog_id: newCatalogId
-                    }
-                });
-                results.bundlesUpdated++;
-            } else {
-                // Create
-                existing = await prisma.bundle.create({
-                    data: {
-                        name: bundle.name,
-                        sku: bundle.sku || `B-${Date.now()}-${Math.floor(Math.random() * 1000)}`, // Fallback SKU
-                        description: bundle.description,
-                        price: Number(bundle.menu_price || bundle.price || 0),
-                        serving_tier: bundle.serving_tier,
-                        is_active: bundle.is_active,
-                        catalog_id: newCatalogId,
-                        business_id: businessId
-                    }
-                });
-                results.bundlesCreated++;
+            let contents: ResolvedBundleContent[] | null = null;
+            if (bundle.contents !== undefined) {
+                // Throws BundleContentsError if any entry cannot be matched to a
+                // recipe owned by this business. No mutation has happened yet.
+                contents = await resolveBundleContents(prisma, bundle.contents, businessId);
             }
 
-            // 3. Process Contents
-            // We need to re-link recipes. This is tricky if recipes don't match.
-            // We'll attempt to match by SKU first, then Name.
-            if (bundle.contents && Array.isArray(bundle.contents)) {
-                // Clear existing contents to avoid duplicates? Or logic to merge?
-                // Safest is to wipe and recreate for this bundle to ensure strict sync.
-                await prisma.bundleContent.deleteMany({ where: { bundle_id: existing.id } });
+            planned.push({ target: existing, bundle, catalogId: newCatalogId, contents });
+        }
 
-                for (const content of bundle.contents) {
-                    let recipeId = null;
+        // 3. Apply the whole plan in ONE transaction, so any failure rolls the
+        // entire import back rather than leaving some bundles replaced and
+        // others not.
+        await prisma.$transaction(async (tx) => {
+            for (const step of planned) {
+                const { bundle, catalogId } = step;
+                let bundleId: string;
 
-                    // Try matching by SKU (Best). BUNDLE-SECURITY-1: Recipe.sku
-                    // is globally unique, so this must be scoped to the importing
-                    // business or an export naming another tenant's SKU would
-                    // attach that tenant's recipe. The name match below was
-                    // already scoped; this one was not.
-                    if (content.recipe?.sku) {
-                        const r = await prisma.recipe.findFirst({
-                            where: { sku: content.recipe.sku, business_id: businessId },
-                            select: { id: true }
-                        });
-                        if (r) recipeId = r.id;
-                    }
+                if (step.target) {
+                    await tx.bundle.update({
+                        where: { id: step.target.id },
+                        data: {
+                            description: bundle.description,
+                            price: Number(bundle.menu_price || bundle.price || 0),
+                            serving_tier: bundle.serving_tier,
+                            is_active: bundle.is_active,
+                            catalog_id: catalogId
+                        }
+                    });
+                    bundleId = step.target.id;
+                    results.bundlesUpdated++;
+                } else {
+                    const created = await tx.bundle.create({
+                        data: {
+                            name: bundle.name,
+                            sku: bundle.sku || `B-${Date.now()}-${Math.floor(Math.random() * 1000)}`, // Fallback SKU
+                            description: bundle.description,
+                            price: Number(bundle.menu_price || bundle.price || 0),
+                            serving_tier: bundle.serving_tier,
+                            is_active: bundle.is_active,
+                            catalog_id: catalogId,
+                            business_id: businessId
+                        }
+                    });
+                    bundleId = created.id;
+                    results.bundlesCreated++;
+                }
 
-                    // Try matching by Name
-                    if (!recipeId && content.recipe?.name) {
-                        const r = await prisma.recipe.findFirst({ where: { business_id: businessId, name: content.recipe.name } });
-                        if (r) recipeId = r.id;
-                    }
-
-                    if (recipeId) {
-                        await prisma.bundleContent.create({
-                            data: {
-                                bundle_id: existing.id,
-                                recipe_id: recipeId,
-                                quantity: Number(content.quantity) || 1
-                            }
+                // Replacement and recreation share one transaction, so the wipe
+                // can never outlive a failed recreate.
+                if (step.contents !== null) {
+                    await tx.bundleContent.deleteMany({ where: { bundle_id: bundleId } });
+                    if (step.contents.length > 0) {
+                        await tx.bundleContent.createMany({
+                            data: step.contents.map((c) => ({ ...c, bundle_id: bundleId }))
                         });
                     }
                 }
             }
-        }
+        }, { timeout: 30_000 });
 
         return NextResponse.json({ success: true, results });
 
     } catch (e: any) {
+        // An unresolvable or foreign recipe is a caller error with a message
+        // worth showing, not an opaque 500 — and by the time it is thrown,
+        // nothing has been written.
+        if (isBundleContentsError(e)) {
+            return NextResponse.json({ error: e.message }, { status: e.status });
+        }
         console.error("Import Error:", e);
         return NextResponse.json({ error: e.message }, { status: 500 });
     }

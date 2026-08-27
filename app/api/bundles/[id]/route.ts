@@ -2,6 +2,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
+import {
+    resolveBundleContents,
+    isBundleContentsError,
+    type ResolvedBundleContent,
+} from '@/lib/bundleContents';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
     const session = await auth();
@@ -50,21 +55,27 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
         const data = await req.json();
 
-        // Pre-check: verify all submitted recipe_ids belong to this tenant
-        if (data.contents && data.contents.length > 0) {
-            const submittedRecipeIds: string[] = [...new Set(
-                data.contents.map((item: any) => item.recipe_id).filter(Boolean)
-            )] as string[];
-
-            if (submittedRecipeIds.length > 0) {
-                const ownedRecipes = await prisma.recipe.findMany({
-                    where: { id: { in: submittedRecipeIds }, business_id: session.user.businessId },
-                    select: { id: true }
-                });
-
-                if (ownedRecipes.length !== submittedRecipeIds.length) {
-                    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        // BUNDLE-PERSISTENCE-FIX. The whole intended set is resolved and proven
+        // owned BEFORE the transaction opens, so a payload this server cannot
+        // fully honour never reaches the deleteMany below and the bundle keeps
+        // the contents it already had. The former pre-check validated only the
+        // ids it could see: `.filter(Boolean)` dropped a null recipe_id from the
+        // count, which then failed deep inside the transaction as an opaque 500.
+        //
+        // `data.contents === undefined` still means "leave contents alone"; an
+        // empty array still means "remove them all". Only the validation of a
+        // submitted list changed.
+        let resolvedContents: ResolvedBundleContent[] | null = null;
+        if (data.contents !== undefined) {
+            try {
+                resolvedContents = await resolveBundleContents(
+                    prisma, data.contents, session.user.businessId
+                );
+            } catch (err) {
+                if (isBundleContentsError(err)) {
+                    return NextResponse.json({ error: err.message }, { status: err.status });
                 }
+                throw err;
             }
         }
 
@@ -86,22 +97,18 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
                 }
             });
 
-            // 2. Sync Contents if provided
-            if (data.contents) {
+            // 2. Sync Contents if provided — using the set validated above, so
+            // the rows written are exactly the rows that were proven resolvable.
+            if (resolvedContents !== null) {
                 // Wipe existing contents
                 await tx.bundleContent.deleteMany({
                     where: { bundle_id: id }
                 });
 
                 // Re-insert new contents
-                if (data.contents.length > 0) {
+                if (resolvedContents.length > 0) {
                     await tx.bundleContent.createMany({
-                        data: data.contents.map((item: any, index: number) => ({
-                            bundle_id: id,
-                            recipe_id: item.recipe_id,
-                            position: index,
-                            quantity: Number(item.quantity) || 1.0
-                        }))
+                        data: resolvedContents.map((c) => ({ ...c, bundle_id: id }))
                     });
                 }
             }
