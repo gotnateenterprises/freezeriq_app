@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast, Toaster } from 'sonner';
+import { deriveSharingStarted, buildShareMessage, buildShareSms } from '@/lib/coordinatorLaunch';
 import type { CampaignAsset } from '@/lib/campaignAssets';
 import type { PromoScriptsResponse } from '@/lib/generatePromoScripts';
 import { computeFundraiserProgress, formatBundleCount } from '@/lib/fundraiserMetrics';
@@ -29,7 +30,10 @@ import { format } from 'date-fns';
 import CopyButton from '@/components/coordinator/CopyButton';
 import { ActionBar } from '@/components/coordinator/ActionBar';
 import { ProgressHero } from '@/components/coordinator/ProgressHero';
-import { SetupChecklist } from '@/components/coordinator/SetupChecklist';
+// FR-COORD-123: SetupChecklist's three nudges live on in LaunchSteps, which is
+// mounted in EVERY active phase (the old card vanished the moment the first
+// order arrived) and anchors completion to durable server truth.
+import { LaunchSteps } from '@/components/coordinator/LaunchSteps';
 import { ShareCenter } from '@/components/coordinator/ShareCenter';
 import { RecentOrders } from '@/components/coordinator/RecentOrders';
 import { QuietLinks } from '@/components/coordinator/QuietLinks';
@@ -141,6 +145,95 @@ export default function CoordinatorPortal() {
         fetchCampaign();
     }, []);
 
+    // ── FR-COORD-123: the tracker refreshes itself ─────────────────────────
+    //
+    // The portal used to fetch once on mount and again only after the
+    // coordinator's OWN mutations, so a supporter's online order sat invisible
+    // until a manual browser reload. This is the smallest safe fix: poll the
+    // one canonical coordinator endpoint about every 30 seconds, plus a
+    // refresh when the window regains focus.
+    //
+    //  - no new data source — the same GET the portal already trusts;
+    //  - an in-flight guard so requests never overlap;
+    //  - skipped while the tab is hidden, and stopped once the server says the
+    //    campaign is closed (nothing new can arrive);
+    //  - interval and focus listener cleaned up on unmount;
+    //  - the coordinator's own mutations still call fetchCampaign() directly.
+    const pollInFlight = useRef(false);
+    const campaignClosedRef = useRef(false);
+    const sessionLapsedRef = useRef(false);
+    const [sessionLapsed, setSessionLapsed] = useState(false);
+    /**
+     * A background poll must never overwrite a NEWER answer. `fetchCampaign`
+     * and the poll are two independent writers of the same state, and a slow
+     * poll that started first can land last — reverting an order the
+     * coordinator just added. Every response carries the sequence number of
+     * its request and is discarded if a later request has already answered.
+     */
+    const campaignSeq = useRef(0);
+    const applyCampaign = useCallback((seq: number, data: any) => {
+        if (seq < campaignSeq.current) return false;   // a newer answer won
+        campaignSeq.current = seq;
+        setCampaign(data);
+        return true;
+    }, []);
+    /**
+     * True while the coordinator is mid-interaction with something the poll
+     * would destroy: the offline-order form (its selections and typed buyer
+     * details live in local state), the AI composer, or the Previous
+     * Supporters invitation editor. Refreshing under any of those replaces
+     * the campaign object, which can change the rendered phase and remount
+     * the very panel being typed into.
+     */
+    const editingRef = useRef(false);
+    const refreshCampaignQuietly = useCallback(async () => {
+        if (pollInFlight.current) return;
+        if (sessionLapsedRef.current) return;
+        if (editingRef.current) return;
+        if (typeof document !== 'undefined' && document.hidden) return;
+        if (campaignClosedRef.current) return;
+        pollInFlight.current = true;
+        const seq = ++campaignSeq.current;
+        try {
+            const res = await fetch('/api/coordinator');
+            // A lapsed session (fixed 24h TTL) answers 401 forever. Silently
+            // swallowing it would leave the coordinator staring at data frozen
+            // at the moment their session died, with no way to know.
+            if (res.status === 401) {
+                sessionLapsedRef.current = true;
+                setSessionLapsed(true);
+                return;
+            }
+            if (res.ok) {
+                const data = await res.json();
+                if (!data.error) applyCampaign(seq, data);
+            }
+        } catch {
+            /* a failed background poll must never surface an error */
+        } finally {
+            pollInFlight.current = false;
+        }
+    }, [applyCampaign]);
+    useEffect(() => {
+        const id = setInterval(refreshCampaignQuietly, 30_000);
+        window.addEventListener('focus', refreshCampaignQuietly);
+        return () => {
+            clearInterval(id);
+            window.removeEventListener('focus', refreshCampaignQuietly);
+        };
+    }, [refreshCampaignQuietly]);
+
+    // Native Web Share availability — resolved after mount so the server and
+    // first client render agree.
+    const [canNativeShare, setCanNativeShare] = useState(false);
+    useEffect(() => {
+        setCanNativeShare(typeof navigator !== 'undefined' && typeof (navigator as any).share === 'function');
+    }, []);
+
+    // FR-REBOOK-2 integration: the PreviousSupporters card reports its
+    // reachable audience size so the 1-2-3 card can offer the invite action.
+    const [psReachable, setPsReachable] = useState(0);
+
     // ── Cancel Order Handler ──
     const handleCancelOrder = async () => {
         if (!cancelOrderId) return;
@@ -198,6 +291,9 @@ export default function CoordinatorPortal() {
         // neutral invalid-link state. Coordinators remain external users who
         // arrive by private link (CONSTITUTION §15).
 
+        // Shares the poll's sequence counter: a foreground fetch is always the
+        // newest intent, and a slow background poll must not land on top of it.
+        const seq = ++campaignSeq.current;
         try {
             const res = await fetch('/api/coordinator');
             const data = await res.json();
@@ -207,7 +303,7 @@ export default function CoordinatorPortal() {
                 setIsLoading(false);
                 return;
             }
-            setCampaign(data);
+            applyCampaign(seq, data);
             setIsLoading(false);
 
             // Fetch campaign asset metadata (fail-safe – does not block portal)
@@ -238,7 +334,14 @@ export default function CoordinatorPortal() {
     };
 
     // ── URL helpers ── Shop order page (drives sales) vs. scoreboard ──
+    //
+    // FR-COORD-123: the canonical ordering URL is now resolved SERVER-SIDE by
+    // /api/coordinator through the same authority as the FR-REBOOK-2
+    // invitation (tenant storefront domain preferred, pinned platform origin).
+    // The browser-origin construction survives only as a fallback for a stale
+    // in-flight response that predates the field.
     const getShopOrderUrl = () => {
+        if (campaign?.share?.orderUrl) return campaign.share.orderUrl as string;
         const slug = (campaign?.customer as any)?.business?.slug;
         if (slug && campaign?.id) {
             return `${window.location.origin}/shop/${slug}/fundraiser/${campaign.id}`;
@@ -256,6 +359,83 @@ export default function CoordinatorPortal() {
         navigator.clipboard.writeText(url);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
+        // Copying the link IS the start of sharing — record it durably.
+        trackAction('share_fundraiser');
+    };
+
+    // ── FR-COORD-123: Step 2 share actions ─────────────────────────────────
+    //
+    // Each performs the REAL action and records a durable share event; the
+    // event is what makes "Sharing started" true, so opening the card alone
+    // changes nothing. Copy is derived from the CURRENT campaign only —
+    // canonical URL + current deadline, both server-resolved.
+    const shareMessage = () => buildShareMessage({
+        organizationName: campaign?.customer?.name || 'Our group',
+        businessName: campaign?.customer?.business?.name || 'freezer meal',
+        orderUrl: getShopOrderUrl(),
+        deadlineLabel: campaign?.share?.deadlineLabel ?? null,
+    });
+
+    const handleShareEmail = async () => {
+        const subject = encodeURIComponent(`Support ${campaign?.customer?.name || 'our fundraiser'}!`);
+        const message = shareMessage();
+        // Copy first, exactly like the Facebook and Text handlers. A webmail-only
+        // device — the typical school Chromebook — may have no mailto: handler
+        // at all, and a coordinator who is told "Sharing started" must still be
+        // holding the message rather than watching nothing happen.
+        try { await navigator.clipboard.writeText(message); } catch { /* clipboard optional */ }
+        toast.success('Message copied! Paste it into your email if it does not open.');
+        trackAction('share_email');
+        window.location.href = `mailto:?subject=${subject}&body=${encodeURIComponent(message)}`;
+    };
+
+    const handleShareFacebook = async () => {
+        try { await navigator.clipboard.writeText(shareMessage()); } catch { /* clipboard optional */ }
+        toast.success('Message copied! Paste it into Facebook when it opens.');
+        trackAction('share_facebook');
+        window.open(
+            `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(getShopOrderUrl())}`,
+            '_blank',
+            'width=600,height=400'
+        );
+    };
+
+    const handleShareText = async () => {
+        const msg = buildShareSms({
+            organizationName: campaign?.customer?.name || 'Our group',
+            orderUrl: getShopOrderUrl(),
+            deadlineLabel: campaign?.share?.deadlineLabel ?? null,
+        });
+        const isMobile = typeof navigator !== 'undefined' &&
+            /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        trackAction('send_text_blast');
+        if (isMobile) {
+            window.location.href = `sms:?&body=${encodeURIComponent(msg)}`;
+        } else {
+            try { await navigator.clipboard.writeText(msg); } catch { /* clipboard optional */ }
+            toast.success('Message copied! Paste it into a text to send.');
+        }
+    };
+
+    const handleCopyLink = () => {
+        navigator.clipboard.writeText(getShopOrderUrl());
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+        trackAction('copy_link');
+    };
+
+    const handleShareNative = async () => {
+        try {
+            await (navigator as any).share({
+                title: `Support ${campaign?.customer?.name || 'our fundraiser'}!`,
+                text: shareMessage(),
+            });
+            // Only a COMPLETED native share counts — canceling the sheet
+            // (AbortError) shares nothing and records nothing.
+            trackAction('share_native');
+        } catch {
+            /* canceled or unsupported — not a share */
+        }
     };
 
 
@@ -471,6 +651,12 @@ export default function CoordinatorPortal() {
         Boolean(campaign.closed_at) ||
         campaign.status === 'Closed' ||
         campaign.status === 'Settled';
+    // Keep the polling guards in sync during render.
+    // Once the server says closed, the background refresh stops (nothing new
+    // can arrive); while a modal or composer is open, the poll holds off so it
+    // cannot replace the campaign underneath an open form.
+    campaignClosedRef.current = isClosed;
+    editingRef.current = showOrderModal || showAiPanel || showSettingsModal;
 
     // Read-only settlement total (Decimal from DB → number, may be null/0)
     const settlementTotal: number | null =
@@ -518,7 +704,29 @@ export default function CoordinatorPortal() {
     const hasPaymentInfo = !!(campaign.payment_instructions || campaign.external_payment_link);
     const activeOrders = (campaign.orders || []);
     const hasFirstOrder = activeOrders.length > 0;
-    const hasSharedOnce = (actionSummary?.totalActions || 0) > 0;
+
+    // FR-COORD-123: "Sharing started" counts only SHARE-classified durable
+    // action events. The old totalActions>0 check would have marked sharing
+    // started when the coordinator merely downloaded a tracker for themselves.
+    const sharingStarted = deriveSharingStarted(actionSummary?.counts as any);
+
+    // Step 1's authority is the CAMPAIGN ROW, re-read on every poll — not the
+    // one-way client latch. `bundleSelectionDone` only ever flips false→true
+    // and never resets, so if a tenant reverts a campaign to `pending` the
+    // latch would keep claiming setup was complete. The row is consulted first
+    // and the latch remains the fallback for the moment before the first
+    // campaign payload lands.
+    const setupComplete = typeof campaign.bundle_selection_status === 'string'
+        ? (campaign.bundle_selection_status === 'selected' || campaign.bundle_selection_status === 'not_required')
+        : bundleSelectionDone;
+
+    // Where the new-order notification actually goes (Customer.contact_email —
+    // THE recipient per lib/email.ts). Null = no email is sent, and the card's
+    // support copy says so instead of promising one.
+    const notifyEmail: string | null = campaign.customer?.contact_email || null;
+
+    const scrollToPreviousSupporters = () =>
+        document.getElementById('previous-supporters')?.scrollIntoView({ behavior: 'smooth' });
 
     // Tenant name for ActionBar closed state
     const tenantName = campaign.customer?.business?.name || null;
@@ -633,20 +841,61 @@ export default function CoordinatorPortal() {
                     </div>
                 )}
 
+                {sessionLapsed && (
+                    <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
+                        <p className="text-[13px] font-black text-amber-900">Your session has expired</p>
+                        <p className="text-xs text-amber-800 font-medium leading-relaxed">
+                            Orders below may be out of date. Open your coordinator link again to sign back in.
+                        </p>
+                    </div>
+                )}
+
+                {/* ═══════════════════════════════════════════════
+                    FR-COORD-123: GET YOUR FUNDRAISER GOING — EASY AS 1-2-3
+                    One card, every active phase. Step 1's checkmark reads the
+                    campaign row itself (re-read on every poll), so it is
+                    durable server truth rather than a client invention — and
+                    it self-corrects if a tenant reverts the selection.
+                ═══════════════════════════════════════════════ */}
+                {campaignPhase !== 'complete' && (
+                    <LaunchSteps
+                        setupComplete={setupComplete}
+                        sharingStarted={sharingStarted}
+                        firstOrderReceived={hasFirstOrder}
+                        hasPaymentInfo={hasPaymentInfo}
+                        onSetPayment={() => setShowSettingsModal(true)}
+                        onShareEmail={handleShareEmail}
+                        onShareFacebook={handleShareFacebook}
+                        onShareText={handleShareText}
+                        onCopyLink={handleCopyLink}
+                        onShareNative={canNativeShare ? handleShareNative : undefined}
+                        copied={copied}
+                        previousSupportersReachable={psReachable}
+                        onPreviousSupporters={scrollToPreviousSupporters}
+                        onEnterOrder={() => { if (!isClosed) setShowOrderModal(true); }}
+                        orderingAllowed={campaign.orderMode?.allowed === true}
+                        notifyEmail={notifyEmail}
+                        coordinatorFirstName={coordinatorFirstName}
+                    />
+                )}
+
+                {/* FR-REBOOK-2 · FR-COORD-123: mounted ONCE, outside the phase
+                    branches. It used to be re-declared inside each phase, so a
+                    background poll that moved the campaign from one phase to
+                    the next unmounted and remounted it — closing an open
+                    invitation composer mid-keystroke and discarding the
+                    coordinator's edits. One mount keeps its state across every
+                    phase change. It renders nothing when there is no audience. */}
+                {campaignPhase !== 'complete' && (
+                    <div id="previous-supporters">
+                        <PreviousSupporters onAvailability={setPsReachable} />
+                    </div>
+                )}
+
                 {/* ═══════════════════════════════════════════════
                     PHASE: SETUP
                 ═══════════════════════════════════════════════ */}
                 {campaignPhase === 'setup' && (<>
-                    <SetupChecklist
-                        coordinatorFirstName={coordinatorFirstName}
-                        hasPaymentInfo={hasPaymentInfo}
-                        hasSharedOnce={hasSharedOnce}
-                        hasFirstOrder={hasFirstOrder}
-                        onSetPayment={() => setShowSettingsModal(true)}
-                        onShare={() => document.getElementById('share-center')?.scrollIntoView({ behavior: 'smooth' })}
-                        onAddOrder={() => setShowOrderModal(true)}
-                        orderingAllowed={campaign.orderMode?.allowed === true}
-                    />
                     <ProgressHero
                         dimmed
                         sold={totalBundlesSold}
@@ -697,10 +946,6 @@ export default function CoordinatorPortal() {
                         onViewAll={() => setShowAllOrders(!showAllOrders)}
                         limit={showAllOrders ? 999 : 3}
                     />
-                    {/* FR-REBOOK-2: a returning organization's own past
-                        supporters. Renders nothing when there are none, so a
-                        first-time fundraiser sees no empty shelf. */}
-                    <PreviousSupporters />
                     <QuietLinks
                         guideHref={'/coordinator/portal/guide'}
                         onOpenDownloads={handleDownloadTracker}
@@ -781,6 +1026,12 @@ export default function CoordinatorPortal() {
                             </button>
                         </div>
                     </section>
+                    {/* FR-COORD-123: pickup-day guidance — the SAME order list,
+                        no new subsystem. Who ordered, how to reach them, what
+                        they bought, what still needs payment attention. */}
+                    <div className="rounded-xl bg-indigo-50 px-4 py-2.5 text-[13px] font-semibold text-indigo-800">
+                        📋 Ordering is closed — use the order list below as your pickup-day guide.
+                    </div>
                     {/* Phase 7E-4: read-only orders — cancel hidden when campaign is closed */}
                     <RecentOrders
                         orders={activeOrders}

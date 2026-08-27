@@ -57,7 +57,16 @@ interface SendResult {
     alreadySent: number;
 }
 
-export function PreviousSupporters() {
+export function PreviousSupporters({ onAvailability }: {
+    /**
+     * FR-COORD-123 (additive, optional): reports the reachable audience size
+     * so the Easy-as-1-2-3 card can offer "Invite previous supporters" as a
+     * Step-2 channel without fetching this endpoint a second time. Purely
+     * presentational — the send contract, audience authority and canSend all
+     * remain exactly the FR-REBOOK-2 server's.
+     */
+    onAvailability?: (reachable: number) => void;
+} = {}) {
     const [data, setData] = useState<PreviousSupportersPayload | null>(null);
     const [loading, setLoading] = useState(true);
     const [open, setOpen] = useState(false);
@@ -77,6 +86,7 @@ export function PreviousSupporters() {
                 const json = (await res.json()) as PreviousSupportersPayload;
                 if (!alive) return;
                 setData(json);
+                onAvailability?.(json.counts?.reachable ?? 0);
                 // The draft is the server's, always. The editor starts from it
                 // rather than from anything composed in the browser.
                 setSubject(json.draft.subject);

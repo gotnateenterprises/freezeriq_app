@@ -268,6 +268,16 @@ export interface FundraiserCoordinatorNotificationInput {
     orderReference: string;
     /** Enables the existing tenant-aware sender (from = tenant name, replyTo = tenant contact). */
     businessId?: string;
+    /**
+     * FR-COORD-123 (Part H): whether the campaign offers ANY external way to
+     * pay — a payment link (Venmo/PayPal/CashApp) or written payment
+     * instructions. Fundraiser orders are NEVER marked paid by the platform,
+     * but when either exists the supporter MAY already have paid through it,
+     * unverified, so the email must say "verify" rather than flatly "no online
+     * payment was taken". With neither, collection by the coordinator is the
+     * whole payment story and the copy can say so plainly.
+     */
+    hasExternalPaymentLink?: boolean;
 }
 
 /**
@@ -297,6 +307,7 @@ export async function sendFundraiserCoordinatorNotification(
         totalAmount,
         orderReference,
         businessId,
+        hasExternalPaymentLink,
     } = input;
 
     if (!coordinatorEmail || coordinatorEmail.trim().length === 0) return false;
@@ -304,6 +315,27 @@ export async function sendFundraiserCoordinatorNotification(
     const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
     const total = currency.format(Number(totalAmount) || 0);
     const supporter = supporterName || 'A supporter';
+
+    // ── Payment truth (FR-COORD-123 Part H) ────────────────────────────────
+    // The platform takes no payment for fundraiser orders and never marks one
+    // paid, so this email must never imply "Paid". The one durable distinction
+    // available is whether the campaign OFFERS an external payment link:
+    //   - no link  → the supporter had no way to pay online; the coordinator
+    //                collects, full stop.
+    //   - link     → the supporter may have paid through it, unverified; the
+    //                coordinator must collect OR verify before counting it.
+    const paymentLine = hasExternalPaymentLink
+        ? `Payment still due: ${total} — needs to be collected or verified`
+        : `Payment to collect: ${total}`;
+    const paymentFooter = hasExternalPaymentLink
+        ? 'This order is held for the fundraiser until the campaign is closed out. '
+        + 'No payment has been confirmed through FreezerIQ. The supporter may have '
+        + 'used your payment link — please verify before counting this order as paid.'
+        : 'This order is held for the fundraiser until the campaign is closed out. '
+        + 'Payment is collected by you directly — no online payment was taken.';
+    const subjectTail = hasExternalPaymentLink
+        ? `${total} — verify payment`
+        : `${total} to collect`;
 
     const itemsHtml = (items || []).map(i => {
         const variantLabel = formatVariantLabel(i.variant_size);
@@ -333,21 +365,19 @@ export async function sendFundraiserCoordinatorNotification(
                     ${itemsHtml}
                 </div>
                 <div style="margin-top: 15px; border-top: 2px solid #d1d5db; padding-top: 10px;">
-                    <strong style="color: #111827;">Total to collect: ${escapeHtml(total)}</strong>
+                    <strong style="color: #111827;">${escapeHtml(paymentLine)}</strong>
                 </div>
             </div>
 
             <p style="font-size: 13px; color: #6b7280;">
-                This order is held for the fundraiser. It stays in the fundraiser workflow
-                until the campaign is closed out, and payment is collected by you directly —
-                no online payment was taken.
+                ${escapeHtml(paymentFooter)}
             </p>
         </div>
     `;
 
     return sendEmail({
         to: coordinatorEmail.trim(),
-        subject: `New fundraiser order — ${supporter} · ${total} to collect`,
+        subject: `New fundraiser order — ${supporter} · ${subjectTail}`,
         html: htmlContent,
         businessId,
     });

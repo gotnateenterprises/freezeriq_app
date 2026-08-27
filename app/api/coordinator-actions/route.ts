@@ -19,6 +19,11 @@ const VALID_ACTION_TYPES = new Set([
     'share_fundraiser',
     'send_text_blast',
     'share_facebook',
+    // FR-COORD-123: the Easy-as-1-2-3 card's share actions. These are what
+    // makes "Sharing started" durable — see lib/coordinatorLaunch.ts.
+    'share_email',
+    'share_native',
+    'copy_link',
     'copy_text_message',
     'copy_facebook_post',
     'copy_email_blurb',
@@ -26,6 +31,7 @@ const VALID_ACTION_TYPES = new Set([
     'download_tracker',
     'download_qr',
     'download_packet',
+    'download_pickup_sheet',
 ]);
 
 export async function POST(req: Request) {

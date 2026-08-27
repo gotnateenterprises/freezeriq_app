@@ -58,7 +58,7 @@ const generateInfoTemplate = (name: string, bundles: any[], branding?: any) => {
 <ol>
     <li><strong>Choose Your Bundles:</strong> Take a look at the Bundles below and let us know which 2 Bundles you'd like to offer (e.g., Family Friendly & Keto).</li>
     <li><strong>Pick Your Date:</strong> Choose your desired delivery date, time and delivery location. We will confirm date if available or get back with an alternative date.</li>
-    <li><strong>We Create Your Marketing:</strong> Once you decide, we will build a custom flyer, order tracking form, <em>plus</em> a personal online order page where supporters can order directly and a Coordinator Dashboard so you can track sales in real time!</li>
+    <li><strong>We Create Your Marketing:</strong> Once you decide, we will build a custom flyer, order tracking form, <em>plus</em> a personal online order page where supporters can order directly and a Coordinator Dashboard that updates as orders come in!</li>
 </ol>
 
 <p>Please complete the short form below with all of the information we need to get you set up in our system and your custom marketing materials ready to go!</p>

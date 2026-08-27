@@ -20,6 +20,9 @@ export type CoordinatorActionSummary = {
         share_fundraiser: number;
         send_text_blast: number;
         share_facebook: number;
+        share_email: number;
+        share_native: number;
+        copy_link: number;
         copy_text_message: number;
         copy_facebook_post: number;
         copy_email_blurb: number;
@@ -27,6 +30,7 @@ export type CoordinatorActionSummary = {
         download_tracker: number;
         download_qr: number;
         download_packet: number;
+        download_pickup_sheet: number;
     };
 };
 
@@ -34,6 +38,9 @@ const DEFAULT_COUNTS: CoordinatorActionSummary['counts'] = {
     share_fundraiser: 0,
     send_text_blast: 0,
     share_facebook: 0,
+    share_email: 0,
+    share_native: 0,
+    copy_link: 0,
     copy_text_message: 0,
     copy_facebook_post: 0,
     copy_email_blurb: 0,
@@ -41,6 +48,7 @@ const DEFAULT_COUNTS: CoordinatorActionSummary['counts'] = {
     download_tracker: 0,
     download_qr: 0,
     download_packet: 0,
+    download_pickup_sheet: 0,
 };
 
 // Human-friendly labels for the "most used" display
@@ -48,6 +56,9 @@ const ACTION_LABELS: Record<string, string> = {
     share_fundraiser: 'Share Fundraiser',
     send_text_blast: 'Text Blast',
     share_facebook: 'Facebook Share',
+    share_email: 'Email Share',
+    share_native: 'Native Share',
+    copy_link: 'Copy Link',
     copy_text_message: 'Copy Text',
     copy_facebook_post: 'Copy Facebook',
     copy_email_blurb: 'Copy Email',
@@ -55,6 +66,7 @@ const ACTION_LABELS: Record<string, string> = {
     download_tracker: 'Download Tracker',
     download_qr: 'Download QR',
     download_packet: 'Download Packet',
+    download_pickup_sheet: 'Download Pickup Sheet',
 };
 
 export async function GET(req: Request) {

@@ -173,7 +173,7 @@ export const EMAIL_TEMPLATES = {
             <h3>What happens after that</h3>
             <ol>
                 <li><strong>We confirm the details</strong> — your date, your delivery location, and what your organization earns.</li>
-                <li><strong>You get everything you need to run and share it</strong> — your own coordinator dashboard to track orders in real time, download and print flyers and order forms, and share your custom online ordering page with supporters.</li>
+                <li><strong>You get everything you need to run and share it</strong> — your own coordinator dashboard to track orders as they come in, download and print flyers and order forms, and share your custom online ordering page with supporters.</li>
                 <li><strong>Final orders and payment</strong> — final orders are due two weeks before the delivery date. Orders submitted online or entered through the coordinator panel are received by us as they come in. Your organization keeps its agreed fundraising percentage off the top, and we&rsquo;ll send an invoice for the remaining balance shortly after the order deadline, with payment due upon receipt.</li>
                 <li><strong>Delivery day</strong> — we bring the meals to you and your families collect them.</li>
             </ol>

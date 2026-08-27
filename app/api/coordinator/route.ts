@@ -23,6 +23,8 @@ import { resolveVariantSize } from '@/lib/serving_multipliers';
 import { buildBundlePriceMap } from '@/lib/pricing';
 import { resolveCampaignOrderMode, validateBundleEligibility } from '@/lib/campaignOrderBundles';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
+import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
+import { buildSupporterOrderUrl, formatOrderDeadline } from '@/lib/previousSupporterInvite';
 
 /**
  * Phase 7E-1C: Returns true if the campaign has been server-closed.
@@ -32,6 +34,40 @@ import { requireCoordinatorSession } from '@/lib/coordinatorSession';
  */
 function isCampaignClosed(campaign: any): boolean {
     return Boolean(campaign.closed_at) || campaign.status === 'Closed';
+}
+
+/**
+ * PLAN GATE SCAFFOLDING — the plans whose coordinators may use the portal.
+ *
+ * The rule this encodes is unchanged and is stated at each call site: fundraising
+ * is available on EVERY known tier today, and the gate exists to block a business
+ * with a null, empty or unrecognised plan. When CONSTITUTION §5 plan-gating
+ * lands, this is the one place to narrow to paid tiers.
+ *
+ * ── WHY THIS IS NOW A CONSTANT ──────────────────────────────────────────────
+ *
+ * It was three hand-written copies of the same literal in this file, and all
+ * three had drifted from the rule they claim to implement: they listed four of
+ * the five SubscriptionPlan values, omitting BASE — which is the SCHEMA DEFAULT
+ * (prisma/schema.prisma: `plan SubscriptionPlan @default(BASE)`). Every business
+ * created without an explicit plan is therefore BASE, and its coordinators were
+ * answered "Portal unavailable (Plan Restriction)" 403 on the portal GET, the
+ * order POST and the settings PUT alike.
+ *
+ * The omission was drift rather than commercial intent. BASE has been in the
+ * enum since the initial commit, this list was written much later and never
+ * contained it, and BASE is a PAID tier (lib/stripe.ts maps it to
+ * STRIPE_PRICE_BASE) while FREE — which the list DOES allow — has no price at
+ * all. Excluding BASE while admitting FREE is backwards under the current rule
+ * and under the future paid-tiers-only one.
+ *
+ * Listing all five is not "allow anything": an unknown, null or empty plan still
+ * fails the check, which is the only thing this gate was ever doing.
+ */
+export const COORDINATOR_PORTAL_PLANS = ['FREE', 'BASE', 'PRO', 'ULTIMATE', 'ENTERPRISE'] as const;
+
+export function planAllowsCoordinatorPortal(plan: unknown): boolean {
+    return typeof plan === 'string' && (COORDINATOR_PORTAL_PLANS as readonly string[]).includes(plan);
 }
 
 export async function GET(req: Request) {
@@ -49,11 +85,21 @@ export async function GET(req: Request) {
                     select: {
                         name: true,
                         contact_name: true,
+                        // FR-COORD-123: the address the new-order notification
+                        // actually goes to (lib/email.ts — Customer.contact_email
+                        // is THE recipient). Shown to the coordinator so the
+                        // dashboard's promise names a real inbox. This is the
+                        // org's own contact, not supporter PII.
+                        contact_email: true,
                         business_id: true,
                         business: {
                             select: {
                                 name: true,
                                 slug: true,
+                                // FR-COORD-123: the canonical share URL prefers
+                                // the tenant's storefront domain, exactly like
+                                // the FR-REBOOK-2 invitation.
+                                custom_domain: true,
                                 logo_url: true,
                                 plan: true,
                                 subscription_status: true
@@ -119,12 +165,12 @@ export async function GET(req: Request) {
         const businessId = (campaign.customer as any)?.business_id;
         const plan = business?.plan || 'FREE'; // Default to FREE if missing
 
-        // PLAN GATE SCAFFOLDING: Currently allows all known plans. Fundraising
-        // is available on every tier today. When full plan-gating is implemented
-        // (CONSTITUTION §5), tighten this list to restrict coordinator portals
-        // to paid tiers only. The gate blocks null/empty plans now.
-        const allowedPlans = ['ENTERPRISE', 'ULTIMATE', 'FREE', 'PRO'];
-        if (!allowedPlans.includes(plan)) {
+        // PLAN GATE SCAFFOLDING: allows all known plans — fundraising is
+        // available on every tier today — and blocks a null, empty or
+        // unrecognised plan. The list and the reason it now includes BASE live
+        // on COORDINATOR_PORTAL_PLANS above; narrowing to paid tiers under
+        // CONSTITUTION §5 is a change in that one place.
+        if (!planAllowsCoordinatorPortal(plan)) {
             return NextResponse.json({ error: "Portal unavailable (Plan Restriction)" }, { status: 403 });
         }
 
@@ -177,12 +223,32 @@ export async function GET(req: Request) {
             (sum: number, o: any) => sum + Number(o.total_amount || 0), 0
         );
 
+        // FR-COORD-123: the canonical supporter ordering URL, resolved
+        // SERVER-SIDE through the same authority as the FR-REBOOK-2 invitation
+        // and the printed materials — tenant storefront domain preferred,
+        // pinned platform origin otherwise, never whichever host happened to
+        // serve this request. Every share action on the dashboard uses this
+        // one value, so a coordinator cannot hand out a preview or stale URL.
+        const shareOrderUrl = buildSupporterOrderUrl(
+            resolveOutreachOrigin(req),
+            { id: campaign.id, public_token: campaign.public_token },
+            {
+                customDomain: (business as any)?.custom_domain ?? null,
+                slug: business?.slug ?? null,
+            },
+        );
+        // The CURRENT campaign's deadline, formatted without a timezone shift
+        // (same helper as the invitation email). Null when the campaign has no
+        // usable end_date — the share copy then omits the sentence.
+        const shareDeadlineLabel = formatOrderDeadline(campaign.end_date);
+
         return NextResponse.json({
             ...campaign,
             total_sales: computedTotalSales,
             canceledOrders,
             availableBundles: bundles,
-            orderMode
+            orderMode,
+            share: { orderUrl: shareOrderUrl, deadlineLabel: shareDeadlineLabel },
         });
 
     } catch (e: any) {
@@ -220,8 +286,7 @@ export async function POST(req: Request) {
         const businessId = business?.id;
         const plan = business?.plan || 'FREE';
         // PLAN GATE SCAFFOLDING: see GET handler comment for rationale
-        const allowedPlans = ['ENTERPRISE', 'ULTIMATE', 'FREE', 'PRO'];
-        if (!allowedPlans.includes(plan)) {
+        if (!planAllowsCoordinatorPortal(plan)) {
             return NextResponse.json({ error: "Portal unavailable" }, { status: 403 });
         }
 
@@ -367,8 +432,7 @@ export async function PUT(req: Request) {
         const business = (campaign.customer as any)?.business;
         const plan = business?.plan || 'FREE';
         // PLAN GATE SCAFFOLDING: see GET handler comment for rationale
-        const allowedPlans = ['ENTERPRISE', 'ULTIMATE', 'FREE', 'PRO'];
-        if (!allowedPlans.includes(plan)) {
+        if (!planAllowsCoordinatorPortal(plan)) {
             return NextResponse.json({ error: "Portal unavailable" }, { status: 403 });
         }
 

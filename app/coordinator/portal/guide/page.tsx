@@ -68,11 +68,11 @@ export default function SuccessGuide() {
         {
             icon: <Megaphone className="text-emerald-600" />,
             title: "2. The Public Order Form",
-            desc: "Your supporters see the live scoreboard and can place orders directly by emailing you!",
+            desc: "Your supporters open your ordering page, pick their bundles, and place orders online.",
             tips: [
                 "Share this link so supporters can browse meals and submit orders.",
-                "Orders are emailed directly to you for easy tracking.",
-                "The live scoreboard at the top keeps momentum going!"
+                "If your group has a contact email on file, each order is emailed to it.",
+                "The progress bar at the top keeps momentum going!"
             ],
             color: "bg-emerald-50"
         },

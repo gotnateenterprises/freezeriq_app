@@ -632,6 +632,15 @@ export async function POST(req: Request) {
                         totalAmount: Number(order.total_amount),
                         orderReference: order.external_id,
                         businessId,
+                        // FR-COORD-123 Part H: when the campaign offers ANY way to
+                        // pay outside the coordinator's hand — a payment link OR
+                        // written instructions like "Venmo @our-boosters" — the
+                        // supporter MAY already have paid, unverified. The email
+                        // then says "verify", never "Paid", and never the false
+                        // "no online payment was taken". Instructions count:
+                        // they are shown to the supporter on the confirmation
+                        // screen and in their receipt exactly like the link is.
+                        hasExternalPaymentLink: Boolean(externalPaymentLink) || Boolean(paymentInstructions?.trim()),
                     });
 
                     if (!notified) {

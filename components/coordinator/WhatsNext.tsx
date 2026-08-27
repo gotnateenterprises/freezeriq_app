@@ -33,7 +33,7 @@ export function WhatsNext({
                 <>
                     <Step n="✓" done title={`${tenantName} confirms your totals`} body="Done — your order is locked in." />
                     {deliveryWindowLabel && (
-                        <Step n="2" title={`Food arrives ${deliveryWindowLabel}`} body="You'll get an email with the exact time." />
+                        <Step n="2" title={`Food arrives ${deliveryWindowLabel}`} body={`${tenantName} will confirm the exact pickup time.`} />
                     )}
                     <Step n={deliveryWindowLabel ? '3' : '2'} title="Hand out orders with your pickup sheet"
                         body="Every family, every bundle, one checklist." />

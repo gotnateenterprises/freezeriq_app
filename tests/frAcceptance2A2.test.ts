@@ -78,7 +78,7 @@ describe('the approved item-2 wording', () => {
     it('carries the exact owner-approved sentence', () => {
         const { html } = render();
         expect(html).toContain(
-            'You get everything you need to run and share it</strong> — your own coordinator dashboard to track orders in real time, download and print flyers and order forms, and share your custom online ordering page with supporters.'
+            'You get everything you need to run and share it</strong> — your own coordinator dashboard to track orders as they come in, download and print flyers and order forms, and share your custom online ordering page with supporters.'
         );
     });
 
