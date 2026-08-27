@@ -354,6 +354,8 @@ model Customer {
   org_contacts     FundraiserOrganizationContact[] @relation("OrgRelationship")
   // FR-RETENTION-2: organizations an audience address represented.
   outreach_orgs    OutreachRecipientOrg[]          @relation("OrgOutreachLinks")
+  // MIGRATION 18: fundraiser-owned outreach batches for this organization.
+  outreach_batches OutreachBatch[]                 @relation("CustomerOutreachBatches")
   // FR-RETENTION-4: rebooking response snapshots and durable opportunities.
   rebooking_snapshots    RebookingSubmissionRevisionOrg[] @relation("OrgRevisionSnapshots")
   rebooking_opportunities RebookingOpportunity[]          @relation("OrgOpportunities")
@@ -651,6 +653,9 @@ model FundraiserCampaign {
   // Optional because every campaign predating FR-FLOW-2 has none and no
   // backfill invents one. "At most one" is the child's PRIMARY KEY, not a flag.
   primary_coordinator   FundraiserCampaignCoordinator? @relation("CampaignPrimaryCoordinator")
+  // MIGRATION 18: at most one Previous Supporters outreach batch, enforced by
+  // the partial unique index outreach_batches_one_per_campaign.
+  outreach_batches      OutreachBatch[]                @relation("CampaignOutreachBatches")
 
   // FR-FUNNEL-1: intentionally redundant with the primary key on `id`.
   // FundraiserCampaign has no business_id, so there is no [business_id, id] for
@@ -1218,10 +1223,43 @@ model SeasonalOfferingFamily {
 
 // One audience workflow for one lineup. In Checkpoint 2 this is an audience
 // SNAPSHOT only — nothing here asserts that a message was ever sent.
+// ── MIGRATION 18 · an outreach batch has ONE owner, of one of two kinds ──────
+//
+// A batch used to belong to a SeasonalOffering and nothing else. That was right
+// while the only outreach was the tenant's seasonal lineup, but FR-REBOOK-2
+// invites a fundraiser's PREVIOUS SUPPORTERS, which belongs to a campaign.
+//
+// The alternative was to fabricate a SeasonalOffering per campaign. This schema
+// already recorded, in FundraiserCampaignCoordinator, why that is unacceptable:
+// "Recording one transactional email there would mean fabricating a seasonal
+// lineup and an audience that the rebooking surfaces would then read as real."
+//
+// So the batch gains a second owner kind rather than a disguise. EXACTLY ONE is
+// present, enforced by a CHECK (outreach_batches_exactly_one_owner) that
+// requires the WHOLE shape — a campaign without its customer is rejected, not
+// merely a plain XOR on two columns.
+//
+// TENANCY IS ENFORCED BY POSTGRES, NOT BY THE CALLER. Two composite foreign keys
+// chain it, both pointing at unique indexes that already existed:
+//
+//   (business_id, customer_id) -> customers(business_id, id)
+//   (customer_id, campaign_id) -> fundraiser_campaigns(customer_id, id)
+//
+// so the batch's tenant must own the organization, and that organization must
+// own the campaign. A batch cannot be pointed at another tenant's campaign even
+// if every id is supplied deliberately. Same device as
+// FundraiserCampaignCoordinator: the duplicated customer_id IS the invariant.
 model OutreachBatch {
   id                    String    @id @default(uuid())
   business_id           String
-  seasonal_offering_id  String
+  /// Null for a fundraiser-owned batch. See the CHECK above.
+  seasonal_offering_id  String?
+  /// MIGRATION 18 — set together with customer_id for a fundraiser batch.
+  campaign_id           String?
+  /// MIGRATION 18 — the campaign's organization, duplicated so both composite
+  /// foreign keys can be keyed on it. That duplication is what makes Postgres
+  /// able to reject a cross-tenant or cross-organization batch.
+  customer_id           String?
   status                OutreachBatchStatus @default(draft)
   audience_calculated_at DateTime?
   recipient_count       Int       @default(0)
@@ -1233,16 +1271,37 @@ model OutreachBatch {
   updated_at            DateTime  @updatedAt
 
   business              Business  @relation("BusinessOutreachBatches", fields: [business_id], references: [id], onDelete: Cascade)
-  offering              SeasonalOffering @relation("OfferingBatches", fields: [business_id, seasonal_offering_id], references: [business_id, id], onDelete: Restrict)
+  offering              SeasonalOffering? @relation("OfferingBatches", fields: [business_id, seasonal_offering_id], references: [business_id, id], onDelete: Restrict)
+  // MIGRATION 18 — the fundraiser owner. Restrict, like the offering: a campaign
+  // that already has a delivery audit trail must not vanish underneath it.
+  customer              Customer?           @relation("CustomerOutreachBatches", fields: [business_id, customer_id], references: [business_id, id], onDelete: Restrict)
+  campaign              FundraiserCampaign? @relation("CampaignOutreachBatches", fields: [customer_id, campaign_id], references: [customer_id, id], onDelete: Restrict)
   recipients            OutreachRecipient[] @relation("BatchRecipients")
   // FR-RETENTION-3
   messages              OutreachMessage[]   @relation("BatchMessages")
 
-  // One audience per lineup — the double-click guarantee, enforced by the
-  // database rather than trusted to the caller.
-  @@unique([seasonal_offering_id])
+  // NOTE: "one audience per owner" — the double-click guarantee — is TWO PARTIAL
+  // unique indexes created in raw SQL, and neither is declared here:
+  //
+  //   outreach_batches_one_per_offering  ON (seasonal_offering_id)
+  //                                      WHERE seasonal_offering_id IS NOT NULL
+  //   outreach_batches_one_per_campaign  ON (campaign_id)
+  //                                      WHERE campaign_id IS NOT NULL
+  //
+  // Prisma cannot express a predicate, so declaring them would tell it about
+  // indexes that do not exist in the shape it believes — and Migration 18 made
+  // that concrete: an earlier draft of this model declared
+  // @@unique([seasonal_offering_id]) and @@unique([customer_id, campaign_id]),
+  // the second of which has no counterpart in the database at all. A later
+  // `prisma migrate dev` would have "corrected" that by folding a stray
+  // CREATE UNIQUE INDEX into an unrelated migration.
+  //
+  // Same convention as OutreachRecipient, which documents
+  // outreach_recipients_batch_one_email the same way and for the same reason.
+  // Nothing queries this model by those columns — every write is by primary key.
   @@unique([business_id, id])
   @@index([business_id, status])
+  @@index([business_id, campaign_id])
   @@map("outreach_batches")
 }
 
