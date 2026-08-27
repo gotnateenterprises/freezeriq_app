@@ -18,7 +18,19 @@ import { generateQrCode } from '@/lib/generateQrCode';
 export interface FlyerBundle {
     name: string;
     price: number;
-    servingTier: string;
+    /**
+     * CANONICAL tier only — 'serves_2' | 'serves_5', as produced by
+     * lib/coordinatorMaterialBundles.resolveMaterialBundles. This used to be a
+     * free string tested against the single literal 'couple', which is how a
+     * 'serves_2' variant landed in the family branch and printed the Family
+     * Size line at the Serves-2 price. The type now refuses the vocabulary
+     * that caused it, and the classifier below throws on anything else.
+     */
+    servingTier: 'serves_2' | 'serves_5';
+    /** CB-1 sibling key — the STRUCTURAL pairing of a family and its Serves-2
+     *  variant. Grouping falls back to the stripped name only when a legacy
+     *  row predates family_id. */
+    familyId?: string | null;
     meals: string[]; // recipe names
 }
 
@@ -151,30 +163,48 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
 
     const menuMap = new Map<string, Menu>();
     for (const b of input.bundles) {
-        // Normalise name: strip any trailing "(Serves ...)" suffix so the
-        // family and serves-2 siblings — regardless of exact suffix wording
-        // ("(Serves 2)", "(Serves a Family of 4)", etc.) — group as one menu.
+        // Group siblings by the STRUCTURAL family key when they have one; the
+        // stripped-name fallback only serves legacy rows that predate
+        // family_id. Name-only grouping split a renamed sibling into two
+        // menus, each carrying half the truth.
         const baseName = stripServingSuffix(b.name);
-        let menu = menuMap.get(baseName);
+        const key = b.familyId ?? `name:${baseName.toLowerCase()}`;
+        let menu = menuMap.get(key);
         if (!menu) {
             menu = { baseName, familyPrice: null, couplePrice: null, meals: [] };
-            menuMap.set(baseName, menu);
+            menuMap.set(key, menu);
         }
-        if (b.servingTier === 'couple') {
+        if (b.servingTier === 'serves_2') {
             menu.couplePrice = b.price;
             // Use couple meals only if we don't have any yet
             if (menu.meals.length === 0) menu.meals = b.meals;
-        } else {
-            // family (default)
+        } else if (b.servingTier === 'serves_5') {
             menu.familyPrice = b.price;
             menu.meals = b.meals;  // prefer family meals
+            menu.baseName = baseName; // the family variant names the menu
+        } else {
+            // A JS caller bypassing the type. Printing a guessed size on paper
+            // handed to supporters is the original defect — refuse instead.
+            throw new Error(
+                `generateFlyer: unrecognized servingTier "${(b as FlyerBundle).servingTier}" `
+                + `for bundle "${b.name}". Callers must classify through `
+                + `lib/coordinatorMaterialBundles.resolveMaterialBundles first.`
+            );
         }
     }
     const menus = Array.from(menuMap.values()).slice(0, 2);
 
-    // Global pricing — pick from first menu that has each tier
-    const globalFamilyPrice = menus.find(m => m.familyPrice !== null)?.familyPrice ?? 0;
-    const globalCouplePrice = menus.find(m => m.couplePrice !== null)?.couplePrice ?? 0;
+    // The page-1 "PRICING (per bundle)" box claims ONE price per size for the
+    // whole flyer, so it is only printed when every menu that has the size
+    // agrees on the number. When menus disagree, the box would be wrong for
+    // one of them — the per-menu order form on page 2 is the truth instead.
+    const uniquePrice = (values: (number | null)[]): number | null => {
+        const present = values.filter((v): v is number => v !== null);
+        if (present.length === 0) return null;
+        return present.every((v) => v === present[0]) ? present[0] : null;
+    };
+    const globalFamilyPrice = uniquePrice(menus.map(m => m.familyPrice));
+    const globalCouplePrice = uniquePrice(menus.map(m => m.couplePrice));
 
     // ═══════════════════════════════════════════════════════════════
     // PAGE 1: Fundraiser Details + Bundle Meals
@@ -241,7 +271,7 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     doc.text('PRICING (per bundle)', rightCol, detailsY);
 
     let priceY = detailsY + 9;
-    if (globalFamilyPrice > 0) {
+    if (globalFamilyPrice !== null) {
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...textDark);
@@ -250,7 +280,7 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
         doc.text(`$${globalFamilyPrice.toFixed(2)}`, rightCol + 28, priceY);
         priceY += 9;
     }
-    if (globalCouplePrice > 0) {
+    if (globalCouplePrice !== null) {
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...textDark);
@@ -285,10 +315,15 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     doc.setTextColor(...textDark);
     doc.text("What's Included", PAGE_W / 2, y + 4, { align: 'center' });
 
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...textLight);
-    doc.text('(Family Size shown  -  also available in Serves 2)', PAGE_W / 2, y + 9, { align: 'center' });
+    // The "also available in Serves 2" caption is a CLAIM — print it only when
+    // every menu genuinely has both sizes, or it advertises a size that cannot
+    // be ordered.
+    if (menus.length > 0 && menus.every(m => m.familyPrice !== null && m.couplePrice !== null)) {
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...textLight);
+        doc.text('(Family Size shown  -  also available in Serves 2)', PAGE_W / 2, y + 9, { align: 'center' });
+    }
     y += 14;
 
     const bundleColW = menus.length === 1
@@ -453,46 +488,45 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     doc.text('Total', MARGIN + 155, y + 7);
     y += 12;
 
-    // One section per menu, with sub-rows for Family Size and Serves 2
+    // One section per menu, one sub-row per size THE MENU ACTUALLY HAS.
+    //
+    // The previous version printed both rows unconditionally and priced them
+    // with a cross-menu fallback (`menu.familyPrice ?? globalFamilyPrice ?? 0`),
+    // so a menu missing a size borrowed ANOTHER menu's price — or printed
+    // $0.00. A paper order form is a contract; a size that cannot be ordered
+    // gets no row, and a price is only ever the menu's own.
     doc.setFontSize(9);
     menus.forEach((menu, mi) => {
         const menuLabel = formatMenuLabel(menu.baseName, menus.length === 1 ? null : mi + 1);
+        const rows: { label: string; price: number }[] = [];
+        if (menu.familyPrice !== null) rows.push({ label: 'Family Size', price: menu.familyPrice });
+        if (menu.couplePrice !== null) rows.push({ label: 'Serves 2', price: menu.couplePrice });
 
-        // Family Size row
         if (mi % 2 === 0) {
             doc.setFillColor(248, 250, 252);
             doc.rect(MARGIN, y - 3, CONTENT_W, 12, 'F');
         }
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(...textDark);
-        doc.text(menuLabel, MARGIN + 6, y + 4);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...textLight);
-        doc.text('Family Size', MARGIN + 68, y + 4);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(...hexToRgb(primary));
-        const fp = menu.familyPrice ?? globalFamilyPrice ?? 0;
-        doc.text(`$${fp.toFixed(2)}`, MARGIN + 108, y + 4);
-        doc.setDrawColor(203, 213, 225);
-        doc.setLineWidth(0.3);
-        doc.line(MARGIN + 132, y + 5, MARGIN + 148, y + 5);
-        doc.line(MARGIN + 152, y + 5, MARGIN + CONTENT_W - 6, y + 5);
-        y += 12;
-
-        // Serves 2 row
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...textDark);
-        doc.text('', MARGIN + 6, y + 4); // blank bundle name for sub-row
-        doc.setTextColor(...textLight);
-        doc.text('Serves 2', MARGIN + 68, y + 4);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(...hexToRgb(primary));
-        const cp = menu.couplePrice ?? globalCouplePrice ?? 0;
-        doc.text(`$${cp.toFixed(2)}`, MARGIN + 108, y + 4);
-        doc.setDrawColor(203, 213, 225);
-        doc.line(MARGIN + 132, y + 5, MARGIN + 148, y + 5);
-        doc.line(MARGIN + 152, y + 5, MARGIN + CONTENT_W - 6, y + 5);
-        y += 14;
+        // The name column is 58mm wide; a long menu label used to run straight
+        // into the Size column. Clip to what fits — the full name is on the
+        // page-1 card.
+        const nameFit = (doc.splitTextToSize(menuLabel, 58) as string[])[0] ?? menuLabel;
+        rows.forEach((row, ri) => {
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(...textDark);
+            // The menu name labels its first row; size sub-rows underneath.
+            doc.text(ri === 0 ? nameFit : '', MARGIN + 6, y + 4);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(...textLight);
+            doc.text(row.label, MARGIN + 68, y + 4);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(...hexToRgb(primary));
+            doc.text(`$${row.price.toFixed(2)}`, MARGIN + 108, y + 4);
+            doc.setDrawColor(203, 213, 225);
+            doc.setLineWidth(0.3);
+            doc.line(MARGIN + 132, y + 5, MARGIN + 148, y + 5);
+            doc.line(MARGIN + 152, y + 5, MARGIN + CONTENT_W - 6, y + 5);
+            y += ri === rows.length - 1 ? 14 : 12;
+        });
     });
 
     y += 4;

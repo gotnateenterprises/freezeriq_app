@@ -16,7 +16,9 @@ import { prisma } from '@/lib/db';
 import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
 import { Prisma } from '@prisma/client';
 import { generatePromoScripts, type BundleSummary } from '@/lib/generatePromoScripts';
-import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
+import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
+import { buildSupporterOrderUrl } from '@/lib/previousSupporterInvite';
+import { resolveMaterialBundles, groupMaterialMenus } from '@/lib/coordinatorMaterialBundles';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 
 export async function GET(req: Request) {
@@ -51,12 +53,22 @@ export async function GET(req: Request) {
 
         // 2. Fetch assigned bundles (or fallback to active business bundles)
         //    Same pattern as flyer/packet download routes
+        //
+        // FR-COORD-123: pending/misconfigured/closed campaigns used to get a
+        // 200 with full promotional copy for a fundraiser nobody could order
+        // from — refuse instead.
         const orderMode = await resolveCampaignOrderMode(campaign, businessId);
+        if (!orderMode.allowed) {
+            return NextResponse.json(
+                { error: 'safeMessage' in orderMode ? orderMode.safeMessage : 'This campaign cannot generate promo scripts right now.' },
+                { status: 422 }
+            );
+        }
         let bundles: any[] = [];
 
         if (orderMode.mode === 'legacy') {
             bundles = await prisma.$queryRaw`
-                SELECT id, name, price, serving_tier FROM bundles
+                SELECT id, name, price, serving_tier, family_id FROM bundles
                 WHERE business_id = ${businessId}
                 AND is_active = true
                 AND show_on_storefront = true
@@ -65,7 +77,7 @@ export async function GET(req: Request) {
             `;
         } else if (orderMode.mode === 'selected' && orderMode.activeOrderableBundleIds.length > 0) {
             bundles = await prisma.$queryRaw`
-                SELECT id, name, price, serving_tier FROM bundles
+                SELECT id, name, price, serving_tier, family_id FROM bundles
                 WHERE id IN(${Prisma.join(orderMode.activeOrderableBundleIds)})
                 AND business_id = ${businessId}
                 AND is_active = true
@@ -73,27 +85,50 @@ export async function GET(req: Request) {
             `;
         }
 
-        // 3. Build public fundraiser URL → prefer shop order page
-        const origin = new URL(req.url).origin;
-        let publicUrl: string;
+        // 3. Canonical tier + price validation, then ONE entry per menu
+        //    (FR-COORD-123). Both size variants used to enter the scripts as
+        //    separate bundles, so every menu was advertised twice — and a
+        //    null price rendered as "$0".
+        const resolved = resolveMaterialBundles(bundles);
+        if (!resolved.ok) {
+            return NextResponse.json({ error: resolved.error, code: resolved.code }, { status: 422 });
+        }
+        const menus = groupMaterialMenus(resolved.bundles);
+
+        // 4. Supporter ordering URL through the canonical FR-REBOOK-2
+        //    authority — coordinators paste these scripts everywhere, so the
+        //    link must be the tenant's durable storefront URL, never whatever
+        //    host served this request.
+        let tenant: { slug: string | null; customDomain: string | null } = { slug: null, customDomain: null };
         if (businessId) {
             const business = await prisma.business.findUnique({
                 where: { id: businessId },
-                select: { slug: true },
+                select: { slug: true, custom_domain: true },
             });
-            if (business?.slug) {
-                publicUrl = `${origin}/shop/${business.slug}/fundraiser/${campaign.id}`;
-            } else {
-                publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
-            }
-        } else {
-            publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
+            if (business) tenant = { slug: business.slug, customDomain: business.custom_domain };
+        }
+        const publicUrl = buildSupporterOrderUrl(
+            resolveOutreachOrigin(req),
+            { id: campaign.id, public_token: campaign.public_token },
+            tenant,
+        );
+        if (!publicUrl) {
+            return NextResponse.json(
+                { error: 'No supporter ordering page could be resolved for this campaign. Check the storefront configuration.' },
+                { status: 422 }
+            );
         }
 
-        // 4. Generate scripts
-        const bundleSummaries: BundleSummary[] = bundles.map(b => ({
-            name: b.name,
-            price: Number(b.price),
+        // 5. Generate scripts — one line per menu, both sizes when both exist.
+        //    Every menu has at least one validated positive price by
+        //    construction (groupMaterialMenus only sees resolved bundles), so
+        //    the assertion cannot introduce the $0 this route used to print.
+        const bundleSummaries: BundleSummary[] = menus.map(m => ({
+            name: m.baseName,
+            // The family price is the headline; the Serves-2 price rides
+            // along so the copy stays truthful for the smaller size.
+            price: (m.familyPrice ?? m.couplePrice)!,
+            couplePrice: m.familyPrice !== null ? m.couplePrice : null,
         }));
 
         const result = generatePromoScripts({

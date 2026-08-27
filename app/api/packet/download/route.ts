@@ -19,7 +19,9 @@ import { prisma } from '@/lib/db';
 import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
 import { generateFullPacket } from '@/lib/generateFullPacket';
 import type { FlyerBundle } from '@/lib/generateFlyer';
-import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
+import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
+import { buildSupporterOrderUrl } from '@/lib/previousSupporterInvite';
+import { resolveMaterialBundles } from '@/lib/coordinatorMaterialBundles';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 
 export async function GET(req: Request) {
@@ -55,12 +57,21 @@ export async function GET(req: Request) {
         const orgName = (campaign.customer as any)?.name || 'Organization';
 
         // 2. Fetch assigned bundles (or fallback to all active bundles for business)
+        //
+        // FR-COORD-123: pending/misconfigured/closed campaigns used to yield a
+        // 200 ZIP whose flyer had no menus and no prices — refuse instead.
         const orderMode = await resolveCampaignOrderMode(campaign, businessId);
+        if (!orderMode.allowed) {
+            return NextResponse.json(
+                { error: 'safeMessage' in orderMode ? orderMode.safeMessage : 'This campaign cannot generate a packet right now.' },
+                { status: 422 }
+            );
+        }
         let bundles: any[] = [];
 
         if (orderMode.mode === 'legacy') {
             bundles = await prisma.$queryRaw`
-                SELECT id, name, price, serving_tier FROM bundles
+                SELECT id, name, price, serving_tier, family_id FROM bundles
                 WHERE business_id = ${businessId}
                 AND is_active = true
                 AND show_on_storefront = true
@@ -69,7 +80,7 @@ export async function GET(req: Request) {
             `;
         } else if (orderMode.mode === 'selected' && orderMode.activeOrderableBundleIds.length > 0) {
             bundles = await prisma.$queryRaw`
-                SELECT id, name, price, serving_tier FROM bundles
+                SELECT id, name, price, serving_tier, family_id FROM bundles
                 WHERE id IN(${Prisma.join(orderMode.activeOrderableBundleIds)})
                 AND business_id = ${businessId}
                 AND is_active = true
@@ -77,8 +88,16 @@ export async function GET(req: Request) {
             `;
         }
 
-        // 3. Fetch recipe names for each bundle
-        const bundleIds = bundles.map(b => b.id);
+        // 3. Canonical tier + price validation (FR-COORD-123) — the packet's
+        //    flyer.pdf carried the same Family-Size-at-Serves-2-price defect
+        //    as /api/flyer/download, from the same raw passthrough.
+        const resolved = resolveMaterialBundles(bundles);
+        if (!resolved.ok) {
+            return NextResponse.json({ error: resolved.error, code: resolved.code }, { status: 422 });
+        }
+
+        // 4. Fetch recipe names for each bundle
+        const bundleIds = resolved.bundles.map(b => b.id);
         let bundleItems: any[] = [];
         if (bundleIds.length > 0) {
             bundleItems = await prisma.$queryRaw`
@@ -90,11 +109,11 @@ export async function GET(req: Request) {
             `;
         }
 
-        // 4. Build FlyerBundle shapes
-        const flyerBundles: FlyerBundle[] = bundles.map(b => ({
+        const flyerBundles: FlyerBundle[] = resolved.bundles.map(b => ({
             name: b.name,
-            price: Number(b.price),
-            servingTier: b.serving_tier || 'family',
+            price: b.price,
+            servingTier: b.servingTier,
+            familyId: b.familyId,
             meals: bundleItems
                 .filter(i => i.bundle_id === b.id)
                 .map(i => i.recipe_name),
@@ -118,25 +137,35 @@ export async function GET(req: Request) {
             }
         }
 
-        // 6. Fetch business name + slug
+        // 6. Fetch business name + storefront identity
         let businessName = 'FreezerIQ';
-        let businessSlug: string | null = null;
+        let tenant: { slug: string | null; customDomain: string | null } = { slug: null, customDomain: null };
         if (businessId) {
             const business = await prisma.business.findUnique({
                 where: { id: businessId },
-                select: { name: true, slug: true },
+                select: { name: true, slug: true, custom_domain: true },
             });
             if (business) {
                 businessName = business.name;
-                businessSlug = business.slug;
+                tenant = { slug: business.slug, customDomain: business.custom_domain };
             }
         }
 
-        // 7. Build public URL → shop order page (not the old scoreboard)
-        const origin = new URL(req.url).origin;
-        const publicUrl = businessSlug
-            ? `${origin}/shop/${businessSlug}/fundraiser/${campaign.id}`
-            : buildPublicFundraiserUrl(req, campaign.public_token!);
+        // 7. Supporter ordering URL through the canonical FR-REBOOK-2
+        //    authority (FR-COORD-123). This URL lands in FOUR durable
+        //    artifacts — flyer QR, tracker cell, qr-code.png, quick-start
+        //    guide — so the request host must never decide it.
+        const publicUrl = buildSupporterOrderUrl(
+            resolveOutreachOrigin(req),
+            { id: campaign.id, public_token: campaign.public_token },
+            tenant,
+        );
+        if (!publicUrl) {
+            return NextResponse.json(
+                { error: 'No supporter ordering page could be resolved for this campaign, so the packet would carry a dead QR code. Check the storefront configuration.' },
+                { status: 422 }
+            );
+        }
 
         // 8. Generate full packet ZIP
         //    coordinatorName: prefer customer.contact_name, fall back to campaign.name

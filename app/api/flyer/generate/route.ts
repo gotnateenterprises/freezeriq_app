@@ -17,7 +17,10 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
 import { generateFlyer, type FlyerBundle } from '@/lib/generateFlyer';
-import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
+import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
+import { buildSupporterOrderUrl } from '@/lib/previousSupporterInvite';
+import { resolveMaterialBundles } from '@/lib/coordinatorMaterialBundles';
+import { CLOSED_STATUSES } from '@/lib/campaignBundleSelection';
 
 export async function POST(req: Request) {
     try {
@@ -54,35 +57,70 @@ export async function POST(req: Request) {
 
         const orgName = customer.name || 'Organization';
 
-        // 3. Find the most recent active campaign for this customer
-        const campaign = await prisma.fundraiserCampaign.findFirst({
-            where: { customer_id: customerId },
-            orderBy: { created_at: 'desc' },
-            select: {
-                id: true,
-                name: true,
-                end_date: true,
-                delivery_date: true,
-                pickup_location: true,
-                checks_payable: true,
-                public_token: true,
-            },
-        });
+        // 3. Find the CURRENT campaign for this customer.
+        //
+        // FR-COORD-123, two fixes here:
+        //  - The comment used to say "most recent active" while the query took
+        //    the most recently CREATED of ANY status — a closed campaign, or a
+        //    Lead row created by a bulk import, silently shadowed the live one.
+        //    Now: the newest Active campaign, falling back to the newest
+        //    not-yet-closed one (a pre-launch flyer is legitimate), never a
+        //    closed one.
+        //  - The select omitted the lifecycle fields resolveCampaignOrderMode
+        //    branches on (status, closed_at, bundle_selection_*), so the
+        //    resolver fell through to fail-closed 'invalid' on EVERY request
+        //    and this route only ever produced zero-menu flyers.
+        const campaignSelect = {
+            id: true,
+            name: true,
+            status: true,
+            closed_at: true,
+            bundle_selection_status: true,
+            bundle_selection_limit: true,
+            end_date: true,
+            delivery_date: true,
+            pickup_location: true,
+            checks_payable: true,
+            public_token: true,
+        } as const;
+
+        const campaign =
+            await prisma.fundraiserCampaign.findFirst({
+                where: { customer_id: customerId, status: 'Active' },
+                orderBy: { created_at: 'desc' },
+                select: campaignSelect,
+            })
+            ?? await prisma.fundraiserCampaign.findFirst({
+                where: {
+                    customer_id: customerId,
+                    status: { notIn: [...CLOSED_STATUSES] },
+                    closed_at: null,
+                },
+                orderBy: { created_at: 'desc' },
+                select: campaignSelect,
+            });
 
         if (!campaign) {
             return NextResponse.json(
-                { error: 'No campaign found for this customer. Please create a campaign first.' },
+                { error: 'No open campaign found for this customer. Please create a campaign first.' },
                 { status: 404 }
             );
         }
 
         // 4. Fetch assigned bundles (or fallback to all active bundles for business)
         const orderMode = await resolveCampaignOrderMode(campaign, businessId);
+        if (!orderMode.allowed) {
+            return NextResponse.json(
+                { error: 'safeMessage' in orderMode ? orderMode.safeMessage : 'This campaign cannot generate a flyer right now.' },
+                { status: 422 }
+            );
+        }
         let bundles: any[] = [];
 
+        // Raw price + family_id, no COALESCE — a missing price fails visibly.
         if (orderMode.mode === 'legacy') {
             bundles = await prisma.$queryRaw`
-                SELECT id, name, COALESCE(price, 0) as price, serving_tier FROM bundles
+                SELECT id, name, price, serving_tier, family_id FROM bundles
                 WHERE business_id = ${businessId}
                 AND is_active = true
                 AND show_on_storefront = true
@@ -91,7 +129,7 @@ export async function POST(req: Request) {
             `;
         } else if (orderMode.mode === 'selected' && orderMode.activeOrderableBundleIds.length > 0) {
             bundles = await prisma.$queryRaw`
-                SELECT id, name, COALESCE(price, 0) as price, serving_tier FROM bundles
+                SELECT id, name, price, serving_tier, family_id FROM bundles
                 WHERE id IN(${Prisma.join(orderMode.activeOrderableBundleIds)})
                 AND business_id = ${businessId}
                 AND is_active = true
@@ -99,8 +137,16 @@ export async function POST(req: Request) {
             `;
         }
 
-        // 5. Fetch recipe names for each bundle
-        const bundleIds = bundles.map(b => b.id);
+        // 5. Canonical tier + price validation (FR-COORD-123) — same authority
+        //    as the supporter ordering path, fail closed on anything it would
+        //    refuse to sell.
+        const resolved = resolveMaterialBundles(bundles);
+        if (!resolved.ok) {
+            return NextResponse.json({ error: resolved.error, code: resolved.code }, { status: 422 });
+        }
+
+        // 6. Fetch recipe names for each bundle
+        const bundleIds = resolved.bundles.map(b => b.id);
         let bundleItems: any[] = [];
         if (bundleIds.length > 0) {
             bundleItems = await prisma.$queryRaw`
@@ -112,11 +158,11 @@ export async function POST(req: Request) {
             `;
         }
 
-        // 6. Build FlyerBundle shapes
-        const flyerBundles: FlyerBundle[] = bundles.map(b => ({
+        const flyerBundles: FlyerBundle[] = resolved.bundles.map(b => ({
             name: b.name,
-            price: Number(b.price),
-            servingTier: b.serving_tier || 'family',
+            price: b.price,
+            servingTier: b.servingTier,
+            familyId: b.familyId,
             meals: bundleItems
                 .filter(i => i.bundle_id === b.id)
                 .map(i => i.recipe_name),
@@ -138,25 +184,32 @@ export async function POST(req: Request) {
             branding = brandingRow;
         }
 
-        // 8. Fetch business name
+        // 8. Fetch business name + storefront identity
         let businessName = 'FreezerIQ';
-        let businessSlug: string | null = null;
+        let tenant: { slug: string | null; customDomain: string | null } = { slug: null, customDomain: null };
         const business = await prisma.business.findUnique({
             where: { id: businessId },
-            select: { name: true, slug: true },
+            select: { name: true, slug: true, custom_domain: true },
         });
         if (business) {
             businessName = business.name;
-            businessSlug = business.slug;
+            tenant = { slug: business.slug, customDomain: business.custom_domain };
         }
 
-        // 9. Build public URL → shop order page (not the old scoreboard)
-        const origin = new URL(req.url).origin;
-        const publicUrl = campaign.public_token
-            ? (businessSlug
-                ? `${origin}/shop/${businessSlug}/fundraiser/${campaign.id}`
-                : buildPublicFundraiserUrl(req, campaign.public_token))
-            : '';
+        // 9. Supporter ordering URL through the canonical FR-REBOOK-2
+        //    authority — tenant storefront domain preferred, platform origin
+        //    pinned, never the request host (FR-COORD-123).
+        const publicUrl = buildSupporterOrderUrl(
+            resolveOutreachOrigin(req),
+            { id: campaign.id, public_token: campaign.public_token },
+            tenant,
+        );
+        if (!publicUrl) {
+            return NextResponse.json(
+                { error: 'No supporter ordering page could be resolved for this campaign, so a flyer would have a dead QR code. Check the storefront configuration.' },
+                { status: 422 }
+            );
+        }
 
         // 10. Generate PDF
         const buffer = await generateFlyer({

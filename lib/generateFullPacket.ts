@@ -19,6 +19,7 @@ import { PassThrough } from 'stream';
 import { generateFlyer, type FlyerInput, type FlyerBundle } from '@/lib/generateFlyer';
 import { generateTracker, type TrackerInput } from '@/lib/generateTracker';
 import { generateQrCode } from '@/lib/generateQrCode';
+import { groupMaterialMenus } from '@/lib/coordinatorMaterialBundles';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -134,15 +135,28 @@ export async function generateFullPacket(input: PacketInput): Promise<Buffer> {
     const flyerBuffer = await generateFlyer(flyerInput);
 
     // 2. Generate tracker XLSX (reuses existing generator — async)
+    //
+    // FR-COORD-123: the tracker template has TWO bundle cells, and this used
+    // to fill them from the raw variant rows — so a two-menu campaign (four
+    // variant rows, name-sorted) put "Menu A" and "Menu A (Serves 2)" in the
+    // cells and the second menu never appeared. One entry per MENU instead,
+    // priced at the family size (the flyer's order form in this same packet
+    // carries the per-size truth).
+    const trackerMenus = groupMaterialMenus(
+        input.bundles.map(b => ({
+            id: b.name, name: b.name, price: b.price,
+            servingTier: b.servingTier, familyId: b.familyId ?? null,
+        })),
+    );
     const trackerInput: TrackerInput = {
         campaignName: input.campaignName,
         organizationName: input.organizationName,
         endDate: input.endDate,
         publicUrl: input.publicUrl,
         coordinatorName: input.coordinatorName || input.campaignName,
-        bundles: input.bundles.map(b => ({
-            name: b.name,
-            price: b.price,
+        bundles: trackerMenus.map(m => ({
+            name: m.baseName,
+            price: (m.familyPrice ?? m.couplePrice)!,
         })),
     };
     const trackerArrayBuffer = await generateTracker(trackerInput);

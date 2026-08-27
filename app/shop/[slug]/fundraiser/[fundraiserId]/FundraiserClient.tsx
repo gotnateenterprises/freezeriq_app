@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useRef } from 'react';
 import { formatBundleCount, computeBundleUnitsFromItems, type FundraiserProgressResult } from '@/lib/fundraiserMetrics';
+import { resolveVariantSize } from '@/lib/serving_multipliers';
 
 // FR-LAUNCH-1B (complete Fable restoration): this page is a full port of the
 // APPROVED fundraiser buyer design — the "FUNDRAISER BUYER PAGE" screen of
@@ -962,7 +963,19 @@ function BundleCard({ bundle, primaryColor, inOrder, onToggle }: {
     const inside = meals.length > 0
         ? meals.map((m: any) => m.name).join(' · ')
         : (bundle.description || '');
-    const servesLabel = bundle.serving_tier === 'family' ? 'serves 5' : 'serves 2';
+    // FR-COORD-123 — the label must say what the ORDER will actually record.
+    //
+    // This was `bundle.serving_tier === 'family' ? 'serves 5' : 'serves 2'`,
+    // which recognized exactly one family spelling and defaulted everything
+    // else to "serves 2". bundles.serving_tier is a free-form column, so the
+    // canonical 'serves_5' — and the aliases 'family_size'/'Family Size'/
+    // 'start_fresh' a tenant can pick or type in the bundle editor — would
+    // have labelled a FAMILY bundle "serves 2" on the supporter page.
+    //
+    // resolveVariantSize is the same resolver /api/public/order uses to set
+    // order_items.variant_size, so the printed label and the recorded order
+    // can no longer disagree about which size this is.
+    const servesLabel = resolveVariantSize(bundle.serving_tier) === 'serves_5' ? 'serves 5' : 'serves 2';
     const hasPrice = Number(bundle.price || 0) > 0;
 
     return (

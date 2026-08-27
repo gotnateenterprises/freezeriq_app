@@ -14,7 +14,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { generateQrCode } from '@/lib/generateQrCode';
-import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
+import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
+import { buildSupporterOrderUrl } from '@/lib/previousSupporterInvite';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 
 export async function GET(req: Request) {
@@ -46,22 +47,30 @@ export async function GET(req: Request) {
 
         const orgName = campaign.customer?.name || 'Organization';
 
-        // Build public URL → shop order page (not the old scoreboard)
+        // Build the supporter ordering URL through the canonical FR-REBOOK-2
+        // authority (FR-COORD-123): tenant storefront domain preferred, pinned
+        // platform origin otherwise — never the request host. A printed QR
+        // outlives every deployment; the previous `new URL(req.url).origin`
+        // baked whatever host happened to serve this request into paper.
         const businessId = campaign.customer?.business_id;
-        let publicUrl: string;
+        let tenant: { slug: string | null; customDomain: string | null } = { slug: null, customDomain: null };
         if (businessId) {
             const business = await prisma.business.findUnique({
                 where: { id: businessId },
-                select: { slug: true },
+                select: { slug: true, custom_domain: true },
             });
-            if (business?.slug) {
-                const origin = new URL(req.url).origin;
-                publicUrl = `${origin}/shop/${business.slug}/fundraiser/${campaign.id}`;
-            } else {
-                publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
-            }
-        } else {
-            publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
+            if (business) tenant = { slug: business.slug, customDomain: business.custom_domain };
+        }
+        const publicUrl = buildSupporterOrderUrl(
+            resolveOutreachOrigin(req),
+            { id: campaign.id, public_token: campaign.public_token },
+            tenant,
+        );
+        if (!publicUrl) {
+            return NextResponse.json(
+                { error: 'No supporter ordering page could be resolved for this campaign, so the QR code would be a dead end. Check the storefront configuration.' },
+                { status: 422 }
+            );
         }
 
         // 2. Generate QR code

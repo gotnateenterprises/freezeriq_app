@@ -11,8 +11,16 @@
 // ── Types ──────────────────────────────────────────────────
 
 export type BundleSummary = {
+    /** Menu display name — one summary per MENU, not per size variant. */
     name: string;
+    /** The family-size price (or the only size's price). */
     price: number;
+    /**
+     * FR-COORD-123: the Serves-2 price, when the menu also comes in that
+     * size. Rendered alongside `price` so a menu is advertised once with
+     * both sizes, instead of appearing twice as two "bundles".
+     */
+    couplePrice?: number | null;
 };
 
 export type PromoScriptInput = {
@@ -43,6 +51,11 @@ function formatPrice(cents: number): string {
 }
 
 function formatBundleLine(b: BundleSummary): string {
+    // Both sizes on one line when the menu comes in both — never the same
+    // menu listed twice.
+    if (b.couplePrice !== null && b.couplePrice !== undefined) {
+        return `${b.name} – ${formatPrice(b.price)} (Family) / ${formatPrice(b.couplePrice)} (Serves 2)`;
+    }
     return `${b.name} – ${formatPrice(b.price)}`;
 }
 
@@ -57,7 +70,13 @@ function bundleListShort(bundles: BundleSummary[], max = 3): string {
 
 function bundleListInline(bundles: BundleSummary[], max = 3): string {
     const show = bundles.slice(0, max);
-    const parts = show.map(b => `${b.name} (${formatPrice(b.price)})`);
+    // SMS-compact: "$125/$60" when the menu comes in both sizes.
+    const parts = show.map(b => {
+        const priceTag = b.couplePrice !== null && b.couplePrice !== undefined
+            ? `${formatPrice(b.price)}/${formatPrice(b.couplePrice)}`
+            : formatPrice(b.price);
+        return `${b.name} (${priceTag})`;
+    });
     if (bundles.length > max) {
         parts.push(`+ more`);
     }
