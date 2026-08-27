@@ -3,6 +3,10 @@ import { Resend } from 'resend';
 // imports nothing at all (deliberately, so its bodies stay testable without a
 // mail provider), so this dependency runs one way and cannot cycle.
 import { safeSubject } from '@/lib/emailTemplates';
+// SUPPORTER-CONFIRM-HTML-1: the canonical payment-link rule, shared with the
+// coordinator setup form rather than duplicated here. lib/coordinatorSetup has
+// no imports of its own, so this stays a pure, dependency-free reuse.
+import { checkPaymentLink } from '@/lib/coordinatorSetup';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -127,6 +131,28 @@ function escapeHtml(value: unknown): string {
         .replace(/'/g, '&#39;');
 }
 
+/**
+ * SUPPORTER-CONFIRM-HTML-1 — a payment link that is safe to make clickable.
+ *
+ * Reuses checkPaymentLink, the rule the coordinator setup form already
+ * enforces (https only, no embedded credentials, a real dotted hostname),
+ * rather than inventing a second URL vocabulary. Returns the normalized URL,
+ * or null when the value must not become an anchor.
+ *
+ * ── WHY THIS IS NEEDED AT RENDER TIME ───────────────────────────────────────
+ *
+ * The setup form validates, but it is not the only writer: the tenant-side
+ * PATCH /api/campaigns/[id] assigns `external_payment_link: body.external_payment_link`
+ * with no validation at all, so a `javascript:` or `data:` value can reach the
+ * column and from there the supporter's inbox. Escaping alone would not save
+ * it — `javascript:alert(1)` contains no HTML-special character, so it survives
+ * escaping intact and stays a working href. The scheme has to be checked.
+ */
+function safePaymentHref(raw: unknown): string | null {
+    const checked = checkPaymentLink(typeof raw === 'string' ? raw : null);
+    return checked.ok ? checked.value : null;
+}
+
 /** Presentation-only label for a variant size ("serves_5" → "Serves 5"). */
 function formatVariantLabel(variantSize: string | null | undefined): string {
     const raw = (variantSize || '').trim();
@@ -157,29 +183,56 @@ export async function sendOrderConfirmationEmail(
     const total = currency.format(Number(order.total_amount));
 
     // Construct Item List
+    //
+    // SUPPORTER-CONFIRM-HTML-1: every interpolated value is escaped, matching
+    // the convention sendFundraiserCoordinatorNotification already follows.
+    // Bundle names are tenant-authored free text and reach this template raw.
     const itemsHtml = items.map(i => `
         <div style="border-bottom: 1px solid #e5e7eb; padding: 10px 0;">
-            <p style="margin: 0; font-weight: bold; color: #1f2937;">${i.quantity}x ${i.bundle?.name || 'Item'}</p>
-            <p style="margin: 0; font-size: 12px; color: #6b7280;">Size: ${i.variant_size}</p>
+            <p style="margin: 0; font-weight: bold; color: #1f2937;">${escapeHtml(i.quantity)}x ${escapeHtml(i.bundle?.name || 'Item')}</p>
+            <p style="margin: 0; font-size: 12px; color: #6b7280;">Size: ${escapeHtml(i.variant_size)}</p>
         </div>
     `).join('');
 
-    // Payment Section
+    // ── Payment Section (SUPPORTER-CONFIRM-HTML-1) ──────────────────────────
+    //
+    // Both values here are coordinator-authored and were previously dropped
+    // into the markup raw: the link straight into an href, the instructions
+    // straight into the body. This is the one place a coordinator's typing
+    // becomes HTML in a supporter's inbox, so it is the one place that has to
+    // hold the line.
     let paymentHtml = '';
-    if (externalPaymentLink) {
+
+    // THE LINK: validated for scheme BEFORE it can become an anchor, then
+    // attribute-escaped. A value that fails the check is still shown — the
+    // supporter should see what their coordinator entered — but as inert text,
+    // never as something clickable.
+    const paymentHref = safePaymentHref(externalPaymentLink);
+    if (paymentHref) {
         paymentHtml += `
             <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 15px; border-radius: 8px; margin: 20px 0;">
                 <p style="margin: 0 0 10px 0; font-weight: bold; color: #1e3a8a;">Payment Required</p>
                 <p style="margin: 0 0 10px 0; font-size: 14px; color: #1e40af;">Please complete your payment using the link below:</p>
-                <a href="${externalPaymentLink}" style="display: inline-block; background: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold;">Pay Now</a>
+                <a href="${escapeHtml(paymentHref)}" style="display: inline-block; background: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold;">Pay Now</a>
+            </div>
+        `;
+    } else if (externalPaymentLink) {
+        paymentHtml += `
+            <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                <p style="margin: 0 0 10px 0; font-weight: bold; color: #1e3a8a;">Payment Required</p>
+                <p style="margin: 0; font-size: 14px; word-break: break-all; color: #1e40af;">${escapeHtml(externalPaymentLink)}</p>
             </div>
         `;
     }
+
+    // THE INSTRUCTIONS: human prose, so escaped and shown as text. The
+    // surrounding `white-space: pre-wrap` keeps the coordinator's own line
+    // breaks without any markup being introduced to represent them.
     if (paymentInstructions) {
         paymentHtml += `
             <div style="background: #f9fafb; padding: 15px; border-radius: 8px; margin: 20px 0;">
                 <p style="margin: 0 0 5px 0; font-weight: bold; color: #374151;">Payment Instructions:</p>
-                <p style="margin: 0; font-size: 14px; white-space: pre-wrap; color: #4b5563;">${paymentInstructions}</p>
+                <p style="margin: 0; font-size: 14px; white-space: pre-wrap; color: #4b5563;">${escapeHtml(paymentInstructions)}</p>
             </div>
         `;
     }
@@ -187,11 +240,11 @@ export async function sendOrderConfirmationEmail(
     const htmlContent = `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
             <h1 style="color: #4f46e5;">Order Received!</h1>
-            <p>Thank you, <strong>${order.customer_name}</strong>. We have received your order.</p>
-            
+            <p>Thank you, <strong>${escapeHtml(order.customer_name)}</strong>. We have received your order.</p>
+
             <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
                 <h3 style="margin-top: 0; color: #111827;">Order Summary</h3>
-                <p style="margin: 0; color: #6b7280;">Order ID: ${order.external_id}</p>
+                <p style="margin: 0; color: #6b7280;">Order ID: ${escapeHtml(order.external_id)}</p>
                 <div style="margin-top: 15px;">
                     ${itemsHtml}
                 </div>
@@ -226,7 +279,11 @@ export async function sendOrderConfirmationEmail(
             from: sender.from,
             to: recipients,
             replyTo: sender.replyTo,
-            subject: `Order Confirmation: ${order.customer_name}`,
+            // SUPPORTER-CONFIRM-HTML-1: the same treatment the lead alert below
+            // already gives its subject. customer_name is typed by the supporter,
+            // and a subject header is the one place a stray newline stops being
+            // cosmetic. Nothing printable is touched — "Ben & Jerry's" survives.
+            subject: safeSubject(`Order Confirmation: ${order.customer_name}`),
             html: htmlContent
         });
 
