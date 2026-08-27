@@ -64,14 +64,47 @@ export interface PreferenceRow {
     status: 'subscribed' | 'unsubscribed' | 'paused' | 'not_interested';
     effective_at: Date;
     effective_until: Date | null;
+    /**
+     * Which authority the row speaks for. REQUIRED, because the whole defect
+     * below came from not knowing: the rows used to arrive flattened into one
+     * scope-blind list, so the resolver could not tell "this person opted out"
+     * from "this inbox opted out" and treated both as the same kind of fact.
+     */
+    scope: 'contact' | 'email_address';
 }
 
 /**
  * The one preference actually in force right now.
  *
- * Rows are append-only history, so the newest row that has taken effect and has
- * not lapsed wins. A `paused` whose `effective_until` has passed is simply over
- * — it must not keep suppressing someone forever.
+ * A `paused` whose `effective_until` has passed is simply over — it must not
+ * keep suppressing someone forever.
+ *
+ * ── WHY THIS IS NOT "NEWEST ROW WINS" ───────────────────────────────────────
+ *
+ * It used to be, and that made the dashboard lie. Preferences exist at two
+ * scopes: `contact` (this person) and `email_address` (this inbox). Send time is
+ * decided by checkSuppressionAtSend in lib/outreachSend.ts, which reads BOTH
+ * scopes and treats ANY row that says `unsubscribed` as suppressing — there is
+ * no recency contest there, and there should not be: an opt-out is not undone by
+ * an unrelated later row about a different scope.
+ *
+ * So after OUTREACH-CONSENT-1 shipped a public unsubscribe that writes
+ * `email_address` rows, a tenant could re-subscribe the CONTACT, get a newer
+ * `subscribed` row, and see "Ready to invite" on a recipient the send path would
+ * refuse. Display said one thing, the server did another, and the tenant would
+ * only find out by watching a send skip people.
+ *
+ * ── THE RULE, AND ITS LIMIT ─────────────────────────────────────────────────
+ *
+ * An ADDRESS opt-out is a veto: no action taken on one person undoes it, because
+ * it may speak for several people sharing that inbox. Releasing it is a separate,
+ * deliberate act (see lib/outreachResubscribe.ts), and until that happens the
+ * dashboard must say so.
+ *
+ * WITHIN a scope, recency still wins — a later re-subscribe genuinely does
+ * override an earlier unsubscribe for the same person, which is exactly what the
+ * tenant's re-subscribe button is for. Only the cross-scope case was ever wrong,
+ * and only that case changed.
  */
 export function resolveActivePreference(prefs: PreferenceRow[], now: Date): PreferenceRow | null {
     const live = prefs
@@ -81,6 +114,12 @@ export function resolveActivePreference(prefs: PreferenceRow[], now: Date): Pref
             return p.effective_until === null || p.effective_until > now;
         })
         .sort((a, b) => b.effective_at.getTime() - a.effective_at.getTime());
+
+    // The address veto, which nothing at contact scope may override.
+    const addressOptOut = live.find((p) => p.scope === 'email_address' && p.status === 'unsubscribed');
+    if (addressOptOut) return addressOptOut;
+
+    // Otherwise the original rule: the newest row still in force.
     return live[0] ?? null;
 }
 

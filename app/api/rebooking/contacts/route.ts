@@ -149,7 +149,7 @@ export async function GET() {
                 // separately below, because they key on the email, not the person.
                 marketing_prefs: {
                     where: { scope: 'contact' },
-                    select: { status: true, effective_at: true, effective_until: true },
+                    select: { scope: true, status: true, effective_at: true, effective_until: true },
                     orderBy: { effective_at: 'desc' },
                 },
             },
@@ -160,7 +160,7 @@ export async function GET() {
         // cannot be resolved from the per-contact relation above.
         const addressPrefs = await prisma.marketingPreference.findMany({
             where: { business_id: businessId, scope: 'email_address', normalized_email: { not: null } },
-            select: { normalized_email: true, status: true, effective_at: true, effective_until: true },
+            select: { scope: true, normalized_email: true, status: true, effective_at: true, effective_until: true },
             orderBy: { effective_at: 'desc' },
         });
         const addressPrefByEmail = new Map<string, PreferenceRow[]>();

@@ -36,6 +36,7 @@ import { QuietLinks } from '@/components/coordinator/QuietLinks';
 import { DeliveryPrep } from '@/components/coordinator/DeliveryPrep';
 import { WhatsNext } from '@/components/coordinator/WhatsNext';
 import { BundleSelectionStep } from '@/components/coordinator/BundleSelectionStep';
+import { PreviousSupporters } from '@/components/coordinator/PreviousSupporters';
 import { LogoutButton } from '@/components/coordinator/LogoutButton';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
@@ -696,6 +697,10 @@ export default function CoordinatorPortal() {
                         onViewAll={() => setShowAllOrders(!showAllOrders)}
                         limit={showAllOrders ? 999 : 3}
                     />
+                    {/* FR-REBOOK-2: a returning organization's own past
+                        supporters. Renders nothing when there are none, so a
+                        first-time fundraiser sees no empty shelf. */}
+                    <PreviousSupporters />
                     <QuietLinks
                         guideHref={'/coordinator/portal/guide'}
                         onOpenDownloads={handleDownloadTracker}

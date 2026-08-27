@@ -1108,10 +1108,17 @@ describe('OUTREACH-CONSENT-1 · transactional mail untouched', () => {
 });
 
 describe('OUTREACH-CONSENT-1 · FR-REBOOK-2 stays disarmed', () => {
-    it('Previous Supporters still reports canSend false with no send route', () => {
+    it('Previous Supporters sends THROUGH this consent engine, never around it', () => {
         const route = strip(R('app/api/coordinator/previous-supporters/route.ts'));
-        expect(route).toContain('canSend: false');
-        expect(route).not.toContain('export async function POST(');
+        // Armed now — and armed means it must go through runSend, which attaches
+        // the footer and headers and re-checks suppression per recipient.
+        expect(route).toContain('export async function POST(');
+        expect(route).toContain('await runSend({');
+        expect(route).toContain('unsubscribe: { origin, brandName:');
+        expect(route).toContain('unsubscribeReady: Boolean(unsubscribeSecret())');
+        // No direct provider call that would bypass all of it.
+        expect(route).not.toMatch(/provider\.send\(/);
+        expect(route).not.toContain('resend.emails.send');
     });
 
     it('the coordinator still edits plain text, with no HTML composer added', () => {

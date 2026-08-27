@@ -169,14 +169,29 @@ describe('Migration 18 · the delivery chain is untouched', () => {
     });
 });
 
-describe('FR-REBOOK-2 is still disarmed by Migration 18', () => {
+describe('Migration 18 is what FR-REBOOK-2 now stands on', () => {
     const route = R('app/api/coordinator/previous-supporters/route.ts');
-    it('canSend is still false and there is no send POST', () => {
-        expect(route).toContain('canSend: false');
-        expect(route).not.toContain('export async function POST(');
+    const batch = R('lib/previousSupporterBatch.ts');
+
+    it('the send path resolves a CAMPAIGN-owned batch, which only M18 allows', () => {
+        expect(route).toContain('resolveCampaignBatch(prisma');
+        expect(batch).toContain('campaign_id: owner.campaignId');
+        expect(batch).toContain('seasonal_offering_id: null');
     });
-    it('no outreach batch is created anywhere yet', () => {
-        expect(route).not.toContain('outreachBatch');
-        expect(route).not.toContain('runSend');
+
+    it('it never fabricates a seasonal lineup to get a batch', () => {
+        expect(batch).not.toContain('seasonalOffering.create');
+        // The seasonal owner is only ever written as an explicit null.
+        const assignments = [...batch.matchAll(/seasonal_offering_id:\s*([^\s,}]+)/g)].map((m) => m[1]);
+        expect(assignments.length).toBeGreaterThan(0);
+        expect(assignments.every((v) => v === 'null')).toBe(true);
+    });
+
+    it('and it does not use the unique selector M18 deliberately withholds', () => {
+        // Comments are stripped first: this file's own header explains WHY
+        // upsert is wrong, and quotes it while doing so.
+        const code = batch.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+        expect(code).not.toMatch(/\.upsert\(/);
+        expect(code).toContain('isUniqueViolation(e)');
     });
 });

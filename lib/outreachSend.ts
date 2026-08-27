@@ -60,6 +60,56 @@ export function buildIdempotencyKey(messageId: string, recipientId: string, gene
     return `${messageId}:${recipientId}:g${generation}`;
 }
 
+/** One preference row, reduced to what suppression actually depends on. */
+export interface SuppressionPreferenceRow {
+    scope: 'contact' | 'email_address' | string;
+    status: 'subscribed' | 'unsubscribed' | 'paused' | 'not_interested' | string;
+    effective_until: Date | null;
+}
+
+/**
+ * THE suppression rule. Pure, and the one every surface must consume.
+ *
+ * ── WHY THIS IS EXPORTED RATHER THAN INLINED ────────────────────────────────
+ *
+ * Four places had independently invented "is this person suppressed right now",
+ * and they disagreed. The Rebooking dashboard flattened both scopes and picked
+ * the NEWEST row, so a tenant who re-subscribed a contact saw "Ready to invite"
+ * for someone this function refuses. The Previous Supporters audience treated
+ * every non-subscribed row as suppressing and ignored `effective_until`, so a
+ * pause that had already elapsed kept excluding people forever.
+ *
+ * Send time is the authority, so send time's rule is the one lifted out here and
+ * the others now call it. A definition that only one caller uses is a definition
+ * free to drift.
+ *
+ * SUPPRESSION IS A VETO, NOT A RECENCY CONTEST. Any row saying `unsubscribed`
+ * suppresses, whatever its scope and whatever was written afterwards — an opt-out
+ * is not undone by a later row about something else. An ELAPSED pause is not a
+ * suppression; it is simply over.
+ */
+export function evaluateSuppression(
+    prefs: readonly SuppressionPreferenceRow[],
+    now: Date,
+): { suppressed: boolean; reason: string | null } {
+    for (const p of prefs) {
+        if (p.status === 'unsubscribed') {
+            return {
+                suppressed: true,
+                reason: p.scope === 'email_address'
+                    ? 'Someone at this address unsubscribed after the audience was reviewed.'
+                    : 'This person unsubscribed after the audience was reviewed.',
+            };
+        }
+        // An elapsed pause is not a suppression.
+        if ((p.status === 'paused' || p.status === 'not_interested')
+            && (!p.effective_until || p.effective_until > now)) {
+            return { suppressed: true, reason: 'This contact was paused after the audience was reviewed.' };
+        }
+    }
+    return { suppressed: false, reason: null };
+}
+
 /**
  * Re-evaluates suppression at send time for one recipient.
  *
@@ -87,23 +137,7 @@ export async function checkSuppressionAtSend(
         select: { scope: true, status: true, effective_until: true },
     });
 
-    for (const p of prefs) {
-        if (p.status === 'unsubscribed') {
-            return {
-                suppressed: true,
-                reason: p.scope === 'email_address'
-                    ? 'Someone at this address unsubscribed after the audience was reviewed.'
-                    : 'This person unsubscribed after the audience was reviewed.',
-            };
-        }
-        // An elapsed pause is not a suppression.
-        if ((p.status === 'paused' || p.status === 'not_interested')
-            && (!p.effective_until || p.effective_until > now)) {
-            return { suppressed: true, reason: 'This contact was paused after the audience was reviewed.' };
-        }
-    }
-
-    return { suppressed: false, reason: null };
+    return evaluateSuppression(prefs, now);
 }
 
 export interface SendRunInput {

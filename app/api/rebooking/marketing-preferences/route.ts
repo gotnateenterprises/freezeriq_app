@@ -10,9 +10,24 @@
  *   · and every change appends an immutable EmailSuppressionEvent.
  *
  * Opt-out follows the PERSON and survives an email change, so re-subscribing
- * clears the contact-scoped preference rather than the address. Where an
- * address itself was suppressed, that is recorded separately and is not lifted
- * by re-subscribing one individual.
+ * clears the contact-scoped preference.
+ *
+ * ── OUTREACH-RESUBSCRIBE-1 — AND THE ADDRESS, WHEN IT MAY ───────────────────
+ *
+ * That used to be ALL it cleared, and the original reasoning was sound: an
+ * address suppression must not be lifted by re-subscribing one individual,
+ * because a shared inbox belongs to everyone using it.
+ *
+ * OUTREACH-CONSENT-1 then made address-scope opt-outs something a RECIPIENT
+ * creates by clicking Unsubscribe, and send time treats any unsubscribed row as
+ * suppressing whatever its scope. So "Re-subscribe with permission" started
+ * reporting success on people it could not actually restore — the drawer offered
+ * the button on precisely the rows it was powerless to fix.
+ *
+ * Now the address is released too, but only when this request covers EVERY
+ * contact in this tenant currently using it, so one person still cannot consent
+ * for an inbox they share. Anything held back is reported rather than hidden.
+ * See lib/outreachResubscribe.ts for the decision, which is pure and tested.
  *
  * Sends no email. Issues no token.
  */
@@ -20,6 +35,12 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
+import { normalizeEmail } from '@/lib/seasonalAudience';
+import {
+    decideAddressRelease,
+    describeAddressRelease,
+    type AddressReleaseDecision,
+} from '@/lib/outreachResubscribe';
 
 type Action = 'resubscribe' | 'unsubscribe' | 'pause' | 'not_interested';
 
@@ -67,7 +88,94 @@ export async function POST(req: Request) {
             : action === 'unsubscribe' ? 'unsubscribe'
                 : action === 'pause' ? 'tenant_pause' : 'not_interested_until';
 
+        // ── OUTREACH-RESUBSCRIBE-1 — WHICH ADDRESSES MAY BE RELEASED ────────
+        //
+        // Re-subscribing only the CONTACT used to be the whole story, and after
+        // OUTREACH-CONSENT-1 that made this endpoint lie: the public unsubscribe
+        // writes an `email_address` row, and checkSuppressionAtSend treats any
+        // unsubscribed row as suppressing whatever its scope. The tenant was told
+        // "re-subscribed" while the recipient stayed permanently unreachable, and
+        // the drawer just re-rendered the same row with the same button.
+        //
+        // The original rule is kept where it earns its keep: a shared inbox is
+        // NOT released on one person's say-so. Release happens only when this
+        // request covers every contact in this tenant who currently uses that
+        // address — which the audience drawer already does, since it sends every
+        // contact grouped onto the row.
+        const releases: AddressReleaseDecision[] = [];
+        if (action === 'resubscribe') {
+            const points = await prisma.fundraiserContactPoint.findMany({
+                where: { business_id: businessId, type: 'email', is_current: true },
+                select: { contact_id: true, normalized_value: true },
+            });
+            const ownership = points
+                .map((p) => ({ contactId: p.contact_id, normalizedEmail: normalizeEmail(p.normalized_value ?? '') }))
+                .filter((o) => o.normalizedEmail.length > 0);
+
+            const targeted = new Set(
+                ownership.filter((o) => contactIds.includes(o.contactId)).map((o) => o.normalizedEmail),
+            );
+            const addressPrefs = targeted.size
+                ? await prisma.marketingPreference.findMany({
+                    where: {
+                        business_id: businessId,
+                        scope: 'email_address',
+                        normalized_email: { in: [...targeted] },
+                    },
+                    select: { id: true, normalized_email: true, status: true },
+                })
+                : [];
+
+            releases.push(...decideAddressRelease({
+                resubscribingContactIds: contactIds,
+                ownership,
+                addressPreferences: addressPrefs.map((p) => ({
+                    normalizedEmail: p.normalized_email ?? '',
+                    status: p.status as 'subscribed' | 'unsubscribed' | 'paused' | 'not_interested',
+                })),
+            }));
+        }
+        const releasable = new Set(
+            releases.filter((r) => r.outcome === 'released').map((r) => r.normalizedEmail),
+        );
+
         await prisma.$transaction(async (tx) => {
+            // The address-scope opt-outs this re-subscribe is entitled to lift.
+            // Updated, never deleted — EmailSuppressionEvent stays the immutable
+            // history of what happened, and an audit trail that can be erased by
+            // the next re-subscribe is not an audit trail.
+            for (const email of releasable) {
+                const row = await tx.marketingPreference.findFirst({
+                    where: { business_id: businessId, scope: 'email_address', normalized_email: email },
+                    select: { id: true },
+                });
+                if (row) {
+                    await tx.marketingPreference.update({
+                        where: { id: row.id },
+                        data: {
+                            status: 'subscribed',
+                            effective_at: new Date(),
+                            effective_until: null,
+                            permission_note: permissionNote,
+                            recorded_by_user_id: userId,
+                            source: 'tenant',
+                        },
+                    });
+                }
+                await tx.emailSuppressionEvent.create({
+                    data: {
+                        business_id: businessId,
+                        event_type: 'resubscribe',
+                        normalized_email: email,
+                        reason: 'Address re-subscribed with documented permission',
+                        effective_until: null,
+                        permission_note: permissionNote,
+                        recorded_by_user_id: userId,
+                        source: 'tenant',
+                    },
+                });
+            }
+
             for (const contactId of contactIds) {
                 const existing = await tx.marketingPreference.findFirst({
                     where: { business_id: businessId, scope: 'contact', contact_id: contactId },
@@ -117,7 +225,17 @@ export async function POST(req: Request) {
             }
         });
 
-        return NextResponse.json({ ok: true, updated: contactIds.length });
+        // The tenant is told what actually happened. A held-back shared address
+        // is the case this endpoint used to hide, so it is named explicitly
+        // rather than folded into a bare success.
+        const summary = describeAddressRelease(releases);
+        return NextResponse.json({
+            ok: true,
+            updated: contactIds.length,
+            addressesReleased: summary.released,
+            addressesHeldBack: summary.heldBack,
+            warning: summary.warning,
+        });
     } catch (e) {
         console.error('[Marketing Preferences] POST failed:', e);
         return NextResponse.json({ error: 'Failed to update marketing preferences' }, { status: 500 });
