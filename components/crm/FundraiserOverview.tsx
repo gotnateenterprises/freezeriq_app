@@ -5,6 +5,7 @@ import Link from 'next/link';
 
 import EmailComposeModal from './EmailComposeModal';
 import FundraiserSetup from './FundraiserSetup';
+import OrganizationTaxPanel from './OrganizationTaxPanel';
 
 import { ShoppingBag, DollarSign, Mail, Phone, MapPin, User, StickyNote, Plus, Calendar, Eye, Loader2, Archive, RotateCcw, Sparkles, Tag, UtensilsCrossed, Clock, Megaphone, Package } from 'lucide-react';
 import StatusPipeline from './StatusPipeline';
@@ -873,6 +874,19 @@ export default function FundraiserOverview({ customer, onUpdateCustomer, onEditP
                     </div>
                 </div>
             )}
+            {/* FR-TAX-1: organization tax status / exemption number / document.
+                Rendered for fundraising organizations, which are the ones
+                FreezerIQ actually invoices. */}
+            {(customer.type === 'Fundraiser' || customer.type === 'Organization') && (
+                <OrganizationTaxPanel
+                    organizationId={customer.id}
+                    taxStatus={(customer.tax_status as any) || 'UNKNOWN'}
+                    taxExemptionNumber={customer.tax_exemption_number || ''}
+                    taxDocument={customer.tax_document || null}
+                    onSave={async (updates) => { await onUpdateCustomer(updates); }}
+                />
+            )}
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Left Column: Stats & Info */}
                 <div className="space-y-6">

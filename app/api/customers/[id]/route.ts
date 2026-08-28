@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
+import { isOrgTaxStatus } from '@/lib/fundraiserTax';
 
 
 export const dynamic = 'force-dynamic';
@@ -114,6 +115,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
             const rawOrders = Array.isArray(orgAny.orders) ? orgAny.orders : [];
             const { orders: serializedOrders, warnings } = serializeOrders(rawOrders);
 
+            // FR-TAX-1: METADATA ONLY. `data` is deliberately excluded from
+            // this select — the CRM profile response must never carry a
+            // megabyte of tax paperwork, and the bytes have their own
+            // authenticated download route.
+            const taxDoc = await prisma.organizationTaxDocument.findFirst({
+                where: { customer_id: org.id, business_id: session.user.businessId },
+                select: { id: true, filename: true, content_type: true, size_bytes: true, uploaded_at: true },
+            });
+            const taxDocumentMeta = taxDoc ?? null;
+
             const response: any = {
                 id: org.id,
                 name: org.name,
@@ -135,6 +146,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
                 fundraiser_info: orgAny.fundraiser_info || {},
                 campaigns: orgAny.campaigns || [],
                 source: orgAny.source || 'Manual',
+                // ── FR-TAX-1: organization tax posture. Status/number only —
+                //    the document's BYTES are never served from this endpoint;
+                //    they have their own authenticated route.
+                tax_status: orgAny.tax_status || 'UNKNOWN',
+                tax_exemption_number: orgAny.tax_exemption_number || '',
+                tax_document: taxDocumentMeta,
                 total_spend: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
                     rawOrders.reduce((sum: number, o: any) => sum + (Number(o.total_amount) || 0), 0)
                 ),
@@ -399,7 +416,16 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
                 type: mappedType,
                 inactive_reason: status === 'Inactive' ? body.inactive_reason : null,
                 tags: body.tags,
-                fundraiser_info: body.fundraiser_info !== undefined ? body.fundraiser_info : undefined
+                fundraiser_info: body.fundraiser_info !== undefined ? body.fundraiser_info : undefined,
+                // ── FR-TAX-1: organization tax posture ────────────────────
+                // Omission leaves the stored value alone, matching every other
+                // field here — a form that does not carry a tax status must
+                // never reset one. An unrecognised value is ignored rather
+                // than written, so a typo cannot become a tax position.
+                ...(isOrgTaxStatus(body.tax_status) ? { tax_status: body.tax_status as any } : {}),
+                ...(body.tax_exemption_number !== undefined
+                    ? { tax_exemption_number: String(body.tax_exemption_number).trim().slice(0, 120) || null }
+                    : {}),
             };
 
             await prisma.customer.update({

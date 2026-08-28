@@ -40,6 +40,21 @@ model Business {
   // fundraisers today. It is deliberately NOT hardcoded in any comparison
   // helper — a future tenant simply stores its own zone here.
   timezone               String             @default("America/Chicago")
+  // ── FR-TAX-1: the tenant's default food/grocery tax rate, as a PERCENT ─────
+  // (1.00 means 1%), matching org_share_percent and storefront_configs.tax_percent.
+  //
+  // Deliberately DEFAULT 0.00, not 1.00. Illinois eliminated its statewide 1%
+  // grocery tax on 2026-01-01; a municipality MAY levy exactly 1% locally, but
+  // that is a per-tenant verified fact, never something this schema should
+  // assume. A tenant configures its own verified rate; until it does, the
+  // default asserts nothing.
+  //
+  // SEPARATE from storefront_configs.tax_percent on purpose: that one is the
+  // RETAIL sales tax charged to an individual storefront shopper at checkout.
+  // This one is the FOOD/GROCERY tax on the fundraiser sale to an organization.
+  // They are different taxes on different transactions and must be able to
+  // differ; collapsing them would make one tenant setting silently wrong.
+  default_food_tax_percent Decimal          @default(0) @db.Decimal(5, 2)
   created_at             DateTime           @default(now())
   current_period_end     DateTime?
   plan                   SubscriptionPlan   @default(BASE)
@@ -88,6 +103,8 @@ model Business {
   // FR-FUNNEL-1
   funnel_inquiries        FundraiserInquiry[]      @relation("BusinessFunnelInquiries")
   funnel_opportunities    FundraiserOpportunity[]  @relation("BusinessFunnelOpportunities")
+  // FR-TAX-1
+  org_tax_documents       OrganizationTaxDocument[]
 
   @@map("businesses")
 }
@@ -344,8 +361,27 @@ model Customer {
   inactive_reason  String?
   fundraiser_info  Json?
   loyalty_balance  Decimal              @default(0) @db.Decimal(10, 2)
+  // ── FR-TAX-1: organization tax status ─────────────────────────────────────
+  // A real column, not a fundraiser_info JSON key, for the same reason
+  // org_share_percent is a real column: this decides money, it is queried and
+  // reasoned about by server code, and a JSON blob has no type, no default and
+  // no enum constraint to stop a typo becoming a tax position.
+  //
+  // UNKNOWN is the honest default for every pre-existing organization — the
+  // tenant has never been asked. UNKNOWN MUST NEVER be treated as exempt;
+  // see lib/fundraiserTax.ts, which resolves UNKNOWN to the tenant's normal
+  // TAXABLE treatment and requires a deliberate tenant choice to exempt.
+  //
+  // Being a school, church, charity, PTO or youth group does NOT imply exempt.
+  // Only a tenant deliberately recording TAX_EXEMPT does.
+  tax_status       OrgTaxStatus         @default(UNKNOWN)
+  /// Optional exemption/E-number the tenant typed. Free text on purpose:
+  /// formats differ by state and FreezerIQ validates no issuing authority.
+  tax_exemption_number String?
   business         Business?            @relation(fields: [business_id], references: [id])
   documents        Document[]
+  /// FR-TAX-1: the organization's current tax-exemption paperwork, if any.
+  tax_document     OrganizationTaxDocument?
   campaigns        FundraiserCampaign[]
   invoices         Invoice[]
   loyalty_points   LoyaltyPoint[]
@@ -525,6 +561,56 @@ model DocumentTemplate {
   @@map("document_templates")
 }
 
+/// FR-TAX-1 — an organization's tax posture. UNKNOWN is not a synonym for
+/// exempt; see Customer.tax_status and lib/fundraiserTax.ts.
+enum OrgTaxStatus {
+  UNKNOWN
+  TAXABLE
+  TAX_EXEMPT
+}
+
+/// FR-TAX-1 — the organization's current tax-exemption paperwork.
+///
+/// WHY THE BYTES LIVE IN POSTGRES AND NOT IN THE EXISTING S3 BUCKET
+/// ───────────────────────────────────────────────────────────────
+/// lib/s3.ts is public-by-construction: uploadToS3() RETURNS A PUBLIC URL
+/// (S3_PUBLIC_DOMAIN / endpoint / bucket.s3.region.amazonaws.com), its keys
+/// carry no tenant prefix at all (`${timestamp}-${fileName}`), the project has
+/// no @aws-sdk/s3-request-presigner dependency, and its no-bucket dev fallback
+/// writes into `public/uploads/` — a directory Next.js serves to the world.
+/// Exemption paperwork is government/legal evidence, not marketing media, so
+/// none of that architecture may hold it. Reusing it would have put a
+/// tenant's tax certificate behind a guessable, unauthenticated CDN URL.
+///
+/// Postgres bytes are the SMALLEST provably-private option: no bucket policy
+/// to misconfigure, no presigned-URL TTL to leak, no new dependency, and the
+/// same tenant scoping every other row already gets. Retrieval is an
+/// authenticated route that re-checks business ownership before streaming.
+///
+/// A SEPARATE MODEL, not columns on Customer, specifically so that the many
+/// `prisma.customer.findMany()` calls across the CRM never load a megabyte of
+/// PDF per row — Prisma selects all scalars by default.
+///
+/// customer_id is UNIQUE: exactly one CURRENT document per organization.
+/// Replacing is an upsert; there is deliberately no version history here.
+model OrganizationTaxDocument {
+  id           String   @id @default(uuid())
+  customer_id  String   @unique
+  business_id  String
+  filename     String
+  content_type String
+  size_bytes   Int
+  data         Bytes
+  uploaded_at  DateTime @default(now())
+  /// User.id of whoever uploaded it. Nullable so the row survives user deletion.
+  uploaded_by  String?
+  customer     Customer @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  business     Business @relation(fields: [business_id], references: [id])
+
+  @@index([business_id])
+  @@map("organization_tax_documents")
+}
+
 model Document {
   id            String              @id @default(uuid())
   name          String
@@ -631,6 +717,25 @@ model FundraiserCampaign {
   // Editable while the campaign is open; refused once closed_at is set.
   org_share_percent     Decimal    @default(20.00) @db.Decimal(5, 2)
   // ─────────────────────────────────────────────────────────────────────────
+  // ── FR-TAX-1: the campaign's FROZEN tax treatment ─────────────────────────
+  // A SNAPSHOT, taken once when the tenant launches the campaign, from the
+  // organization's tax_status and the tenant's default_food_tax_percent. It is
+  // never recomputed from live values afterwards: changing an organization's
+  // status, or the tenant's default rate, must not retroactively rewrite what
+  // an already-launched fundraiser was told its tax treatment would be. A new
+  // campaign inherits the new current values; an old one keeps its own.
+  //
+  // Both NULLABLE with no default on purpose: NULL means "launched before
+  // FR-TAX-1, no snapshot was ever taken", which is a different and more
+  // honest fact than "snapshotted as taxable at 0%". Callers must handle the
+  // no-snapshot case explicitly rather than inheriting a fabricated one.
+  //
+  // Owned by the TENANT. The coordinator and the supporter cannot set or
+  // change these — the coordinator portal never writes them, and the generic
+  // organization-profile form is barred from touching them for the same
+  // reason it is barred from touching org_share_percent.
+  tax_status            OrgTaxStatus?
+  tax_rate_percent      Decimal?   @db.Decimal(5, 2)
   documents             Document[]
   // FR-RETENTION-0R: campaign history must survive normal organization lifecycle.
   // Restrict (was Cascade) — deleting an organization that owns campaigns is refused

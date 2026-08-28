@@ -168,6 +168,15 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
         isSuperAdmin: (session?.user as any)?.isSuperAdmin === true,
     });
     const [orgShare, setOrgShare] = useState(ORG_SHARE_DEFAULT_INPUT);
+
+    // FR-TAX-1: tax treatment for this campaign. Prefilled from the selected
+    // organization's recorded status and the tenant's default rate (fetched
+    // below), then confirmed or overridden by the tenant. UNKNOWN prefills as
+    // TAXABLE — never exempt — so an unanswered question cannot quietly become
+    // a tax position.
+    const [taxStatus, setTaxStatus] = useState<'TAXABLE' | 'TAX_EXEMPT'>('TAXABLE');
+    const [taxRate, setTaxRate] = useState('0');
+    const [orgHasExemptionDoc, setOrgHasExemptionDoc] = useState(false);
     const orgShareError = shareAuthorized ? orgShareInputError(orgShare) : null;
     // CB-4: eligible families from /api/campaigns/bundle-families
     const [eligibleFamilies, setEligibleFamilies] = useState<EligibleFamily[]>([]);
@@ -195,6 +204,35 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
     useEffect(() => {
         fetch('/api/tenant/branding').then(r => r.json()).then(d => setBranding(d)).catch(() => {});
     }, []);
+
+    // FR-TAX-1: prefill the tax treatment from the tenant's default rate and,
+    // when launching for an EXISTING organization, that organization's own
+    // recorded status. Presentation only — the server re-resolves and freezes
+    // the snapshot itself, so a tampered form cannot invent a tax position.
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch('/api/tenant/tax-settings', { cache: 'no-store' });
+                const data = await res.json().catch(() => ({}));
+                if (!cancelled && res.ok && data?.defaultFoodTaxPercent !== undefined) {
+                    setTaxRate(String(data.defaultFoodTaxPercent));
+                }
+            } catch { /* prefill is a convenience; the server decides */ }
+
+            const orgId = useExistingId;
+            if (!orgId) return;
+            try {
+                const res = await fetch(`/api/customers/${orgId}`, { cache: 'no-store' });
+                const data = await res.json().catch(() => ({}));
+                if (cancelled || !res.ok) return;
+                setOrgHasExemptionDoc(Boolean(data?.tax_document));
+                // UNKNOWN deliberately does NOT prefill exempt.
+                if (data?.tax_status === 'TAX_EXEMPT') setTaxStatus('TAX_EXEMPT');
+            } catch { /* same */ }
+        })();
+        return () => { cancelled = true; };
+    }, [useExistingId]);
 
     // Dup-check while typing (Step 1).
     // GET /api/customers?type=organization returns only fundraiser_org/organization rows
@@ -289,6 +327,11 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                     // resolves it to the default rather than rejecting a literal 0.
                     bundleGoal: camp.bundleGoal || undefined,
                     endDate: camp.endDate,
+                    // FR-TAX-1: the tenant's confirmed tax treatment for THIS
+                    // campaign. The server snapshots it onto the campaign; it
+                    // is never recomputed from live values afterwards.
+                    taxStatus: taxStatus,
+                    taxRatePercent: taxStatus === 'TAXABLE' ? taxRate : undefined,
                     // INV-A: present only for an authorized ADMIN/super-admin
                     // with a non-blank value; everyone else omits the key and
                     // the database default (20.00) applies.
@@ -554,6 +597,53 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                                     </p>
                                 </>
                             )}
+                        </FieldLabel>
+
+                        {/* FR-TAX-1: tax treatment, frozen onto the campaign at
+                            launch. The tenant owns this choice; the coordinator
+                            and supporters never see or set it. */}
+                        <FieldLabel label="Tax Treatment">
+                            <div className="mt-1 space-y-2">
+                                <label className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-slate-700 dark:text-slate-200">
+                                    <input
+                                        type="radio"
+                                        name="wiz-tax-status"
+                                        checked={taxStatus === 'TAXABLE'}
+                                        onChange={() => setTaxStatus('TAXABLE')}
+                                    />
+                                    <span>Taxable</span>
+                                    <input
+                                        id="wiz-tax-rate"
+                                        type="number"
+                                        min={0}
+                                        max={100}
+                                        step={0.01}
+                                        className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-[13px] dark:border-slate-700 dark:bg-slate-900"
+                                        value={taxRate}
+                                        disabled={taxStatus !== 'TAXABLE'}
+                                        onChange={(e) => setTaxRate(e.target.value)}
+                                    />
+                                    <span className="text-slate-500">%</span>
+                                </label>
+                                <label className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-slate-700 dark:text-slate-200">
+                                    <input
+                                        type="radio"
+                                        name="wiz-tax-status"
+                                        checked={taxStatus === 'TAX_EXEMPT'}
+                                        onChange={() => setTaxStatus('TAX_EXEMPT')}
+                                    />
+                                    <span>
+                                        Tax exempt
+                                        {orgHasExemptionDoc
+                                            ? ' — documentation on file'
+                                            : ' — no documentation on file'}
+                                    </span>
+                                </label>
+                            </div>
+                            <p className="mt-1 text-[11px] font-medium normal-case tracking-normal text-slate-500 dark:text-slate-400">
+                                Frozen onto this campaign at launch. Changing the organization&apos;s status or your
+                                default rate later will not change this fundraiser.
+                            </p>
                         </FieldLabel>
 
                         {/* GE-9 below-minimum amber warning (handoff line 529) */}

@@ -8,6 +8,7 @@ import {
   isCanonicalServes2Tier,
 } from '@/lib/campaignBundleSelection';
 import { computeBundleUnitsFromItems, parseBundleGoal, resolveBundleGoal } from '@/lib/fundraiserMetrics';
+import { isOrgTaxStatus, parseTaxRatePercent, resolveCampaignTaxSnapshot } from '@/lib/fundraiserTax';
 import { decideOrgShareChange, isOrgShareRejected } from '@/lib/fundraiserOrgShare';
 import { evaluateCampaignHealth } from '@/lib/growth/health';
 import {
@@ -81,6 +82,11 @@ interface CreateCampaignBody {
   // Omitted by every pre-INV-A caller, which is why the column carries a 20.00
   // database default rather than requiring a value here.
   orgSharePercent?: number | string | null;
+  // FR-TAX-1: the tenant's explicit tax treatment for THIS campaign, confirming
+  // or overriding what the organization's own status would prefill. Omitted by
+  // every pre-FR-TAX-1 caller, which then gets the resolved default.
+  taxStatus?: 'UNKNOWN' | 'TAXABLE' | 'TAX_EXEMPT' | null;
+  taxRatePercent?: number | string | null;
 }
 
 /**
@@ -178,12 +184,44 @@ export async function POST(req: Request) {
                 id: customerId,
                 business_id: businessId,
             },
-            select: { id: true },
+            select: { id: true, tax_status: true },
         });
 
         if (!customer) {
             return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
         }
+
+        // ── FR-TAX-1: FREEZE the campaign's tax treatment at launch ───────────
+        // Read the organization's CURRENT status and the tenant's CURRENT
+        // default rate once, here, and store the result on the campaign. Every
+        // later read uses the stored snapshot, never these live values, so a
+        // subsequent change to either cannot retroactively rewrite what an
+        // already-launched fundraiser was told.
+        //
+        // An organization whose status was never recorded (UNKNOWN) resolves to
+        // TAXABLE at the tenant default — never to exempt. See
+        // lib/fundraiserTax.ts resolveCampaignTaxSnapshot.
+        const taxBusiness = await prisma.business.findUnique({
+            where: { id: businessId },
+            select: { default_food_tax_percent: true },
+        });
+
+        let taxOverride: { status: 'TAXABLE' | 'TAX_EXEMPT'; ratePercent?: number | string | null } | null = null;
+        if (isOrgTaxStatus(body.taxStatus) && body.taxStatus !== 'UNKNOWN') {
+            taxOverride = { status: body.taxStatus, ratePercent: body.taxRatePercent };
+        }
+        if (taxOverride?.status === 'TAXABLE' && body.taxRatePercent !== undefined && body.taxRatePercent !== null && body.taxRatePercent !== '') {
+            const parsedRate = parseTaxRatePercent(body.taxRatePercent);
+            if (!parsedRate.ok) {
+                return NextResponse.json({ error: parsedRate.error }, { status: 400 });
+            }
+        }
+
+        const taxSnapshot = resolveCampaignTaxSnapshot({
+            organizationStatus: customer.tax_status as any,
+            tenantDefaultRatePercent: taxBusiness?.default_food_tax_percent as any,
+            override: taxOverride,
+        });
 
         // ── FR-RETENTION-5: rebooking conversion pre-flight ───────────────────
         //
@@ -416,6 +454,9 @@ export async function POST(req: Request) {
                             portal_token: mintCoordinatorPortalToken(),
                             // @ts-ignore - Stale client: bundle_goal added in CB-1 migration
                             bundle_goal: resolvedBundleGoal,
+                            // FR-TAX-1: frozen at launch; never recomputed afterwards.
+                            tax_status: taxSnapshot.status as any,
+                            tax_rate_percent: taxSnapshot.ratePercent,
                             end_date: endDate ? new Date(endDate) : undefined,
                             // @ts-ignore - Stale client
                             mission_text: missionText,
@@ -471,6 +512,9 @@ export async function POST(req: Request) {
                         portal_token: mintCoordinatorPortalToken(),
                         // @ts-ignore - Stale client
                         bundle_goal: resolvedBundleGoal,
+                        // FR-TAX-1: frozen at launch; never recomputed afterwards.
+                        tax_status: taxSnapshot.status as any,
+                        tax_rate_percent: taxSnapshot.ratePercent,
                         end_date: endDate ? new Date(endDate) : undefined,
                         // @ts-ignore - Stale client
                         mission_text: missionText,
@@ -508,6 +552,9 @@ export async function POST(req: Request) {
                 portal_token: mintCoordinatorPortalToken(),
                 // @ts-ignore - Stale client
                 bundle_goal: resolvedBundleGoal,
+                // FR-TAX-1: frozen at launch; never recomputed afterwards.
+                tax_status: taxSnapshot.status as any,
+                tax_rate_percent: taxSnapshot.ratePercent,
                 end_date: endDate ? new Date(endDate) : undefined,
                 // @ts-ignore - Stale client
                 mission_text: missionText,

@@ -29,6 +29,7 @@ import { resolveEligibleBundleFamilies } from '@/lib/campaignBundleSelection';
 import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
 import { decideOrgShareChange, isOrgShareRejected } from '@/lib/fundraiserOrgShare';
 import { DEFAULT_BUNDLE_GOAL } from '@/lib/fundraiserMetrics';
+import { resolveCampaignTaxSnapshot } from '@/lib/fundraiserTax';
 import {
     AWAITING_COORDINATOR_SETUP_SELECTION_STATUS,
     LAUNCHED_CAMPAIGN_STATUS,
@@ -196,6 +197,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
                 customer_id: true,
                 confirmed_delivery_date: true,
                 campaign_id: true,
+                // FR-TAX-1: the organization's tax posture, read here so the
+                // campaign can freeze its own snapshot at launch.
+                customer: { select: { tax_status: true } },
             },
         });
         if (!opportunity) {
@@ -268,6 +272,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
             return NextResponse.json({ error: shareDecision.error }, { status: shareDecision.status });
         }
 
+        // ── FR-TAX-1: resolve the campaign's frozen tax treatment ─────────────
+        const launchTaxBusiness = await prisma.business.findUnique({
+            where: { id: businessId },
+            select: { default_food_tax_percent: true },
+        });
+        const launchTaxSnapshot = resolveCampaignTaxSnapshot({
+            organizationStatus: (opportunity.customer as any)?.tax_status ?? null,
+            tenantDefaultRatePercent: launchTaxBusiness?.default_food_tax_percent as any,
+        });
+
         // Candidate rows store the Serves-5 canonical bundle only; the Serves-2
         // sibling is resolved at read time from family_id + serving_tier. This is
         // the representation loadCandidateFamilies() already expects.
@@ -299,6 +313,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
                         // written explicitly rather than left to the DB
                         // default, so the JS constant stays the one authority.
                         bundle_goal: DEFAULT_BUNDLE_GOAL,
+                        // FR-TAX-1: this streamlined flow has no tax input UI,
+                        // so the snapshot is whatever the organization's own
+                        // status and the tenant's default rate resolve to —
+                        // frozen here, never recomputed later.
+                        tax_status: launchTaxSnapshot.status as any,
+                        tax_rate_percent: launchTaxSnapshot.ratePercent,
                         ...(shareDecision.change ? { org_share_percent: shareDecision.percent } : {}),
                     },
                     select: { id: true },
