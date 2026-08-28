@@ -25,6 +25,8 @@ import { resolveCampaignOrderMode, validateBundleEligibility } from '@/lib/campa
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
 import { buildSupporterOrderUrl, formatOrderDeadline } from '@/lib/previousSupporterInvite';
+import { customerFacingBusinessName } from '@/lib/tenantBrand';
+import { resolveMaterialBundles, groupMaterialMenus } from '@/lib/coordinatorMaterialBundles';
 
 /**
  * Phase 7E-1C: Returns true if the campaign has been server-closed.
@@ -95,6 +97,10 @@ export async function GET(req: Request) {
                         business: {
                             select: {
                                 name: true,
+                                // FR-SHARE-COPY-1: the tenant's customer-facing
+                                // brand (lib/tenantBrand.customerFacingBusinessName)
+                                // — never the internal Business.name alone.
+                                display_name: true,
                                 slug: true,
                                 // FR-COORD-123: the canonical share URL prefers
                                 // the tenant's storefront domain, exactly like
@@ -242,13 +248,117 @@ export async function GET(req: Request) {
         // usable end_date — the share copy then omits the sentence.
         const shareDeadlineLabel = formatOrderDeadline(campaign.end_date);
 
+        // FR-SHARE-COPY-1: the tenant's customer-facing brand — never the
+        // internal Business.name alone, and never a hardcoded tenant name.
+        const shareTenantDisplayName = business ? customerFacingBusinessName(business) : 'freezer meal';
+
+        // FR-SHARE-COPY-1: the campaign's ACTUAL selected Bundle families,
+        // de-duplicated (a Serves-5/Serves-2 sibling pair counts once), in
+        // campaign selection order — the SAME authority the Order Tracker and
+        // marketing materials already use (lib/coordinatorMaterialBundles),
+        // never a second, independently-derived list. A legacy campaign has
+        // no "selected" subset to speak of (its whole catalog is orderable),
+        // so it gets an empty list rather than a misleading full-catalog dump;
+        // callers omit the bundle section entirely in that case.
+        let shareBundleFamilyNames: string[] = [];
+        try {
+            if (orderMode?.mode === 'selected') {
+                const activeAssignments = await prisma.campaignBundle.findMany({
+                    where: { campaign_id: campaign.id, state: 'active' },
+                    orderBy: { position: 'asc' },
+                    select: {
+                        bundle: {
+                            select: { id: true, name: true, price: true, serving_tier: true, family_id: true },
+                        },
+                    },
+                });
+                const resolved = resolveMaterialBundles(
+                    activeAssignments.map(({ bundle: b }) => ({
+                        id: b.id,
+                        name: b.name,
+                        price: b.price,
+                        serving_tier: b.serving_tier,
+                        family_id: b.family_id,
+                    }))
+                );
+                if (resolved.ok) {
+                    shareBundleFamilyNames = groupMaterialMenus(resolved.bundles).map((m) => m.baseName);
+                }
+            }
+        } catch (shareBundleErr) {
+            console.error('Share bundle-family resolution error (non-blocking):', shareBundleErr);
+            // Share copy omits the bundle section rather than blocking portal access.
+        }
+
+        // FR-SHARE-COPY-1: coordinator identity for the share copy's "contact"
+        // block. The ASSIGNED coordinator (FundraiserCampaignCoordinator, the
+        // only durable record of "who agreed to run this fundraiser" — see
+        // app/api/campaigns/[id]/coordinator-email/route.ts for the same
+        // chain) wins when one exists and is still an active contact. Only
+        // when no assignment exists does this fall back to Customer.contact_name/
+        // contact_email — the org's own on-file contact, already shown
+        // elsewhere on this same dashboard. Never invents a name or email.
+        let shareCoordinatorName: string | null = null;
+        let shareCoordinatorEmail: string | null = null;
+        try {
+            const assigned = await prisma.fundraiserCampaignCoordinator.findUnique({
+                where: { campaign_id: campaign.id },
+                select: {
+                    org_contact: {
+                        select: {
+                            ended_at: true,
+                            contact: {
+                                select: {
+                                    display_name: true,
+                                    contact_points: {
+                                        where: { type: 'email', is_current: true },
+                                        select: { value: true },
+                                        orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+            if (assigned && !assigned.org_contact.ended_at) {
+                shareCoordinatorName = assigned.org_contact.contact.display_name?.trim() || null;
+                shareCoordinatorEmail = assigned.org_contact.contact.contact_points[0]?.value?.trim() || null;
+            }
+        } catch (coordErr) {
+            console.error('Assigned-coordinator resolution error (non-blocking):', coordErr);
+        }
+        if (!shareCoordinatorName && !shareCoordinatorEmail) {
+            shareCoordinatorName = (campaign.customer as any)?.contact_name?.trim() || null;
+            shareCoordinatorEmail = (campaign.customer as any)?.contact_email?.trim() || null;
+        }
+
+        // FR-SHARE-COPY-1: pickup/delivery logistics, only the facts actually
+        // configured — never "TBD" or an invented value. Distinct from the
+        // supporter ORDER deadline (end_date) above.
+        const sharePickupDeliveryLines: string[] = [];
+        const shareDeliveryDateLabel = formatOrderDeadline((campaign as any).delivery_date ?? null);
+        if (shareDeliveryDateLabel) sharePickupDeliveryLines.push(`Date: ${shareDeliveryDateLabel}`);
+        const shareDeliveryTime = ((campaign as any).delivery_time ?? '').trim();
+        if (shareDeliveryTime) sharePickupDeliveryLines.push(`Time: ${shareDeliveryTime}`);
+        const sharePickupLocation = ((campaign as any).pickup_location ?? '').trim();
+        if (sharePickupLocation) sharePickupDeliveryLines.push(`Location: ${sharePickupLocation}`);
+
         return NextResponse.json({
             ...campaign,
             total_sales: computedTotalSales,
             canceledOrders,
             availableBundles: bundles,
             orderMode,
-            share: { orderUrl: shareOrderUrl, deadlineLabel: shareDeadlineLabel },
+            share: {
+                orderUrl: shareOrderUrl,
+                deadlineLabel: shareDeadlineLabel,
+                tenantDisplayName: shareTenantDisplayName,
+                bundleFamilyNames: shareBundleFamilyNames,
+                coordinatorName: shareCoordinatorName,
+                coordinatorEmail: shareCoordinatorEmail,
+                pickupDeliveryLines: sharePickupDeliveryLines,
+            },
         });
 
     } catch (e: any) {

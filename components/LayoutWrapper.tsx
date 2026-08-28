@@ -13,6 +13,15 @@ interface LayoutWrapperProps {
 export default function LayoutWrapper({ children, hasSession }: LayoutWrapperProps) {
     const pathname = usePathname();
     const isShopPage = pathname?.startsWith('/shop/');
+    // FR-SHARE-COPY-1 mobile-overflow fix: the coordinator portal and the
+    // public scoreboard are self-contained "edge to edge" shells (their own
+    // sticky nav, their own max-w-xl mx-auto column) the same way storefront
+    // pages are — but unlike storefront pages they never got the same
+    // responsive padding exemption, so they stacked an UNCONDITIONAL 32px/side
+    // wrapper padding on top of their own page-level padding, well past what
+    // a phone viewport can spare. Sidebar visibility is intentionally NOT
+    // widened by this — showSidebar below still keys off isShopPage alone.
+    const isEdgeToEdgePage = isShopPage || pathname?.startsWith('/coordinator/') || pathname?.startsWith('/fundraiser/');
 
     // Hide sidebar and remove margin for storefront pages
     const showSidebar = hasSession && !isShopPage;
@@ -62,7 +71,7 @@ export default function LayoutWrapper({ children, hasSession }: LayoutWrapperPro
                     <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
                 </div>
             )}
-            <main className={`flex-1 ${!isShopPage ? 'h-full overflow-y-auto p-8' : 'min-h-screen p-4 sm:p-8'} overflow-x-clip ${showSidebar ? 'pt-20 lg:pt-8 lg:ml-[280px]' : 'ml-0'} print:ml-0 print:p-0 print:h-auto print:overflow-visible transition-all duration-300`}>
+            <main className={`flex-1 ${!isEdgeToEdgePage ? 'h-full overflow-y-auto p-8' : 'min-h-screen p-4 sm:p-8'} overflow-x-clip ${showSidebar ? 'pt-20 lg:pt-8 lg:ml-[280px]' : 'ml-0'} print:ml-0 print:p-0 print:h-auto print:overflow-visible transition-all duration-300`}>
                 {children}
             </main>
         </div>

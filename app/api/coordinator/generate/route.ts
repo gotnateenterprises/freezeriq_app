@@ -12,13 +12,15 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { callGemini, getGeminiApiKey } from '@/lib/ai/gemini';
-import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
+import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
+import { buildSupporterOrderUrl } from '@/lib/previousSupporterInvite';
+import { customerFacingBusinessName } from '@/lib/tenantBrand';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 import { resolveBundleGoal } from '@/lib/fundraiserMetrics';
 
 const MAX_GENERATIONS = 40;
 
-function buildPrompt(channel: string, campaign: any, publicUrl: string): string {
+function buildPrompt(channel: string, campaign: any, publicUrl: string, tenantName: string): string {
     const name = campaign.name || 'Our Fundraiser';
     const org = campaign.customer?.name || 'Our Organization';
     const bundleGoal = resolveBundleGoal(campaign.bundle_goal);
@@ -28,7 +30,11 @@ function buildPrompt(channel: string, campaign: any, publicUrl: string): string 
         ? new Date(campaign.end_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
         : 'soon';
 
-    const base = `Fundraiser: "${name}" by ${org}. Goal: ${bundleGoal} bundles. Orders placed: ${totalOrders}. Orders due: ${endDate}. Order link: ${publicUrl}. They are selling Freezer Chef meals — delicious, easy-to-prepare freezer meals that solve dinner.`;
+    // FR-SHARE-COPY-1: this used to hardcode "Freezer Chef meals" — a
+    // multi-tenant product cannot put one tenant's brand into every other
+    // tenant's AI-generated marketing copy. tenantName is the caller's
+    // resolved customerFacingBusinessName (display_name -> name).
+    const base = `Fundraiser: "${name}" by ${org}. Goal: ${bundleGoal} bundles. Orders placed: ${totalOrders}. Orders due: ${endDate}. Order link: ${publicUrl}. They are selling ${tenantName} meals — delicious, easy-to-prepare freezer meals that solve dinner.`;
 
     switch (channel) {
         case 'facebook':
@@ -65,6 +71,12 @@ export async function POST(req: Request) {
                     select: {
                         name: true,
                         business_id: true,
+                        // FR-SHARE-COPY-1: needed to build the SAME canonical
+                        // supporter URL every other share action uses (below) —
+                        // this route used to build its own, deprecated one —
+                        // and to resolve the tenant's actual brand name rather
+                        // than a hardcoded one.
+                        business: { select: { name: true, display_name: true, slug: true, custom_domain: true } },
                     }
                 }
             }
@@ -90,8 +102,19 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'AI generation not configured. Contact support.' }, { status: 503 });
         }
 
-        const publicUrl = buildPublicFundraiserUrl(req, campaign.public_token!);
-        const prompt = buildPrompt(channel, campaign, publicUrl);
+        // FR-SHARE-COPY-1: the SAME canonical supporter URL every other share
+        // action uses (lib/previousSupporterInvite.buildSupporterOrderUrl) —
+        // this used to build the deprecated /fundraiser/{public_token}
+        // scoreboard shape via buildPublicFundraiserUrl, so AI-generated copy
+        // could point supporters somewhere different from every other button.
+        const business = (campaign.customer as any)?.business ?? null;
+        const publicUrl = buildSupporterOrderUrl(
+            resolveOutreachOrigin(req),
+            { id: campaign.id, public_token: campaign.public_token },
+            { customDomain: business?.custom_domain ?? null, slug: business?.slug ?? null },
+        ) ?? '';
+        const tenantName = business ? customerFacingBusinessName(business) : 'freezer meal';
+        const prompt = buildPrompt(channel, campaign, publicUrl, tenantName);
 
         let content: string;
         try {

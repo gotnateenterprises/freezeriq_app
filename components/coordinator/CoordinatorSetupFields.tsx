@@ -51,7 +51,7 @@ function LockedRow({ label, value }: { label: string; value: string }) {
             <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">
                 <Lock size={11} aria-hidden="true" /> {label}
             </span>
-            <span className="text-right text-sm font-semibold text-slate-900">{value}</span>
+            <span className="min-w-0 flex-1 text-right text-sm font-semibold text-slate-900 break-words">{value}</span>
         </div>
     );
 }

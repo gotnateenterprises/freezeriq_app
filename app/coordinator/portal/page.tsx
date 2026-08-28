@@ -2,7 +2,14 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast, Toaster } from 'sonner';
-import { deriveSharingStarted, buildShareMessage, buildShareSms } from '@/lib/coordinatorLaunch';
+import { deriveSharingStarted } from '@/lib/coordinatorLaunch';
+import {
+    buildFundraiserShareEmail,
+    buildFundraiserShareSms,
+    buildFundraiserShareFacebook,
+    buildFundraiserShareNative,
+    type ShareFacts,
+} from '@/lib/fundraiserShareContent';
 import type { CampaignAsset } from '@/lib/campaignAssets';
 import type { PromoScriptsResponse } from '@/lib/generatePromoScripts';
 import { computeFundraiserProgress, formatBundleCount } from '@/lib/fundraiserMetrics';
@@ -363,34 +370,41 @@ export default function CoordinatorPortal() {
         trackAction('share_fundraiser');
     };
 
-    // ── FR-COORD-123: Step 2 share actions ─────────────────────────────────
+    // ── FR-COORD-123 / FR-SHARE-COPY-1: Step 2 share actions ────────────────
     //
     // Each performs the REAL action and records a durable share event; the
     // event is what makes "Sharing started" true, so opening the card alone
-    // changes nothing. Copy is derived from the CURRENT campaign only —
-    // canonical URL + current deadline, both server-resolved.
-    const shareMessage = () => buildShareMessage({
-        organizationName: campaign?.customer?.name || 'Our group',
-        businessName: campaign?.customer?.business?.name || 'freezer meal',
+    // changes nothing. All channel copy is built from the SAME normalized
+    // facts — canonical URL, current deadline, tenant brand, selected Bundle
+    // families, pickup/delivery logistics, and coordinator contact, all
+    // server-resolved (app/api/coordinator/route.ts's `share` object) — so no
+    // handler below invents or duplicates a fact of its own.
+    const shareFacts = (): ShareFacts => ({
+        organizationName: campaign?.customer?.name?.trim() || 'Our group',
+        tenantDisplayName: campaign?.share?.tenantDisplayName?.trim() || 'freezer meal',
+        bundleFamilyNames: campaign?.share?.bundleFamilyNames ?? [],
         orderUrl: getShopOrderUrl(),
         deadlineLabel: campaign?.share?.deadlineLabel ?? null,
+        coordinatorName: campaign?.share?.coordinatorName ?? null,
+        coordinatorEmail: campaign?.share?.coordinatorEmail ?? null,
+        pickupDeliveryLines: campaign?.share?.pickupDeliveryLines ?? [],
     });
 
     const handleShareEmail = async () => {
-        const subject = encodeURIComponent(`Support ${campaign?.customer?.name || 'our fundraiser'}!`);
-        const message = shareMessage();
+        const { subject, body } = buildFundraiserShareEmail(shareFacts());
         // Copy first, exactly like the Facebook and Text handlers. A webmail-only
         // device — the typical school Chromebook — may have no mailto: handler
         // at all, and a coordinator who is told "Sharing started" must still be
         // holding the message rather than watching nothing happen.
-        try { await navigator.clipboard.writeText(message); } catch { /* clipboard optional */ }
+        try { await navigator.clipboard.writeText(body); } catch { /* clipboard optional */ }
         toast.success('Message copied! Paste it into your email if it does not open.');
         trackAction('share_email');
-        window.location.href = `mailto:?subject=${subject}&body=${encodeURIComponent(message)}`;
+        window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     };
 
     const handleShareFacebook = async () => {
-        try { await navigator.clipboard.writeText(shareMessage()); } catch { /* clipboard optional */ }
+        const message = buildFundraiserShareFacebook(shareFacts());
+        try { await navigator.clipboard.writeText(message); } catch { /* clipboard optional */ }
         toast.success('Message copied! Paste it into Facebook when it opens.');
         trackAction('share_facebook');
         window.open(
@@ -401,11 +415,7 @@ export default function CoordinatorPortal() {
     };
 
     const handleShareText = async () => {
-        const msg = buildShareSms({
-            organizationName: campaign?.customer?.name || 'Our group',
-            orderUrl: getShopOrderUrl(),
-            deadlineLabel: campaign?.share?.deadlineLabel ?? null,
-        });
+        const msg = buildFundraiserShareSms(shareFacts());
         const isMobile = typeof navigator !== 'undefined' &&
             /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
         trackAction('send_text_blast');
@@ -426,10 +436,8 @@ export default function CoordinatorPortal() {
 
     const handleShareNative = async () => {
         try {
-            await (navigator as any).share({
-                title: `Support ${campaign?.customer?.name || 'our fundraiser'}!`,
-                text: shareMessage(),
-            });
+            const { title, text } = buildFundraiserShareNative(shareFacts());
+            await (navigator as any).share({ title, text });
             // Only a COMPLETED native share counts — canceling the sheet
             // (AbortError) shares nothing and records nothing.
             trackAction('share_native');
@@ -469,7 +477,10 @@ export default function CoordinatorPortal() {
 
     const handleEmailShareWithContent = async (content: string) => {
         await navigator.clipboard.writeText(content);
-        const subject = encodeURIComponent(`Support ${campaign?.name || 'our fundraiser'}!`);
+        // FR-SHARE-COPY-1: this used to read campaign?.name (the CAMPAIGN's own
+        // name, e.g. "Fall 2026 Sale") instead of the organization — every
+        // other Email subject on this page uses campaign?.customer?.name.
+        const subject = encodeURIComponent(`Support ${campaign?.customer?.name || 'our fundraiser'}!`);
         const body = encodeURIComponent(content);
         if (content.length < 1800) {
             toast.success('Copied! Paste into your email when it opens.');

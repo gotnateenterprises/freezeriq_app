@@ -234,7 +234,7 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
                             <AlertCircle size={24} className="text-indigo-400" />
                             <h2 className="text-xl font-black italic underline decoration-indigo-500">How to Help</h2>
                         </div>
-                        <p className="text-slate-300 font-bold mb-6 italic leading-relaxed whitespace-pre-wrap">
+                        <p className="text-slate-300 font-bold mb-6 italic leading-relaxed whitespace-pre-wrap break-words">
                             {campaign.payment_instructions}
                         </p>
                         {campaign.external_payment_link && (

@@ -331,6 +331,9 @@ describe('FR-COORD-123 · every material route uses the canonical authority', ()
         'app/api/packet/download/route.ts',
         'app/api/promo-scripts/route.ts',
         'app/api/qr/download/route.ts',
+        // FR-SHARE-COPY-1: the AI Content Generator used to build its own,
+        // deprecated /fundraiser/{public_token} URL — now on the same authority.
+        'app/api/coordinator/generate/route.ts',
     ];
 
     it.each(ROUTES)('%s builds its order URL from the pinned authority, never the request host', (p) => {

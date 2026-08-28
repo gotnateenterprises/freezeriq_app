@@ -13,8 +13,6 @@ import path from 'path';
 import {
     deriveLaunchSteps,
     deriveSharingStarted,
-    buildShareMessage,
-    buildShareSms,
     isShareAction,
     SHARE_ACTION_TYPES,
 } from '../lib/coordinatorLaunch';
@@ -210,38 +208,20 @@ describe('FR-COORD-123 · Step 2 — sharing started is a durable ACTION', () =>
 });
 
 // ── SHARE COPY + URL AUTHORITY ──────────────────────────────────────────────
+// FR-SHARE-COPY-1: the channel-specific templates (Email/SMS/Facebook/Native)
+// now live in lib/fundraiserShareContent.ts and are covered by
+// tests/frShareCopy1.test.ts. What remains here is the wiring invariant this
+// suite has always owned: the portal reads its share facts from exactly ONE
+// server-resolved source, never a per-handler duplicate or a client guess.
 describe('FR-COORD-123 · share copy and canonical URL', () => {
-    const URL_ = 'https://myfreezerchef.com/shop/my-freezer-chef/fundraiser/camp-1';
-
-    it('the message is the preferred voice, current URL, current deadline', () => {
-        const m = buildShareMessage({
-            organizationName: 'Hilltop Boosters', businessName: 'Freezer Chef',
-            orderUrl: URL_, deadlineLabel: 'Sunday, August 31',
-        });
-        expect(m).toContain('Hilltop Boosters is holding a Freezer Chef fundraiser!');
-        expect(m).toContain("We'd love your support.");
-        expect(m).toContain(`Save time and order online here:\n${URL_}`);
-        expect(m).toContain('Please place your order by Sunday, August 31.');
-        expect(m).toContain('Thank you for supporting Hilltop Boosters!');
-    });
-
-    it('no valid deadline → the deadline sentence is OMITTED, never invented', () => {
-        const m = buildShareMessage({
-            organizationName: 'Org', businessName: 'B', orderUrl: URL_, deadlineLabel: null,
-        });
-        expect(m).not.toContain('Please place your order by');
-        const sms = buildShareSms({ organizationName: 'Org', orderUrl: URL_, deadlineLabel: null });
-        expect(sms).not.toContain('Order by');
-        expect(sms).toContain(URL_);
-    });
-
     it('the coordinator GET resolves the URL through the PINNED authority', () => {
         const code = strip(R(COORD_GET));
         expect(code).toContain('buildSupporterOrderUrl(');
         expect(code).toContain('resolveOutreachOrigin(req)');
         expect(code).toContain('custom_domain');
         expect(code).toContain('formatOrderDeadline(campaign.end_date)');
-        expect(code).toContain("share: { orderUrl: shareOrderUrl, deadlineLabel: shareDeadlineLabel }");
+        expect(code).toContain('orderUrl: shareOrderUrl,');
+        expect(code).toContain('deadlineLabel: shareDeadlineLabel,');
     });
 
     it('every portal share handler uses the one canonical URL helper', () => {
@@ -256,10 +236,17 @@ describe('FR-COORD-123 · share copy and canonical URL', () => {
             const block = portal.slice(i, portal.indexOf('};', i));
             expect(block).not.toContain('window.location.origin');
         }
-        // BOTH share copies (full message and SMS) read the CURRENT campaign's
-        // server deadline — a hardcoded date in either one is a wrong deadline
-        // on real paper/phones.
-        expect(portal.split('deadlineLabel: campaign?.share?.deadlineLabel ?? null').length - 1).toBe(2);
+        // FR-SHARE-COPY-1: every channel now reads the CURRENT campaign's
+        // server-resolved facts through the ONE shareFacts() resolver — a
+        // stronger invariant than before, when Email/Facebook/Native shared a
+        // wrapper but Text/SMS duplicated the same field access independently.
+        expect(portal).toContain('const shareFacts = (): ShareFacts => (');
+        expect(portal.split('deadlineLabel: campaign?.share?.deadlineLabel ?? null').length - 1).toBe(1);
+        for (const h of ['handleShareEmail', 'handleShareFacebook', 'handleShareText', 'handleShareNative']) {
+            const i = portal.indexOf(`const ${h}`);
+            const block = portal.slice(i, portal.indexOf('};', i));
+            expect(block).toContain('shareFacts()');
+        }
     });
 
     it('an old campaign cannot leak: URL and deadline both come from the one campaign object', () => {

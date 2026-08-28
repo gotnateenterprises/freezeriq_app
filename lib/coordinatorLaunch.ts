@@ -104,46 +104,9 @@ export function deriveLaunchSteps(input: {
     };
 }
 
-/**
- * The generic share message, in the same voice as the FR-REBOOK-2 invitation.
- *
- * Derived entirely from the CURRENT campaign: the caller passes the canonical
- * supporter ordering URL (built server-side by buildSupporterOrderUrl from a
- * pinned origin) and the CURRENT campaign's formatted deadline. When the
- * campaign has no usable deadline the sentence is simply absent — there is no
- * fallback date, because the only available fallback would be invented.
- */
-export function buildShareMessage(input: {
-    organizationName: string;
-    businessName: string;
-    orderUrl: string;
-    deadlineLabel: string | null;
-}): string {
-    const org = input.organizationName?.trim() || 'Our group';
-    const biz = input.businessName?.trim() || 'freezer meal';
-    const lines = [
-        `${org} is holding a ${biz} fundraiser!`,
-        '',
-        `We'd love your support.`,
-        '',
-        'Save time and order online here:',
-        input.orderUrl,
-        '',
-    ];
-    if (input.deadlineLabel) {
-        lines.push(`Please place your order by ${input.deadlineLabel}.`, '');
-    }
-    lines.push(`Thank you for supporting ${org}!`);
-    return lines.join('\n');
-}
-
-/** A short SMS-sized variant of the same message. */
-export function buildShareSms(input: {
-    organizationName: string;
-    orderUrl: string;
-    deadlineLabel: string | null;
-}): string {
-    const org = input.organizationName?.trim() || 'Our group';
-    const deadline = input.deadlineLabel ? ` Order by ${input.deadlineLabel}!` : '';
-    return `${org} is holding a freezer meal fundraiser! Order online here: ${input.orderUrl}${deadline}`;
-}
+// FR-SHARE-COPY-1: the generic share message that used to live here
+// (buildShareMessage/buildShareSms) was replaced by the channel-specific,
+// tenant-brand-aware templates in lib/fundraiserShareContent.ts — Email,
+// Facebook and Native no longer share one generic message, Text/SMS no
+// longer hardcodes "freezer meal fundraiser", and every channel now derives
+// from the SAME normalized ShareFacts rather than each rebuilding its own.

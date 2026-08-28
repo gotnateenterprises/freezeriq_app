@@ -502,15 +502,22 @@ export default function FundraiserClient({
     return (
         <div style={{ minHeight: '100vh', background: '#faf5ef', color: '#3b2a2f', paddingBottom: '4rem', fontSize: 14, lineHeight: 1.5 }}>
 
-            {/* ── Topbar (prototype lines 504-507): campaign identity + tenant chip ── */}
-            <div style={{ position: 'sticky', top: 0, zIndex: 30, display: 'flex', alignItems: 'center', gap: '.55rem', background: 'rgba(250,245,239,.92)', backdropFilter: 'blur(8px)', padding: '.75rem 1rem .6rem', borderBottom: '1px solid #eee2d6' }}>
+            {/* ── Topbar (prototype lines 504-507): campaign identity + tenant chip ──
+                 FR-SHARE-COPY-1: horizontal padding removed here for the same
+                 reason as the page column below — it duplicated LayoutWrapper's
+                 `main` padding (`p-4 sm:p-8`), stacking to 2rem/side on mobile. ── */}
+            <div style={{ position: 'sticky', top: 0, zIndex: 30, display: 'flex', alignItems: 'center', gap: '.55rem', background: 'rgba(250,245,239,.92)', backdropFilter: 'blur(8px)', padding: '.75rem 0 .6rem', borderBottom: '1px solid #eee2d6' }}>
                 <span style={{ width: 30, height: 30, borderRadius: 99, background: primaryColor, color: '#fff', display: 'grid', placeItems: 'center', fontSize: '.85rem', flex: 'none', overflow: 'hidden' }} aria-hidden="true">
                     {tenantLogo
                         ? <img src={tenantLogo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         : '🍲'}
                 </span>
-                <b style={{ fontFamily: SERIF, fontSize: '1rem', letterSpacing: '.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{campaignTitle}</b>
-                <span style={{ marginLeft: 'auto', flex: 'none', fontSize: '.66rem', fontWeight: 800, background: '#fdf3ee', color: primaryColor, borderRadius: 99, padding: '.3rem .6rem' }}>by {tenantName}</span>
+                <b style={{ fontFamily: SERIF, fontSize: '1rem', letterSpacing: '.01em', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{campaignTitle}</b>
+                {/* FR-SHARE-COPY-1 mobile-overflow fix: flex:'none' held this at
+                    full content width with no shrink/ellipsis guard, so a tenant
+                    brand name longer than a short example could push the whole
+                    topbar row past the viewport with no way to scroll to it. */}
+                <span style={{ marginLeft: 'auto', flex: '0 1 auto', minWidth: 0, maxWidth: '40%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '.66rem', fontWeight: 800, background: '#fdf3ee', color: primaryColor, borderRadius: 99, padding: '.3rem .6rem' }}>by {tenantName}</span>
             </div>
 
             {/* ── Page column (the prototype is a single warm editorial column) ── */}
@@ -903,7 +910,13 @@ export default function FundraiserClient({
                                 ) : (
                                     <div style={{ marginTop: '.6rem' }}>
                                         {orderLines.map(line => (
-                                            <div key={line.bundleId} style={{ display: 'flex', alignItems: 'center', gap: '.6rem', padding: '.55rem 0', borderBottom: '1px dashed #eee2d6' }}>
+                                            /* FR-SHARE-COPY-1 mobile-overflow fix: the qty stepper,
+                                               line total, and remove button have no shrink floor —
+                                               flexWrap lets this row drop to a second line as its
+                                               escape valve rather than pushing content off-screen
+                                               with no way to scroll to it (a 2-digit quantity, a
+                                               3-digit total, or OS font scaling can exceed the row). */
+                                            <div key={line.bundleId} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '.6rem', padding: '.55rem 0', borderBottom: '1px dashed #eee2d6' }}>
                                                 <div style={{ flex: 1, minWidth: 0 }}>
                                                     <b style={{ fontSize: '.76rem', color: '#3b2a2f', display: 'block' }}>{line.name}</b>
                                                     <span style={{ fontSize: '.66rem', color: '#9a8075' }}>${line.price.toFixed(2)} each</span>
@@ -986,7 +999,7 @@ export default function FundraiserClient({
                     {campaign.about_text && (
                         <section style={fableCard}>
                             <b style={{ fontFamily: SERIF, fontWeight: 400, fontSize: '.95rem', color: '#3b2a2f' }}>About this fundraiser</b>
-                            <p style={{ whiteSpace: 'pre-wrap', margin: '.45rem 0 0', fontSize: '.78rem', color: '#5d463d', lineHeight: 1.55 }}>{campaign.about_text}</p>
+                            <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: '.45rem 0 0', fontSize: '.78rem', color: '#5d463d', lineHeight: 1.55 }}>{campaign.about_text}</p>
                         </section>
                     )}
                 </>
