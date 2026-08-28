@@ -151,10 +151,33 @@ export default function RecipeBrowser({ recipes, categories }: { recipes: Recipe
 
             if (res.ok) {
                 router.refresh();
-            } else {
-                const data = await res.json();
-                alert(data.error || 'Failed to delete recipe');
+                return;
             }
+
+            const data = await res.json();
+
+            // RECIPE-DELETE-GUARD-1. A recipe still used by bundles (or by other
+            // recipes) is refused rather than silently unlinked, so the user
+            // needs to see WHERE it is used — a bare "delete failed" would leave
+            // them with no way to act.
+            if (res.status === 409 && data.code === 'RECIPE_IN_USE') {
+                const lines = [`Can't delete "${name}" yet.`, ''];
+                if (data.bundleCount > 0) {
+                    lines.push(`It is used in ${data.bundleCount} bundle${data.bundleCount === 1 ? '' : 's'}:`);
+                    for (const b of data.bundles ?? []) lines.push(`   • ${b.name}`);
+                    lines.push('');
+                }
+                if (data.recipeCount > 0) {
+                    lines.push(`It is used in ${data.recipeCount} other recipe${data.recipeCount === 1 ? '' : 's'}:`);
+                    for (const r of data.recipes ?? []) lines.push(`   • ${r.name}`);
+                    lines.push('');
+                }
+                lines.push('Remove or replace it there first, then delete the recipe.');
+                alert(lines.join('\n'));
+                return;
+            }
+
+            alert(data.error || 'Failed to delete recipe');
         } catch (e) {
             alert('Error deleting recipe');
         }
