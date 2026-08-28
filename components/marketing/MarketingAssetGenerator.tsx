@@ -6,6 +6,7 @@ import jsPDF from 'jspdf';
 import { QRCodeSVG } from 'qrcode.react';
 import { Loader2, Share2, FileText, Instagram } from 'lucide-react';
 import { format } from 'date-fns';
+import { resolveBundleGoal } from '@/lib/fundraiserMetrics';
 
 interface MarketingAssetGeneratorProps {
     campaign: {
@@ -202,7 +203,7 @@ export default function MarketingAssetGenerator({
                         <h2 className="text-3xl font-bold uppercase tracking-widest mb-4" style={{ color: '#a5b4fc' }}>Support Our Fundraiser</h2>
                         <h1 className="text-7xl font-black leading-tight mb-8">{organizationName}</h1>
                         <div className="inline-block px-8 py-4 rounded-2xl" style={{ backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }}>
-                            <p className="text-2xl font-medium">Goal: <span className="font-bold" style={{ color: '#ffffff' }}>{Number(campaign.bundle_goal) || 100} Bundles</span></p>
+                            <p className="text-2xl font-medium">Goal: <span className="font-bold" style={{ color: '#ffffff' }}>{resolveBundleGoal(campaign.bundle_goal)} Bundles</span></p>
                         </div>
                     </div>
 

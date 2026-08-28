@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { X, Eye, Calendar } from 'lucide-react';
 import { generateGoogleCalendarUrl } from '@/lib/google_calendar';
+import { DEFAULT_BUNDLE_GOAL } from '@/lib/fundraiserMetrics';
 
 interface FundraiserSetupProps {
     customer: any;
@@ -28,7 +29,7 @@ export default function FundraiserSetup({ customer, onSave, allowCancel, onCance
         bundle1_name: customer.fundraiser_info?.bundle1_name || '', // NEW: Store Bundle Name
         bundle2_name: customer.fundraiser_info?.bundle2_name || '', // NEW: Store Bundle Name
         participant_label: customer.fundraiser_info?.participant_label || '', // NEW: Participant Label
-        bundle_goal: customer.fundraiser_info?.bundle_goal || 100,
+        bundle_goal: customer.fundraiser_info?.bundle_goal || DEFAULT_BUNDLE_GOAL,
         // Prices removed
     });
 
@@ -203,9 +204,9 @@ export default function FundraiserSetup({ customer, onSave, allowCancel, onCance
                         type="number"
                         min={1}
                         value={fundraiserInfo.bundle_goal}
-                        onChange={e => setFundraiserInfo({ ...fundraiserInfo, bundle_goal: Number(e.target.value) || 100 })}
+                        onChange={e => setFundraiserInfo({ ...fundraiserInfo, bundle_goal: Number(e.target.value) || DEFAULT_BUNDLE_GOAL })}
                         className="w-full p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold"
-                        placeholder="100"
+                        placeholder={String(DEFAULT_BUNDLE_GOAL)}
                     />
                     <p className="text-[10px] text-slate-400 mt-1">
                         Target number of bundles to sell. Used in progress tracking &amp; emails.

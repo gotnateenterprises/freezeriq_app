@@ -11,6 +11,7 @@ import {
     ORG_SHARE_ADMIN_MANAGED_NOTE,
 } from '@/lib/orgShareForm';
 import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
+import { DEFAULT_BUNDLE_GOAL } from '@/lib/fundraiserMetrics';
 
 type Prefill = { customerId?: string; orgName?: string; goal?: number };
 
@@ -153,7 +154,10 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
     const [camp, setCamp] = useState({
         name: rebooking?.campaignName ?? '',
         endDate: rebooking?.endDate ?? '',
-        bundleGoal: prefill?.goal ?? 0,
+        // FR-GOAL-CONFIG-1: pre-filled and visible, not a silent default —
+        // the tenant sees exactly what goal they're launching with and can
+        // change it right here.
+        bundleGoal: prefill?.goal ?? DEFAULT_BUNDLE_GOAL,
     });
     // INV-A: organization share. Client-side role read is PRESENTATION only —
     // the server independently authorizes any explicit override. An
@@ -280,7 +284,10 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                 body: JSON.stringify({
                     customerId,
                     name: camp.name,
-                    bundleGoal: camp.bundleGoal,
+                    // A manually-cleared field parses to the 0 sentinel (see the
+                    // input's onChange below) — send it as omitted so the server
+                    // resolves it to the default rather than rejecting a literal 0.
+                    bundleGoal: camp.bundleGoal || undefined,
                     endDate: camp.endDate,
                     // INV-A: present only for an authorized ADMIN/super-admin
                     // with a non-blank value; everyone else omits the key and
@@ -501,7 +508,10 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                                 )}
                             </FieldLabel>
                             <FieldLabel label="Bundle Goal">
-                                <input id="wiz-bundle-goal" type="number" min={0} className={inputCls} value={camp.bundleGoal || ''} onChange={e => setCamp(c => ({ ...c, bundleGoal: Number(e.target.value) || 0 }))} placeholder="e.g. 50" />
+                                <input id="wiz-bundle-goal" type="number" min={1} className={inputCls} value={camp.bundleGoal || ''} onChange={e => setCamp(c => ({ ...c, bundleGoal: Number(e.target.value) || 0 }))} placeholder="e.g. 50" />
+                                <p className="mt-1 text-[11px] font-medium normal-case tracking-normal text-slate-500 dark:text-slate-400">
+                                    Weighted bundles — Serves 5 = 1, Serves 2 = ½. Defaults to {DEFAULT_BUNDLE_GOAL} if left blank.
+                                </p>
                             </FieldLabel>
                         </div>
 

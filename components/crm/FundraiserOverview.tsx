@@ -11,6 +11,7 @@ import StatusPipeline from './StatusPipeline';
 import { STATUS_LABELS, STATUS_COLORS, type CustomerStatus } from '@/lib/statusConstants';
 import { validateLaunchReadiness, launchReadinessMessage } from '@/lib/validateLaunchReadiness';
 import { buildFundraiserUrls } from '@/lib/fundraiserUrls';
+import { resolveBundleGoal } from '@/lib/fundraiserMetrics';
 
 // Template Generator (Matches API for default preview)
 const generateIntroTemplate = (name: string, orgName?: string, branding?: any) => {
@@ -127,7 +128,7 @@ ${(portalUrl || guideUrl || scoreboardUrl) ? `<div style="background-color: #f8f
 
 <h3>Fundraiser Details Refresher:</h3>
 <ul>
-    <li><strong>Bundle Goal:</strong> ${campaign?.bundle_goal || info.bundle_goal || 100} Bundles</li>
+    <li><strong>Bundle Goal:</strong> ${resolveBundleGoal(campaign?.bundle_goal ?? info.bundle_goal)} Bundles</li>
     <li><strong>Order Deadline:</strong> ${info.deadline ? new Date(info.deadline + 'T12:00:00').toLocaleDateString() : 'TBD'}</li>
     <li><strong>Delivery Date:</strong> ${info.delivery_date ? new Date(info.delivery_date + 'T12:00:00').toLocaleDateString() : 'TBD'} @ ${info.delivery_time || 'TBD'}</li>
     <li><strong>Pickup Location:</strong> ${info.pickup_location || 'TBD'}</li>

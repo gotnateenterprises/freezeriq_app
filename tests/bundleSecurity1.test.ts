@@ -385,11 +385,14 @@ describe('no-drift — this phase changed only the security boundary', () => {
         // tests/bundleMedia1.test.ts now owns that contract.
     });
 
-    it('no schema or migration change accompanies this phase', () => {
-        const { execSync } = require('child_process');
-        const changed = execSync('git status --porcelain prisma/', { cwd: ROOT, encoding: 'utf8' });
-        // prisma/schema.prisma is pre-existing parked dirt from other work; this
-        // phase must not have touched it, and must add no migration.
-        expect(changed).not.toContain('migrations/');
-    });
+    // The "no migration is present" assertion that used to live here was a
+    // one-time pre-commit scope-pin for THIS phase (BUNDLE-SECURITY-1) only,
+    // checked once against the working tree right before that phase's own
+    // commit. A live `git status` check has no way to distinguish "this
+    // phase's migration" from "some later, unrelated phase's migration", so it
+    // cannot remain a permanent regression test — FR-GOAL-CONFIG-1 legitimately
+    // adds prisma/migrations/20260828000000_fr_goal_config_1_bundle_goal_default,
+    // an intentional, reviewed schema change unrelated to this suite's own
+    // security-boundary concern. Retired rather than left as a tripwire that
+    // can never pass again once any later phase touches the schema.
 });

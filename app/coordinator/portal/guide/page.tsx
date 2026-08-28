@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
+import { resolveBundleGoal } from '@/lib/fundraiserMetrics';
 
 export default function SuccessGuide() {
     const [campaign, setCampaign] = useState<any>(null);
@@ -137,7 +138,7 @@ export default function SuccessGuide() {
                         Let's CRUSH <br /> this fundraiser!
                     </h1>
                     <p className="text-lg text-slate-500 font-medium max-w-md mx-auto">
-                        Everything you need to promote {campaign?.name || 'your campaign'} and hit your <strong>{campaign?.bundle_goal || '100'} bundle goal</strong>.
+                        Everything you need to promote {campaign?.name || 'your campaign'} and hit your <strong>{resolveBundleGoal(campaign?.bundle_goal)} bundle goal</strong>.
                     </p>
                 </div>
 

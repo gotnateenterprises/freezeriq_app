@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { FileText, Send, X, Eye, Loader2, Check, Save, Link as LinkIcon, Printer } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import FundraiserSetup from './crm/FundraiserSetup';
+import { DEFAULT_BUNDLE_GOAL } from '@/lib/fundraiserMetrics';
 
 interface Template {
     id: string;
@@ -182,7 +183,7 @@ export default function DocumentCenter({ customer, existingDoc, onSave }: Docume
             .replace(/{{ContactEmail}}/g, customer.email || '')
             .replace(/{{Date}}/g, new Date().toLocaleDateString())
             .replace(/{{DeliveryAddress}}/g, customer.delivery_address || 'Not Provided')
-            .replace(/{{GoalAmount}}/g, fundraiserInfo.bundle_goal ? `${fundraiserInfo.bundle_goal} bundles` : '100 bundles')
+            .replace(/{{GoalAmount}}/g, fundraiserInfo.bundle_goal ? `${fundraiserInfo.bundle_goal} bundles` : `${DEFAULT_BUNDLE_GOAL} bundles`)
             // Fundraiser Specifics
             .replace(/{{FundraiserDeadline}}/g, fundraiserInfo.deadline ? new Date(fundraiserInfo.deadline).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : '____________')
             .replace(/{{FundraiserDeadlineTime}}/g, fundraiserInfo.deadline_time || '')

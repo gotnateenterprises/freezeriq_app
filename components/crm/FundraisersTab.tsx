@@ -19,6 +19,7 @@ import {
     ORG_SHARE_LOCKED_NOTE,
 } from '@/lib/orgShareForm';
 import { isCampaignClosed } from '@/lib/campaignBundleSelection';
+import { resolveBundleGoal, parseBundleGoal, DEFAULT_BUNDLE_GOAL } from '@/lib/fundraiserMetrics';
 
 interface BundleOption {
     id: string;
@@ -76,6 +77,15 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
     const [shareInput, setShareInput] = useState(ORG_SHARE_DEFAULT_INPUT);
     const [savingShare, setSavingShare] = useState(false);
     const editShareError = orgShareInputError(shareInput);
+
+    // FR-GOAL-CONFIG-1: tenant-controlled weighted bundle goal. No role gate
+    // (unlike org share) — any tenant user on this tab may set it; only the
+    // campaign's closed-out state locks the field.
+    const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
+    const [goalInput, setGoalInput] = useState(String(DEFAULT_BUNDLE_GOAL));
+    const [savingGoal, setSavingGoal] = useState(false);
+    const editGoalErrorResult = parseBundleGoal(goalInput);
+    const editGoalError = editGoalErrorResult.ok ? null : editGoalErrorResult.error;
 
     // Bundle assignment state
     const [allBundles, setAllBundles] = useState<BundleOption[]>([]);
@@ -244,6 +254,43 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
         }
     }
 
+    /**
+     * FR-GOAL-CONFIG-1 — save an edited bundle goal for one OPEN campaign.
+     *
+     * Uses the same campaign-specific PATCH as the org share above. A blank
+     * input is submitted as omitted, matching decideBundleGoalChange's
+     * "no value supplied = leave the stored goal alone" contract — the server
+     * re-checks closeout (409) and value validity (400) independently.
+     */
+    async function handleSaveGoal(id: string) {
+        if (editGoalError) {
+            toast.error(editGoalError);
+            return;
+        }
+        const trimmed = goalInput.trim();
+        if (trimmed === '') {
+            setEditingGoalId(null);
+            return;
+        }
+        setSavingGoal(true);
+        try {
+            const res = await fetch(`/api/campaigns/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bundleGoal: trimmed })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to update bundle goal');
+            toast.success('Bundle goal updated!');
+            setEditingGoalId(null);
+            fetchCampaigns();
+        } catch (error: any) {
+            toast.error(error.message);
+        } finally {
+            setSavingGoal(false);
+        }
+    }
+
     async function handleUpdateLabels(id: string) {
         try {
             const res = await fetch(`/api/campaigns/${id}`, {
@@ -346,12 +393,13 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Bundle Goal</label>
                                 <input
                                     type="number"
+                                    min={1}
                                     className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold"
-                                    placeholder="e.g. 100"
+                                    placeholder="e.g. 20"
                                     value={newCampaign.bundleGoal}
                                     onChange={e => setNewCampaign({ ...newCampaign, bundleGoal: e.target.value })}
                                 />
-                                <p className="text-[10px] text-slate-400 mt-1">How many bundles does this campaign aim to sell?</p>
+                                <p className="text-[10px] text-slate-400 mt-1">Weighted bundles — Serves 5 = 1, Serves 2 = ½. Defaults to {DEFAULT_BUNDLE_GOAL} if left blank.</p>
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">End Date</label>
@@ -459,7 +507,29 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                 <div className="flex flex-wrap gap-4 text-sm text-slate-500">
                                     <div className="flex items-center gap-1.5">
                                         <Target className="w-4 h-4 text-slate-400" />
-                                        <span>Goal: {campaign.bundle_goal || 100} Bundles</span>
+                                        <span>Goal: {resolveBundleGoal(campaign.bundle_goal)} Bundles</span>
+                                        {/* FR-GOAL-CONFIG-1: tenant-owned, editable while open;
+                                            locked after closeout, mirroring the org-share pattern. */}
+                                        {!isCampaignClosed({ closed_at: campaign.closed_at ? new Date(campaign.closed_at) : null, status: campaign.status }) ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setEditingLabelsId(null);
+                                                    setEditingBundlesId(null);
+                                                    setEditingShareId(null);
+                                                    setEditingGoalId(campaign.id);
+                                                    setGoalInput(String(resolveBundleGoal(campaign.bundle_goal)));
+                                                }}
+                                                className="text-xs font-bold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 px-2 py-1.5 -my-1.5 rounded"
+                                                title="Edit bundle goal"
+                                            >
+                                                Edit
+                                            </button>
+                                        ) : (
+                                            <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400" title="Bundle goal is locked after fundraiser closeout.">
+                                                Locked
+                                            </span>
+                                        )}
                                     </div>
                                     <div className="flex items-center gap-1.5">
                                         <Calendar className="w-4 h-4 text-slate-400" />
@@ -486,6 +556,7 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                                 onClick={() => {
                                                     setEditingLabelsId(null);
                                                     setEditingBundlesId(null);
+                                                    setEditingGoalId(null);
                                                     setEditingShareId(campaign.id);
                                                     setShareInput(
                                                         campaign.org_share_percent != null && campaign.org_share_percent !== ''
@@ -631,6 +702,46 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                         className="text-xs font-bold text-indigo-600 hover:text-indigo-800 disabled:opacity-40 disabled:cursor-not-allowed"
                                     >
                                         {savingShare ? 'Saving…' : 'Save Share'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* FR-GOAL-CONFIG-1: Inline Bundle Goal Edit — open campaigns,
+                            any tenant user on this tab (no role gate; the server
+                            re-checks closeout regardless). */}
+                        {editingGoalId === campaign.id && (
+                            <div className="mt-2 pt-4 border-t border-slate-100 dark:border-slate-700/50 bg-slate-50/50 dark:bg-slate-900/20 p-4 rounded-xl">
+                                <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-1">Bundle Goal</p>
+                                <p className="text-[10px] text-slate-400 mb-3">Weighted bundles — Serves 5 = 1, Serves 2 = ½. Changing this only moves the target; progress already earned never changes.</p>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        step={1}
+                                        className="w-28 text-sm px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700"
+                                        value={goalInput}
+                                        aria-invalid={editGoalError ? true : undefined}
+                                        onChange={e => setGoalInput(e.target.value)}
+                                    />
+                                    <span className="text-sm font-bold text-slate-500 dark:text-slate-400">Bundles</span>
+                                </div>
+                                {editGoalError && (
+                                    <p role="alert" className="text-[11px] font-bold text-red-600 dark:text-red-400 mt-2">{editGoalError}</p>
+                                )}
+                                <div className="flex justify-end gap-2 mt-4">
+                                    <button
+                                        onClick={() => setEditingGoalId(null)}
+                                        className="text-xs font-bold text-slate-400 hover:text-slate-600"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={() => handleSaveGoal(campaign.id)}
+                                        disabled={savingGoal || editGoalError !== null}
+                                        className="text-xs font-bold text-indigo-600 hover:text-indigo-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                        {savingGoal ? 'Saving…' : 'Save Goal'}
                                     </button>
                                 </div>
                             </div>

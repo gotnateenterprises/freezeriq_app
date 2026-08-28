@@ -7,7 +7,7 @@ import {
   isCanonicalFamilyTier,
   isCanonicalServes2Tier,
 } from '@/lib/campaignBundleSelection';
-import { computeBundleUnitsFromItems } from '@/lib/fundraiserMetrics';
+import { computeBundleUnitsFromItems, parseBundleGoal, resolveBundleGoal } from '@/lib/fundraiserMetrics';
 import { decideOrgShareChange, isOrgShareRejected } from '@/lib/fundraiserOrgShare';
 import { evaluateCampaignHealth } from '@/lib/growth/health';
 import {
@@ -131,6 +131,16 @@ export async function POST(req: Request) {
         if (!customerId || !name) {
             return NextResponse.json({ error: "Customer ID and Name are required" }, { status: 400 });
         }
+
+        // ── FR-GOAL-CONFIG-1: tenant-controlled weighted bundle goal. Blank
+        //    or absent resolves to the shared default; a malformed or
+        //    non-positive value is rejected outright rather than silently
+        //    coerced — every branch below reuses this ONE resolved value.
+        const bundleGoalParsed = parseBundleGoal(bundleGoal);
+        if (!bundleGoalParsed.ok) {
+            return NextResponse.json({ error: bundleGoalParsed.error }, { status: 400 });
+        }
+        const resolvedBundleGoal = bundleGoalParsed.goal;
 
         // ── INV-A: organization share. Server-authoritative; omitted means the
         //    database default (20.00) applies, so every legacy caller is safe.
@@ -405,7 +415,7 @@ export async function POST(req: Request) {
                             // which is a sortable identifier, not a secret.
                             portal_token: mintCoordinatorPortalToken(),
                             // @ts-ignore - Stale client: bundle_goal added in CB-1 migration
-                            bundle_goal: bundleGoal ? Number(bundleGoal) : undefined,
+                            bundle_goal: resolvedBundleGoal,
                             end_date: endDate ? new Date(endDate) : undefined,
                             // @ts-ignore - Stale client
                             mission_text: missionText,
@@ -460,7 +470,7 @@ export async function POST(req: Request) {
                         // FR-FLOW-1R: explicit secure coordinator credential.
                         portal_token: mintCoordinatorPortalToken(),
                         // @ts-ignore - Stale client
-                        bundle_goal: bundleGoal ? Number(bundleGoal) : undefined,
+                        bundle_goal: resolvedBundleGoal,
                         end_date: endDate ? new Date(endDate) : undefined,
                         // @ts-ignore - Stale client
                         mission_text: missionText,
@@ -497,7 +507,7 @@ export async function POST(req: Request) {
                 // FR-FLOW-1R: explicit secure coordinator credential.
                 portal_token: mintCoordinatorPortalToken(),
                 // @ts-ignore - Stale client
-                bundle_goal: bundleGoal ? Number(bundleGoal) : undefined,
+                bundle_goal: resolvedBundleGoal,
                 end_date: endDate ? new Date(endDate) : undefined,
                 // @ts-ignore - Stale client
                 mission_text: missionText,
@@ -736,11 +746,10 @@ export async function GET(req: Request) {
                             ),
                             0
                         );
-                        const bundleGoalValue = Number((fc as any).bundle_goal || 0);
-                        // Safe for zero, missing, or invalid goals; capped at 100%.
-                        const progressPercent = Number.isFinite(bundleGoalValue) && bundleGoalValue > 0
-                            ? Math.min((weightedBundlesSold / bundleGoalValue) * 100, 100)
-                            : 0;
+                        // FR-GOAL-CONFIG-1: the same authority as every other
+                        // surface — never a locally-decided fallback.
+                        const bundleGoalValue = resolveBundleGoal((fc as any).bundle_goal);
+                        const progressPercent = Math.min((weightedBundlesSold / bundleGoalValue) * 100, 100);
 
                         // ── GE-3 campaign health (read-only) ──────────────────
                         // Derived from the same tenant-scoped rows already loaded
@@ -777,7 +786,7 @@ export async function GET(req: Request) {
                             start_date: fc.start_date,
                             end_date: fc.end_date,
                             goal_amount: Number(fc.goal_amount || 0),
-                            bundle_goal: Number((fc as any).bundle_goal || 0),
+                            bundle_goal: bundleGoalValue,
                             sales_total: Number(fc.total_sales || 0),
                             customer_id: c.id,
                             customer: { name: c.name, contact_name: (c as any).contact_name || null },

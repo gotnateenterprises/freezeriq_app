@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { decideOrgShareChange, isOrgShareRejected } from '@/lib/fundraiserOrgShare';
+import { decideBundleGoalChange, isBundleGoalRejected } from '@/lib/fundraiserMetrics';
 import { isCampaignClosed } from '@/lib/campaignBundleSelection';
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -67,12 +68,37 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
             ? orgShareDecision.percent
             : undefined;
 
+        // ── FR-GOAL-CONFIG-1: tenant-controlled weighted bundle goal ───────────
+        // Same closeout gate as the organization share above: once a fundraiser
+        // is financially closed, changing the denominator would retroactively
+        // rewrite what "on track" meant during a campaign that already ended.
+        // Unlike org share this carries no role gate — the goal is not a
+        // financial contract term, so any tenant user permitted on this route
+        // (already scoped to this business above) may set it. Omission leaves
+        // the stored goal untouched; the numerator is never touched here at all.
+        const bundleGoalDecision = decideBundleGoalChange({
+            requested: body.bundleGoal,
+            campaignClosed: isCampaignClosed({
+                closed_at: (campaign as any).closed_at ?? null,
+                status: campaign.status,
+            }),
+        });
+        if (isBundleGoalRejected(bundleGoalDecision)) {
+            return NextResponse.json({ error: bundleGoalDecision.error }, { status: bundleGoalDecision.status });
+        }
+        const bundleGoalValue: number | undefined = bundleGoalDecision.change
+            ? bundleGoalDecision.goal
+            : undefined;
+
         // Update
         const updated = await prisma.fundraiserCampaign.update({
             where: { id },
             data: {
                 ...(orgSharePercentValue !== undefined
                     ? { org_share_percent: orgSharePercentValue }
+                    : {}),
+                ...(bundleGoalValue !== undefined
+                    ? { bundle_goal: bundleGoalValue }
                     : {}),
                 name: body.name,
                 status: body.status,

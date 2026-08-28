@@ -28,6 +28,7 @@ import { mintCoordinatorPortalToken } from '@/lib/coordinatorPortalToken';
 import { resolveEligibleBundleFamilies } from '@/lib/campaignBundleSelection';
 import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
 import { decideOrgShareChange, isOrgShareRejected } from '@/lib/fundraiserOrgShare';
+import { DEFAULT_BUNDLE_GOAL } from '@/lib/fundraiserMetrics';
 import {
     AWAITING_COORDINATOR_SETUP_SELECTION_STATUS,
     LAUNCHED_CAMPAIGN_STATUS,
@@ -293,6 +294,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
                         bundle_selection_status: AWAITING_COORDINATOR_SETUP_SELECTION_STATUS,
                         bundle_selection_limit: limit.selectionLimit,
                         bundle_selection_at: null,
+                        // FR-GOAL-CONFIG-1: this streamlined flow has no goal
+                        // input UI, so it always gets the shared default —
+                        // written explicitly rather than left to the DB
+                        // default, so the JS constant stays the one authority.
+                        bundle_goal: DEFAULT_BUNDLE_GOAL,
                         ...(shareDecision.change ? { org_share_percent: shareDecision.percent } : {}),
                     },
                     select: { id: true },

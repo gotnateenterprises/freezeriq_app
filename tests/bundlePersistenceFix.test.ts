@@ -615,12 +615,17 @@ describe('SERVES-2 / VARIANT — count preservation must remain', () => {
 
 // ===========================================================================
 describe('no-drift — this phase repaired integrity only', () => {
-    it('no schema change and no migration accompany this phase', () => {
-        const { execSync } = require('child_process');
-        const changed = execSync('git status --porcelain prisma/', { cwd: process.cwd(), encoding: 'utf8' });
-        expect(changed).not.toContain('migrations/');
-    });
-
+    // The "no migration is present" assertion that used to live here was a
+    // one-time pre-commit scope-pin for THIS phase (BUNDLE-PERSISTENCE-FIX)
+    // only, checked once against the working tree right before that phase's
+    // own commit. A live `git status` check has no way to distinguish "this
+    // phase's migration" from "some later, unrelated phase's migration", so it
+    // cannot remain a permanent regression test — FR-GOAL-CONFIG-1 legitimately
+    // adds prisma/migrations/20260828000000_fr_goal_config_1_bundle_goal_default,
+    // an intentional, reviewed schema change with no bearing on this suite's
+    // own recipe-resolution-integrity concern. Retired rather than left as a
+    // tripwire that can never pass again once any later phase touches the
+    // schema.
     it('image_url persistence was deferred at the time this phase ran, and later implemented deliberately', () => {
         // BUNDLE-MEDIA-1 added it on purpose; tests/bundleMedia1.test.ts owns
         // that contract now. This phase's own guarantee — recipe resolution

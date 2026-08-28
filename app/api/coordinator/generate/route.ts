@@ -14,13 +14,14 @@ import { prisma } from '@/lib/db';
 import { callGemini, getGeminiApiKey } from '@/lib/ai/gemini';
 import { buildPublicFundraiserUrl } from '@/lib/fundraiserUrls';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
+import { resolveBundleGoal } from '@/lib/fundraiserMetrics';
 
 const MAX_GENERATIONS = 40;
 
 function buildPrompt(channel: string, campaign: any, publicUrl: string): string {
     const name = campaign.name || 'Our Fundraiser';
     const org = campaign.customer?.name || 'Our Organization';
-    const bundleGoal = Number(campaign.bundle_goal) || 100;
+    const bundleGoal = resolveBundleGoal(campaign.bundle_goal);
     // totalBundlesSold is passed from the caller or estimated from orders
     const totalOrders = (campaign.orders || []).length;
     const endDate = campaign.end_date
