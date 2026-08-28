@@ -59,15 +59,45 @@ export function LaunchSteps(props: LaunchStepsProps) {
     const allComplete = setupComplete && sharingStarted && firstOrderReceived;
     const currentStep = !setupComplete ? 1 : !sharingStarted ? 2 : !firstOrderReceived ? 3 : null;
 
-    // All three done: collapse to one quiet success line (the dashboard below
-    // is the point now), keeping the support section reachable.
+    // FR-ACCEPTANCE-MOBILE-POLISH-1. All three steps done used to collapse
+    // this card to a bare checklist line — "keep sharing!" with no way left
+    // on the card to actually do that. The share tools are exactly the
+    // "Help us keep the momentum going" block the owner wants available on
+    // the ONGOING coordinator panel, reusing the identical ShareBtn/handlers
+    // Step 2 already used above — not a second, duplicate implementation.
+    // The campaign is still active for as long as this component renders at
+    // all (app/coordinator/portal/page.tsx only mounts it while
+    // campaignPhase !== 'complete'), so there is no reason sharing tools
+    // should ever become unreachable before then.
     if (allComplete) {
         return (
-            <section data-testid="launch-steps" className="bg-white border border-slate-200 rounded-2xl p-4 space-y-2">
-                <p className="text-sm font-black text-emerald-700">
-                    ✓ Setup · ✓ Sharing started · ✓ First order received
-                </p>
-                <p className="text-xs text-slate-500">Great start — keep sharing!</p>
+            <section data-testid="launch-steps" className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+                <div>
+                    <p className="text-sm font-black text-emerald-700">
+                        ✓ Setup · ✓ Sharing started · ✓ First order received
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5">Help us keep the momentum going — share it again anytime.</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <ShareBtn label="✉️ Email" onClick={onShareEmail} />
+                    <ShareBtn label="📘 Facebook" onClick={onShareFacebook} />
+                    <ShareBtn label="💬 Text" onClick={onShareText} />
+                    <ShareBtn label={copied ? '✓ Copied' : '🔗 Copy Link'} onClick={onCopyLink} />
+                </div>
+                {onShareNative && (
+                    <button onClick={onShareNative}
+                        className="w-full rounded-xl bg-indigo-600 py-2.5 text-[13px] font-bold text-white">
+                        Share…
+                    </button>
+                )}
+                {previousSupportersReachable > 0 && (
+                    <button onClick={onPreviousSupporters}
+                        className="w-full rounded-xl border border-indigo-200 bg-indigo-50 py-2.5 text-[13px] font-bold text-indigo-700">
+                        💌 Invite {previousSupportersReachable} previous supporter{previousSupportersReachable === 1 ? '' : 's'}
+                    </button>
+                )}
+
                 <WhatHappens notifyEmail={notifyEmail} />
             </section>
         );

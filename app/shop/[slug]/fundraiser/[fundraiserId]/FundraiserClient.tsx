@@ -4,6 +4,22 @@ import React, { useState, useMemo, useRef } from 'react';
 import { formatBundleCount, computeBundleUnitsFromItems, type FundraiserProgressResult } from '@/lib/fundraiserMetrics';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
 
+/**
+ * FR-ACCEPTANCE-MOBILE-POLISH-1. Display-only formatting for the per-order
+ * confirmation sentence — "0.5" reads as an unexplained fraction to a
+ * supporter, "½" reads as a portion the way "half a bundle" already does.
+ * Purely cosmetic: the weighting engine (getBundleUnitWeight /
+ * computeBundleUnitsFromItems in lib/fundraiserMetrics.ts) is untouched, and
+ * every value it can ever produce is a multiple of 0.5, so `hasHalf` never
+ * needs to handle any other fractional remainder.
+ */
+function formatBundleCredit(units: number): string {
+    const whole = Math.floor(units);
+    const hasHalf = Math.abs(units - whole - 0.5) < 1e-9;
+    if (!hasHalf) return String(whole);
+    return whole === 0 ? '½' : `${whole}½`;
+}
+
 // FR-LAUNCH-1B (complete Fable restoration): this page is a full port of the
 // APPROVED fundraiser buyer design — the "FUNDRAISER BUYER PAGE" screen of
 // docs/ai/prototypes/storefront_prototype.html (markup lines 502-596, shared
@@ -498,7 +514,13 @@ export default function FundraiserClient({
             </div>
 
             {/* ── Page column (the prototype is a single warm editorial column) ── */}
-            <div style={{ maxWidth: '36rem', margin: '0 auto', padding: '0 1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {/* FR-ACCEPTANCE-MOBILE-POLISH-1: horizontal padding here used to
+                duplicate components/LayoutWrapper.tsx's `main` element, which
+                already applies `p-4 sm:p-8` (1rem/2rem) to every /shop/* page
+                — stacking to 2rem per side instead of the intended 1rem, and
+                narrowing usable width most on the smallest phones. `main`'s
+                padding is now the single source of horizontal spacing. */}
+            <div style={{ maxWidth: '36rem', margin: '0 auto', padding: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
                 {thanks ? (
                     /* ============ ThanksState (prototype lines 570-594) ============
@@ -601,8 +623,16 @@ export default function FundraiserClient({
                             </div>
 
                             <b style={{ display: 'block', fontFamily: SERIF, fontWeight: 400, fontSize: '1rem', color: '#3b2a2f', textAlign: 'center' }}>
-                                Your order added {formatBundleCount(thanks.unitsAdded)} bundle{thanks.unitsAdded === 1 ? '' : 's'} 🎉
+                                Your order added {formatBundleCredit(thanks.unitsAdded)} bundle{thanks.unitsAdded <= 1 ? '' : 's'} toward the fundraiser goal 🎉
                             </b>
+                            {/* FR-ACCEPTANCE-MOBILE-POLISH-1: the sentence above is
+                                mathematically correct (thanks.unitsAdded is the actual
+                                weighted total of everything in this order — see
+                                computeBundleUnitsFromItems, called at submit time), but
+                                unexplained on its own. This is that explanation. */}
+                            <p style={{ margin: '.3rem 0 0', fontSize: '.68rem', color: '#9a8075', textAlign: 'center' }}>
+                                Fundraiser goal credit: serves 5 = 1 bundle · serves 2 = ½ bundle
+                            </p>
 
                             {/* Same visual language as the ordering-page hero bar: warm
                                 #eee2d6 track, primary fill with soft glow, rounded ends. */}
@@ -824,10 +854,28 @@ export default function FundraiserClient({
                         </section>
                     ) : bundles.length > 0 ? (
                         <>
-                            {/* PayBadge — prototype lines 523-525, ported verbatim */}
+                            {/* PayBadge — prototype lines 523-525.
+                                FR-ACCEPTANCE-MOBILE-POLISH-1: no longer names a
+                                specific payment method. This banner shows before
+                                the supporter has even added anything to their
+                                order, so it never had campaign-specific payment
+                                data to draw on in the first place — it was simply
+                                assuming "Venmo or check" for every organization.
+                                The actual configured-vs-generic payment copy is
+                                the PaymentCard below (rendered after ordering,
+                                once the real total/campaign data is known). */}
                             <div style={{ background: '#e8ede2', borderRadius: 14, padding: '.6rem .85rem', fontSize: '.72rem', fontWeight: 700, color: '#4f6142' }}>
-                                💵 No card needed here — you'll pay your coordinator directly (Venmo or check). We'll show you how after you order.
+                                💵 No card needed here — you'll pay your coordinator directly. We'll show you how after you order.
                             </div>
+
+                            {/* FR-ACCEPTANCE-MOBILE-POLISH-1: same explanation as
+                                the post-order confirmation, offered once here too
+                                — near the actual serves-5/serves-2 choice — since
+                                that's the point a supporter would otherwise have
+                                to guess what their pick counts toward. */}
+                            <p style={{ margin: '-.2rem 0 0', fontSize: '.68rem', color: '#9a8075', textAlign: 'center' }}>
+                                Fundraiser goal credit: serves 5 = 1 bundle · serves 2 = ½ bundle
+                            </p>
 
                             {/* Bundle cards — prototype .cards / .bcard (single warm column) */}
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '.85rem' }}>
@@ -993,7 +1041,7 @@ function BundleCard({ bundle, primaryColor, inOrder, onToggle }: {
                     <p style={{ margin: '.25rem 0 .4rem', fontSize: '.7rem', color: '#9a8075', lineHeight: 1.45 }}>{inside}</p>
                 )}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem' }}>
-                    <span>
+                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         <span style={{ fontSize: '.95rem', fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: '#3b2a2f' }}>
                             {hasPrice ? `$${Number(bundle.price).toFixed(2)}` : 'Contact for price'}
                         </span>{' '}
@@ -1004,7 +1052,7 @@ function BundleCard({ bundle, primaryColor, inOrder, onToggle }: {
                         disabled={!hasPrice}
                         aria-pressed={inOrder}
                         aria-label={inOrder ? `Remove ${bundle.name} from your order` : `Add ${bundle.name} to your order`}
-                        style={{ marginLeft: 'auto', background: inOrder ? '#7d8f72' : primaryColor, color: '#fff', border: 0, borderRadius: 12, fontSize: '.74rem', fontWeight: 800, padding: '.55rem .95rem', cursor: hasPrice ? 'pointer' : 'default', fontFamily: 'inherit', opacity: hasPrice ? 1 : .55 }}
+                        style={{ marginLeft: 'auto', flexShrink: 0, background: inOrder ? '#7d8f72' : primaryColor, color: '#fff', border: 0, borderRadius: 12, fontSize: '.74rem', fontWeight: 800, padding: '.55rem .95rem', cursor: hasPrice ? 'pointer' : 'default', fontFamily: 'inherit', opacity: hasPrice ? 1 : .55, whiteSpace: 'nowrap' }}
                     >
                         {inOrder ? '✓ Added' : 'Add'}
                     </button>
