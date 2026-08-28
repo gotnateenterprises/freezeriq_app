@@ -924,6 +924,26 @@ model Invoice {
   due_date                  DateTime?
   fundraiser_profit_percent Decimal?      @default(0) @db.Decimal(5, 2)
   fundraiser_profit_amount  Decimal?      @default(0) @db.Decimal(10, 2)
+  // ── FR-TAX-1B: the tax treatment FROZEN onto this invoice ─────────────────
+  // Copied from the campaign's own snapshot at closeout so the invoice is
+  // SELF-DESCRIBING: total_amount can be reproduced from this row alone,
+  // without reading through to a campaign or a tenant setting. That matters
+  // for two reasons. Square will eventually collect exactly total_amount and
+  // must never recompute it; and without a stored rate, a $0.00 tax_amount
+  // cannot distinguish "exempt" from "0% rate" from "the owner switched it
+  // off" — the lossy case INV-B's own notes flagged.
+  //
+  // Both NULL on every pre-FR-TAX-1B invoice, including the five historical
+  // ones that charged 1% of GROSS under the superseded basis. They are not
+  // backfilled: NULL honestly means "this invoice predates the frozen tax
+  // contract", which is different from any value we could invent for it.
+  tax_rate_percent          Decimal?      @db.Decimal(5, 2)
+  tax_status                OrgTaxStatus?
+  /// The taxable selling price this invoice's tax was actually computed on —
+  /// gross minus the organization's share, per the confirmed NET basis. Stored
+  /// rather than re-derived so a later change to how the base is defined can
+  /// never retroactively re-explain a settled invoice.
+  taxable_base_amount       Decimal?      @db.Decimal(10, 2)
   // ── INV-A: campaign linkage ───────────────────────────────────────────────
   // Nullable: every ordinary (non-fundraiser) invoice keeps campaign_id NULL,
   // which is also what makes the partial unique index harmless to them —

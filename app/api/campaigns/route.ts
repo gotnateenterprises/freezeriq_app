@@ -679,6 +679,11 @@ export async function GET(req: Request) {
                     // fundraiser setup/edit UI. Display data only — every
                     // change goes through the authorized POST/PATCH paths.
                     org_share_percent: true,
+                    // FR-TAX-1B: the campaign's frozen tax snapshot, so the
+                    // closeout dialog can state THIS campaign's rate instead of
+                    // a product constant. Display data only.
+                    tax_status: true,
+                    tax_rate_percent: true,
                     bundle_selection_status: true,
                     bundle_selection_at: true,
                     // ── FR-HISTORY-1: settlement truth, so the dashboard can tell
@@ -850,6 +855,14 @@ export async function GET(req: Request) {
                             org_share_percent: (fc as any).org_share_percent != null
                                 ? Number((fc as any).org_share_percent)
                                 : 20,
+                            // FR-TAX-1B: the frozen snapshot, passed through
+                            // as-is. NULL stays NULL — a campaign launched
+                            // before FR-TAX-1 has no tax treatment, which is a
+                            // different fact from "0%".
+                            tax_status: (fc as any).tax_status ?? null,
+                            tax_rate_percent: (fc as any).tax_rate_percent != null
+                                ? Number((fc as any).tax_rate_percent)
+                                : null,
                             closed_at: (fc as any).closed_at ?? null,
                             // ── FR-HISTORY-1: the facts that separate "ordering
                             //    finished" from "money received". Additive — every

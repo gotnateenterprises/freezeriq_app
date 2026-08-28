@@ -267,13 +267,29 @@ describe('financial figures and layout are untouched by this correction', () => 
         for (const marker of [
             'Subtotal:',
             'Fundraiser Profit (',
-            'doc.text(\'Tax:\', 40, y);',
             'Final Balance Due to',
             'Congratulations! Your organization earned:',
-            'itemsSubtotal - profitAmount + taxAmountValue',
         ]) {
             expect(c).toContain(marker);
         }
+    });
+
+    it('FR-TAX-1B: the tax line now names its rate, and a new Taxable Selling Price line states the base', () => {
+        const c = code(PAGE);
+        // The bare "Tax:" label became rate-bearing, because under the NET
+        // basis a reader must be able to see WHICH amount the percentage was
+        // applied to. The exempt case says so in words rather than printing 0%.
+        expect(c).toContain('Taxable Selling Price:');
+        expect(c).toContain("'Tax (Tax Exempt):'");
+        expect(c).toMatch(/Tax \(\$\{invoiceTaxRate\}%\):/);
+    });
+
+    it('FR-TAX-1B: the printed balance is the FROZEN invoice total, not a re-derivation', () => {
+        // The PDF used to recompute `itemsSubtotal - profitAmount + taxAmountValue`.
+        // Square will collect exactly invoices.total_amount, so the document and
+        // the payment must read the same field or they can silently disagree.
+        const c = code(PAGE);
+        expect(c).toMatch(/const calculatedBalance = invoice\.total_amount != null\s*\?\s*Number\(invoice\.total_amount\)/);
     });
 
     it('the green organization-earned treatment is untouched', () => {

@@ -31,6 +31,7 @@ import RecipeImporter from '@/components/RecipeImporter';
 import CustomerImporter from '@/components/CustomerImporter';
 import FundraiserImporter from '@/components/FundraiserImporter';
 import { Database as DatabaseIcon } from 'lucide-react';
+import FundraiserTaxSettings from '@/components/settings/FundraiserTaxSettings';
 
 function AccountSecuritySection() {
     const [currentPassword, setCurrentPassword] = useState('');
@@ -623,6 +624,8 @@ export default function SettingsPage() {
             </div>
 
             <div className="space-y-8">
+                {/* FR-TAX-1B: the tenant's default food/grocery tax rate. */}
+                <FundraiserTaxSettings />
                 <DataManagementSection />
                 <div className="bg-white dark:bg-slate-800 bg-adaptive rounded-xl shadow-sm border border-rose-100 dark:border-rose-900/30 p-8">
                     <h3 className="text-lg font-bold text-rose-600 dark:text-rose-500 mb-2 flex items-center gap-2">

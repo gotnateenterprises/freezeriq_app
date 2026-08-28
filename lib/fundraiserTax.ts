@@ -208,41 +208,102 @@ export function computeCampaignTax(input: {
 // ── The unresolved question, stated in code so it cannot be forgotten ───────
 
 /**
- * WHY INVOICE TAX IS NOT REWIRED TO THIS MODULE YET.
+ * THE TAXABLE BASE — RESOLVED BY OWNER DECISION (FR-TAX-1B).
  *
- * Two authorities already in this repository point at DIFFERENT taxable bases,
- * and nothing reconciles them:
+ * FR-TAX-1 deliberately shipped the foundation WITHOUT changing what closeout
+ * charged, because two authorities in this repository pointed at different
+ * bases and nothing reconciled them:
  *
- *   GROSS — what the code actually charges today. lib/fundraiserCloseoutMath.ts
- *     computes `grossSales * FOOD_TAX_RATE_PERCENT / 100`. All five historical
- *     Production invoices reconcile to the cent on that basis and none reconcile
- *     on a net basis ($6,420 gross -> $64.20 tax -> $5,200.20 total; a net basis
+ *   GROSS — what the code charged. lib/fundraiserCloseoutMath.ts computed
+ *     `grossSales * FOOD_TAX_RATE_PERCENT / 100`. All five historical
+ *     Production invoices reconcile to the cent on that basis and none on a
+ *     net basis ($6,420 gross -> $64.20 tax -> $5,200.20 total; a net basis
  *     would have produced $51.36 / $5,187.36).
  *
- *   NET — what the repository repeatedly calls the amount the organization
- *     actually pays. lib/fundraiserOrgShare.ts balanceDueToTenant() is
- *     documented as "What the organization owes the tenant: gross minus the
- *     organization's share", and docs/ai/SETTLEMENT_CONSTITUTION.md (itself
- *     marked DRAFT, unratified) defines the settlement as "campaign total sales
- *     minus fundraiser profit".
+ *   NET — what the repository repeatedly called the amount the organization
+ *     actually pays (lib/fundraiserOrgShare.ts balanceDueToTenant,
+ *     docs/ai/SETTLEMENT_CONSTITUTION.md).
  *
- * Which is correct turns on whether the organization share is a seller-funded
- * DISCOUNT reducing the consideration Freezer Chef receives (base = net), or a
- * commission/payout out of a full-price sale (base = gross). No document, code
- * comment, test or migration in this repository states that characterization,
- * and it depends on the written agreement with the organization plus the
- * applicable state's treatment of fundraiser arrangements.
+ * THE OWNER HAS NOW RULED: the base is NET AFTER ORGANIZATION SHARE.
  *
- * Reproducing five historical invoices is a FIDELITY argument, not a legal one.
- * So FR-TAX-1 deliberately ships the configuration, snapshot and document
- * foundation WITHOUT changing what closeout charges: silently switching the
- * base would move real money on a guess, and silently keeping it would dress a
- * guess up as a decision. Closeout continues to behave exactly as it did.
+ *     supporter-facing gross merchandise sales
+ *   - organization fundraiser share
+ *   = taxable selling price from Freezer Chef to the organization
+ *
+ * This follows the business model: Freezer Chef sells the aggregated order TO
+ * THE ORGANIZATION, and the selling price is what the organization actually
+ * pays. The organization share is therefore a seller-funded reduction of
+ * consideration, not a commission out of a full-price sale.
+ *
+ * The historical gross x 1% behaviour is NOT preserved merely because old
+ * invoices used it — reproducing history was a fidelity argument, never a legal
+ * one. Existing finalized invoices are equally NOT rewritten: they remain
+ * historical records of what was actually billed and settled.
  */
-export const TAXABLE_BASE_STATUS = 'UNRESOLVED_PENDING_OWNER_CONFIRMATION' as const;
+export const CONFIRMED_TAXABLE_BASE = 'net' as const;
 
 /**
- * The candidate bases, named so the eventual one-line switch is obvious.
- * `gross` is campaign.settlement_total; `net` is closeout's baseRemit.
+ * The candidate bases. `gross` is campaign.settlement_total; `net` is gross
+ * minus the organization's share (closeout's baseRemit).
  */
 export type TaxableBaseChoice = 'gross' | 'net';
+
+/**
+ * The taxable selling price, per the confirmed NET basis.
+ *
+ * DELIBERATELY takes the organization's share as an INPUT rather than a
+ * percent to re-multiply: closeout already computes `organizationAmount` and
+ * derives its remit by SUBTRACTION so that
+ * `organizationAmount + baseRemit === gross` exactly. Recomputing the share
+ * here from a percentage would be a second, independent calculation that can
+ * round to a different cent — precisely the "how a penny goes missing" failure
+ * lib/fundraiserCloseoutMath.ts already warns about. One computation, reused.
+ */
+export function resolveTaxableSellingPrice(input: {
+    grossSales: number;
+    organizationAmount: number;
+}): number {
+    const gross = roundCents(Number(input.grossSales) || 0);
+    const orgAmount = roundCents(Number(input.organizationAmount) || 0);
+    return roundCents(gross - orgAmount);
+}
+
+/**
+ * The rate closeout should charge for one campaign — including the deliberate
+ * rule for campaigns that carry NO FR-TAX-1 snapshot.
+ *
+ * THE LEGACY RULE, stated explicitly because silence here would be a money
+ * decision made by accident:
+ *
+ *   TAX_EXEMPT snapshot        -> 0. The exemption is authoritative on its own,
+ *                                 even if a rate somehow rode along with it.
+ *   TAXABLE snapshot           -> that campaign's own frozen rate.
+ *   NO snapshot (NULL status)  -> 0, and the closeout is NOT silently
+ *                                 reinterpreted.
+ *
+ * Why 0 for a legacy campaign rather than "resolve it live from the
+ * organization and the tenant default": every campaign that predates FR-TAX-1
+ * was launched, and its organization was told what the fundraiser would cost,
+ * under a world where this product charged 1% of GROSS. The owner has since
+ * ruled that base wrong. Applying the NEW base and a rate NOBODY chose at that
+ * campaign's launch would invent a number that was never agreed — and reading
+ * the tenant's CURRENT default would be exactly the live-value read that
+ * snapshotting exists to prevent. Charging nothing is the only option that
+ * neither fabricates a rate nor rewrites history.
+ *
+ * The consequence is explicit and small: a legacy OPEN campaign closes out with
+ * $0.00 tax. If the owner wants tax on such a campaign, the honest path is to
+ * relaunch it (a new campaign snapshots the current treatment) rather than have
+ * this function guess. Already-CLOSED campaigns are unaffected in any case:
+ * closeout is idempotent and refuses to run twice.
+ */
+export function resolveCloseoutTaxRate(input: {
+    taxStatus: OrgTaxStatus | null | undefined;
+    taxRatePercent: number | string | null | undefined;
+}): number {
+    if (!input.taxStatus) return 0;              // pre-FR-TAX-1 campaign
+    if (input.taxStatus !== 'TAXABLE') return 0; // TAX_EXEMPT, or UNKNOWN never frozen
+
+    const rate = Number(input.taxRatePercent);
+    return Number.isFinite(rate) && rate > 0 ? rate : 0;
+}

@@ -5,11 +5,17 @@
  * worked example, so a regression shows up as a wrong dollar figure rather than
  * an abstract assertion failure.
  *
- * The 1% food tax is the reason this suite exists in the shape it does. Five
+ * The food tax is the reason this suite exists in the shape it does. Five
  * historical invoices settled at 81% of gross against a 20% share, which looks
  * like a 101% error until you read `invoices.tax_amount` — where the exact 1%
  * was recorded all along. These tests pin BOTH halves: the share math must never
  * drift to 81%, and the tax must remain its own visible fact.
+ *
+ * FR-TAX-1B moved the TAX BASE. On the owner's confirmed ruling the taxable
+ * selling price is the NET after the organization's share, and the rate now
+ * arrives as an input from the campaign's frozen snapshot instead of a product
+ * constant. The five historical invoices are consequently no longer reproduced
+ * by this function — and are deliberately never recalculated.
  */
 
 import {
@@ -100,12 +106,27 @@ describe('bundle aggregation', () => {
 
 describe('organization share and remit', () => {
     it('the owner worked example: $2,065 at 20% with tax ON', () => {
-        const f = computeCloseoutFinancials({ grossSales: 2065, orgSharePercent: 20, applyFoodTax: true });
+        // FR-TAX-1B: the taxable base is now the NET after the organization's
+        // share, per the owner's confirmed ruling, and the rate arrives from
+        // the campaign's frozen snapshot rather than a product constant.
+        // 1% of $1,652 = $16.52 — NOT the $20.65 the superseded gross basis
+        // produced.
+        const f = computeCloseoutFinancials({ grossSales: 2065, orgSharePercent: 20, applyFoodTax: true, taxRatePercent: 1 });
         expect(f.organizationAmount).toBe(413);
         expect(f.baseRemit).toBe(1652);
         expect(f.taxRatePercent).toBe(1);
-        expect(f.taxAmount).toBe(20.65);
-        expect(f.totalDue).toBe(1672.65);
+        expect(f.taxAmount).toBe(16.52);
+        expect(f.totalDue).toBe(1668.52);
+    });
+
+    it('no rate means no tax, even with the owner switch ON', () => {
+        // A campaign that carries no FR-TAX-1 snapshot reaches here with no
+        // rate. Charging nothing is the deliberate legacy rule — see
+        // resolveCloseoutTaxRate — never a fabricated default.
+        const f = computeCloseoutFinancials({ grossSales: 2065, orgSharePercent: 20, applyFoodTax: true });
+        expect(f.taxApplied).toBe(false);
+        expect(f.taxAmount).toBe(0);
+        expect(f.totalDue).toBe(1652);
     });
 
     it('the same campaign with tax OFF', () => {
@@ -123,7 +144,7 @@ describe('organization share and remit', () => {
         // model must always total exactly 100% BEFORE tax, with tax added on top
         // as its own visible amount.
         for (const gross of [2065, 1410, 4785, 845, 6420, 12345.67]) {
-            const f = computeCloseoutFinancials({ grossSales: gross, orgSharePercent: 20, applyFoodTax: true });
+            const f = computeCloseoutFinancials({ grossSales: gross, orgSharePercent: 20, applyFoodTax: true, taxRatePercent: 1 });
             expect(roundCents(f.organizationAmount + f.baseRemit)).toBe(roundCents(gross));
             expect(f.baseRemit).not.toBe(roundCents(gross * 0.81));
             expect(f.totalDue).toBe(roundCents(f.baseRemit + f.taxAmount));
@@ -154,16 +175,20 @@ describe('organization share and remit', () => {
 
     it('rounds to cents and still balances on an awkward share', () => {
         // 33.33% of 1000.05 is 333.3167 -> 333.32, remit must absorb the rest.
-        const f = computeCloseoutFinancials({ grossSales: 1000.05, orgSharePercent: 33.33, applyFoodTax: true });
+        const f = computeCloseoutFinancials({ grossSales: 1000.05, orgSharePercent: 33.33, applyFoodTax: true, taxRatePercent: 1 });
         expect(f.organizationAmount).toBe(333.32);
         expect(f.baseRemit).toBe(666.73);
         expect(roundCents(f.organizationAmount + f.baseRemit)).toBe(1000.05);
-        expect(f.taxAmount).toBe(10);          // 1% of 1000.05 = 10.0005 -> 10.00
-        expect(f.totalDue).toBe(676.73);
+        // FR-TAX-1B: 1% of the NET 666.73 = 6.6673 -> 6.67.
+        expect(f.taxAmount).toBe(6.67);
+        expect(f.totalDue).toBe(673.40);
     });
 
-    it('reproduces all five historical invoices when tax is applied', () => {
-        // gross -> [organization amount, total due] as stored in Production.
+    it('FR-TAX-1B: the five historical invoices are NOT reproduced, and are never recalculated', () => {
+        // Those invoices were computed on GROSS x 1%, the basis the owner has
+        // since superseded. This function no longer reproduces them BY DESIGN.
+        // They remain in Production untouched as historical records of what was
+        // actually billed and settled — nothing backfills or recomputes them.
         const historical: Array<[number, number, number]> = [
             [6420, 1284, 5200.20],
             [845, 169, 684.45],
@@ -171,18 +196,25 @@ describe('organization share and remit', () => {
             [860, 172, 696.60],
             [1220, 244, 988.20],
         ];
-        for (const [gross, org, total] of historical) {
-            const f = computeCloseoutFinancials({ grossSales: gross, orgSharePercent: 20, applyFoodTax: true });
+        for (const [gross, org, oldTotal] of historical) {
+            const f = computeCloseoutFinancials({ grossSales: gross, orgSharePercent: 20, applyFoodTax: true, taxRatePercent: 1 });
+            // The organization's share is unchanged — only the tax base moved.
             expect(f.organizationAmount).toBe(org);
-            expect(f.totalDue).toBe(total);
-            expect(f.taxAmount).toBe(roundCents(gross * 0.01));
+            // Tax is now 1% of NET, so the new total is strictly lower than the
+            // historical one by exactly 1% of the organization's share.
+            expect(f.taxAmount).toBe(roundCents(f.baseRemit * 0.01));
+            expect(f.totalDue).toBeLessThan(oldTotal);
+            expect(roundCents(oldTotal - f.totalDue)).toBe(roundCents(org * 0.01));
         }
     });
 
-    it('the tax rate is 1% and the default is derived from history, not assumed', () => {
+    it('the legacy constant still exists for the historical record, but no longer drives the math', () => {
         expect(FOOD_TAX_RATE_PERCENT).toBe(1);
-        // All five prior fundraiser invoices charged it.
         expect(FOOD_TAX_DEFAULT_APPLIED).toBe(true);
+        // FR-TAX-1B: the rate is now an input. Omitting it charges nothing —
+        // the constant cannot leak back in as a silent default.
+        const noRate = computeCloseoutFinancials({ grossSales: 1000, orgSharePercent: 20, applyFoodTax: true });
+        expect(noRate.taxAmount).toBe(0);
     });
 });
 
@@ -202,10 +234,11 @@ describe('the generated invoice agrees with the existing PDF', () => {
     it('the PDF balance equals the stored total due, tax ON', () => {
         const lines = aggregateBundleLines(EDGAR);
         const gross = sumLineTotals(lines);
-        const f = computeCloseoutFinancials({ grossSales: gross, orgSharePercent: 20, applyFoodTax: true });
+        const f = computeCloseoutFinancials({ grossSales: gross, orgSharePercent: 20, applyFoodTax: true, taxRatePercent: 1 });
 
         expect(pdfBalance(gross, f.organizationAmount, f.taxAmount)).toBe(f.totalDue);
-        expect(f.totalDue).toBe(1672.65);
+        // FR-TAX-1B: 1% of the NET $1,652 = $16.52 (was $20.65 on gross).
+        expect(f.totalDue).toBe(1668.52);
     });
 
     it('the PDF balance equals the stored total due, tax OFF', () => {
@@ -221,7 +254,7 @@ describe('the generated invoice agrees with the existing PDF', () => {
         for (const pct of [0, 15, 20, 33.33, 50, 100]) {
             for (const gross of [125, 1410, 2065, 4785, 9999.99]) {
                 for (const tax of [true, false]) {
-                    const f = computeCloseoutFinancials({ grossSales: gross, orgSharePercent: pct, applyFoodTax: tax });
+                    const f = computeCloseoutFinancials({ grossSales: gross, orgSharePercent: pct, applyFoodTax: tax, taxRatePercent: 1 });
                     expect(pdfBalance(gross, f.organizationAmount, f.taxAmount)).toBe(f.totalDue);
                 }
             }

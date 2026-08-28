@@ -105,6 +105,9 @@ beforeEach(() => {
     campaignRow = {
         id: CAMPAIGN, status: 'Active', closed_at: null, settlement_total: null,
         org_share_percent: 20, customer: { id: 'cust-1', business_id: BIZ },
+        // FR-TAX-1B: the campaign's own FROZEN tax snapshot is what drives the
+        // closeout's tax, never a product constant or the tenant's live default.
+        tax_status: 'TAXABLE', tax_rate_percent: 1,
     };
     mockAuth.mockReset();
     mockAuth.mockResolvedValue({
@@ -154,18 +157,45 @@ describe('closeout creates exactly one DRAFT invoice', () => {
             base_remit: 1652,
             tax_applied: true,
             tax_rate_percent: 1,
-            tax_amount: 20.65,
-            total_due: 1672.65,
+            // FR-TAX-1B: 1% of the NET $1,652, not of the $2,065 gross.
+            tax_amount: 16.52,
+            total_due: 1668.52,
         });
 
         const created = calls.find((c) => c.op === 'invoice.create')!.args.data;
         expect(created.status).toBe('DRAFT');
         expect(created.campaign_id).toBe(CAMPAIGN);
         expect(created.generated_at).toBeInstanceOf(Date);
-        expect(Number(created.total_amount)).toBe(1672.65);
-        expect(Number(created.tax_amount)).toBe(20.65);
+        expect(Number(created.total_amount)).toBe(1668.52);
+        expect(Number(created.tax_amount)).toBe(16.52);
         expect(Number(created.fundraiser_profit_amount)).toBe(413);
         expect(created.items.create).toHaveLength(4);
+        // FR-TAX-1B: the tax contract is frozen ONTO the invoice, so the row is
+        // self-describing and Square never has to recompute anything.
+        expect(Number(created.tax_rate_percent)).toBe(1);
+        expect(created.tax_status).toBe('TAXABLE');
+        expect(Number(created.taxable_base_amount)).toBe(1652);
+    });
+
+    it('FR-TAX-1B: a campaign with NO tax snapshot is charged no tax', async () => {
+        // The deliberate legacy rule: a campaign launched before FR-TAX-1 was
+        // agreed under the superseded gross basis, so neither that basis nor a
+        // rate nobody chose may be applied to it now. See resolveCloseoutTaxRate.
+        campaignRow.tax_status = null;
+        campaignRow.tax_rate_percent = null;
+        const body = await (await post({ applyFoodTax: true })).json();
+        expect(body.financials.tax_applied).toBe(false);
+        expect(body.financials.tax_amount).toBe(0);
+        expect(body.financials.total_due).toBe(1652);
+    });
+
+    it('FR-TAX-1B: a TAX_EXEMPT campaign is charged no tax even with the switch ON', async () => {
+        campaignRow.tax_status = 'TAX_EXEMPT';
+        campaignRow.tax_rate_percent = 0;
+        const body = await (await post({ applyFoodTax: true })).json();
+        expect(body.financials.tax_applied).toBe(false);
+        expect(body.financials.tax_amount).toBe(0);
+        expect(body.financials.total_due).toBe(1652);
     });
 
     it('the tax toggle OFF yields no tax and a total equal to the remit', async () => {

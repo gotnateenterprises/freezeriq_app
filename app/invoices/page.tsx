@@ -58,6 +58,11 @@ interface Invoice {
     tax_amount: string | number;
     fundraiser_profit_percent: string | number | null;
     fundraiser_profit_amount: string | number | null;
+    // FR-TAX-1B: the frozen tax contract. All null on invoices that predate it,
+    // including the five historical ones computed on the superseded gross basis.
+    tax_rate_percent?: string | number | null;
+    tax_status?: 'UNKNOWN' | 'TAXABLE' | 'TAX_EXEMPT' | null;
+    taxable_base_amount?: string | number | null;
     created_at: string;
     due_date: string | null;
     customer: {
@@ -310,8 +315,33 @@ function InvoicesContent() {
             doc.setTextColor(0, 0, 0); // Reset
         }
 
+        // ── FR-TAX-1B: show the TAXABLE SELLING PRICE explicitly ──────────────
+        // The tax is computed on gross minus the organization's share, so the
+        // document now states that amount instead of leaving the reader to
+        // infer which line the tax percentage was applied to. Frozen on the
+        // invoice (taxable_base_amount); the subtraction shown here is a
+        // fallback for invoices that predate the frozen column.
+        const taxableBase = invoice.taxable_base_amount != null
+            ? Number(invoice.taxable_base_amount)
+            : itemsSubtotal - profitAmount;
+        const invoiceTaxRate = invoice.tax_rate_percent != null ? Number(invoice.tax_rate_percent) : null;
+        const isExemptInvoice = invoice.tax_status === 'TAX_EXEMPT';
+
+        if (profitAmount > 0) {
+            y += 25;
+            doc.setFont('helvetica', 'bold');
+            doc.text('Taxable Selling Price:', 40, y);
+            doc.text('$' + taxableBase.toFixed(2), 560, y, { align: 'right' });
+            doc.setFont('helvetica', 'normal');
+        }
+
         y += 25;
-        doc.text('Tax:', 40, y);
+        const taxLabel = isExemptInvoice
+            ? 'Tax (Tax Exempt):'
+            : invoiceTaxRate != null && invoiceTaxRate > 0
+                ? `Tax (${invoiceTaxRate}%):`
+                : 'Tax:';
+        doc.text(taxLabel, 40, y);
         doc.text('$' + taxAmountValue.toFixed(2), 560, y, { align: 'right' });
 
         y += 45;
@@ -319,7 +349,13 @@ function InvoicesContent() {
         doc.setFont('helvetica', 'bold');
         doc.setDrawColor(0, 0, 0); // Black for border if used
         doc.setTextColor(0, 0, 0); // Black for text
-        const calculatedBalance = itemsSubtotal - profitAmount + taxAmountValue;
+        // FR-TAX-1B: print the FROZEN invoice total, never a re-derivation.
+        // This is the single amount Square will eventually collect, so the
+        // printed document and the payment must come from the same field. The
+        // arithmetic fallback covers only a malformed row with no total.
+        const calculatedBalance = invoice.total_amount != null
+            ? Number(invoice.total_amount)
+            : itemsSubtotal - profitAmount + taxAmountValue;
         const tenantName = branding?.business_name || 'Freezer Chef';
         const balanceLabel = profitAmount > 0 ? `Final Balance Due to ${tenantName}:` : 'Grand Total:';
 

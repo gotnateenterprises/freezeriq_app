@@ -70,6 +70,9 @@ import {
     roundCents,
     type AggregatedLine,
 } from '@/lib/fundraiserCloseoutMath';
+// FR-TAX-1B: the campaign's frozen tax rate, and the explicit rule for
+// campaigns that carry no snapshot at all.
+import { resolveCloseoutTaxRate } from '@/lib/fundraiserTax';
 
 /** Thrown inside the transaction when the conditional claim is not won. */
 class CampaignAlreadyClosedError extends Error {
@@ -292,10 +295,22 @@ export async function POST(
 
                 // 4. The money. Organization share comes from the campaign's own
                 //    durable org_share_percent, never a current tenant default.
+                //
+                //    FR-TAX-1B: the tax rate likewise comes from the campaign's
+                //    OWN frozen snapshot, never the tenant's current default —
+                //    that is the whole point of snapshotting at launch. The
+                //    base is the NET after the organization's share, per the
+                //    owner's confirmed ruling (lib/fundraiserTax.ts
+                //    CONFIRMED_TAXABLE_BASE), which computeCloseoutFinancials
+                //    applies to its own baseRemit.
                 const financials = computeCloseoutFinancials({
                     grossSales: settlementTotal,
                     orgSharePercent: Number(campaign.org_share_percent),
                     applyFoodTax,
+                    taxRatePercent: resolveCloseoutTaxRate({
+                        taxStatus: (campaign as any).tax_status ?? null,
+                        taxRatePercent: (campaign as any).tax_rate_percent ?? null,
+                    }),
                 });
 
                 const closedAt = new Date();
@@ -367,6 +382,14 @@ export async function POST(
                             tax_amount: financials.taxAmount,
                             fundraiser_profit_percent: financials.orgSharePercent,
                             fundraiser_profit_amount: financials.organizationAmount,
+                            // FR-TAX-1B: freeze the whole tax contract onto the
+                            // invoice, so total_amount is reproducible from this
+                            // row alone and no later change to the organization,
+                            // the tenant default, or the definition of the base
+                            // can re-explain a settled document.
+                            tax_rate_percent: financials.taxRatePercent,
+                            tax_status: ((campaign as any).tax_status ?? null) as any,
+                            taxable_base_amount: financials.baseRemit,
                             items: {
                                 create: lines.map((l) => ({
                                     bundle_id: l.bundleId,

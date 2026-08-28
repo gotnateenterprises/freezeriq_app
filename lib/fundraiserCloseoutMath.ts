@@ -11,19 +11,26 @@
  *     what did the organization earn      -> organization amount
  *     what must the organization remit    -> total due
  *
- * THE 1% FOOD TAX — WHY IT IS EXPLICIT
- * ────────────────────────────────────
+ * THE FOOD TAX — WHY IT IS EXPLICIT, AND WHAT CHANGED IN FR-TAX-1B
+ * ────────────────────────────────────────────────────────────────
  * Five historical invoices settled at 81% of gross while recording a 20%
  * organization share, which reads like a 101% arithmetic error. It is not. The
- * owner charges a 1% food tax, and the database already proves it: every one of
- * those invoices stores the exact 1% in `invoices.tax_amount` ($64.20 on $6,420,
- * $8.45 on $845, $8.70 on $870, $8.60 on $860, $12.20 on $1,220). 80% remit plus
- * 1% tax reproduces all five totals to the cent.
+ * owner charged a 1% food tax, and the database proves it: every one of those
+ * invoices stores the exact 1% of GROSS in `invoices.tax_amount` ($64.20 on
+ * $6,420, $8.45 on $845, $8.70 on $870, $8.60 on $860, $12.20 on $1,220).
  *
- * So the tax is real and is carried as its OWN labelled fact — never folded into
- * an unexplained 81%. Whether it applies is an owner decision made at closeout,
- * not a jurisdiction FreezerIQ tries to infer. There is deliberately no
- * geographic tax determination here and this file gives no tax advice.
+ * FR-TAX-1B superseded that calculation. The owner ruled that the taxable
+ * selling price is the NET after the organization's share — what the
+ * organization actually pays Freezer Chef — and that the rate is per-tenant
+ * configuration frozen onto each campaign, not a constant. Those five invoices
+ * are NOT recalculated: they are historical records of what was billed and
+ * settled, and reproducing their arithmetic was never a legal argument for it.
+ *
+ * The tax is still carried as its OWN labelled fact — never folded into an
+ * unexplained 81%. Whether it applies is an owner decision made at launch and
+ * confirmable at closeout, not a jurisdiction FreezerIQ tries to infer. There
+ * is deliberately no geographic tax determination here, and this file gives no
+ * tax advice.
  *
  * WHY NO SCHEMA WAS ADDED
  * ───────────────────────
@@ -142,9 +149,15 @@ export interface CloseoutFinancials {
  * The whole money model, in one place.
  *
  *   organizationAmount = gross x pct        (rounded to cents)
- *   baseRemit          = gross - organizationAmount
- *   taxAmount          = gross x 1%         (only when the owner applied it)
+ *   baseRemit          = gross - organizationAmount   <- the TAXABLE base
+ *   taxAmount          = baseRemit x campaign's frozen rate
  *   totalDue           = baseRemit + taxAmount
+ *
+ * FR-TAX-1B changed the third line. The tax used to be `gross x 1%` with the
+ * rate hardcoded here; the owner has since ruled that the taxable selling price
+ * from Freezer Chef to the organization is the NET after the organization's
+ * share, and the rate now comes from the campaign's own frozen snapshot rather
+ * than a constant. See lib/fundraiserTax.ts CONFIRMED_TAXABLE_BASE.
  *
  * Note what is NOT here: no processor fees, no COGS, no delivery or card
  * deductions, no jurisdictional logic. Adding any of those silently would change
@@ -153,18 +166,34 @@ export interface CloseoutFinancials {
 export function computeCloseoutFinancials(input: {
     grossSales: number;
     orgSharePercent: number;
+    /**
+     * The owner's closeout-time switch. It can only ever turn tax OFF — it
+     * never invents a rate — so it remains a strict narrowing of whatever the
+     * campaign's frozen snapshot already says.
+     */
     applyFoodTax: boolean;
+    /**
+     * FR-TAX-1B: the campaign's FROZEN tax treatment, snapshotted at launch.
+     * Absent (a campaign that predates FR-TAX-1, or an explicit exemption)
+     * means no tax is charged — the caller decides what to pass and is the
+     * place where the legacy-campaign rule lives.
+     */
+    taxRatePercent?: number | null;
 }): CloseoutFinancials {
     const grossSales = roundCents(input.grossSales);
     const orgSharePercent = Number(input.orgSharePercent);
 
     const organizationAmount = roundCents(grossSales * orgSharePercent / 100);
-    // Subtraction, not a second percentage — see ROUNDING above.
+    // Subtraction, not a second percentage — see ROUNDING above. This is also
+    // the taxable selling price under the confirmed NET basis, which is why
+    // the tax below multiplies it rather than gross.
     const baseRemit = roundCents(grossSales - organizationAmount);
 
-    const taxApplied = input.applyFoodTax === true;
-    const taxRatePercent = taxApplied ? FOOD_TAX_RATE_PERCENT : 0;
-    const taxAmount = taxApplied ? roundCents(grossSales * FOOD_TAX_RATE_PERCENT / 100) : 0;
+    const requestedRate = Number(input.taxRatePercent);
+    const rate = Number.isFinite(requestedRate) && requestedRate > 0 ? requestedRate : 0;
+    const taxApplied = input.applyFoodTax === true && rate > 0;
+    const taxRatePercent = taxApplied ? rate : 0;
+    const taxAmount = taxApplied ? roundCents(baseRemit * rate / 100) : 0;
 
     return {
         grossSales,

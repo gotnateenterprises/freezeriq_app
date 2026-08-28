@@ -27,7 +27,8 @@ import type { CampaignTriage } from '@/lib/growth/nextAction';
 import { triageCampaign } from '@/lib/growth/nextAction';
 import { classifyCampaignLifecycle } from '@/lib/growth/campaignLifecycle';
 import type { CampaignHealth, CampaignHealthReason } from '@/lib/growth/health';
-import { FOOD_TAX_DEFAULT_APPLIED, FOOD_TAX_RATE_PERCENT } from '@/lib/fundraiserCloseoutMath';
+import { FOOD_TAX_DEFAULT_APPLIED } from '@/lib/fundraiserCloseoutMath';
+import { resolveCloseoutTaxRate, formatTaxRate } from '@/lib/fundraiserTax';
 
 interface Fundraiser {
     id: string;
@@ -172,6 +173,17 @@ export default function FundraisersPage() {
     // CRM-CC-5: the closeout modal gets the same focus/scroll treatment as the
     // Campaign Context drawer — focus in on open, Tab contained, focus restored.
     const closeoutDialog = useDialogFocus(closeoutTarget !== null);
+
+    // FR-TAX-1B: the rate shown in the closeout dialog is the CAMPAIGN's own
+    // frozen snapshot — never a product constant and never the tenant's current
+    // default, which is exactly what snapshotting exists to avoid. Null means
+    // this campaign carries no snapshot (launched before FR-TAX-1) or is tax
+    // exempt, and no tax will be charged; see resolveCloseoutTaxRate.
+    const closeoutTaxRate = resolveCloseoutTaxRate({
+        taxStatus: (closeoutTarget as any)?.tax_status ?? null,
+        taxRatePercent: (closeoutTarget as any)?.tax_rate_percent ?? null,
+    });
+    const closeoutTaxRateLabel = closeoutTaxRate > 0 ? formatTaxRate(closeoutTaxRate) : null;
 
     const userPlan = (session?.user as any)?.plan;
     const isSuperAdmin = (session?.user as any)?.isSuperAdmin;
@@ -670,14 +682,34 @@ export default function FundraisersPage() {
                                     onChange={(e) => setApplyFoodTax(e.target.checked)}
                                     className="mt-0.5 w-4 h-4 rounded accent-indigo-600 disabled:opacity-50"
                                 />
+                                {/* FR-TAX-1B: the rate is the CAMPAIGN's own frozen
+                                    snapshot, not a product constant, and the base is
+                                    the taxable selling price (gross minus the
+                                    organization's share) per the owner's confirmed
+                                    ruling. A campaign with no snapshot — launched
+                                    before FR-TAX-1 — is charged no tax; see
+                                    resolveCloseoutTaxRate. */}
                                 <span className="text-sm">
                                     <span className="font-black text-slate-900 dark:text-white block">
-                                        Apply {FOOD_TAX_RATE_PERCENT}% food tax
+                                        {closeoutTaxRateLabel
+                                            ? `Apply ${closeoutTaxRateLabel} food tax`
+                                            : 'Apply food tax'}
                                     </span>
                                     <span className="font-medium text-slate-500 dark:text-slate-400">
-                                        Adds {FOOD_TAX_RATE_PERCENT}% of gross fundraiser sales to the
-                                        invoice as its own separate line. Turn this off for a fundraiser
-                                        that is not taxed.
+                                        {closeoutTaxRateLabel ? (
+                                            <>
+                                                Adds {closeoutTaxRateLabel} of the taxable selling price —
+                                                fundraiser sales minus the organization&apos;s share — to the
+                                                invoice as its own separate line. Turn this off for a
+                                                fundraiser that is not taxed.
+                                            </>
+                                        ) : (
+                                            <>
+                                                This fundraiser has no saved tax rate, so no tax will be
+                                                charged. Set a Default Food Tax Rate in Settings before
+                                                launching future campaigns.
+                                            </>
+                                        )}
                                     </span>
                                 </span>
                             </label>

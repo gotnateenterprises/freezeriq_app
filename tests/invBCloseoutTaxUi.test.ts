@@ -34,7 +34,11 @@ describe('the tax choice is exposed to the owner before closeout', () => {
         const src = read(PAGE);
         expect(src).toMatch(/id="closeout-food-tax"/);
         expect(src).toMatch(/type="checkbox"/);
-        expect(src).toMatch(/Apply \{FOOD_TAX_RATE_PERCENT\}% food tax/);
+        // FR-TAX-1B: the label names the CAMPAIGN's frozen rate rather than a
+        // product constant, and degrades to a plain label for a campaign that
+        // carries no snapshot (and is therefore charged no tax).
+        expect(src).toContain('`Apply ${closeoutTaxRateLabel} food tax`');
+        expect(src).toContain("'Apply food tax'");
     });
 
     it('it is bound to state the owner can change', () => {
@@ -117,9 +121,11 @@ describe('the selected value reaches the closeout API', () => {
             // And the money that choice produces.
             const f = computeCloseoutFinancials({
                 grossSales: 2065, orgSharePercent: 20, applyFoodTax: parsed.applyFoodTax,
+                taxRatePercent: 1,
             });
             expect(f.taxApplied).toBe(applyFoodTax);
-            expect(f.totalDue).toBe(applyFoodTax ? 1672.65 : 1652);
+            // FR-TAX-1B: 1% of the NET 1652 = 16.52, not 1% of gross.
+            expect(f.totalDue).toBe(applyFoodTax ? 1668.52 : 1652);
         }
     });
 
@@ -161,8 +167,12 @@ describe('the owner sees the resulting figures', () => {
         expect(src).not.toMatch(/org_share_percent\s*\/\s*100/);
     });
 
-    it('the rate shown is the shared constant', () => {
-        expect(FOOD_TAX_RATE_PERCENT).toBe(1);
-        expect(read(PAGE)).toMatch(/\{FOOD_TAX_RATE_PERCENT\}%/);
+    it('FR-TAX-1B: the rate shown is the CAMPAIGN\'s frozen snapshot, not a constant', () => {
+        const src = read(PAGE);
+        // Derived through the one authority, from the campaign being closed out.
+        expect(src).toMatch(/resolveCloseoutTaxRate\(\{/);
+        expect(src).toContain('(closeoutTarget as any)?.tax_rate_percent');
+        // The old product constant is no longer rendered anywhere on this page.
+        expect(src).not.toMatch(/\{FOOD_TAX_RATE_PERCENT\}%/);
     });
 });

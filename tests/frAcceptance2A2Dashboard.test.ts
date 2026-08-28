@@ -306,18 +306,20 @@ describe('this patch changed presentation only', () => {
             .filter((d: string) => /^\d{14}_/.test(d)).sort();
         // This guarded "the 2A.2 dashboard patch added no schema", which is still
         // true. Rather than relax it to "16 or more", it names exactly which
-        // migrations are allowed to follow — so an unapproved 21st still fails
+        // migrations are allowed to follow — so an unapproved 22nd still fails
         // here. Each entry was approved by the owner before it was written:
         //   17  INV-D settlement truth
         //   18  outreach batch campaign ownership (FR-REBOOK-2 idempotency)
         //   19  FR-GOAL-CONFIG-1 bundle goal default (100 -> 20)
         //   20  FR-TAX-1 org tax status + exemption document + campaign snapshot
-        expect(migrations).toHaveLength(20);
+        //   21  FR-TAX-1B invoice tax snapshot (frozen rate/status/base)
+        expect(migrations).toHaveLength(21);
         expect(migrations[15]).toBe('20260823010000_fr_acceptance_2a2_human_followup');
         expect(migrations[16]).toBe('20260825000000_inv_d_settlement_truth');
         expect(migrations[17]).toBe('20260826000000_m18_outreach_batch_campaign_ownership');
         expect(migrations[18]).toBe('20260828000000_fr_goal_config_1_bundle_goal_default');
         expect(migrations[19]).toBe('20260828120000_fr_tax_1_org_tax_status_and_exemption_document');
+        expect(migrations[20]).toBe('20260828140000_fr_tax_1b_invoice_tax_snapshot');
     });
 
     it('the acknowledgement and follow-up contracts are untouched', () => {

@@ -12,8 +12,11 @@
  *  - tax-exemption paperwork becoming reachable without a tenant session, or
  *    reachable by the WRONG tenant
  *  - the exemption document's bytes riding along in ordinary CRM responses
- *  - the invoice/closeout tax base being silently switched while the correct
- *    base is still an open accounting question
+ *
+ * FR-TAX-1B note: the taxable base, left deliberately open by FR-TAX-1, has
+ * since been confirmed by the owner as NET AFTER ORGANIZATION SHARE. The two
+ * assertions in section 27-28 that pinned the OPEN state were updated
+ * accordingly; tests/frTax1b.test.ts owns the base and invoice contract.
  */
 
 import {
@@ -24,7 +27,7 @@ import {
     formatTaxRate,
     resolveCampaignTaxSnapshot,
     computeCampaignTax,
-    TAXABLE_BASE_STATUS,
+    CONFIRMED_TAXABLE_BASE,
     MIN_TAX_RATE_PERCENT,
     MAX_TAX_RATE_PERCENT,
 } from '@/lib/fundraiserTax';
@@ -461,7 +464,7 @@ describe('26. nothing in the FR-TAX-1 path hardcodes 1%', () => {
 // TRACKER / INVOICE / SQUARE (matrix 27-29)
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('27-28. tracker and invoice remain truthful while the tax base is unresolved', () => {
+describe('27-28. tracker and invoice remain truthful under the confirmed NET base', () => {
     it('27. the coordinator tracker still says "No Tax", which is still true', () => {
         // FR-COORD-ORDER-TRACKER-1 established this label because the fundraiser
         // flow charges supporters no tax. FR-TAX-1 does not change that: it adds
@@ -476,20 +479,23 @@ describe('27-28. tracker and invoice remain truthful while the tax base is unres
         expect(src).toMatch(/resolveMaterialBundles/);
     });
 
-    it('28. closeout tax behaviour is NOT rewired while the base is unresolved', () => {
+    it('28. FR-TAX-1B: closeout is now wired to the campaign snapshot and the NET base', () => {
+        // Superseded by the owner's confirmed ruling. FR-TAX-1 deliberately left
+        // closeout alone while the base was open; FR-TAX-1B resolved it.
         const closeout = read('app', 'api', 'campaigns', '[id]', 'closeout', 'route.ts');
-        expect(closeout).not.toMatch(/computeCampaignTax|fundraiserTax/);
+        expect(closeout).toMatch(/resolveCloseoutTaxRate/);
 
         const math = read('lib', 'fundraiserCloseoutMath.ts');
-        // Still the pre-existing behaviour, deliberately preserved.
-        expect(math).toMatch(/grossSales \* FOOD_TAX_RATE_PERCENT \/ 100/);
+        // The tax now multiplies the NET remit, never gross.
+        expect(math).toMatch(/baseRemit \* rate \/ 100/);
+        expect(math).not.toMatch(/grossSales \* FOOD_TAX_RATE_PERCENT \/ 100/);
     });
 
-    it('28b. the unresolved base is recorded in code, not left as folklore', () => {
-        expect(TAXABLE_BASE_STATUS).toBe('UNRESOLVED_PENDING_OWNER_CONFIRMATION');
+    it('28b. the confirmed base is recorded in code, not left as folklore', () => {
+        expect(CONFIRMED_TAXABLE_BASE).toBe('net');
         const src = read('lib', 'fundraiserTax.ts');
-        expect(src).toMatch(/UNRESOLVED_PENDING_OWNER_CONFIRMATION/);
-        expect(src).toMatch(/taxableBase/);
+        expect(src).toMatch(/CONFIRMED_TAXABLE_BASE/);
+        expect(src).toMatch(/resolveTaxableSellingPrice/);
     });
 
     it('28c. the calculator takes its base as a parameter so one call site changes later', () => {

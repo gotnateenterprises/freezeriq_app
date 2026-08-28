@@ -245,5 +245,16 @@ export function populateTrackerWorksheet(
     // flow — fundraiser supporter orders are never taxed). Labeled explicitly
     // so a coordinator computing this by hand never adds a tax that the real
     // checkout never charges.
+    //
+    // FR-TAX-1B REVIEWED AND DELIBERATELY UNCHANGED. That phase made the
+    // ORGANIZATION's closeout invoice taxable, which raises the question of
+    // whether "(No Tax)" is still honest here. It is: this sheet is a
+    // per-SUPPORTER collection tally — one row per purchaser, no
+    // organization-level settlement total anywhere on it — and supporters
+    // remain untaxed. The organization's tax lives on its invoice, a
+    // different document with its own Taxable Selling Price and Tax lines.
+    // Adding organization-level tax to these supporter rows would be the
+    // actively wrong change: it would tell a coordinator to collect money
+    // from supporters that no supporter owes.
     worksheet.getCell('I9').value = 'Total Cost (No Tax)';
 }
