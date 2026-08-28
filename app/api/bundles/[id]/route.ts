@@ -93,7 +93,14 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
                     show_on_storefront: data.show_on_storefront,
                     order_cutoff_date: data.order_cutoff_date ? new Date(data.order_cutoff_date) : null,
                     price: data.price ? Number(data.price) : null,
-                    catalog_id: data.catalog_id || null // Ensure null if empty string
+                    catalog_id: data.catalog_id || null, // Ensure null if empty string
+                    // BUNDLE-MEDIA-1: was never written despite the editor
+                    // sending it. `undefined` (key absent) is left as `undefined`
+                    // so Prisma skips the column rather than clearing an
+                    // existing image on a caller that doesn't send it — an
+                    // explicit '' is the deliberate "clear the image" signal
+                    // and becomes null, matching Acceptance D.
+                    image_url: data.image_url === undefined ? undefined : (data.image_url || null)
                 }
             });
 

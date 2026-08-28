@@ -126,6 +126,10 @@ export async function POST(req: Request) {
                     order_cutoff_date: data.order_cutoff_date ? new Date(data.order_cutoff_date) : null,
                     price: data.price ? Number(data.price) : null,
                     catalog_id: data.catalog_id || null, // Added catalog_id
+                    // BUNDLE-MEDIA-1: was never written despite the editor
+                    // sending it, so every uploaded cover image was silently
+                    // discarded on save.
+                    image_url: data.image_url || null,
                     business_id: session.user.businessId
                 }
             });

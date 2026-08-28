@@ -380,8 +380,9 @@ describe('no-drift — this phase changed only the security boundary', () => {
         // no bundle write path may silently skip an unresolvable recipe again.
         expect(create).not.toContain('if (recipeId) {');
         expect(imp).not.toContain('if (recipeId) {');
-        // image_url persistence remains deferred.
-        expect(create).not.toContain('image_url');
+        // image_url persistence was deferred at the time this suite was
+        // written and was implemented deliberately by BUNDLE-MEDIA-1 —
+        // tests/bundleMedia1.test.ts now owns that contract.
     });
 
     it('no schema or migration change accompanies this phase', () => {

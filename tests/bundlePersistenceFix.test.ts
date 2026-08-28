@@ -621,9 +621,12 @@ describe('no-drift — this phase repaired integrity only', () => {
         expect(changed).not.toContain('migrations/');
     });
 
-    it('image_url persistence remains deferred', () => {
+    it('image_url persistence was deferred at the time this phase ran, and later implemented deliberately', () => {
+        // BUNDLE-MEDIA-1 added it on purpose; tests/bundleMedia1.test.ts owns
+        // that contract now. This phase's own guarantee — recipe resolution
+        // stays fully validated and atomic — is unaffected by that field.
         const { readFileSync } = require('fs');
         const src = readFileSync('app/api/bundles/route.ts', 'utf8');
-        expect(src).not.toContain('image_url');
+        expect(src).toContain('resolveBundleContents(');
     });
 });

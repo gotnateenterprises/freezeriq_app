@@ -1,10 +1,10 @@
 
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm, useFieldArray } from 'react-hook-form';
-import { Save, Plus, Trash, ArrowLeft, Package, Search, DollarSign, TrendingUp, Sparkles, Image as ImageIcon, Loader2, Download, Copy } from 'lucide-react';
+import { Save, Plus, Trash, ArrowLeft, Package, Search, DollarSign, TrendingUp, Sparkles, Image as ImageIcon, Loader2, Download, Copy, Upload } from 'lucide-react';
 import Link from 'next/link';
 
 interface BundleEditorProps {
@@ -20,6 +20,8 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
     const [recipeCosts, setRecipeCosts] = useState<Record<string, number>>({});
     const [catalogs, setCatalogs] = useState<any[]>([]);
     const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+    const [isUploadingImage, setIsUploadingImage] = useState(false);
+    const bundleImageInputRef = useRef<HTMLInputElement>(null);
 
     const { register, control, handleSubmit, watch, setValue } = useForm({
         defaultValues: initialData ? {
@@ -77,6 +79,41 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
         }
         fetchData();
     }, []);
+
+    // BUNDLE-MEDIA-1. Local-file upload — a Bundle-scoped sibling of
+    // RecipeEditor's handleUploadImage, same upload-then-setValue shape.
+    // image_url is only ever set on a SUCCESSFUL response, so a failed or
+    // rejected upload leaves whatever image was already showing untouched
+    // rather than flashing a broken/blank one.
+    const handleUploadBundleImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        try {
+            setIsUploadingImage(true);
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const res = await fetch('/api/bundles/upload-image', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await res.json();
+            if (res.ok && data.url) {
+                setValue('image_url', data.url, { shouldDirty: true });
+            } else {
+                alert(data.error || 'Failed to upload image');
+            }
+        } catch (err: any) {
+            console.error('Bundle Image Upload Error:', err);
+            alert('Error uploading image');
+        } finally {
+            setIsUploadingImage(false);
+            // Reset so choosing the same file again still fires onChange.
+            e.target.value = '';
+        }
+    };
 
     const onSubmit = async (data: any) => {
         try {
@@ -227,6 +264,26 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
                         <div>
                             <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Bundle Image</label>
                             <div className="relative group">
+                                {/* BUNDLE-MEDIA-1: the primary, visible way to attach a
+                                    cover image — a local-file upload, not a URL the tenant
+                                    has to already have somewhere else. */}
+                                <input
+                                    type="file"
+                                    ref={bundleImageInputRef}
+                                    className="hidden"
+                                    accept="image/jpeg,image/png,image/webp,image/gif"
+                                    onChange={handleUploadBundleImage}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => bundleImageInputRef.current?.click()}
+                                    disabled={isUploadingImage || isGeneratingImage}
+                                    className="w-full mb-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+                                >
+                                    {isUploadingImage ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                                    {isUploadingImage ? 'Uploading...' : watch('image_url') ? 'Replace Image' : 'Upload Image'}
+                                </button>
+
                                 {watch('image_url') ? (
                                     <div className="relative w-full aspect-square rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 mb-2 group">
                                         <img src={watch('image_url')} alt="Bundle" className="w-full h-full object-cover" />
@@ -267,7 +324,7 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
                                     />
                                     <button
                                         type="button"
-                                        disabled={isGeneratingImage}
+                                        disabled={isGeneratingImage || isUploadingImage}
                                         onClick={async () => {
                                             const name = watch('name');
                                             const desc = watch('description');
