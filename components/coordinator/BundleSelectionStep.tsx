@@ -40,6 +40,8 @@ interface BundleVariantInfo {
     sku: string | null;
     price: number | null;
     imageUrl: string | null;
+    /** FR-COORD-BUNDLE-CONTENTS-1. Recipe names, in Bundle admin order. */
+    meals: string[];
 }
 
 interface CandidateFamily {
@@ -702,6 +704,32 @@ function FamilyCard({ family, isSelected, isDisabled, onToggle }: FamilyCardProp
                     {isSelected && <Check size={11} className="text-white" strokeWidth={3} />}
                 </div>
             </div>
+
+            {/* FR-COORD-BUNDLE-CONTENTS-1: included meals, directly under the
+                name — the coordinator was choosing between families with no
+                way to see what was actually inside. One list only: Serves-2
+                is the same meals in a smaller portion, so a second list would
+                just repeat these names with "(Serves 2)" appended. */}
+            {available && (
+                serves5.meals.length > 0 ? (
+                    <div className="space-y-1">
+                        <p className="text-[10px] font-black uppercase text-slate-400 tracking-wide">
+                            Included meals
+                        </p>
+                        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5 text-xs text-slate-600 font-medium list-disc list-inside marker:text-slate-300">
+                            {serves5.meals.map((meal, i) => (
+                                <li key={`${meal}-${i}`} className="truncate" title={meal}>
+                                    {meal}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                ) : (
+                    <p className="text-xs text-slate-400 italic">
+                        No meals are currently listed for this bundle.
+                    </p>
+                )
+            )}
 
             {/* Serving size details */}
             {available && (

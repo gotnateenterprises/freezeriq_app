@@ -31,6 +31,15 @@ export interface BundleVariantInfo {
   sku: string | null;
   price: number | null;
   imageUrl: string | null;
+  /**
+   * FR-COORD-BUNDLE-CONTENTS-1. Recipe names for this bundle, in
+   * BundleContent.position order. The coordinator was being asked to choose
+   * between families ("Clean Eating/Paleo - Fall 2026") with no way to see
+   * what meals were actually inside — never queried, not merely unrendered.
+   * Read-only display context: no Recipe id, cost, or admin data crosses this
+   * boundary.
+   */
+  meals: string[];
 }
 
 export interface BundleSelectionCandidate {
@@ -259,6 +268,14 @@ export async function loadCandidateFamilies(
           family_id: true,
           business_id: true,
           is_active: true,
+          // FR-COORD-BUNDLE-CONTENTS-1. Only the recipe NAME crosses into the
+          // coordinator-facing DTO — no recipe id, cost, or ownership detail.
+          // Position-ordered so the list the coordinator sees matches the
+          // order shown in Bundle administration.
+          contents: {
+            orderBy: { position: 'asc' },
+            select: { recipe: { select: { name: true } } },
+          },
         },
       },
     },
@@ -295,6 +312,10 @@ export async function loadCandidateFamilies(
             serving_tier: true,
             family_id: true,
             business_id: true,
+            contents: {
+              orderBy: { position: 'asc' },
+              select: { recipe: { select: { name: true } } },
+            },
           },
         })
       : [];
@@ -539,6 +560,8 @@ function bundleToVariantInfo(b: {
   sku: string | null;
   price: unknown;
   image_url: string | null;
+  /** Optional: callers that never selected it (none currently) still compile. */
+  contents?: { recipe: { name: string } }[];
 }): BundleVariantInfo {
   return {
     id: b.id,
@@ -546,5 +569,6 @@ function bundleToVariantInfo(b: {
     sku: b.sku,
     price: decimalToNumber(b.price),
     imageUrl: b.image_url,
+    meals: (b.contents ?? []).map((c) => c.recipe.name),
   };
 }
