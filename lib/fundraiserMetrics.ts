@@ -10,6 +10,8 @@
  * Import it from both API routes and UI components.
  */
 
+import { organizationShareAmount } from './fundraiserOrgShare';
+
 // ── Weight Map ───────────────────────────────────────────────
 
 /**
@@ -226,19 +228,32 @@ export interface FundraiserProgressResult {
     estimatedEarnings: number;
     /** Total dollar sales (kept for backward compat / earnings calc) */
     totalSales: number;
+    /**
+     * FR-SHARE-COPY-1 addendum: the organization's ACTUAL money raised —
+     * totalSales × THIS CAMPAIGN'S configured org_share_percent (INV-A,
+     * lib/fundraiserOrgShare.organizationShareAmount), never the
+     * ESTIMATED_FUNDRAISER_ORG_SHARE guess above. Null when the caller did
+     * not supply orgSharePercent — those callers get no fabricated number
+     * rather than a silently wrong one.
+     */
+    raisedAmount: number | null;
 }
 
 /**
  * Computes the full fundraiser progress from campaign data.
  *
- * @param bundleGoalInput - campaign.bundle_goal (target number of bundles)
- * @param totalSales      - campaign.total_sales (dollar value, for earnings calc)
- * @param orders          - orders with nested items[] for weighted bundle math
+ * @param bundleGoalInput  - campaign.bundle_goal (target number of bundles)
+ * @param totalSales       - campaign.total_sales (dollar value, for earnings calc)
+ * @param orders           - orders with nested items[] for weighted bundle math
+ * @param orgSharePercent  - campaign.org_share_percent (INV-A), for the REAL
+ *                           raisedAmount. Omit only when the caller genuinely
+ *                           has no campaign-specific rate to hand in.
  */
 export function computeFundraiserProgress(
     bundleGoalInput: number | string | null | undefined,
     totalSales: number | string | null | undefined,
-    orders: OrderForMetrics[] = []
+    orders: OrderForMetrics[] = [],
+    orgSharePercent?: number | string | null
 ): FundraiserProgressResult {
     const bundleGoal = resolveBundleGoal(bundleGoalInput);
     const dollarSales = Number(totalSales) || 0;
@@ -254,12 +269,17 @@ export function computeFundraiserProgress(
     // (from raise-funds page: "Your organization keeps 20% of the proceeds")
     const estimatedEarnings = dollarSales * ESTIMATED_FUNDRAISER_ORG_SHARE;
 
+    const raisedAmount = orgSharePercent === undefined || orgSharePercent === null
+        ? null
+        : organizationShareAmount(dollarSales, Number(orgSharePercent));
+
     return {
         totalBundlesSold,
         bundleGoal,
         progressPercent,
         estimatedEarnings,
         totalSales: dollarSales,
+        raisedAmount,
     };
 }
 

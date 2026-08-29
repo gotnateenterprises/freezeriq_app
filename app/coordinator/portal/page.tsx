@@ -644,7 +644,11 @@ export default function CoordinatorPortal() {
         );
     }
 
-    const metrics = computeFundraiserProgress(campaign.bundle_goal, campaign.total_sales, campaign.orders || []);
+    // FR-SHARE-COPY-1 addendum: org_share_percent is THIS campaign's own
+    // configured rate (INV-A, prisma default 20.00, never null) — passing it
+    // through is what makes metrics.raisedAmount the organization's real
+    // money raised instead of gross sales relabeled.
+    const metrics = computeFundraiserProgress(campaign.bundle_goal, campaign.total_sales, campaign.orders || [], campaign.org_share_percent);
     const progress = metrics.progressPercent;
     const totalBundlesSold = metrics.totalBundlesSold;
     const bundleGoal = metrics.bundleGoal;
@@ -913,9 +917,11 @@ export default function CoordinatorPortal() {
                         goal={bundleGoal}
                         progress={progress}
                         totalSales={metrics.totalSales}
+                        raisedAmount={metrics.raisedAmount ?? 0}
                         orderCount={activeOrders.length}
                         daysRemaining={daysRemaining}
                         orgLabel={orgLabel}
+                        orgSharePercent={Number(campaign.org_share_percent) || 0}
                     />
                     <ShareCenter
                         shareUrl={shareUrl}
@@ -936,10 +942,12 @@ export default function CoordinatorPortal() {
                         goal={bundleGoal}
                         progress={progress}
                         totalSales={metrics.totalSales}
+                        raisedAmount={metrics.raisedAmount ?? 0}
                         orderCount={activeOrders.length}
                         daysRemaining={daysRemaining}
                         paceText={`${coachingTip.emoji} ${coachingTip.text}`}
                         orgLabel={orgLabel}
+                        orgSharePercent={Number(campaign.org_share_percent) || 0}
                     />
                     <ShareCenter
                         shareUrl={shareUrl}
@@ -974,10 +982,12 @@ export default function CoordinatorPortal() {
                         goal={bundleGoal}
                         progress={progress}
                         totalSales={metrics.totalSales}
+                        raisedAmount={metrics.raisedAmount ?? 0}
                         orderCount={activeOrders.length}
                         daysRemaining={daysRemaining}
                         paceText={`${coachingTip.emoji} ${coachingTip.text}`}
                         orgLabel={orgLabel}
+                        orgSharePercent={Number(campaign.org_share_percent) || 0}
                     />
                     <DeliveryPrep
                         deliveryDateLabel={deliveryDateLabel}
@@ -1012,10 +1022,12 @@ export default function CoordinatorPortal() {
                         goal={bundleGoal}
                         progress={progress}
                         totalSales={metrics.totalSales}
+                        raisedAmount={metrics.raisedAmount ?? 0}
                         orderCount={activeOrders.length}
                         daysRemaining={daysRemaining}
                         paceText={`${coachingTip.emoji} ${coachingTip.text}`}
                         orgLabel={orgLabel}
+                        orgSharePercent={Number(campaign.org_share_percent) || 0}
                     />
                     <WhatsNext
                         tenantName={tenantName || 'Your fundraiser organizer'}

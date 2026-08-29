@@ -1,13 +1,26 @@
 'use client';
 
+/**
+ * FR-SHARE-COPY-1 addendum — "raised for {org}" must be the organization's
+ * ACTUAL money raised (totalSales × this campaign's configured
+ * org_share_percent), never gross sales relabeled. totalSales is still shown,
+ * as its own stat, so a coordinator can see both facts rather than losing
+ * one to fix the other. See lib/fundraiserMetrics.computeFundraiserProgress
+ * (raisedAmount) and lib/fundraiserOrgShare.organizationShareAmount — the
+ * campaign's own share, resolved by the caller, never guessed here.
+ */
 export function ProgressHero({
-    sold, goal, progress, totalSales, orderCount, daysRemaining,
-    paceText, hot = false, dimmed = false, orgLabel = 'your group',
+    sold, goal, progress, totalSales, raisedAmount, orderCount, daysRemaining,
+    paceText, hot = false, dimmed = false, orgLabel = 'your group', orgSharePercent,
 }: {
     sold: number; goal: number; progress: number;
-    totalSales: number; orderCount: number; daysRemaining: number | null;
-    paceText?: string; hot?: boolean; dimmed?: boolean; orgLabel?: string;
+    totalSales: number; raisedAmount: number; orderCount: number; daysRemaining: number | null;
+    paceText?: string; hot?: boolean; dimmed?: boolean; orgLabel?: string; orgSharePercent?: number;
 }) {
+    const sharePercentLabel = orgSharePercent && orgSharePercent > 0
+        ? `${parseFloat(orgSharePercent.toFixed(2))}% share`
+        : undefined;
+
     return (
         <section className={`bg-white border border-slate-200 rounded-2xl p-4 ${dimmed ? 'opacity-75' : ''}`}>
             <p className="text-4xl font-black tracking-tight tabular-nums text-slate-900">
@@ -19,8 +32,9 @@ export function ProgressHero({
                     style={{ width: `${Math.min(progress, 100)}%` }}
                 />
             </div>
-            <div className="mt-3 flex gap-2">
-                <Stat label={`raised for ${orgLabel}`} value={`$${totalSales.toFixed(0)}`} money />
+            <div className="mt-3 flex flex-wrap gap-2">
+                <Stat label="total sales" value={`$${totalSales.toFixed(0)}`} />
+                <Stat label={`raised for ${orgLabel}`} value={`$${raisedAmount.toFixed(0)}`} caption={sharePercentLabel} money />
                 <Stat label="orders" value={String(orderCount)} />
                 <Stat label="days left" value={daysRemaining === null ? '—' : String(Math.max(daysRemaining, 0))} />
             </div>
@@ -35,11 +49,12 @@ export function ProgressHero({
     );
 }
 
-function Stat({ label, value, money = false }: { label: string; value: string; money?: boolean }) {
+function Stat({ label, value, caption, money = false }: { label: string; value: string; caption?: string; money?: boolean }) {
     return (
-        <div className="flex-1 rounded-xl bg-slate-50 px-2 py-2 text-center">
+        <div className="min-w-0 flex-1 rounded-xl bg-slate-50 px-2 py-2 text-center">
             <p className={`text-base font-black tabular-nums ${money ? 'text-emerald-600' : 'text-slate-900'}`}>{value}</p>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
+            <p className="break-words text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
+            {caption && <p className="mt-0.5 text-[9px] font-medium normal-case text-slate-400">{caption}</p>}
         </div>
     );
 }
