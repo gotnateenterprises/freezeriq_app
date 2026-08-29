@@ -372,6 +372,16 @@ export async function sendFundraiserCoordinatorNotification(
     const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
     const total = currency.format(Number(totalAmount) || 0);
     const supporter = supporterName || 'A supporter';
+    // FR-SUPPORTER-CONTACT-1 Part I: campaignName often already IS "{org}
+    // Fundraiser" (FundraiserClient's own fallback title), which made the
+    // parenthetical organization name pure repetition — "Home Schoolers USA
+    // Fundraiser (Home Schoolers USA)". A campaign with a genuinely distinct
+    // custom name (e.g. "Fall 2026 Big Sale") still gets the org name shown,
+    // since there it's real disambiguation, not an echo.
+    const campaignNameEchoesOrg = Boolean(
+        campaignName && organizationName
+        && campaignName.toLowerCase().includes(organizationName.toLowerCase())
+    );
 
     // ── Payment truth (FR-COORD-123 Part H) ────────────────────────────────
     // The platform takes no payment for fundraiser orders and never marks one
@@ -410,11 +420,12 @@ export async function sendFundraiserCoordinatorNotification(
             <p style="color: #374151;">
                 <strong>${escapeHtml(supporter)}</strong> just placed an order
                 ${campaignName ? `for <strong>${escapeHtml(campaignName)}</strong>` : ''}
-                ${organizationName ? `(${escapeHtml(organizationName)})` : ''}.
+                ${organizationName && !campaignNameEchoesOrg ? `(${escapeHtml(organizationName)})` : ''}.
             </p>
 
             <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
                 <p style="margin: 0; color: #6b7280;">Order reference: ${escapeHtml(orderReference)}</p>
+                <p style="margin: 5px 0 0 0; color: #374151;"><strong>Name:</strong> ${escapeHtml(supporter)}</p>
                 ${supporterEmail ? `<p style="margin: 5px 0 0 0; color: #374151;"><strong>Email:</strong> <a href="mailto:${escapeHtml(supporterEmail)}" style="color: #4f46e5;">${escapeHtml(supporterEmail)}</a></p>` : ''}
                 ${supporterPhone ? `<p style="margin: 5px 0 0 0; color: #374151;"><strong>Phone:</strong> ${escapeHtml(supporterPhone)}</p>` : ''}
                 ${participantName ? `<p style="margin: 5px 0 0 0; color: #374151;"><strong>Supporting:</strong> ${escapeHtml(participantName)}</p>` : ''}
@@ -434,7 +445,11 @@ export async function sendFundraiserCoordinatorNotification(
 
     return sendEmail({
         to: coordinatorEmail.trim(),
-        subject: `New fundraiser order — ${supporter} · ${subjectTail}`,
+        // FR-SUPPORTER-CONTACT-1: `supporter` is purchaser-typed text (the
+        // checkout form's First/Last Name) — this subject skipped safeSubject
+        // while the confirmation email's equivalent line (above) already used
+        // it, leaving a header-injection gap unique to this one notification.
+        subject: safeSubject(`New fundraiser order — ${supporter} · ${subjectTail}`),
         html: htmlContent,
         businessId,
     });

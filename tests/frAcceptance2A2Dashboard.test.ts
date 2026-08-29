@@ -313,13 +313,15 @@ describe('this patch changed presentation only', () => {
         //   19  FR-GOAL-CONFIG-1 bundle goal default (100 -> 20)
         //   20  FR-TAX-1 org tax status + exemption document + campaign snapshot
         //   21  FR-TAX-1B invoice tax snapshot (frozen rate/status/base)
-        expect(migrations).toHaveLength(21);
+        //   22  FR-SUPPORTER-CONTACT-1 Order.first_name/last_name (distinct purchaser identity)
+        expect(migrations).toHaveLength(22);
         expect(migrations[15]).toBe('20260823010000_fr_acceptance_2a2_human_followup');
         expect(migrations[16]).toBe('20260825000000_inv_d_settlement_truth');
         expect(migrations[17]).toBe('20260826000000_m18_outreach_batch_campaign_ownership');
         expect(migrations[18]).toBe('20260828000000_fr_goal_config_1_bundle_goal_default');
         expect(migrations[19]).toBe('20260828120000_fr_tax_1_org_tax_status_and_exemption_document');
         expect(migrations[20]).toBe('20260828140000_fr_tax_1b_invoice_tax_snapshot');
+        expect(migrations[21]).toBe('20260828150000_fr_supporter_contact_1_order_first_last_name');
     });
 
     it('the acknowledgement and follow-up contracts are untouched', () => {

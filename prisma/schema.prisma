@@ -411,6 +411,13 @@ model Order {
   external_id       String              @unique
   source            OrderSource
   customer_name     String?
+  // FR-SUPPORTER-CONTACT-1: the purchaser's own first/last, distinct from the
+  // combined customer_name above (kept, and still written on every new order,
+  // so every existing reader — coordinator email, RecentOrders, pickup sheet,
+  // scoreboard mask — keeps working unmodified). Nullable, additive-only:
+  // historical rows are NULL here and are never backfilled or guessed.
+  first_name        String?
+  last_name         String?
   status            OrderStatus         @default(pending)
   delivery_date     DateTime?           @db.Date
   created_at        DateTime?           @default(now())

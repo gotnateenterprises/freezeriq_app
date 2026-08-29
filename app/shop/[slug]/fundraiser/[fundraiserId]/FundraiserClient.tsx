@@ -133,7 +133,11 @@ export default function FundraiserClient({
     // so regular-store items can't enter a fundraiser order, fundraiser items
     // can't leak into the storefront cart, and nothing persists across campaigns.
     const [orderLines, setOrderLines] = useState<OrderLine[]>([]);
-    const [buyerName, setBuyerName] = useState('');
+    // FR-SUPPORTER-CONTACT-1: distinct First/Last, never a single ambiguous
+    // "Full Name" — see lib/purchaserName.ts for the one place these combine
+    // into a display string.
+    const [firstName, setFirstName] = useState('');
+    const [lastName, setLastName] = useState('');
     const [buyerEmail, setBuyerEmail] = useState('');
     const [buyerPhone, setBuyerPhone] = useState('');
     const [participant, setParticipant] = useState('');
@@ -258,8 +262,11 @@ export default function FundraiserClient({
         setOrderLines(prev => prev.filter(l => l.bundleId !== bundleId));
     };
 
+    // First name required (same strength as the old single "name" field);
+    // last name stays optional — a purchaser with one name is a real case,
+    // not an error (see lib/purchaserName.ts's "first only" rule).
     const canSubmit = orderLines.length > 0
-        && buyerName.trim().length > 0
+        && firstName.trim().length > 0
         && buyerEmail.trim().length > 0
         && !submitting;
 
@@ -289,7 +296,8 @@ export default function FundraiserClient({
                         name: l.name,
                     })),
                     customer: {
-                        name: buyerName.trim(),
+                        firstName: firstName.trim(),
+                        lastName: lastName.trim(),
                         email: buyerEmail.trim(),
                         phone: buyerPhone.trim(),
                         participantCode: participant.trim() || undefined,
@@ -933,13 +941,54 @@ export default function FundraiserClient({
                                     </div>
                                 )}
 
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.5rem', marginTop: '.6rem' }}>
-                                    <input placeholder="Your name" aria-label="Your name" value={buyerName} onChange={e => { resetSubmissionKey(); setBuyerName(e.target.value); }} style={fableInput} />
-                                    <input placeholder="Phone" aria-label="Phone" value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)} style={fableInput} />
+                                {/* FR-SUPPORTER-CONTACT-1: four explicit fields, never a single
+                                    ambiguous "Full Name". auto-fit + minmax collapses to one
+                                    column on a narrow phone (Part D's stacked layout) and settles
+                                    to exactly two columns — First|Last, Email|Phone — once the
+                                    card has room, without a media query; minWidth:0 on every input
+                                    guarantees the row can never force this card wider than its
+                                    container (the prior mobile-clipping defect: this was the one
+                                    CSS Grid in the file with no min-width guard on its children). */}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '.5rem', marginTop: '.6rem' }}>
+                                    <input
+                                        type="text"
+                                        placeholder="First Name"
+                                        aria-label="First Name"
+                                        autoComplete="given-name"
+                                        value={firstName}
+                                        onChange={e => { resetSubmissionKey(); setFirstName(e.target.value); }}
+                                        style={{ ...fableInput, minWidth: 0 }}
+                                    />
+                                    <input
+                                        type="text"
+                                        placeholder="Last Name"
+                                        aria-label="Last Name"
+                                        autoComplete="family-name"
+                                        value={lastName}
+                                        onChange={e => { resetSubmissionKey(); setLastName(e.target.value); }}
+                                        style={{ ...fableInput, minWidth: 0 }}
+                                    />
+                                    {/* Email is required by the order API (customer record + confirmation
+                                        email); Fable's prototype form omitted it — same input style, reported. */}
+                                    <input
+                                        type="email"
+                                        placeholder="Email (for your confirmation)"
+                                        aria-label="Email"
+                                        autoComplete="email"
+                                        value={buyerEmail}
+                                        onChange={e => { resetSubmissionKey(); setBuyerEmail(e.target.value); }}
+                                        style={{ ...fableInput, minWidth: 0 }}
+                                    />
+                                    <input
+                                        type="tel"
+                                        placeholder="Phone Number"
+                                        aria-label="Phone Number"
+                                        autoComplete="tel"
+                                        value={buyerPhone}
+                                        onChange={e => setBuyerPhone(e.target.value)}
+                                        style={{ ...fableInput, minWidth: 0 }}
+                                    />
                                 </div>
-                                {/* Email is required by the order API (customer record + confirmation
-                                    email); Fable's prototype form omitted it — same input style, reported. */}
-                                <input type="email" placeholder="Email (for your confirmation)" aria-label="Email" value={buyerEmail} onChange={e => { resetSubmissionKey(); setBuyerEmail(e.target.value); }} style={{ ...fableInput, marginTop: '.5rem' }} />
 
                                 <label style={{ display: 'block', marginTop: '.55rem', fontSize: '.64rem', fontWeight: 800, color: '#9a8075', textTransform: 'uppercase', letterSpacing: '.05em' }}>
                                     Who are you supporting? 🏅

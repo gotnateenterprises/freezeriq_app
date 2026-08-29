@@ -9,6 +9,7 @@ import { lockCampaignSelection } from '@/lib/campaignSelectionLock';
 import { isValidIanaTimeZone } from '@/lib/tenantTimezone';
 import { validateSubmissionKey, buildSubmissionFingerprint } from '@/lib/orderIdempotency';
 import { normalizeSlug, NO_SUCH_SLUG } from '@/lib/publicIdentity';
+import { purchaserDisplayName } from '@/lib/purchaserName';
 
 /**
  * FR-LAUNCH-1E: sentinel used to abort the order transaction when the campaign
@@ -70,13 +71,26 @@ export async function POST(req: Request) {
             }, { status: 400 });
         }
 
-        if (!customer || !customer.email || !customer.name) {
-            return NextResponse.json({ error: "Customer details required" }, { status: 400 });
+        // FR-SUPPORTER-CONTACT-1: separate First Name / Last Name, never a single
+        // ambiguous "Full Name" — the field this replaced sat directly next to
+        // Phone in the checkout form and was mistaken for it in practice. First
+        // name is required (the same strength the old combined field had); last
+        // name is optional, matching lib/purchaserName's "first only" case.
+        if (!customer || typeof customer.firstName !== 'string' || !customer.firstName.trim()
+            || typeof customer.email !== 'string' || !customer.email.trim()) {
+            return NextResponse.json({ error: "First name and email are required" }, { status: 400 });
         }
 
         if (!slug || typeof slug !== 'string') {
             return NextResponse.json({ error: "Store identifier required" }, { status: 400 });
         }
+
+        // The ONE place first/last combine into a display string — every
+        // downstream write below (Customer.name, Order.customer_name, the lead
+        // notification) uses this SAME value, never its own concatenation.
+        const purchaserFirstName = String(customer.firstName ?? '').trim();
+        const purchaserLastName = String(customer.lastName ?? '').trim();
+        const purchaserName = purchaserDisplayName(purchaserFirstName, purchaserLastName);
 
         // FR-LAUNCH-1E: validate the optional submission key BEFORE any database
         // work. Phased rollout — a MISSING key stays backward-compatible (the
@@ -241,7 +255,7 @@ export async function POST(req: Request) {
                 slug,
                 campaignId: campaign ? campaign.id : null,
                 customerEmail: customer.email,
-                customerName: customer.name,
+                customerName: purchaserName,
                 participantName: customer.participantCode,
                 items: resolvedItems.map((item: any) => ({
                     bundleId: item.bundleId,
@@ -345,7 +359,7 @@ export async function POST(req: Request) {
                     dbCustomer = await tx.customer.create({
                         data: {
                             business_id: businessId,
-                            name: customer.name,
+                            name: purchaserName,
                             contact_email: customer.email,
                             contact_phone: customer.phone,
                             delivery_address: formattedAddress,
@@ -448,7 +462,17 @@ export async function POST(req: Request) {
                     data: {
                         business_id: businessId,
                         customer_id: dbCustomer.id,
-                        customer_name: customer.name,
+                        customer_name: purchaserName,
+                        // FR-SUPPORTER-CONTACT-1: the real distinct values, kept
+                        // alongside customer_name (above) rather than instead of
+                        // it, so every existing reader of customer_name keeps
+                        // working unmodified.
+                        first_name: purchaserFirstName || null,
+                        last_name: purchaserLastName || null,
+                        // Previously silently dropped here despite the column
+                        // existing — phone reached Customer.contact_phone and the
+                        // notification emails, but never the order row itself.
+                        phone: (typeof customer.phone === 'string' ? customer.phone.trim() : '') || null,
                         participant_name: customer.participantCode || null,
                         // FR-LAUNCH-1A: a server-resolved campaign order enters the fundraiser
                         // lifecycle so campaign closeout — the sole owner of
@@ -578,7 +602,7 @@ export async function POST(req: Request) {
                 if (owner?.email) {
                     const { sendLeadNotificationEmail } = await import('@/lib/email');
                     await sendLeadNotificationEmail(owner.email, {
-                        name: customer.name,
+                        name: purchaserName,
                         email: customer.email,
                         phone: customer.phone,
                         source: isCampaignOrder ? 'Fundraiser' : 'Storefront'
