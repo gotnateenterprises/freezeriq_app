@@ -71,7 +71,20 @@ export default function LayoutWrapper({ children, hasSession }: LayoutWrapperPro
                     <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
                 </div>
             )}
-            <main className={`flex-1 ${!isEdgeToEdgePage ? 'h-full overflow-y-auto p-8' : 'min-h-screen p-4 sm:p-8'} overflow-x-clip ${showSidebar ? 'pt-20 lg:pt-8 lg:ml-[280px]' : 'ml-0'} print:ml-0 print:p-0 print:h-auto print:overflow-visible transition-all duration-300`}>
+            {/* MOBILE-LAYOUT-FIX-2 — `min-w-0` is load-bearing, do not remove.
+                This <main> is a FLEX ITEM (the row above is `flex`). Per the
+                Flexbox spec a flex item's default `min-width: auto` resolves to
+                its MIN-CONTENT width, so <main> refused to shrink below the
+                widest unbreakable thing on the page and expanded past the
+                viewport — measured at 647px on a 412px phone, i.e. 235px of the
+                page pushed off-screen. `overflow-x-clip` below then DELETED
+                those pixels instead of revealing them, which is why
+                `scrollWidth <= clientWidth` kept passing in automated checks
+                while real phones stayed broken. min-w-0 restores the viewport
+                as the real constraint, which is what finally lets the
+                ellipsis/wrap guards already present on the inner elements
+                actually engage. */}
+            <main className={`flex-1 min-w-0 ${!isEdgeToEdgePage ? 'h-full overflow-y-auto p-8' : 'min-h-screen p-4 sm:p-8'} overflow-x-clip ${showSidebar ? 'pt-20 lg:pt-8 lg:ml-[280px]' : 'ml-0'} print:ml-0 print:p-0 print:h-auto print:overflow-visible transition-all duration-300`}>
                 {children}
             </main>
         </div>
