@@ -262,12 +262,18 @@ export default function FundraiserClient({
         setOrderLines(prev => prev.filter(l => l.bundleId !== bundleId));
     };
 
-    // First name required (same strength as the old single "name" field);
-    // last name stays optional — a purchaser with one name is a real case,
-    // not an error (see lib/purchaserName.ts's "first only" rule).
+    // FR-SUPPORTER-CONTACT-1A — OWNER RULING: all four contact fields are now
+    // required. A coordinator following up on payment, pickup/delivery, or a
+    // fulfillment question needs both a name they can act on and both ways to
+    // reach the purchaser. Whitespace-only values fail here exactly like
+    // missing ones — the server independently re-enforces the same rule
+    // (app/api/public/order/route.ts), so this button-disable is a courtesy,
+    // never the actual boundary.
     const canSubmit = orderLines.length > 0
         && firstName.trim().length > 0
+        && lastName.trim().length > 0
         && buyerEmail.trim().length > 0
+        && buyerPhone.trim().length > 0
         && !submitting;
 
     const submitOrder = async () => {
@@ -948,12 +954,27 @@ export default function FundraiserClient({
                                     card has room, without a media query; minWidth:0 on every input
                                     guarantees the row can never force this card wider than its
                                     container (the prior mobile-clipping defect: this was the one
-                                    CSS Grid in the file with no min-width guard on its children). */}
+                                    CSS Grid in the file with no min-width guard on its children).
+
+                                    FR-SUPPORTER-CONTACT-1A: all four are now required (owner
+                                    ruling — a coordinator following up on payment or pickup needs
+                                    a name they can act on and both ways to reach the purchaser).
+                                    This form has no enclosing <form> element (submission is a
+                                    plain onClick, see submitOrder), so `required` alone gives no
+                                    visible browser validation UI — the "*" in each placeholder is
+                                    the actual visible required-field signal, matching the
+                                    placeholder-as-label pattern this form already uses everywhere.
+                                    `required`/`aria-required` are kept for the accessibility tree
+                                    regardless. Real enforcement is canSubmit (above) and the
+                                    server (app/api/public/order/route.ts) — never this attribute
+                                    alone. */}
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '.5rem', marginTop: '.6rem' }}>
                                     <input
                                         type="text"
-                                        placeholder="First Name"
+                                        placeholder="First Name *"
                                         aria-label="First Name"
+                                        aria-required="true"
+                                        required
                                         autoComplete="given-name"
                                         value={firstName}
                                         onChange={e => { resetSubmissionKey(); setFirstName(e.target.value); }}
@@ -961,8 +982,10 @@ export default function FundraiserClient({
                                     />
                                     <input
                                         type="text"
-                                        placeholder="Last Name"
+                                        placeholder="Last Name *"
                                         aria-label="Last Name"
+                                        aria-required="true"
+                                        required
                                         autoComplete="family-name"
                                         value={lastName}
                                         onChange={e => { resetSubmissionKey(); setLastName(e.target.value); }}
@@ -972,8 +995,10 @@ export default function FundraiserClient({
                                         email); Fable's prototype form omitted it — same input style, reported. */}
                                     <input
                                         type="email"
-                                        placeholder="Email (for your confirmation)"
+                                        placeholder="Email (for your confirmation) *"
                                         aria-label="Email"
+                                        aria-required="true"
+                                        required
                                         autoComplete="email"
                                         value={buyerEmail}
                                         onChange={e => { resetSubmissionKey(); setBuyerEmail(e.target.value); }}
@@ -981,11 +1006,13 @@ export default function FundraiserClient({
                                     />
                                     <input
                                         type="tel"
-                                        placeholder="Phone Number"
+                                        placeholder="Phone Number *"
                                         aria-label="Phone Number"
+                                        aria-required="true"
+                                        required
                                         autoComplete="tel"
                                         value={buyerPhone}
-                                        onChange={e => setBuyerPhone(e.target.value)}
+                                        onChange={e => { resetSubmissionKey(); setBuyerPhone(e.target.value); }}
                                         style={{ ...fableInput, minWidth: 0 }}
                                     />
                                 </div>

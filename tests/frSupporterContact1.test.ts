@@ -24,10 +24,13 @@ describe('FR-SUPPORTER-CONTACT-1 · the checkout form has four explicit fields',
     const client = strip(R(CLIENT));
 
     it('1-4. First Name, Last Name, Email, Phone Number all exist as distinct inputs', () => {
-        expect(client).toContain('placeholder="First Name"');
-        expect(client).toContain('placeholder="Last Name"');
-        expect(client).toContain('placeholder="Email (for your confirmation)"');
-        expect(client).toContain('placeholder="Phone Number"');
+        // FR-SUPPORTER-CONTACT-1A appended a required-field "*" to each
+        // placeholder (this form's only visible label) — see the dedicated
+        // FR-SUPPORTER-CONTACT-1A suite for the full required-field contract.
+        expect(client).toContain('placeholder="First Name *"');
+        expect(client).toContain('placeholder="Last Name *"');
+        expect(client).toContain('placeholder="Email (for your confirmation) *"');
+        expect(client).toContain('placeholder="Phone Number *"');
     });
 
     it('5. the old ambiguous "Your name" field is gone — no buyerName state or input remains', () => {
@@ -35,11 +38,13 @@ describe('FR-SUPPORTER-CONTACT-1 · the checkout form has four explicit fields',
         expect(client).not.toMatch(/\bbuyerName\b/);
     });
 
-    it('the First Name field is required (canSubmit), Last Name is not', () => {
+    it('FR-SUPPORTER-CONTACT-1A: all four fields are now required in canSubmit (owner ruling supersedes the original first-name-only rule)', () => {
         const i = client.indexOf('const canSubmit');
         const block = client.slice(i, client.indexOf(';', client.lastIndexOf('&&', client.indexOf('!submitting', i))) + 1);
         expect(block).toContain('firstName.trim().length > 0');
-        expect(block).not.toContain('lastName.trim().length > 0');
+        expect(block).toContain('lastName.trim().length > 0');
+        expect(block).toContain('buyerEmail.trim().length > 0');
+        expect(block).toContain('buyerPhone.trim().length > 0');
     });
 });
 
@@ -48,28 +53,28 @@ describe('FR-SUPPORTER-CONTACT-1 · correct HTML semantics per field', () => {
     const client = strip(R(CLIENT));
 
     it('First Name: type text, autocomplete given-name', () => {
-        const i = client.indexOf('placeholder="First Name"');
+        const i = client.indexOf('placeholder="First Name *"');
         const tag = client.slice(client.lastIndexOf('<input', i), client.indexOf('/>', i) + 2);
         expect(tag).toContain('type="text"');
         expect(tag).toContain('autoComplete="given-name"');
     });
 
     it('Last Name: type text, autocomplete family-name', () => {
-        const i = client.indexOf('placeholder="Last Name"');
+        const i = client.indexOf('placeholder="Last Name *"');
         const tag = client.slice(client.lastIndexOf('<input', i), client.indexOf('/>', i) + 2);
         expect(tag).toContain('type="text"');
         expect(tag).toContain('autoComplete="family-name"');
     });
 
     it('Email: type email, autocomplete email', () => {
-        const i = client.indexOf('placeholder="Email (for your confirmation)"');
+        const i = client.indexOf('placeholder="Email (for your confirmation) *"');
         const tag = client.slice(client.lastIndexOf('<input', i), client.indexOf('/>', i) + 2);
         expect(tag).toContain('type="email"');
         expect(tag).toContain('autoComplete="email"');
     });
 
     it('Phone: type tel (never type number), autocomplete tel', () => {
-        const i = client.indexOf('placeholder="Phone Number"');
+        const i = client.indexOf('placeholder="Phone Number *"');
         const tag = client.slice(client.lastIndexOf('<input', i), client.indexOf('/>', i) + 2);
         expect(tag).toContain('type="tel"');
         expect(tag).toContain('autoComplete="tel"');
@@ -253,12 +258,12 @@ describe('FR-SUPPORTER-CONTACT-1 · mobile: the one CSS Grid in the file now has
     });
 
     it('25. every input in that grid has minWidth: 0 — the exact prior overflow mechanism (grid items default to content-based min-width)', () => {
-        for (const field of ['First Name', 'Last Name', 'Phone Number']) {
+        for (const field of ['First Name *', 'Last Name *', 'Phone Number *']) {
             const i = client.indexOf(`placeholder="${field}"`);
             const tag = client.slice(client.lastIndexOf('<input', i), client.indexOf('/>', i) + 2);
             expect(tag).toContain('minWidth: 0');
         }
-        const emailIdx = client.indexOf('placeholder="Email (for your confirmation)"');
+        const emailIdx = client.indexOf('placeholder="Email (for your confirmation) *"');
         const emailTag = client.slice(client.lastIndexOf('<input', emailIdx), client.indexOf('/>', emailIdx) + 2);
         expect(emailTag).toContain('minWidth: 0');
     });
@@ -266,10 +271,10 @@ describe('FR-SUPPORTER-CONTACT-1 · mobile: the one CSS Grid in the file now has
     it('27. all four fields live in the SAME grid, so they stack together at narrow widths, not two separate pairs', () => {
         const i = client.indexOf("gridTemplateColumns: 'repeat(auto-fit");
         const gridBlock = client.slice(i, client.indexOf('</div>', i));
-        expect(gridBlock).toContain('placeholder="First Name"');
-        expect(gridBlock).toContain('placeholder="Last Name"');
-        expect(gridBlock).toContain('placeholder="Email (for your confirmation)"');
-        expect(gridBlock).toContain('placeholder="Phone Number"');
+        expect(gridBlock).toContain('placeholder="First Name *"');
+        expect(gridBlock).toContain('placeholder="Last Name *"');
+        expect(gridBlock).toContain('placeholder="Email (for your confirmation) *"');
+        expect(gridBlock).toContain('placeholder="Phone Number *"');
     });
 
     it('30. the previously-fixed mobile-overflow guards from FR-SHARE-COPY-1 are still present (no regression)', () => {

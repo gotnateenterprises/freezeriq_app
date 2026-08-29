@@ -73,12 +73,31 @@ export async function POST(req: Request) {
 
         // FR-SUPPORTER-CONTACT-1: separate First Name / Last Name, never a single
         // ambiguous "Full Name" — the field this replaced sat directly next to
-        // Phone in the checkout form and was mistaken for it in practice. First
-        // name is required (the same strength the old combined field had); last
-        // name is optional, matching lib/purchaserName's "first only" case.
-        if (!customer || typeof customer.firstName !== 'string' || !customer.firstName.trim()
-            || typeof customer.email !== 'string' || !customer.email.trim()) {
-            return NextResponse.json({ error: "First name and email are required" }, { status: 400 });
+        // Phone in the checkout form and was mistaken for it in practice.
+        //
+        // FR-SUPPORTER-CONTACT-1A — OWNER RULING: all four are now required.
+        // A coordinator following up on payment, pickup/delivery, or a
+        // fulfillment question needs both a name they can act on and both ways
+        // to reach the purchaser. Checked by NAMED property, independently of
+        // the client's own canSubmit gate — a caller invoking this route
+        // directly cannot bypass the browser form's requirement. Each check is
+        // `typeof === 'string'` before `.trim()`, matching the strictness the
+        // quantity check above already uses, so a non-string value fails the
+        // same as a missing one rather than throwing.
+        if (!customer || typeof customer !== 'object') {
+            return NextResponse.json({ error: 'Customer details required' }, { status: 400 });
+        }
+        const missingContactFields: string[] = [];
+        if (typeof customer.firstName !== 'string' || !customer.firstName.trim()) missingContactFields.push('First name');
+        if (typeof customer.lastName !== 'string' || !customer.lastName.trim()) missingContactFields.push('Last name');
+        if (typeof customer.email !== 'string' || !customer.email.trim()) missingContactFields.push('Email');
+        if (typeof customer.phone !== 'string' || !customer.phone.trim()) missingContactFields.push('Phone number');
+        if (missingContactFields.length > 0) {
+            return NextResponse.json({
+                error: `${missingContactFields.join(', ')} ${missingContactFields.length === 1 ? 'is' : 'are'} required`,
+                code: 'CONTACT_INFO_REQUIRED',
+                missingFields: missingContactFields,
+            }, { status: 400 });
         }
 
         if (!slug || typeof slug !== 'string') {
