@@ -342,20 +342,27 @@ describe('no-drift — this phase changed only the four named surfaces', () => {
         // before this phase started), not something this phase could ever
         // show as clean regardless of what it touches.
         //
-        // SEC-PUBLIC-ROUTE-1 narrowed this pathspec by exactly one file.
-        // app/api/recipes/upload/route.ts was found to be a completely
+        // SEC-PUBLIC-ROUTE-1 and SEC-RECIPE-PUT-1 each narrowed this pathspec
+        // by exactly one file. app/api/recipes/upload/route.ts was a completely
         // unauthenticated handler that took business_id from the uploaded file
-        // and could delete any tenant's recipe ingredient lines; hardening it was
-        // the highest-priority item of a P0 security phase. A blanket directory
-        // pin on app/api/recipes cannot distinguish "an unrelated phase drifted
-        // into recipes" from "a security phase legitimately had to fix a recipes
-        // route", and this file's own comment above already records why absolute
-        // closed-set assertions expire. The exclusion is deliberately ONE file,
-        // not the directory, so every other recipes route stays pinned.
+        // and could delete any tenant's recipe ingredient lines; hardening it
+        // was the highest-priority item of a P0 security phase.
+        // app/api/recipes/[id]/route.ts's PUT authenticated the caller but never
+        // compared the target Recipe's business_id to the session's before
+        // updating it and replacing its RecipeItems, while GET and DELETE in the
+        // same file already did — any tenant could edit or gut another tenant's
+        // recipe by UUID. A blanket directory pin on app/api/recipes cannot
+        // distinguish "an unrelated phase drifted into recipes" from "a security
+        // phase legitimately had to fix a recipes route", and this file's own
+        // comment above already records why absolute closed-set assertions
+        // expire. Each exclusion is deliberately ONE file, not the directory, so
+        // every other recipes route stays pinned.
         const { execSync } = require('child_process');
         const diff = execSync(
             'git diff --stat -- lib/bundleContents.ts app/api/bundles app/api/recipes '
-            + '":(exclude)app/api/recipes/upload/route.ts" lib/devEnvGuard.ts instrumentation.ts',
+            + '":(exclude)app/api/recipes/upload/route.ts" '
+            + '":(exclude)app/api/recipes/[id]/route.ts" '
+            + 'lib/devEnvGuard.ts instrumentation.ts',
             { cwd: ROOT, encoding: 'utf8' }
         );
         expect(diff.trim()).toBe('');

@@ -6,6 +6,52 @@ import { auth } from '@/auth';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * SEC-RECIPE-PUT-1.
+ *
+ * PUT authenticated the caller and then went straight into
+ * `tx.recipe.update({ where: { id } })` with no ownership check — GET and
+ * DELETE in this same file both compare `recipe.business_id` to
+ * `session.user.businessId` first; PUT never did. Any authenticated user of
+ * ANY tenant could overwrite another tenant's recipe by UUID, wipe its
+ * RecipeItem list, and (because the item-matching lookups further down were
+ * already correctly scoped to the caller's own business) replace it with
+ * items referencing THEIR OWN tenant's ingredients — a cross-tenant graft in
+ * both directions from one bug.
+ *
+ * These two classes are the same non-leaking distinction GET/DELETE already
+ * make (id doesn't exist vs. exists-but-foreign) and let the transaction
+ * throw a typed signal the outer catch can map to the right status. tsconfig
+ * targets ES5, and down-level emit breaks the prototype chain for Error
+ * subclasses so a plain `instanceof` check silently returns false — the same
+ * hazard lib/bundleContents.ts's BundleContentsError exists to work around,
+ * and this follows that same discriminator-flag pattern rather than
+ * `instanceof`.
+ */
+class RecipeNotFoundError extends Error {
+    readonly isRecipeNotFoundError = true;
+    constructor() {
+        super('Recipe not found');
+        Object.setPrototypeOf(this, RecipeNotFoundError.prototype);
+        this.name = 'RecipeNotFoundError';
+    }
+}
+function isRecipeNotFoundError(e: unknown): e is RecipeNotFoundError {
+    return typeof e === 'object' && e !== null && (e as any).isRecipeNotFoundError === true;
+}
+
+class RecipeForbiddenError extends Error {
+    readonly isRecipeForbiddenError = true;
+    constructor() {
+        super('Forbidden');
+        Object.setPrototypeOf(this, RecipeForbiddenError.prototype);
+        this.name = 'RecipeForbiddenError';
+    }
+}
+function isRecipeForbiddenError(e: unknown): e is RecipeForbiddenError {
+    return typeof e === 'object' && e !== null && (e as any).isRecipeForbiddenError === true;
+}
+
 export async function GET(
     request: Request,
     { params }: { params: Promise<{ id: string }> }
@@ -57,7 +103,34 @@ export async function PUT(
 
         // Interactive Transaction to ensure atomicity
         console.log(`[Recipe API] Updating recipe ${id} with data:`, JSON.stringify({ ...body, items: undefined }));
+        const businessId = session.user.businessId;
         const updatedId = await prisma.$transaction(async (tx) => {
+            // SEC-RECIPE-PUT-1. Ownership must be proven INSIDE this
+            // transaction, before the first mutation — not by a separate
+            // pre-check outside it. A pre-check-then-act-elsewhere pattern
+            // (like DELETE's below) opens a TOCTOU window between the check
+            // and the write; here, doing the read as the transaction's first
+            // statement means no other request can be interleaved between
+            // "ownership confirmed" and "mutation happens" for this recipe.
+            //
+            // Prisma's `update()` requires a where clause on a unique field,
+            // and `id` is the only unique column on Recipe — there is no
+            // compound (id, business_id) unique index to fold the ownership
+            // check into the update's own where clause without a schema
+            // change, which this phase does not make. `updateMany` would
+            // accept a compound where, but it does not support the nested
+            // relation write `categories: { set: [...] }` below, so switching
+            // to it would silently drop that field's own update — a bigger
+            // behavior change than this fix is allowed to make. A single
+            // ownership read as the transaction's first statement is
+            // therefore the correct shape, not a compromise.
+            const existing = await tx.recipe.findUnique({
+                where: { id },
+                select: { id: true, business_id: true },
+            });
+            if (!existing) throw new RecipeNotFoundError();
+            if (existing.business_id !== businessId) throw new RecipeForbiddenError();
+
             // 1. Update Base Info (scalars + metadata)
             const updated = await tx.recipe.update({
                 where: { id },
@@ -160,6 +233,18 @@ export async function PUT(
         return NextResponse.json({ success: true, id: updatedId });
 
     } catch (error: any) {
+        // SEC-RECIPE-PUT-1: these two match GET's/DELETE's existing non-leaking
+        // convention in this same file — 404 when the id doesn't exist at all,
+        // 403 when it exists but belongs to another tenant. Checked before the
+        // generic fallback and before any Prisma-error logging, so a foreign-
+        // tenant probe never reaches the "something went wrong" branch below.
+        if (isRecipeNotFoundError(error)) {
+            return NextResponse.json({ error: 'Recipe not found' }, { status: 404 });
+        }
+        if (isRecipeForbiddenError(error)) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
         console.error('Error updating recipe:', error);
         // Extract more info if available
         if (error.code) console.error('Prisma Error Code:', error.code);
