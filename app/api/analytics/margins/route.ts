@@ -1,11 +1,24 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { auth } from '@/auth';
 import { calculateRecipeCost } from '@/lib/cost_engine';
 
+// SEC-PUBLIC-ROUTE-1. This handler had no auth() call and no business_id
+// predicate, so an anonymous GET returned every active Bundle on the platform
+// with its price, SKU, computed COGS and margin — every tenant's cost structure,
+// to anyone. The guard and the tenant predicate below are both load-bearing:
+// the guard stops the anonymous read, the predicate stops an authenticated
+// tenant from seeing anyone else's catalogue.
 export async function GET() {
     try {
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+        const businessId = session.user.businessId;
+
         const bundles = await prisma.bundle.findMany({
-            where: { is_active: true },
+            where: { is_active: true, business_id: businessId },
             include: {
                 contents: {
                     include: {

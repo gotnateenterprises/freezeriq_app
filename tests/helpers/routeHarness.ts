@@ -54,6 +54,12 @@ const MODELS = [
     // FR-ACCEPTANCE-1: the fundraiser address book.
     'fundraiserContact',
     'fundraiserContactPoint',
+    // SEC-PUBLIC-ROUTE-1: the models the newly-guarded routes read and write.
+    // A model missing from this list surfaces as `prisma.<model> is undefined`
+    // and the handler throws a TypeError instead of returning 401/403 — a false
+    // green on exactly the assertion these tests exist to make.
+    'ingredient', 'packagingItem', 'recipe', 'recipeItem', 'category',
+    'supplier', 'trainingResource',
 ];
 
 const METHODS = [

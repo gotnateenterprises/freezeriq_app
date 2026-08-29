@@ -341,9 +341,21 @@ describe('no-drift — this phase changed only the four named surfaces', () => {
         // pre-existing PARKED dirt from unrelated earlier work (present since
         // before this phase started), not something this phase could ever
         // show as clean regardless of what it touches.
+        //
+        // SEC-PUBLIC-ROUTE-1 narrowed this pathspec by exactly one file.
+        // app/api/recipes/upload/route.ts was found to be a completely
+        // unauthenticated handler that took business_id from the uploaded file
+        // and could delete any tenant's recipe ingredient lines; hardening it was
+        // the highest-priority item of a P0 security phase. A blanket directory
+        // pin on app/api/recipes cannot distinguish "an unrelated phase drifted
+        // into recipes" from "a security phase legitimately had to fix a recipes
+        // route", and this file's own comment above already records why absolute
+        // closed-set assertions expire. The exclusion is deliberately ONE file,
+        // not the directory, so every other recipes route stays pinned.
         const { execSync } = require('child_process');
         const diff = execSync(
-            'git diff --stat -- lib/bundleContents.ts app/api/bundles app/api/recipes lib/devEnvGuard.ts instrumentation.ts',
+            'git diff --stat -- lib/bundleContents.ts app/api/bundles app/api/recipes '
+            + '":(exclude)app/api/recipes/upload/route.ts" lib/devEnvGuard.ts instrumentation.ts',
             { cwd: ROOT, encoding: 'utf8' }
         );
         expect(diff.trim()).toBe('');

@@ -1,9 +1,32 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { auth } from '@/auth';
 
+// SEC-PUBLIC-ROUTE-1. This handler had no auth() call, and deductItem matched
+// packaging rows with `contains` and NO business_id — so findFirst returned
+// whichever tenant's row matched the hardcoded name first, platform-wide. That
+// made it both an anonymous inventory-decrement primitive AND a live correctness
+// bug: the legitimate print-batch flow could already be decrementing another
+// tenant's stock. It also echoed the matched row's real name back in the
+// response, leaking it.
+//
+// The caller supplies only quantities — the eight partial names are hardcoded
+// below — so adding the tenant predicate needs no client change.
+//
+// NOTE for whoever touches this next: after the tenant predicate, a tenant whose
+// PackagingItem rows are named differently will now silently match nothing
+// (deductItem returns quietly when item is null). Moving this matching off
+// free-text `name` onto PackagingItem.type is a real follow-up, but it is a
+// behaviour change, not a security fix, and is deliberately NOT bundled here.
 export async function POST(req: Request) {
     try {
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+        const businessId = session.user.businessId;
+
         const {
             largeBoxes, smallBoxes, sheetsUsed,
             packaging // { largeTrays, largeLids, ... }
@@ -20,7 +43,8 @@ export async function POST(req: Request) {
         const deductItem = async (partialName: string, qty: number) => {
             if (qty <= 0) return;
             const item = await prisma.packagingItem.findFirst({
-                where: { name: { contains: partialName, mode: 'insensitive' } }
+                where: { business_id: businessId, name: { contains: partialName, mode: 'insensitive' } },
+                orderBy: { name: 'asc' }
             });
             if (item) {
                 updates.push(prisma.packagingItem.update({

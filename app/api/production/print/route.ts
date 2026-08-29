@@ -1,12 +1,24 @@
 
 import { NextResponse } from 'next/server';
+import { auth } from '@/auth';
 import { getLabelPrinter } from '@/lib/label_printer';
 
 // Force dynamic to prevent caching of print jobs
 export const dynamic = 'force-dynamic';
 
+// SEC-PUBLIC-ROUTE-1. No auth() call. This handler touches no database, but it
+// is not inert: getLabelPrinter() returns a real DateCodeGeniePrinter whenever
+// DCG_API_KEY and DCG_LOCATION_ID are configured, so an anonymous POST is a
+// handle on physical label hardware — arbitrary text, unbounded items[], and
+// label-stock exhaustion. Authenticated only; there is no tenant data here to
+// scope.
 export async function POST(request: Request) {
     try {
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const body = await request.json();
         const { items } = body; // Array of { recipeName, ingredients, expiryDate, quantity }
 

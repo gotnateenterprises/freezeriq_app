@@ -1,6 +1,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { auth } from '@/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,8 +16,68 @@ function splitCsvLine(line: string): string[] {
     });
 }
 
+/**
+ * SEC-PUBLIC-ROUTE-1 — pre-flight ownership gate.
+ *
+ * Every id the uploaded file names is checked BEFORE any write happens. This
+ * placement is load-bearing, not stylistic: the JSON restore below is a two-pass
+ * loop with no enclosing transaction, and Pass 1 issues a destructive
+ * `recipeItem.deleteMany` per record. An ownership check inside that loop would
+ * be too late — records 1..n-1 are already destroyed by the time record n is
+ * rejected. So ownership is proven for the whole file up front, and a single
+ * foreign id rejects the entire upload.
+ *
+ * Rule: an id that does not exist is fine (that is a fresh restore). An id that
+ * DOES exist and is not owned by this business rejects the file.
+ *
+ * `business_id === null` counts as not-owned and is rejected. Those orphan rows
+ * exist only because this route historically created recipes and categories with
+ * no business_id at all (see the create sites below, now fixed); they are already
+ * invisible to every reader in the app, which all filter on business_id. Letting
+ * one tenant adopt them by id would be a small cross-tenant claim, so this fails
+ * closed instead.
+ */
+async function findForeignIds(
+    businessId: string,
+    groups: { model: 'category' | 'supplier' | 'ingredient' | 'packagingItem' | 'recipe'; ids: string[] }[]
+): Promise<string[]> {
+    const problems: string[] = [];
+
+    for (const { model, ids } of groups) {
+        const unique = [...new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0))];
+        if (unique.length === 0) continue;
+
+        const delegate = (prisma as any)[model];
+        const rows: { id: string; business_id: string | null }[] = await delegate.findMany({
+            where: { id: { in: unique } },
+            select: { id: true, business_id: true },
+        });
+
+        for (const row of rows) {
+            if (row.business_id !== businessId) {
+                problems.push(`${model}:${row.id}`);
+            }
+        }
+    }
+
+    return problems;
+}
+
 export async function POST(req: NextRequest) {
     try {
+        // SEC-PUBLIC-ROUTE-1. This handler had no authentication of any kind. The
+        // JSON branch upserted by attacker-chosen primary key AND took business_id
+        // straight from the uploaded file, so it could overwrite and re-tenant any
+        // row on the platform. The CSV branch was worse: it looked recipes and
+        // ingredients up by NAME with no tenant predicate, so a file naming another
+        // tenant's meal silently rewrote that recipe and deleted its entire
+        // ingredient list — no UUID required.
+        const session = await auth();
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+        const businessId = session.user.businessId;
+
         const formData = await req.formData();
         const file = formData.get('file') as File;
 
@@ -35,6 +96,57 @@ export async function POST(req: NextRequest) {
                 const backup = JSON.parse(text);
                 const { categories, ingredients, recipes } = backup.data || backup; // Support wrapped or direct
 
+                // SEC-PUBLIC-ROUTE-1 pre-flight. Collect every id this file names,
+                // per model, and prove they are all ours before writing anything.
+                const suppliersIn = Array.isArray(backup.data?.suppliers) ? backup.data.suppliers : [];
+                const packagingIn = Array.isArray(backup.data?.packaging_items) ? backup.data.packaging_items : [];
+                const categoriesIn = Array.isArray(categories) ? categories : [];
+                const ingredientsIn = Array.isArray(ingredients) ? ingredients : [];
+                const recipesIn = Array.isArray(recipes) ? recipes : [];
+                const childItemsIn = recipesIn.flatMap((r: any) => Array.isArray(r?.child_items) ? r.child_items : []);
+
+                const foreign = await findForeignIds(businessId, [
+                    {
+                        model: 'category',
+                        ids: [
+                            ...categoriesIn.map((c: any) => c?.id),
+                            ...categoriesIn.map((c: any) => c?.parent_id),
+                            ...recipesIn.map((r: any) => r?.category_id),
+                            ...recipesIn.flatMap((r: any) => (Array.isArray(r?.categories) ? r.categories : []).map((c: any) => c?.id)),
+                        ],
+                    },
+                    {
+                        model: 'supplier',
+                        ids: [
+                            ...suppliersIn.map((s: any) => s?.id),
+                            ...ingredientsIn.map((i: any) => i?.supplier_id),
+                        ],
+                    },
+                    {
+                        model: 'ingredient',
+                        ids: [
+                            ...ingredientsIn.map((i: any) => i?.id),
+                            ...childItemsIn.map((it: any) => it?.child_ingredient_id),
+                        ],
+                    },
+                    { model: 'packagingItem', ids: packagingIn.map((p: any) => p?.id) },
+                    {
+                        model: 'recipe',
+                        ids: [
+                            ...recipesIn.map((r: any) => r?.id),
+                            ...childItemsIn.map((it: any) => it?.child_recipe_id),
+                        ],
+                    },
+                ]);
+
+                if (foreign.length > 0) {
+                    return NextResponse.json({
+                        error: 'This backup references records that do not belong to your business. Nothing was imported.',
+                        code: 'FOREIGN_RECORDS_IN_BACKUP',
+                        count: foreign.length,
+                    }, { status: 403 });
+                }
+
                 const logs: string[] = [];
 
                 // A. Restore Categories (2-Pass to handle hierarchy)
@@ -43,7 +155,10 @@ export async function POST(req: NextRequest) {
                     for (const cat of categories) {
                         await prisma.category.upsert({
                             where: { id: cat.id },
-                            create: { id: cat.id, name: cat.name },
+                            // business_id was previously never set here, so imported
+                            // categories were invisible to the tenant that imported
+                            // them (every reader filters on business_id).
+                            create: { id: cat.id, name: cat.name, business_id: businessId },
                             update: { name: cat.name }
                         });
                     }
@@ -70,7 +185,8 @@ export async function POST(req: NextRequest) {
                                 contact_email: sup.contact_email,
                                 phone_number: sup.phone_number,
                                 website_url: sup.website_url,
-                                business_id: sup.business_id
+                                // Never let the uploaded file name its own tenant.
+                                business_id: businessId
                             },
                             update: {
                                 name: sup.name,
@@ -87,8 +203,8 @@ export async function POST(req: NextRequest) {
                         // Check if supplier exists before trying to reference it
                         let validSupplierId = null;
                         if (ing.supplier_id) {
-                            const supplierExists = await prisma.supplier.findUnique({
-                                where: { id: ing.supplier_id }
+                            const supplierExists = await prisma.supplier.findFirst({
+                                where: { id: ing.supplier_id, business_id: businessId }
                             });
                             if (supplierExists) {
                                 validSupplierId = ing.supplier_id;
@@ -104,7 +220,7 @@ export async function POST(req: NextRequest) {
                                 unit: ing.unit,
                                 stock_quantity: ing.stock_quantity || 0,
                                 supplier_id: validSupplierId, // Only set if supplier exists
-                                business_id: ing.business_id,
+                                business_id: businessId, // never from the uploaded file
                                 needs_review: ing.needs_review ?? true // Default to true if not specified in backup
                             },
                             update: {
@@ -130,7 +246,7 @@ export async function POST(req: NextRequest) {
                                 quantity: item.quantity || 0,
                                 reorderUrl: item.reorderUrl,
                                 lowStockThreshold: item.lowStockThreshold || 10,
-                                business_id: item.business_id
+                                business_id: businessId // never from the uploaded file
                             },
                             update: {
                                 name: item.name,
@@ -162,6 +278,9 @@ export async function POST(req: NextRequest) {
                                     allergens: r.allergens,
                                     instructions: r.instructions,
                                     category_id: r.category_id,
+                                    // Previously unset, so imported recipes were
+                                    // invisible to the tenant that imported them.
+                                    business_id: businessId,
                                     categories: {
                                         connect: (r.categories || []).map((c: any) => ({ id: c.id }))
                                     }
@@ -177,7 +296,12 @@ export async function POST(req: NextRequest) {
                                 }
                             });
 
-                            // Clear existing items to prepare for fresh import
+                            // Clear existing items to prepare for fresh import.
+                            // SEC-PUBLIC-ROUTE-1: this deleteMany deliberately has no
+                            // tenant predicate and CANNOT have one — RecipeItem has no
+                            // business_id column. It is safe only because r.id was
+                            // proven tenant-owned by the pre-flight gate above, before
+                            // any write ran. Do not move that check inline.
                             await prisma.recipeItem.deleteMany({ where: { parent_recipe_id: r.id } });
 
                         } catch (err) {
@@ -195,7 +319,7 @@ export async function POST(req: NextRequest) {
                                 try {
                                     // Verify target exists if it's a sub-recipe
                                     if (item.child_recipe_id) {
-                                        const targetExists = await prisma.recipe.count({ where: { id: item.child_recipe_id } });
+                                        const targetExists = await prisma.recipe.count({ where: { id: item.child_recipe_id, business_id: businessId } });
                                         if (!targetExists) {
                                             console.warn(`Skipping missing sub-recipe link: ${item.child_recipe_id} for ${r.name}`);
                                             continue;
@@ -274,8 +398,12 @@ export async function POST(req: NextRequest) {
                 dbType = 'prep';
             }
 
-            // Check if exists
-            const existing = await prisma.recipe.findFirst({ where: { name: rName } });
+            // Check if exists.
+            // SEC-PUBLIC-ROUTE-1: this lookup was global. A CSV row naming another
+            // tenant's meal matched their recipe, then updated it and wiped its
+            // ingredient list below — the most severe path in this file, and it
+            // needed no UUID. Scoped to this business now.
+            const existing = await prisma.recipe.findFirst({ where: { name: rName, business_id: businessId } });
             let rId = existing?.id;
 
             if (existing) {
@@ -297,7 +425,8 @@ export async function POST(req: NextRequest) {
                         name: rName,
                         type: dbType as any,
                         base_yield_qty: rData.yieldQty,
-                        base_yield_unit: rData.yieldUnit
+                        base_yield_unit: rData.yieldUnit,
+                        business_id: businessId // previously unset — imported recipes were invisible
                     }
                 });
                 rId = newRecipe.id;
@@ -316,12 +445,13 @@ export async function POST(req: NextRequest) {
             const parentId = recipeIds.get(rName);
             if (!parentId) continue;
 
-            // Clear existing items for this recipe to avoid duplicates/stale data
+            // Clear existing items for this recipe to avoid duplicates/stale data.
+            // Safe because parentId came from the tenant-scoped lookup or create above.
             await prisma.recipeItem.deleteMany({ where: { parent_recipe_id: parentId } });
 
             for (const ing of rData.ingredients) {
-                // Check if it matches another Recipe (Sub-Recipe)
-                const subRecipeId = recipeIds.get(ing.name) || (await prisma.recipe.findFirst({ where: { name: ing.name } }))?.id;
+                // Check if it matches another Recipe (Sub-Recipe) — within this tenant only.
+                const subRecipeId = recipeIds.get(ing.name) || (await prisma.recipe.findFirst({ where: { name: ing.name, business_id: businessId } }))?.id;
 
                 if (subRecipeId) {
                     await prisma.recipeItem.create({
@@ -335,15 +465,16 @@ export async function POST(req: NextRequest) {
                 } else {
                     // Ingredient
                     let ingId = '';
-                    const existingIng = await prisma.ingredient.findFirst({ where: { name: ing.name } });
+                    const existingIng = await prisma.ingredient.findFirst({ where: { name: ing.name, business_id: businessId } });
                     if (existingIng) {
                         ingId = existingIng.id;
                     } else {
                         const newIng = await prisma.ingredient.create({
-                            data: { 
-                                name: ing.name, 
-                                cost_per_unit: 0, 
+                            data: {
+                                name: ing.name,
+                                cost_per_unit: 0,
                                 unit: ing.unit,
+                                business_id: businessId,
                                 needs_review: true // Mark for review since it's auto-created
                             } as any
                         });

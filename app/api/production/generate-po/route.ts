@@ -8,10 +8,19 @@ const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder');
 
 export async function POST(req: Request) {
     try {
-        // Resolve session for tenant sender
+        // SEC-PUBLIC-ROUTE-1. This handler already called auth() but never gated
+        // on the result — an absent session fell through to a platform sender at
+        // 'FreezerIQ Orders <orders@freezeriq.com>', so an anonymous caller could
+        // send an attacker-chosen recipient an attacker-authored CSV attachment
+        // through the platform's own Resend account. That is worse than no auth
+        // at all: the mail looks like it genuinely came from FreezerIQ. The
+        // session is now a hard gate, which makes the sender ternary below dead.
         const { auth } = await import('@/auth');
         const session = await auth();
-        const businessId = session?.user?.businessId;
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+        const businessId = session.user.businessId;
 
         const body = await req.json();
         const { supplier, email, items } = body;
@@ -44,11 +53,10 @@ export async function POST(req: Request) {
             return NextResponse.json({ success: true, simulated: true });
         }
 
-        // Resolve tenant-branded sender
+        // Resolve tenant-branded sender. businessId is guaranteed non-empty by the
+        // guard above, so there is no anonymous fallback sender any more.
         const { getTenantSender } = await import('@/lib/email');
-        const sender = businessId
-            ? await getTenantSender(businessId)
-            : { from: 'FreezerIQ Orders <orders@freezeriq.com>' };
+        const sender = await getTenantSender(businessId);
 
         const data = await resend.emails.send({
             from: sender.from,

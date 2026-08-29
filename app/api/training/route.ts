@@ -4,12 +4,22 @@ import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 
 // GET /api/training
-// Public: Fetch all active training resources (global + tenant specific)
+// Authenticated tenant: fetch active training resources (global + this tenant's).
+//
+// SEC-PUBLIC-ROUTE-1. This handler called auth() but never gated on it. With no
+// session, businessId was `undefined`, and Prisma STRIPS undefined from a where
+// clause — so `{ business_id: undefined }` collapsed to `{}`, which matches every
+// row, and the OR returned every tenant's TrainingResource rows to an anonymous
+// caller. Both callers (app/training/page.tsx, app/admin/training/page.tsx) are
+// already behind an authenticated page, so requiring a session breaks nothing.
 export async function GET(req: Request) {
     try {
         const session = await auth();
-        const businessId = session?.user?.businessId;
-        const userId = session?.user?.id;
+        if (!session?.user?.businessId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+        const businessId = session.user.businessId;
+        const userId = session.user.id;
 
         const resources = await prisma.trainingResource.findMany({
             where: {
