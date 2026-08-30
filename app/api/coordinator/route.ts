@@ -27,6 +27,7 @@ import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
 import { buildSupporterOrderUrl, formatOrderDeadline } from '@/lib/previousSupporterInvite';
 import { customerFacingBusinessName } from '@/lib/tenantBrand';
 import { resolveMaterialBundles, groupMaterialMenus } from '@/lib/coordinatorMaterialBundles';
+import { hasInvalidOrderQuantity } from '@/lib/orderQuantity';
 
 /**
  * Phase 7E-1C: Returns true if the campaign has been server-closed.
@@ -413,6 +414,20 @@ export async function POST(req: Request) {
         //    Mirrors the pattern in /api/public/order/route.ts
         if (!items || items.length === 0) {
             return NextResponse.json({ error: "Order must contain at least one item" }, { status: 400 });
+        }
+
+        // OPS-1: every quantity must be a positive integer, validated before any
+        // total is computed or any Order/OrderItem write occurs. Coordinator orders
+        // previously reached the database with no quantity check at all — a
+        // zero-or-malformed quantity is exactly how an order can leave campaign
+        // closeout unable to reconcile (lib/fundraiserCloseoutMath.ts). Same
+        // predicate the public order route uses (lib/orderQuantity.ts), so the two
+        // paths can never drift into two different rules.
+        if (hasInvalidOrderQuantity(items)) {
+            return NextResponse.json({
+                error: 'Every item quantity must be a positive integer',
+                code: 'INVALID_QUANTITY',
+            }, { status: 400 });
         }
 
         const bundleIds = items

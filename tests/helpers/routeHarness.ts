@@ -60,6 +60,9 @@ const MODELS = [
     // green on exactly the assertion these tests exist to make.
     'ingredient', 'packagingItem', 'recipe', 'recipeItem', 'category',
     'supplier', 'trainingResource',
+    // OPS-1: requireCoordinatorSession -> resolveCoordinatorSession reads this
+    // model on every coordinator route call, guarded or not.
+    'coordinatorSession',
 ];
 
 const METHODS = [

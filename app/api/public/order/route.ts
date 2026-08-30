@@ -10,6 +10,7 @@ import { isValidIanaTimeZone } from '@/lib/tenantTimezone';
 import { validateSubmissionKey, buildSubmissionFingerprint } from '@/lib/orderIdempotency';
 import { normalizeSlug, NO_SUCH_SLUG } from '@/lib/publicIdentity';
 import { purchaserDisplayName } from '@/lib/purchaserName';
+import { hasInvalidOrderQuantity } from '@/lib/orderQuantity';
 
 /**
  * FR-LAUNCH-1E: sentinel used to abort the order transaction when the campaign
@@ -57,14 +58,10 @@ export async function POST(req: Request) {
         // FR-LAUNCH-1A: every quantity must be a positive integer. Validated up
         // front — before totals, customer/order creation, or inventory decrement —
         // and never silently coerced, rounded, dropped, or defaulted. A single bad
-        // quantity rejects the whole request.
-        const hasInvalidQuantity = items.some((item: any) =>
-            typeof item?.quantity !== 'number' ||
-            !Number.isFinite(item.quantity) ||
-            !Number.isInteger(item.quantity) ||
-            item.quantity <= 0
-        );
-        if (hasInvalidQuantity) {
+        // quantity rejects the whole request. OPS-1: the predicate itself now lives
+        // in lib/orderQuantity.ts, shared with the coordinator order path, so the
+        // two can never drift into two different definitions of "valid."
+        if (hasInvalidOrderQuantity(items)) {
             return NextResponse.json({
                 error: 'Every item quantity must be a positive integer',
                 code: 'INVALID_QUANTITY',
