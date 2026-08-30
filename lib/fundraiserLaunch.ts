@@ -102,6 +102,23 @@ export function checkOpportunityLaunchable(
         };
     }
 
+    // OPS-LAUNCH-HOTFIX-1: a structural sanity floor, not a business-logic
+    // "is this a sensible date" check (this file reads no clock, on purpose).
+    // calendarDateOfDateOnlyValue always zero-pads to at least 4 digits now, so
+    // a year below 1000 can only mean the stored value never had a normal
+    // 4-digit year to begin with — the exact shape that reached the database
+    // for one opportunity through some path other than this app's own writes,
+    // and that otherwise produced an unparseable Date at campaign-creation time.
+    const year = Number(confirmed.slice(0, confirmed.indexOf('-')));
+    if (year < 1000) {
+        return {
+            ok: false,
+            code: 'implausible_confirmed_date',
+            error: 'This opportunity\'s confirmed delivery date looks incorrect. Re-confirm the delivery date, then launch again.',
+            status: 409,
+        };
+    }
+
     return { ok: true, confirmedDeliveryDate: confirmed };
 }
 

@@ -97,10 +97,19 @@ export function calendarDateInTimeZone(timeZone: string, instant: Date): string 
  * calendar date is its UTC year/month/day. Reading it with local getters is the
  * classic way to shift a stored date by one day, so this reads UTC fields
  * deliberately — the same reasoning as lib/calendarDate.ts.
+ *
+ * OPS-LAUNCH-HOTFIX-1: the year is zero-padded to (at least) 4 digits, same as
+ * month/day. getUTCFullYear() for an unusual short year (e.g. 26) previously
+ * returned it unpadded, producing "26-08-28" — not a valid ISO date, so every
+ * caller that reconstructs a Date from this string via
+ * `new Date(`${x}T00:00:00.000Z`)` got Invalid Date back. This is what broke
+ * campaign launch in Production for one opportunity whose confirmed_delivery_date
+ * had reached the database with a non-4-digit year through some path other
+ * than this app's own normal writes.
  */
 export function calendarDateOfDateOnlyValue(value: Date | string): string | null {
     const d = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(d.getTime())) return null;
     const p = (n: number) => String(n).padStart(2, '0');
-    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+    return `${String(d.getUTCFullYear()).padStart(4, '0')}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
 }

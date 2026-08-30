@@ -94,6 +94,25 @@ describe('tenant timezone helpers', () => {
         expect(calendarDateOfDateOnlyValue('2026-08-31')).toBe('2026-08-31');
     });
 
+    it('OPS-LAUNCH-HOTFIX-1: pads the year so a short-year Date round-trips into a parseable date string', () => {
+        // A Date whose UTC year is not 4 digits (e.g. a value stored via some
+        // non-standard write path -- the numeric Date.UTC(26, ...) constructor
+        // form would actually give 1926 via JS's legacy 2-digit-year offset;
+        // the ISO STRING form treats an explicit short year literally, which is
+        // how a genuinely short year would have reached the database) must
+        // still produce a string every caller can safely reconstruct with
+        // `new Date(`${x}T00:00:00.000Z`)`. Unpadded, getUTCFullYear() for
+        // year 26 returns the number 26, producing "26-08-28" -- not a valid
+        // ISO date, and the exact shape that broke
+        // app/api/opportunities/[id]/launch/route.ts's delivery_date
+        // construction in Production (FR-FLOW-2 launch error:
+        // PrismaClientValidationError, "Invalid value for argument `delivery_date`").
+        const shortYear = new Date('0026-08-28T00:00:00.000Z'); // year 26, not 2026
+        const result = calendarDateOfDateOnlyValue(shortYear);
+        expect(result).toBe('0026-08-28');
+        expect(Number.isNaN(new Date(`${result}T00:00:00.000Z`).getTime())).toBe(false);
+    });
+
     it('returns the calendar date as seen in the given zone', () => {
         // 04:30 UTC on Sep 1 is still Aug 31 in Chicago (CDT, UTC-5).
         expect(calendarDateInTimeZone(CHI, at('2026-09-01T04:30:00Z'))).toBe('2026-08-31');

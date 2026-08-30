@@ -178,6 +178,58 @@ describe('confirmed_delivery_date maps to delivery_date, never start_date', () =
 });
 
 /* ══════════════════════════════════════════════════════════════════════════ */
+describe('OPS-LAUNCH-HOTFIX-1: an implausible confirmed_delivery_date year', () => {
+    // FR-FLOW-2 launch error (Production, all on lastDeployment dpl_8bqmaV7...,
+    // pre-OPS-1): "Ag in the Classroom" repeatedly 500'd with
+    // PrismaClientValidationError -- "Invalid value for argument `delivery_date`:
+    // Provided Date object is invalid." Root cause: calendarDateOfDateOnlyValue
+    // did not zero-pad the year, so a stored confirmed_delivery_date whose UTC
+    // year is not exactly 4 digits produced a string
+    // (e.g. "26-08-28") that `new Date(`${x}T00:00:00.000Z`)` cannot parse.
+    // A local round-trip through a REAL Postgres @db.Date column with a normal
+    // date proved the code path is otherwise correct -- this is data-specific,
+    // not a general regression (see the Final Report, Part 5).
+    // The recording Prisma double does not simulate Prisma's own client-side
+    // argument validation (it never actually rejects an invalid Date the way
+    // the real client does), so the crash itself is proven separately: by the
+    // real Production runtime error, and by a real-Postgres round-trip. What
+    // the double CAN prove -- and must, so this defect can never regress
+    // silently -- is that a plausibility check runs before the campaign write
+    // is even attempted, for any implausible year.
+    const SHORT_YEAR_DELIVERY = new Date('0026-08-28T00:00:00.000Z'); // year 26, not 2026
+
+    it('refuses with a clean, actionable 409 rather than reaching fundraiserCampaign.create', async () => {
+        mock = launchMock({
+            'fundraiserOpportunity.findFirst': {
+                id: OPP, status: 'date_confirmed', customer_id: ORG_A1,
+                confirmed_delivery_date: SHORT_YEAR_DELIVERY,
+                campaign_id: null,
+            },
+        });
+        const res = await post(validBody());
+        expect(res.status).toBe(409);
+        expect(res.body.code).toBe('implausible_confirmed_date');
+        expect(res.body.error).not.toMatch(/prisma|PrismaClientValidationError|delivery_date/i);
+        expect(mock.callsTo('fundraiserCampaign.create')).toHaveLength(0);
+    });
+
+    it('checkOpportunityLaunchable itself refuses the short year, not just the route', () => {
+        const refused = checkOpportunityLaunchable({
+            status: 'date_confirmed', confirmed_delivery_date: SHORT_YEAR_DELIVERY, campaign_id: null,
+        });
+        expect(refused.ok).toBe(false);
+        expect((refused as any).code).toBe('implausible_confirmed_date');
+    });
+
+    it('an ordinary, plausible year is unaffected', () => {
+        const ok = checkOpportunityLaunchable({
+            status: 'date_confirmed', confirmed_delivery_date: new Date(`${DELIVERY}T00:00:00.000Z`), campaign_id: null,
+        });
+        expect(ok.ok).toBe(true);
+    });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════ */
 describe('the supporter order deadline', () => {
     it('is required', async () => {
         const res = await post(validBody({ endDate: '' }));
