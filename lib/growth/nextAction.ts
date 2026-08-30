@@ -94,6 +94,13 @@ export interface CampaignForTriage {
     invoice_statuses?: readonly (string | null | undefined)[] | null;
     has_settled_history?: boolean | null;
     has_open_opportunity?: boolean | null;
+    // ── CRM-ARCHIVED-CAMPAIGN-VISIBILITY-1 ──────────────────────────────────
+    // Customer.archived, the ORGANIZATION-level archive flag. The campaign's
+    // OWN status can independently be the recognized 'Archived' string (see
+    // isArchivedForDashboard below) — this field catches the other real case,
+    // where the organization was archived but its last campaign row is still
+    // nominally 'Active' because archiving never touches campaign status.
+    organization_archived?: boolean | null;
 }
 
 export interface CampaignNextAction {
@@ -112,8 +119,14 @@ export interface CampaignNextAction {
 }
 
 export interface CampaignTriage {
-    priority: CampaignPriority;
-    /** PRIORITY_RANK[priority], denormalized for cheap sorting. */
+    /**
+     * Null means: excluded from every operational bucket entirely — see
+     * isArchivedForDashboard. Not one of the six ordinary priorities, because
+     * archiving is not a lifecycle stage to render, it is a decision to stop
+     * rendering.
+     */
+    priority: CampaignPriority | null;
+    /** PRIORITY_RANK[priority], denormalized for cheap sorting. Infinity when priority is null. */
     rank: number;
     /** The single most useful next step, or null when nothing needs doing. */
     action: CampaignNextAction | null;
@@ -121,6 +134,19 @@ export interface CampaignTriage {
 
 const isClosedFamily = (c: CampaignForTriage): boolean =>
     Boolean(c.closed_at) || (CLOSED_FAMILY as readonly string[]).includes(c.status);
+
+/**
+ * CRM-ARCHIVED-CAMPAIGN-VISIBILITY-1 — true when EITHER real archive signal
+ * this app has today is set. Archiving is a filing decision, not a financial
+ * one: it says nothing about whether money is owed, only that the tenant no
+ * longer wants this on their working dashboard. See the header of
+ * tests/crmArchivedCampaignVisibility1.test.ts for the full evidence trail —
+ * both signals are real, pre-existing, and already populated on real rows
+ * (lib/growth/campaignLifecycle.ts's own comment names Edgar County and
+ * Coles County as campaigns carrying status 'Archived' today).
+ */
+export const isArchivedForDashboard = (c: CampaignForTriage): boolean =>
+    c.status === 'Archived' || c.organization_archived === true;
 
 /** The window has passed and orders are still held hostage to closeout. */
 export function hasEndedWithHeldOrders(c: CampaignForTriage, now: Date): boolean {
@@ -142,6 +168,16 @@ const hasReason = (c: CampaignForTriage, code: CampaignHealthReason['code']): bo
  * bundle selection beats a generic check-in.
  */
 export function triageCampaign(c: CampaignForTriage, now: Date): CampaignTriage {
+    // CRM-ARCHIVED-CAMPAIGN-VISIBILITY-1: archived outranks everything below
+    // — closed-family, health, held orders, all of it — because none of
+    // those questions matter once the tenant has said "take this off my
+    // working dashboard". This is the ONE choke point every dashboard
+    // surface (sections, the attention strip, the filter pills in
+    // app/fundraisers/page.tsx) ultimately renders through, so checking it
+    // first here is sufficient everywhere without touching page code.
+    if (isArchivedForDashboard(c)) {
+        return { priority: null, rank: Infinity, action: null };
+    }
     if (isClosedFamily(c)) {
         // FR-HISTORY-1: invoice state is no longer unknowable. /api/campaigns now
         // sends invoice_statuses and settled_externally, so a closed campaign that
@@ -263,7 +299,11 @@ export function summarizeAttention(
     let heldValue = 0;
     for (const c of campaigns) {
         if (triageCampaign(c, now).priority === 'needs_attention') needsAttention += 1;
-        if (!isClosedFamily(c) && !c.is_placeholder) {
+        // CRM-ARCHIVED-CAMPAIGN-VISIBILITY-1: isClosedFamily alone already
+        // catches a campaign whose OWN status is 'Archived' (CLOSED_FAMILY
+        // includes it), but not an organization-archived campaign whose row
+        // is still nominally 'Active' — that needs the explicit check too.
+        if (!isClosedFamily(c) && !isArchivedForDashboard(c) && !c.is_placeholder) {
             heldOrders += c.held_order_count ?? 0;
             heldValue += Number(c.held_order_total ?? 0);
         }

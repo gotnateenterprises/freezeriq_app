@@ -426,6 +426,22 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
                 ...(body.tax_exemption_number !== undefined
                     ? { tax_exemption_number: String(body.tax_exemption_number).trim().slice(0, 120) || null }
                     : {}),
+                // ── CRM-ARCHIVED-CAMPAIGN-VISIBILITY-1 ────────────────────
+                // The "Archive"/"Reactivate" button (FundraiserOverview.tsx,
+                // CustomerOverview.tsx) has always sent { archived: boolean }
+                // to this route, intending to write the real archived/
+                // archived_at columns that lib/statusWorkflow.ts's
+                // archiveCustomer/unarchiveCustomer already write correctly
+                // elsewhere — but this route never read body.archived at
+                // all, so every click silently no-op'd. Fixed to actually
+                // persist it, moving both fields together exactly as that
+                // module already does. Omission (every other PUT this route
+                // receives) leaves the stored value alone, same as every
+                // other field above — this does not touch status, since the
+                // button never asked for that.
+                ...(typeof body.archived === 'boolean'
+                    ? { archived: body.archived, archived_at: body.archived ? new Date() : null }
+                    : {}),
             };
 
             await prisma.customer.update({

@@ -899,6 +899,12 @@ export async function GET(req: Request) {
                             // show a real workflow status instead of "No signal yet".
                             bundle_selection_status: (fc as any).bundle_selection_status ?? null,
                             coordinator_invite_sent_at: (fc as any).primary_coordinator?.setup_email_sent_at ?? null,
+                            // CRM-ARCHIVED-CAMPAIGN-VISIBILITY-1 — `c` (Customer) is
+                            // already fetched in full above with no select
+                            // restriction, so `archived` needs no new query. This is
+                            // the organization-level archive signal; the campaign's
+                            // own status can independently be 'Archived'.
+                            organization_archived: Boolean((c as any).archived),
                         });
                     }
                 } else {
@@ -934,7 +940,11 @@ export async function GET(req: Request) {
                         // GE-3: a placeholder is not a running campaign to judge.
                         health: 'not_applicable',
                         health_reasons: [],
-                        health_metrics: null
+                        health_metrics: null,
+                        // CRM-ARCHIVED-CAMPAIGN-VISIBILITY-1: an archived organization
+                        // with no campaign at all must not surface a "Lead" placeholder
+                        // under Leads & upcoming either.
+                        organization_archived: Boolean((c as any).archived),
                     });
                 }
             }

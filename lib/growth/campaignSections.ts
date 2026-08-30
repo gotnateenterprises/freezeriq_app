@@ -86,6 +86,14 @@ export function groupCampaignsByPriority<T extends CampaignForTriage>(
     const buckets = new Map<CampaignPriority, (T & { triage: CampaignTriage })[]>();
     for (const c of campaigns) {
         const triage = triageCampaign(c, now);
+        // CRM-ARCHIVED-CAMPAIGN-VISIBILITY-1: a null priority means archived
+        // — excluded from every section, not filed into one, including
+        // "Recently completed". That section is still part of THIS working
+        // dashboard (CRM-CC-2 renders it, just collapsed by default); the
+        // real historical surface for an archived organization is its own
+        // profile page (app/fundraisers/[id]/page.tsx's Campaign History),
+        // which this module never touches.
+        if (triage.priority === null) continue;
         const list = buckets.get(triage.priority) ?? [];
         list.push(Object.assign({}, c, { triage }));
         buckets.set(triage.priority, list);

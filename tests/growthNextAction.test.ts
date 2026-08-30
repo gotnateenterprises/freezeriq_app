@@ -90,7 +90,13 @@ describe('2. finished campaigns are records, never tasks', () => {
      */
     const FINISHED = { invoice_statuses: [] as string[], settlement_total: 0, held_order_count: 0 };
 
-    it.each(CLOSED_FAMILY)('status %s owing nothing is completed with no action', (status) => {
+    // CRM-ARCHIVED-CAMPAIGN-VISIBILITY-1: 'Archived' is no longer part of this
+    // parametrization -- archiving now outranks the closed-family check
+    // entirely and is excluded from every bucket, not filed as 'completed'.
+    // See tests/crmArchivedCampaignVisibility1.test.ts for that behavior;
+    // the other three CLOSED_FAMILY members are unaffected and still finish
+    // as ordinary records.
+    it.each(CLOSED_FAMILY.filter((s) => s !== 'Archived'))('status %s owing nothing is completed with no action', (status) => {
         const t = triageCampaign(active({ status, ...FINISHED }), NOW);
         expect(t.priority).toBe('completed');
         expect(t.action).toBeNull();
