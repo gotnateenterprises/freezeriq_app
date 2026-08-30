@@ -357,11 +357,20 @@ describe('no-drift — this phase changed only the four named surfaces', () => {
         // comment above already records why absolute closed-set assertions
         // expire. Each exclusion is deliberately ONE file, not the directory, so
         // every other recipes route stays pinned.
+        // OPS-MANUAL-PLANNER-BUNDLE-FILTER-1 narrowed it a third time, by the
+        // same discipline: app/api/bundles/route.ts's GET had no lifecycle
+        // filter at all, so the Manual Planner's Bundle selector (and, latently,
+        // components/admin/StorefrontSettings.tsx, which already called
+        // ?activeOnly=true expecting server-side filtering that never existed)
+        // offered archived/inactive Bundles as if they were current. The fix is
+        // additive only — an opt-in activeOnly=true query param — so every
+        // other caller of this route keeps its exact prior behavior.
         const { execSync } = require('child_process');
         const diff = execSync(
             'git diff --stat -- lib/bundleContents.ts app/api/bundles app/api/recipes '
             + '":(exclude)app/api/recipes/upload/route.ts" '
             + '":(exclude)app/api/recipes/[id]/route.ts" '
+            + '":(exclude)app/api/bundles/route.ts" '
             + 'lib/devEnvGuard.ts instrumentation.ts',
             { cwd: ROOT, encoding: 'utf8' }
         );

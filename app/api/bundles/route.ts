@@ -15,9 +15,20 @@ export async function GET(req: Request) {
 
         const { searchParams } = new URL(req.url);
         const fullDetails = searchParams.get('full') === 'true';
+        // OPS-MANUAL-PLANNER-BUNDLE-FILTER-1: opt-in, additive only. Default
+        // (unset/false) behavior is unchanged for every existing caller —
+        // app/bundles/page.tsx's own admin view still needs to see archived
+        // Bundles to manage/reactivate them. is_active is the sole lifecycle
+        // field on Bundle (prisma/schema.prisma); app/bundles/page.tsx's own
+        // Archive/Activate toggle proves "archived" and "inactive" are the
+        // same concept here, not two states.
+        const activeOnly = searchParams.get('activeOnly') === 'true';
 
         const bundles = await prisma.bundle.findMany({
-            where: { business_id: session.user.businessId },
+            where: {
+                business_id: session.user.businessId,
+                ...(activeOnly ? { is_active: true } : {}),
+            },
             include: {
                 _count: {
                     select: { contents: true }

@@ -74,8 +74,9 @@ export function ProductionCalculator() {
     useEffect(() => {
         if (!businessId) return;
 
-        // Fetch Bundles
-        fetch('/api/bundles')
+        // Fetch Bundles — active only; archived Bundles must not be selectable
+        // for new production runs (OPS-MANUAL-PLANNER-BUNDLE-FILTER-1).
+        fetch('/api/bundles?activeOnly=true')
             .then(res => res.json())
             .then(data => setBundles(data))
             .catch(err => console.error("Failed to fetch bundles", err));
