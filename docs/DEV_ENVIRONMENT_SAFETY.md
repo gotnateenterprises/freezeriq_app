@@ -75,6 +75,70 @@ is a no-op for every `NODE_ENV` other than `development`, so it can never
 affect `next build`, `next start`, or a Vercel Preview/Production
 deployment.
 
+## Setting up (or fixing) your local database
+
+Everything above governs `next dev`'s env resolution. The Prisma CLI
+(`npx prisma migrate ...`) is a **separate mechanism that reads only `.env`**
+— it does not know about `.env.local` or `.env.development.local` at all.
+That distinction matters: `next dev`'s target and the Prisma CLI's target can
+genuinely differ, and the CLI's behavior is governed entirely by whatever
+`DATABASE_URL` sits in plain `.env`.
+
+Clean setup, in order:
+
+1. Install and start a local PostgreSQL server.
+2. Create a local database (matching `.env`'s `DATABASE_URL` database name —
+   `freezer_iq` by convention in this repo).
+3. Copy the template once, if you have not already:
+   ```bash
+   cp .env.development.local.example .env.development.local
+   ```
+   (This covers `next dev`'s target — see above. It does **not** affect the
+   Prisma CLI.)
+4. Verify the Prisma CLI's actual target before running anything write-capable:
+   ```bash
+   npm run db:target
+   ```
+   This prints only the redacted host/port/database name and refuses
+   (non-zero exit, no connection attempted) if `.env`'s `DATABASE_URL` is
+   not `localhost` or `127.0.0.1` — see `lib/dbSafety.ts` (pure classifier)
+   and `lib/dbSafetyCli.ts` (the command this runs). Both live in `lib/`,
+   not `scripts/` — `.gitignore` excludes `/scripts` entirely, which would
+   have made this command invisible on a fresh clone.
+5. Apply the committed migration history:
+   ```bash
+   npm run db:setup
+   ```
+   This runs the same safety check, then `prisma migrate deploy` — which
+   only ever *applies* pending migrations forward. It cannot drop, reset, or
+   overwrite existing data.
+6. Confirm a clean result:
+   ```bash
+   npm run db:status
+   ```
+   Expect `Database schema is up to date!`.
+7. Start the dev server as usual: `npm run dev`.
+
+**Do not use `prisma db push` against this schema.** The committed migration
+history in `prisma/migrations/` is authoritative — `db push` bypasses it
+entirely and does not update `_prisma_migrations`, which is exactly the kind
+of drift `db:setup`/`db:status` above exist to prevent and detect.
+
+If `db:status` reports migrations as unapplied but you have reason to believe
+the underlying tables/columns already exist (for example, after restoring a
+database from a snapshot, or if someone previously ran schema changes by hand
+or via `db push`), do not guess. Verify the actual physical schema — the
+tables/columns a specific migration claims to create — against
+`information_schema` before deciding whether to `db:setup` (apply migrations)
+or reconcile the ledger with `prisma migrate resolve --applied <name>` for
+migrations whose effects are already provably present. Never mark a
+migration applied without first confirming its effects exist; never run
+`migrate reset`.
+
+**Neither `db:target`, `db:status`, nor `db:setup` runs automatically.**
+`npm run dev` and `npm install` never touch the database — database setup is
+always a deliberate, separate step.
+
 ## What this does not cover
 
 - **Email (Resend).** The same Resend API key is currently present in
