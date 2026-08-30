@@ -113,3 +113,38 @@ export function calendarDateOfDateOnlyValue(value: Date | string): string | null
     const p = (n: number) => String(n).padStart(2, '0');
     return `${String(d.getUTCFullYear()).padStart(4, '0')}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
 }
+
+/**
+ * OPS-DATE-PICKER-HOTFIX-1: the one definition of "a plausible calendar
+ * year," shared by lib/fundraiserLaunch.ts's launch gate and by
+ * safeCalendarDateForInput below, so the two can never drift into two
+ * different thresholds. Purely structural (this module reads no clock) —
+ * not "is this a sensible fundraiser date," just "does this year have a
+ * normal 4-digit register."
+ */
+export function isPlausibleCalendarYear(year: number): boolean {
+    return year >= 1000 && year <= 9999;
+}
+
+/**
+ * OPS-DATE-PICKER-HOTFIX-1: the safe value for a date-only display or a
+ * native `<input type="date">`'s `value`. Returns '' for anything not
+ * safely showable — null/undefined/unparseable, AND an implausible year —
+ * rather than handing a date control a malformed or misleadingly-short-year
+ * string.
+ *
+ * This does not repair a bad stored value: it decides what is safe to
+ * DISPLAY. A confirmed_delivery_date whose year is not 4 digits (the exact
+ * shape a pre-existing Production row can carry — see
+ * calendarDateOfDateOnlyValue's own history) renders as an empty field
+ * instead of a garbled one, so re-picking a real date starts from a blank
+ * control rather than one already showing something confusing.
+ */
+export function safeCalendarDateForInput(value: Date | string | null | undefined): string {
+    if (!value) return '';
+    const calendar = calendarDateOfDateOnlyValue(value);
+    if (!calendar) return '';
+    const year = Number(calendar.slice(0, calendar.indexOf('-')));
+    if (!isPlausibleCalendarYear(year)) return '';
+    return calendar;
+}

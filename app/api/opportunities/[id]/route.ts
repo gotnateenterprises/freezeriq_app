@@ -19,6 +19,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { cleanText } from '@/lib/fundraiserFunnel';
+import { calendarDateOfDateOnlyValue } from '@/lib/tenantTimezone';
 
 /** Disposition vocabulary. Mirrors the FundraiserLostReason enum exactly. */
 const LOST_REASONS = [
@@ -26,13 +27,25 @@ const LOST_REASONS = [
     'duplicate', 'not_a_fit', 'chose_other_fundraiser', 'other',
 ] as const;
 
-/** Accepts YYYY-MM-DD and stores it as a calendar date with no timezone drift. */
+/**
+ * Accepts YYYY-MM-DD and stores it as a calendar date with no timezone drift.
+ *
+ * OPS-DATE-PICKER-HOTFIX-1: also rejects an impossible calendar date (e.g.
+ * "2026-02-30", "2026-02-29" on a non-leap year) rather than accepting
+ * `new Date(...)`'s silent rollover into the next month. The round trip
+ * through calendarDateOfDateOnlyValue re-derives the calendar day the
+ * constructed Date actually landed on; if that disagrees with what was
+ * typed, the input was never a real date.
+ */
 function parseCalendarDate(value: unknown): Date | null | undefined {
     if (value === null) return null;            // explicit clear
     if (typeof value !== 'string' || !value.trim()) return undefined; // absent
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return undefined;
-    const d = new Date(`${value.trim()}T00:00:00.000Z`);
-    return Number.isNaN(d.getTime()) ? undefined : d;
+    const trimmed = value.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return undefined;
+    const d = new Date(`${trimmed}T00:00:00.000Z`);
+    if (Number.isNaN(d.getTime())) return undefined;
+    if (calendarDateOfDateOnlyValue(d) !== trimmed) return undefined;
+    return d;
 }
 
 /**

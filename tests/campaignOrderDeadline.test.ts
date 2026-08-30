@@ -32,6 +32,7 @@ import { isCampaignPastOrderDeadline } from '@/lib/campaignBundleSelection';
 import { resolveCampaignOrderMode, validateBundleEligibility } from '@/lib/campaignOrderBundles';
 import {
     isValidIanaTimeZone, calendarDateInTimeZone, calendarDateOfDateOnlyValue,
+    isPlausibleCalendarYear, safeCalendarDateForInput,
 } from '@/lib/tenantTimezone';
 
 const ROOT = process.cwd();
@@ -111,6 +112,80 @@ describe('tenant timezone helpers', () => {
         const result = calendarDateOfDateOnlyValue(shortYear);
         expect(result).toBe('0026-08-28');
         expect(Number.isNaN(new Date(`${result}T00:00:00.000Z`).getTime())).toBe(false);
+    });
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // OPS-DATE-PICKER-HOTFIX-1 — the shared plausibility predicate, extracted
+    // from lib/fundraiserLaunch.ts's checkOpportunityLaunchable so the launch
+    // gate and the CRM funnel panel's date display can never define
+    // "plausible year" two different ways.
+    // ═══════════════════════════════════════════════════════════════════════
+    describe('isPlausibleCalendarYear', () => {
+        it('accepts an ordinary 4-digit year', () => {
+            expect(isPlausibleCalendarYear(2026)).toBe(true);
+        });
+        it('rejects a short year like the one that broke launch', () => {
+            expect(isPlausibleCalendarYear(26)).toBe(false);
+        });
+        it('rejects year 0 and negative years', () => {
+            expect(isPlausibleCalendarYear(0)).toBe(false);
+            expect(isPlausibleCalendarYear(-5)).toBe(false);
+        });
+        it('accepts the boundary years 1000 and 9999', () => {
+            expect(isPlausibleCalendarYear(1000)).toBe(true);
+            expect(isPlausibleCalendarYear(9999)).toBe(true);
+        });
+        it('rejects 999 and 10000', () => {
+            expect(isPlausibleCalendarYear(999)).toBe(false);
+            expect(isPlausibleCalendarYear(10000)).toBe(false);
+        });
+    });
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // OPS-DATE-PICKER-HOTFIX-1 — PART F before-fix proof. This is the exact
+    // defect the owner saw: components/crm2/FunnelLeadsPanel.tsx fed a raw,
+    // un-4-digit-padded, unplausibility-checked API string straight into the
+    // native <input type="date">'s value and into fmtDate()'s
+    // `new Date(d).toLocaleDateString(...)`, for an opportunity whose
+    // confirmed_delivery_date already carried a short year (the exact
+    // Production shape OPS-LAUNCH-HOTFIX-1 diagnosed for "Ag in the
+    // Classroom" but explicitly did not repair — Production data and code
+    // fixes are separate). safeCalendarDateForInput is the one place that
+    // now decides "is this value safe to show in a date control" so the
+    // panel's two input fields and its label cannot drift into different
+    // answers.
+    // ═══════════════════════════════════════════════════════════════════════
+    describe('safeCalendarDateForInput', () => {
+        it('returns a clean YYYY-MM-DD for an ordinary date', () => {
+            expect(safeCalendarDateForInput('2026-09-09T00:00:00.000Z')).toBe('2026-09-09');
+            expect(safeCalendarDateForInput(new Date('2026-09-09T00:00:00.000Z'))).toBe('2026-09-09');
+        });
+        it('returns empty string for null/undefined/empty', () => {
+            expect(safeCalendarDateForInput(null)).toBe('');
+            expect(safeCalendarDateForInput(undefined)).toBe('');
+            expect(safeCalendarDateForInput('')).toBe('');
+        });
+        it('BEFORE THE FIX, this exact value produced "0026-09-09" fed straight into the native date input -- returns empty string instead', () => {
+            // The exact malformed shape from Production: a stored
+            // confirmed_delivery_date whose year is not 4 digits.
+            const badStoredValue = '0026-09-09T00:00:00.000Z';
+            expect(safeCalendarDateForInput(badStoredValue)).toBe('');
+        });
+        it('an unparseable string also returns empty string, not a throw', () => {
+            expect(safeCalendarDateForInput('not-a-date')).toBe('');
+        });
+
+        // PART M — no timezone drift for the representative dates, including
+        // a DST-transition date (2026-03-08, the US spring-forward Sunday)
+        // and both calendar-year boundaries. safeCalendarDateForInput reads
+        // UTC fields deliberately (via calendarDateOfDateOnlyValue), so a
+        // stored midnight-UTC date-only value must round-trip to the SAME
+        // calendar day regardless of which day of year it is.
+        it.each([
+            '2026-01-01', '2026-03-08', '2026-09-09', '2026-11-01', '2026-12-31',
+        ])('%s round-trips to the same calendar date with no day shift', (day) => {
+            expect(safeCalendarDateForInput(`${day}T00:00:00.000Z`)).toBe(day);
+        });
     });
 
     it('returns the calendar date as seen in the given zone', () => {

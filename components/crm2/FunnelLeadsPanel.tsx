@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { LaunchFundraiserDialog } from '@/components/crm2/LaunchFundraiserDialog';
 import { RespondToInquiryDialog, type RespondTarget } from '@/components/crm2/RespondToInquiryDialog';
 import { firstNameOf } from '@/lib/personName';
+import { safeCalendarDateForInput } from '@/lib/tenantTimezone';
 
 type Bucket = 'new_leads' | 'needs_follow_up' | 'waiting_on_date' | 'ready_to_create_campaign' | 'closed';
 
@@ -276,7 +277,14 @@ const LOST_REASONS = [
     ['other', 'Other'],
 ] as const;
 
-const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString(undefined, { timeZone: 'UTC' }) : '—');
+// OPS-DATE-PICKER-HOTFIX-1: routed through safeCalendarDateForInput first, so
+// a stored value with an implausible year (e.g. a non-4-digit year reaching
+// the database through some path other than this app's own writes) shows as
+// "no date" rather than a garbled one like "9/9/26".
+const fmtDate = (d: string | null) => {
+    const safe = safeCalendarDateForInput(d);
+    return safe ? new Date(`${safe}T00:00:00.000Z`).toLocaleDateString(undefined, { timeZone: 'UTC' }) : '—';
+};
 
 interface FunnelLeadsPanelProps {
     /**
@@ -611,7 +619,7 @@ export function FunnelLeadsPanel({ onCountChange }: FunnelLeadsPanelProps = {}) 
                                         <LeadDateField
                                             icon={<CalendarClock size={13} />}
                                             label="Preferred"
-                                            value={o.preferred_delivery_date ? o.preferred_delivery_date.slice(0, 10) : ''}
+                                            value={safeCalendarDateForInput(o.preferred_delivery_date)}
                                             disabled={busyId === o.id}
                                             onCommit={(d) => mutate(o.id, { action: 'set_dates', preferred_delivery_date: d }, 'Preferred delivery date saved')}
                                         />
@@ -619,7 +627,7 @@ export function FunnelLeadsPanel({ onCountChange }: FunnelLeadsPanelProps = {}) 
                                         <LeadDateField
                                             icon={<CalendarCheck size={13} />}
                                             label="Confirm"
-                                            value={o.confirmed_delivery_date ? o.confirmed_delivery_date.slice(0, 10) : ''}
+                                            value={safeCalendarDateForInput(o.confirmed_delivery_date)}
                                             disabled={busyId === o.id}
                                             onCommit={(d) => mutate(o.id, { action: 'confirm_date', confirmed_delivery_date: d }, 'Delivery date confirmed')}
                                         />
