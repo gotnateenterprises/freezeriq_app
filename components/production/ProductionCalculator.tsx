@@ -6,7 +6,6 @@ import { Plus, Calculator, ShoppingCart, ChefHat, Trash2, Printer, Calendar, Loa
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { toFraction } from '@/lib/unit_converter';
-import { interpretPlanResponse, type PlanResult } from '@/lib/productionPlanResponse';
 
 // Calculator Interfaces
 interface Bundle {
@@ -18,6 +17,27 @@ interface Bundle {
 interface OrderItem {
     bundle_id: string;
     quantity: number;
+}
+
+interface PlanResult {
+    rawIngredients: Record<string, {
+        qty: number;
+        netQty: number;
+        unit: string;
+        onHand: number;
+        costPerUnit: number;
+        costUnit?: string;
+        supplier?: string;
+        supplierUrl?: string;
+        portalType?: string;
+        searchUrlPattern?: string;
+        displayName?: string;
+        purchaseCost?: number;
+        purchaseUnit?: string;
+        purchaseQuantity?: number;
+    }>;
+    prepTasks: Record<string, { qty: number; unit: string; id: string; label_text?: string }>;
+    assemblyTasks: Record<string, { qty: number; unit: string }>;
 }
 
 export function ProductionCalculator() {
@@ -219,11 +239,9 @@ export function ProductionCalculator() {
                 body: JSON.stringify({ orders: validOrders })
             });
             const data = await res.json();
-            const interpreted = interpretPlanResponse(res, data);
-            if (!interpreted.ok) throw new Error(interpreted.message);
-            setResult(interpreted.result);
-        } catch (e: any) {
-            alert(e?.message || "Failed to calculate plan");
+            setResult(data);
+        } catch (e) {
+            alert("Failed to calculate plan");
         } finally {
             setIsCalculating(false);
         }
