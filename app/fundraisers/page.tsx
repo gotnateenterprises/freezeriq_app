@@ -21,6 +21,7 @@ import { FunnelLeadsPanel } from '@/components/crm2/FunnelLeadsPanel';
 import { OrganizationImpactTab } from '@/components/crm2/OrganizationImpactTab';
 import { AttentionStrip } from '@/components/crm2/AttentionStrip';
 import { CampaignPriorityList, type PriorityListCampaign } from '@/components/crm2/CampaignPriorityList';
+import { ArchivedCampaignList, filterArchivedCampaigns } from '@/components/crm2/ArchivedCampaignList';
 import { CampaignContextDrawer } from '@/components/crm2/CampaignContextDrawer';
 import { useDialogFocus } from '@/components/crm2/useDialogFocus';
 import type { CampaignTriage } from '@/lib/growth/nextAction';
@@ -363,6 +364,14 @@ export default function FundraisersPage() {
         return matchesSearch && matchesFilter;
     });
 
+    // CRM-ARCHIVED-VIEW-1: computed separately from `filtered` above rather
+    // than folded into that same ternary, because `filtered` feeds
+    // CampaignPriorityList -- and groupCampaignsByPriority would immediately
+    // filter every archived row back OUT again (triage.priority is null for
+    // anything isArchivedForDashboard() is true for, by design). This reuses
+    // the SAME predicate, just never routes through that grouping at all.
+    const archivedCampaigns = filterArchivedCampaigns(fundraisers, searchTerm);
+
     if (status === 'loading') return <div className="p-8 text-center text-slate-400 font-bold">Loading session…</div>;
 
     if (!hasAccess) {
@@ -536,7 +545,7 @@ export default function FundraisersPage() {
                         conflated a fundraiser still owed money with one that had
                         been paid, so there was no way to ask the question the
                         owner actually asks: who still owes me? */}
-                    {(['all', 'attention', 'awaiting', 'active', 'lead', 'closed'] as const).map(status => (
+                    {(['all', 'attention', 'awaiting', 'active', 'lead', 'closed', 'archived'] as const).map(status => (
                         <button
                             key={status}
                             type="button"
@@ -544,28 +553,35 @@ export default function FundraisersPage() {
                             aria-pressed={filterStatus === status}
                             className={`px-4 md:px-6 py-2 rounded-xl text-xs font-black uppercase transition-all min-h-[44px] ${filterStatus === status ? 'bg-white dark:bg-slate-800 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                         >
-                            {{ all: 'All', attention: 'Needs attention', awaiting: 'Awaiting payment', active: 'Active', lead: 'Leads', closed: 'Closed' }[status]}
+                            {{ all: 'All', attention: 'Needs attention', awaiting: 'Awaiting payment', active: 'Active', lead: 'Leads', closed: 'Closed', archived: 'Archived' }[status]}
                         </button>
                     ))}
                 </div>
             </div>
 
-            {/* CRM-CC-2 — Campaign Priority List. Replaces the legacy 7-column
-                table: campaigns are grouped by CRM-CC-1 triage into priority
-                sections, each row carries one primary signal and at most one
-                labeled next action, and legacy per-row capabilities live in a
-                labeled overflow menu instead of five icon-only buttons. */}
-            <CampaignPriorityList
-                campaigns={filtered}
-                loading={isLoading}
-                totalCount={fundraisers.length}
-                searchTerm={searchTerm}
-                filterStatus={filterStatus}
-                now={triageNow}
-                onCloseout={(c) => openCloseoutModal(c as Fundraiser)}
-                onArchive={(c) => handleArchiveCampaign(c as Fundraiser)}
-                onOpenDetail={setDetailCampaign}
-            />
+            {/* CRM-ARCHIVED-VIEW-1: Archived is discovery/history, not another
+                operational bucket -- it replaces the priority sections
+                entirely rather than rendering alongside them. */}
+            {filterStatus === 'archived' ? (
+                <ArchivedCampaignList campaigns={archivedCampaigns} loading={isLoading} />
+            ) : (
+                /* CRM-CC-2 — Campaign Priority List. Replaces the legacy 7-column
+                    table: campaigns are grouped by CRM-CC-1 triage into priority
+                    sections, each row carries one primary signal and at most one
+                    labeled next action, and legacy per-row capabilities live in a
+                    labeled overflow menu instead of five icon-only buttons. */
+                <CampaignPriorityList
+                    campaigns={filtered}
+                    loading={isLoading}
+                    totalCount={fundraisers.length}
+                    searchTerm={searchTerm}
+                    filterStatus={filterStatus}
+                    now={triageNow}
+                    onCloseout={(c) => openCloseoutModal(c as Fundraiser)}
+                    onArchive={(c) => handleArchiveCampaign(c as Fundraiser)}
+                    onOpenDetail={setDetailCampaign}
+                />
+            )}
             </div>
             )}
         </div>
