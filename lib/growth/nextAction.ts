@@ -56,12 +56,22 @@ export type CampaignPriority =
     /** Finished. A record, not a task. */
     | 'completed';
 
-/** Sort order for CRM-CC-2's grouped list: lower = shown first. */
+/**
+ * Sort order for CRM-CC-2's grouped list: lower = shown first.
+ *
+ * CRM-ACTIVE-STATUS-UX-1: on_pace ("Active") now ranks ahead of worth_a_look
+ * ("Worth a look") — an owner-confirmed choice, since a fundraiser that is
+ * actually running and orderable is more operationally relevant than one
+ * flagged for a single soft signal. needs_attention and awaiting_payment stay
+ * pinned first regardless: those are unconditional alarms (an active risk, or
+ * money already owed), not part of the reordered range. Membership (which
+ * priority a campaign gets) is untouched — only these two ranks swapped.
+ */
 export const PRIORITY_RANK: Record<CampaignPriority, number> = {
     needs_attention: 0,
     awaiting_payment: 1,
-    worth_a_look: 2,
-    on_pace: 3,
+    on_pace: 2,
+    worth_a_look: 3,
     upcoming: 4,
     completed: 5,
 };

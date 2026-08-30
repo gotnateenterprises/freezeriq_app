@@ -686,6 +686,11 @@ export async function GET(req: Request) {
                     tax_rate_percent: true,
                     bundle_selection_status: true,
                     bundle_selection_at: true,
+                    // CRM-ACTIVE-STATUS-UX-1: the durable, provider-confirmed
+                    // "invite actually sent" timestamp, so the Active card can
+                    // distinguish "coordinator invite not sent" from "waiting on
+                    // coordinator" instead of both showing as one vague status.
+                    primary_coordinator: { select: { setup_email_sent_at: true } },
                     // ── FR-HISTORY-1: settlement truth, so the dashboard can tell
                     //    "ordering finished" apart from "money received".
                     //
@@ -888,7 +893,12 @@ export async function GET(req: Request) {
                             // GE-3 — additive; existing consumers ignore these.
                             health: healthResult.health,
                             health_reasons: healthResult.reasons,
-                            health_metrics: healthResult.metrics
+                            health_metrics: healthResult.metrics,
+                            // CRM-ACTIVE-STATUS-UX-1 — already selected above for
+                            // GE-3 health, now also surfaced so the Active card can
+                            // show a real workflow status instead of "No signal yet".
+                            bundle_selection_status: (fc as any).bundle_selection_status ?? null,
+                            coordinator_invite_sent_at: (fc as any).primary_coordinator?.setup_email_sent_at ?? null,
                         });
                     }
                 } else {

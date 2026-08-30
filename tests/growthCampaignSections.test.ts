@@ -80,8 +80,10 @@ describe('2. grouping files campaigns without re-deciding priority', () => {
         const sections = groupCampaignsByPriority(
             [closed('c'), lead('l'), onPace('p'), watch('w'), atRisk('a')], NOW,
         );
+        // CRM-ACTIVE-STATUS-UX-1: on_pace ("Active") now ranks ahead of
+        // worth_a_look ("Worth a look") -- see PRIORITY_RANK's own comment.
         expect(sections.map((s) => s.priority)).toEqual(
-            ['needs_attention', 'worth_a_look', 'on_pace', 'upcoming', 'completed'],
+            ['needs_attention', 'on_pace', 'worth_a_look', 'upcoming', 'completed'],
         );
         const ranks = sections.map((s) => PRIORITY_RANK[s.priority]);
         expect([...ranks].sort((a, b) => a - b)).toEqual(ranks);

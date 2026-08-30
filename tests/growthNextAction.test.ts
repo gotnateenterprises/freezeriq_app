@@ -44,13 +44,18 @@ describe('1. the priority order is fixed and complete', () => {
         // shifted every number below it without changing the property this test
         // exists to protect. Ordering is the contract; the integers are an
         // implementation detail that should not break on every insertion.
+        //
+        // CRM-ACTIVE-STATUS-UX-1: on_pace ("Active") now ranks ahead of
+        // worth_a_look ("Worth a look") -- see PRIORITY_RANK's own comment in
+        // lib/growth/nextAction.ts. needs_attention/awaiting_payment stay
+        // pinned first, unconditionally.
         const order = (Object.keys(PRIORITY_RANK) as (keyof typeof PRIORITY_RANK)[])
             .sort((a, b) => PRIORITY_RANK[a] - PRIORITY_RANK[b]);
         expect(order).toEqual([
             'needs_attention',
             'awaiting_payment',
-            'worth_a_look',
             'on_pace',
+            'worth_a_look',
             'upcoming',
             'completed',
         ]);

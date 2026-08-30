@@ -49,8 +49,12 @@ export interface CampaignDisplayStage {
  * A closed campaign is never "awaiting setup" — closure outranks the workflow,
  * exactly as it does in resolveCampaignOrderMode, where isCampaignClosed() is
  * checked before the bundle-selection branch.
+ *
+ * Exported so other pure derivations over this same input shape (e.g.
+ * lib/growth/coordinatorSetupStatus.ts) can check "is this closed" without a
+ * second, competing definition of closed-family.
  */
-function isClosedFamily(c: CampaignDisplayStageInput): boolean {
+export function isClosedFamily(c: CampaignDisplayStageInput): boolean {
     return Boolean(c.closed_at) || CLOSED_STATUSES.includes(c.status);
 }
 

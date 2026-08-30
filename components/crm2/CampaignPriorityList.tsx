@@ -48,6 +48,9 @@ export interface PriorityListCampaign extends CampaignForTriage {
     bundle_goal?: number;
     /** FR-FLOW-2B — drives the "Awaiting Coordinator Setup" chip. */
     bundle_selection_status?: string | null;
+    /** CRM-ACTIVE-STATUS-UX-1 — provider-confirmed invite-sent timestamp, for
+     *  telling "invite not sent" apart from "waiting on coordinator". */
+    coordinator_invite_sent_at?: string | null;
 }
 
 const SECTION_DOT: Record<CampaignPriority, string> = {
@@ -319,7 +322,14 @@ function CampaignRow({
             {/* HOW IS IT DOING — one primary signal per row */}
             <div className="xl:w-56 xl:flex-none">
                 {isActiveRow
-                    ? <CampaignHealthBadge health={c.health} reasons={c.health_reasons} />
+                    ? <CampaignHealthBadge
+                        health={c.health}
+                        reasons={c.health_reasons}
+                        status={c.status}
+                        closedAt={c.closed_at ?? null}
+                        bundleSelectionStatus={c.bundle_selection_status ?? null}
+                        coordinatorInviteSentAt={c.coordinator_invite_sent_at ?? null}
+                    />
                     : <StageChip
                         status={c.closed_at ? 'Closed' : c.status}
                         bundleSelectionStatus={c.bundle_selection_status ?? null}
