@@ -307,32 +307,37 @@ export async function POST(req: Request) {
             });
         };
 
-        // ── CB-4: Determine bundle selection mode ─────────────────────────────
+        // ── CB-4 / OPS-2: Determine bundle selection mode ──────────────────────
         //
-        // THREE branches:
+        // OPS-2: a normal new campaign must always enter the coordinator-setup
+        // funnel, so bundleSelection is now REQUIRED and must be
+        // 'coordinator_selects' — the one mode the canonical wizard
+        // (components/crm2/StartFundraiserWizard.tsx) has ever sent. Two prior
+        // branches are gone, both of which were a confirmed, live bypass:
         //
-        //   A. bundleSelection.mode = 'coordinator_selects'
-        //      → Validate candidateFamilyIds + selectionLimit, create campaign as
-        //        pending + candidate rows (Serves-5 only, one per family).
+        //   - explicit bundleSelection.mode = 'not_required' ("legacy/exempt")
+        //   - bundleSelection omitted entirely (silently treated as
+        //     not_required "for legacy callers" — this is exactly what
+        //     components/crm/FundraisersTab.tsx's "New Campaign" form sent)
         //
-        //   B. bundleSelection.mode = 'not_required'
-        //      → Explicit legacy/exempt campaign. No candidate pool.
-        //
-        //   C. bundleSelection absent (legacy callers without the new field)
-        //      → Explicit legacy branch: not_required, no candidate pool.
-        //        Legacy callers: the handoff CRM-4 code skeleton and any pre-CB-4
-        //        callers that POST without bundleSelection.
-        //        NOT a fallback for bad coordinator_selects submissions.
+        // Both created an Active campaign whose bundle-selection status was the
+        // "not required" value, with no delivery date and no allowed-Bundle
+        // pool — and lib/campaignOrderBundles.ts's resolveCampaignOrderMode
+        // treats that status as immediately orderable against the tenant's
+        // ENTIRE active Bundle catalog (its own doc comment: "legacy fallback:
+        // business-wide validation preserved"). Existing historical rows that
+        // already carry that status are untouched — this only closes the
+        // write path that could still create more of them for a brand-new
+        // campaign.
+        if (!isBundleSelectionPayload(bundleSelection) || bundleSelection.mode !== 'coordinator_selects') {
+            return NextResponse.json({
+                error: `A new fundraiser campaign must specify the allowed Bundle pool: bundleSelection with mode 'coordinator_selects', candidateFamilyIds, and selectionLimit.`,
+            }, { status: 400 });
+        }
 
-        if (bundleSelection !== undefined && bundleSelection !== null) {
-            if (!isBundleSelectionPayload(bundleSelection)) {
-                return NextResponse.json({
-                    error: `Invalid bundleSelection payload. Mode must be 'coordinator_selects' or 'not_required' with appropriate fields.`,
-                }, { status: 400 });
-            }
-
-            // ── Mode A: coordinator_selects ────────────────────────────────────
-            if (bundleSelection.mode === 'coordinator_selects') {
+        // ── coordinator_selects: the only campaign-creation path this route
+        //    now allows ────────────────────────────────────────────────────────
+            {
                 const rawFamilyIds = bundleSelection.candidateFamilyIds;
                 const selectionLimit = bundleSelection.selectionLimit;
 
@@ -501,81 +506,6 @@ export async function POST(req: Request) {
 
                 return NextResponse.json(campaign);
             }
-
-            // ── Mode B: not_required (explicit) ───────────────────────────────
-            if (bundleSelection.mode === 'not_required') {
-                const campaign = await runCreate((tx) => tx.fundraiserCampaign.create({
-                    data: {
-                        customer_id: customerId,
-                        name,
-                        // FR-FLOW-1R: explicit secure coordinator credential.
-                        portal_token: mintCoordinatorPortalToken(),
-                        // @ts-ignore - Stale client
-                        bundle_goal: resolvedBundleGoal,
-                        // FR-TAX-1: frozen at launch; never recomputed afterwards.
-                        tax_status: taxSnapshot.status as any,
-                        tax_rate_percent: taxSnapshot.ratePercent,
-                        end_date: endDate ? new Date(endDate) : undefined,
-                        // @ts-ignore - Stale client
-                        mission_text: missionText,
-                        // @ts-ignore - Stale client
-                        about_text: aboutText,
-                        participant_label: participantLabel || 'Seller',
-                        group_label: groupLabel,
-                        is_group_enabled: !!groupLabel,
-                        status: 'Active',
-                        bundle_selection_status: 'not_required',
-                        // INV-A: when omitted, the DB default (20.00) applies.
-                        ...(orgSharePercentValue !== undefined
-                            ? { org_share_percent: orgSharePercentValue }
-                            : {}),
-                    },
-                }));
-                return NextResponse.json(campaign);
-            }
-
-            // Unreachable due to isBundleSelectionPayload, but required for exhaustiveness
-            return NextResponse.json({
-                error: `Invalid bundleSelection.mode. Expected 'coordinator_selects' or 'not_required'.`,
-            }, { status: 400 });
-        }
-
-        // ── Branch C: Legacy caller (no bundleSelection field) ─────────────────
-        // Pre-CB-4 callers that POST without bundleSelection are treated as not_required.
-        // This includes any integrations built before CB-4, or the CRM-4 handoff skeleton.
-        // The new wizard always sends an explicit bundleSelection.mode and never reaches here.
-        const campaign = await runCreate((tx) => tx.fundraiserCampaign.create({
-            data: {
-                customer_id: customerId,
-                name,
-                // FR-FLOW-1R: explicit secure coordinator credential.
-                portal_token: mintCoordinatorPortalToken(),
-                // @ts-ignore - Stale client
-                bundle_goal: resolvedBundleGoal,
-                // FR-TAX-1: frozen at launch; never recomputed afterwards.
-                tax_status: taxSnapshot.status as any,
-                tax_rate_percent: taxSnapshot.ratePercent,
-                end_date: endDate ? new Date(endDate) : undefined,
-                // @ts-ignore - Stale client
-                mission_text: missionText,
-                // @ts-ignore - Stale client
-                about_text: aboutText,
-                // @ts-ignore - Stale client
-                participant_label: participantLabel || 'Seller',
-                // @ts-ignore - Stale client
-                group_label: groupLabel,
-                // @ts-ignore - Stale client
-                is_group_enabled: !!groupLabel,
-                status: 'Active',
-                bundle_selection_status: 'not_required',
-                // INV-A: when omitted, the DB default (20.00) applies.
-                ...(orgSharePercentValue !== undefined
-                    ? { org_share_percent: orgSharePercentValue }
-                    : {}),
-            }
-        }));
-
-        return NextResponse.json(campaign);
 
     } catch (e: any) {
         // FR-RETENTION-5: the opportunity could not be claimed, which means a

@@ -332,9 +332,13 @@ describe('21-22. the snapshot is FROZEN — later changes never rewrite it', () 
     });
 
     it('every campaign-creation path writes the snapshot at launch', () => {
+        // OPS-2 collapsed the three creation branches (coordinator_selects,
+        // explicit not_required, and the silent-omission bypass) down to the
+        // one safe coordinator_selects path, so there is now exactly one
+        // .create() call site to check instead of three.
         const create = read('app', 'api', 'campaigns', 'route.ts');
-        expect((create.match(/tax_status: taxSnapshot\.status/g) || []).length).toBe(3);
-        expect((create.match(/tax_rate_percent: taxSnapshot\.ratePercent/g) || []).length).toBe(3);
+        expect((create.match(/tax_status: taxSnapshot\.status/g) || []).length).toBe(1);
+        expect((create.match(/tax_rate_percent: taxSnapshot\.ratePercent/g) || []).length).toBe(1);
 
         const launch = read('app', 'api', 'opportunities', '[id]', 'launch', 'route.ts');
         expect(launch).toMatch(/tax_status: launchTaxSnapshot\.status/);

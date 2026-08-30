@@ -234,10 +234,14 @@ describe('8. no surface reintroduces its own independent fallback', () => {
     const path = require('path');
     const read = (...p: string[]) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8');
 
-    it('the three campaign-creation branches all use the resolved goal, not a bare `|| 100`', () => {
+    it('the campaign-creation branch uses the resolved goal, not a bare `|| 100`', () => {
+        // OPS-2 collapsed the three creation branches (coordinator_selects,
+        // explicit not_required, and the silent-omission bypass) down to the
+        // one safe coordinator_selects path, so there is now exactly one
+        // .create() call site to check instead of three.
         const src = read('app', 'api', 'campaigns', 'route.ts');
         expect(src.includes('bundleGoal ? Number(bundleGoal)')).toBe(false);
-        expect((src.match(/bundle_goal: resolvedBundleGoal/g) || []).length).toBe(3);
+        expect((src.match(/bundle_goal: resolvedBundleGoal/g) || []).length).toBe(1);
     });
 
     it('campaign creation actually refuses an invalid bundle goal instead of silently accepting it', () => {

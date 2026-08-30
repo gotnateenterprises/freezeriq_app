@@ -8,18 +8,23 @@ import { toast } from 'sonner';
 // (useParams was already imported-unused before INV-A; left alone deliberately.)
 import { useParams } from 'next/navigation';
 import {
-    canManageOrgShare,
     orgShareRequestField,
     orgShareInputError,
     orgShareFieldMode,
     formatOrgShare,
     ORG_SHARE_DEFAULT_INPUT,
     ORG_SHARE_HELPER_TEXT,
-    ORG_SHARE_ADMIN_MANAGED_NOTE,
     ORG_SHARE_LOCKED_NOTE,
 } from '@/lib/orgShareForm';
 import { isCampaignClosed } from '@/lib/campaignBundleSelection';
 import { resolveBundleGoal, parseBundleGoal, DEFAULT_BUNDLE_GOAL } from '@/lib/fundraiserMetrics';
+// OPS-2: the "New Campaign" form used to POST bundleSelection-less bodies
+// straight to /api/campaigns, landing on the route's now-removed
+// not_required bypass branch. It now reuses the one safe creation path the
+// canonical wizard already provides — prefill.customerId skips wizard Step 1
+// (organization selection) and lands directly on Step 2 (Campaign), which
+// only ever sends bundleSelection.mode: 'coordinator_selects'.
+import { StartFundraiserWizard } from '@/components/crm2/StartFundraiserWizard';
 
 interface BundleOption {
     id: string;
@@ -48,16 +53,10 @@ interface Fundraiser {
 export default function FundraisersTab({ customerId, businessSlug }: { customerId: string, businessSlug: string }) {
     const [campaigns, setCampaigns] = useState<Fundraiser[]>([]);
     const [loading, setLoading] = useState(true);
-    const [isCreating, setIsCreating] = useState(false);
+    // OPS-2: opens the canonical StartFundraiserWizard (prefilled to this
+    // organization) instead of the removed inline "New Campaign" form.
+    const [showWizard, setShowWizard] = useState(false);
     const [editingLabelsId, setEditingLabelsId] = useState<string | null>(null);
-    const [newCampaign, setNewCampaign] = useState({
-        name: '',
-        bundleGoal: '',
-        endDate: '',
-        participantLabel: 'Seller',
-        groupLabel: '',
-        orgShare: ORG_SHARE_DEFAULT_INPUT
-    });
 
     const [editData, setEditData] = useState({
         participant_label: '',
@@ -71,8 +70,6 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
         role: (session?.user as any)?.role,
         isSuperAdmin: (session?.user as any)?.isSuperAdmin === true,
     };
-    const shareAuthorized = canManageOrgShare(shareUser);
-    const createShareError = shareAuthorized ? orgShareInputError(newCampaign.orgShare) : null;
     const [editingShareId, setEditingShareId] = useState<string | null>(null);
     const [shareInput, setShareInput] = useState(ORG_SHARE_DEFAULT_INPUT);
     const [savingShare, setSavingShare] = useState(false);
@@ -176,44 +173,6 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
             toast.error('Failed to save bundle assignments');
         } finally {
             setSavingBundles(false);
-        }
-    }
-
-    async function handleCreate(e: React.FormEvent) {
-        e.preventDefault();
-        // INV-A: refuse to submit a share the server would reject anyway.
-        if (createShareError) {
-            toast.error(createShareError);
-            return;
-        }
-        setLoading(true);
-        try {
-            const res = await fetch('/api/campaigns', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    customerId,
-                    name: newCampaign.name,
-                    bundleGoal: newCampaign.bundleGoal ? Number(newCampaign.bundleGoal) : undefined,
-                    endDate: newCampaign.endDate,
-                    participantLabel: newCampaign.participantLabel,
-                    groupLabel: newCampaign.groupLabel,
-                    // INV-A: key present only for an authorized ADMIN/super-admin
-                    // with a non-blank value; the DB default (20.00) otherwise.
-                    ...orgShareRequestField({ user: shareUser, raw: newCampaign.orgShare })
-                })
-            });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error);
-
-            toast.success('Campaign created!');
-            setNewCampaign({ name: '', bundleGoal: '', endDate: '', participantLabel: 'Seller', groupLabel: '', orgShare: ORG_SHARE_DEFAULT_INPUT });
-            setIsCreating(false);
-            fetchCampaigns();
-        } catch (error: any) {
-            toast.error(error.message);
-        } finally {
-            setLoading(false);
         }
     }
 
@@ -368,128 +327,21 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
             <div className="flex justify-between items-center">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white">Active Campaigns</h3>
                 <button
-                    onClick={() => setIsCreating(!isCreating)}
+                    onClick={() => setShowWizard(true)}
                     className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                 >
                     <Plus className="w-4 h-4" /> New Campaign
                 </button>
             </div>
 
-            {isCreating && (
-                <div className="bg-slate-50 dark:bg-slate-800/50 p-6 rounded-xl border border-slate-200 dark:border-slate-700 animate-in slide-in-from-top-2">
-                    <form onSubmit={handleCreate} className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Campaign Name</label>
-                                <input
-                                    required
-                                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold"
-                                    placeholder="e.g. Spring 2026 Fundraiser"
-                                    value={newCampaign.name}
-                                    onChange={e => setNewCampaign({ ...newCampaign, name: e.target.value })}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Bundle Goal</label>
-                                <input
-                                    type="number"
-                                    min={1}
-                                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold"
-                                    placeholder="e.g. 20"
-                                    value={newCampaign.bundleGoal}
-                                    onChange={e => setNewCampaign({ ...newCampaign, bundleGoal: e.target.value })}
-                                />
-                                <p className="text-[10px] text-slate-400 mt-1">Weighted bundles — Serves 5 = 1, Serves 2 = ½. Defaults to {DEFAULT_BUNDLE_GOAL} if left blank.</p>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">End Date</label>
-                                <input
-                                    type="date"
-                                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold"
-                                    value={newCampaign.endDate}
-                                    onChange={e => setNewCampaign({ ...newCampaign, endDate: e.target.value })}
-                                />
-                            </div>
-                            {/* INV-A: organization share — editable for ADMIN /
-                                super-admin only; the server enforces this
-                                independently. Others see the default read-only. */}
-                            <div>
-                                <label htmlFor="new-org-share" className="block text-xs font-bold text-slate-500 uppercase mb-1">Organization Share</label>
-                                {shareAuthorized ? (
-                                    <>
-                                        <div className="flex items-center gap-2">
-                                            <input
-                                                id="new-org-share"
-                                                type="number"
-                                                min={0}
-                                                max={100}
-                                                step={0.01}
-                                                className="w-full max-w-[8rem] px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold"
-                                                value={newCampaign.orgShare}
-                                                aria-describedby={createShareError ? 'new-org-share-error' : 'new-org-share-help'}
-                                                aria-invalid={createShareError ? true : undefined}
-                                                onChange={e => setNewCampaign({ ...newCampaign, orgShare: e.target.value })}
-                                            />
-                                            <span className="text-sm font-bold text-slate-500 dark:text-slate-400">%</span>
-                                        </div>
-                                        <p id="new-org-share-help" className="text-[10px] text-slate-400 mt-1">{ORG_SHARE_HELPER_TEXT}</p>
-                                        {createShareError && (
-                                            <p id="new-org-share-error" role="alert" className="text-[11px] font-bold text-red-600 dark:text-red-400 mt-1">{createShareError}</p>
-                                        )}
-                                    </>
-                                ) : (
-                                    <>
-                                        <p className="px-3 py-2 font-bold text-slate-900 dark:text-white">20%</p>
-                                        <p className="text-[10px] text-slate-400 mt-1">{ORG_SHARE_ADMIN_MANAGED_NOTE}</p>
-                                    </>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Terminology Settings */}
-                        <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-                            <h4 className="text-xs font-black text-indigo-500 uppercase tracking-widest mb-4">Terminology Settings</h4>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Participant Label</label>
-                                    <input
-                                        className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold"
-                                        placeholder="e.g. Student, Seller, Athlete"
-                                        value={newCampaign.participantLabel}
-                                        onChange={e => setNewCampaign({ ...newCampaign, participantLabel: e.target.value })}
-                                    />
-                                    <p className="text-[10px] text-slate-400 mt-1">What do you call the individuals selling?</p>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Group Label (Optional)</label>
-                                    <input
-                                        className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold"
-                                        placeholder="e.g. Classroom, Team, Squad"
-                                        value={newCampaign.groupLabel}
-                                        onChange={e => setNewCampaign({ ...newCampaign, groupLabel: e.target.value })}
-                                    />
-                                    <p className="text-[10px] text-slate-400 mt-1">Use for classrooms or groups (Enterprise Only).</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex justify-end gap-2 pt-2">
-                            <button
-                                type="button"
-                                onClick={() => setIsCreating(false)}
-                                className="px-4 py-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-sm font-medium"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="submit"
-                                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 font-bold"
-                            >
-                                Create Campaign
-                            </button>
-                        </div>
-                    </form>
-                </div>
+            {showWizard && (
+                <StartFundraiserWizard
+                    prefill={{ customerId }}
+                    onClose={() => {
+                        setShowWizard(false);
+                        fetchCampaigns();
+                    }}
+                />
             )}
 
             <div className="grid gap-4">
