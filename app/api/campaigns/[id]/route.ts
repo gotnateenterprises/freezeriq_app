@@ -38,6 +38,25 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
             return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
         }
 
+        // ── CRM-CAMPAIGN-ARCHIVE-ACTION-1 ──────────────────────────────────────
+        // 'Archived' was already in validStatuses above, but nothing gated WHO
+        // could reach it — a currently-Active, orderable campaign could have been
+        // silently archived off the dashboard with no eligibility check at all.
+        // Archiving is for closed/historical cleanup, not a way to pull a live
+        // campaign out of sight. Reuses isCampaignClosed, already imported here
+        // for the org-share and bundle-goal gates below — not a new definition
+        // of "closed". A campaign already Archived stays closed-family (it is in
+        // CLOSED_STATUSES), so re-archiving is a harmless idempotent no-op.
+        if (body.status === 'Archived' && !isCampaignClosed({
+            closed_at: (campaign as any).closed_at ?? null,
+            status: campaign.status,
+        })) {
+            return NextResponse.json(
+                { error: 'Only a closed or completed fundraiser can be archived.' },
+                { status: 409 },
+            );
+        }
+
         // ── INV-A: per-campaign organization share ────────────────────────────
         // Editable only while the fundraiser is financially open. Once closeout
         // has frozen settlement_total, the share is part of the frozen financial

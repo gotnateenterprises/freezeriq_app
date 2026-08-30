@@ -72,6 +72,7 @@ export function CampaignPriorityList({
     filterStatus,
     now,
     onCloseout,
+    onArchive,
     onOpenDetail,
 }: {
     /** Already search/filter-scoped rows from the page. */
@@ -85,6 +86,8 @@ export function CampaignPriorityList({
     now: Date;
     /** Existing Phase 7E closeout modal opener. */
     onCloseout: (c: PriorityListCampaign) => void;
+    /** CRM-CAMPAIGN-ARCHIVE-ACTION-1 — confirms, then PATCHes status: 'Archived'. */
+    onArchive: (c: PriorityListCampaign) => void;
     /** CRM-CC-4 — opens the Campaign Context drawer for one campaign. */
     onOpenDetail?: (c: PriorityListCampaign & { triage: CampaignTriage }) => void;
 }) {
@@ -191,6 +194,7 @@ export function CampaignPriorityList({
                                         onToggleMenu={() => setOpenMenuId((id) => (id === c.id ? null : c.id))}
                                         onCloseMenu={() => setOpenMenuId(null)}
                                         onCloseout={onCloseout}
+                                        onArchive={onArchive}
                                         onOpenDetail={onOpenDetail}
                                     />
                                 ))}
@@ -225,6 +229,7 @@ function CampaignRow({
     onToggleMenu,
     onCloseMenu,
     onCloseout,
+    onArchive,
     onOpenDetail,
 }: {
     c: PriorityListCampaign & { triage: CampaignTriage };
@@ -233,6 +238,7 @@ function CampaignRow({
     onToggleMenu: () => void;
     onCloseMenu: () => void;
     onCloseout: (c: PriorityListCampaign) => void;
+    onArchive: (c: PriorityListCampaign) => void;
     onOpenDetail?: (c: PriorityListCampaign & { triage: CampaignTriage }) => void;
 }) {
     const action = c.triage.action;
@@ -284,6 +290,14 @@ function CampaignRow({
     }
     if (!c.is_placeholder && c.triage.priority !== 'completed' && action?.kind !== 'closeout') {
         menuItems.push({ key: 'closeout', label: 'Close out fundraiser', onClick: () => onCloseout(c), warn: true });
+    }
+    // CRM-CAMPAIGN-ARCHIVE-ACTION-1: only offered once the campaign is already
+    // closed-family (awaiting_payment or completed are the only two priorities
+    // triageCampaign ever returns for a closed campaign) -- this is the
+    // client-side mirror of the server's own eligibility guard, not a second
+    // definition of "closed". A live, orderable campaign never gets this item.
+    if (!c.is_placeholder && (c.triage.priority === 'awaiting_payment' || c.triage.priority === 'completed')) {
+        menuItems.push({ key: 'archive', label: 'Archive fundraiser', onClick: () => onArchive(c) });
     }
 
     return (

@@ -25,7 +25,7 @@ import { CampaignContextDrawer } from '@/components/crm2/CampaignContextDrawer';
 import { useDialogFocus } from '@/components/crm2/useDialogFocus';
 import type { CampaignTriage } from '@/lib/growth/nextAction';
 import { triageCampaign } from '@/lib/growth/nextAction';
-import { classifyCampaignLifecycle } from '@/lib/growth/campaignLifecycle';
+import { classifyCampaignLifecycle, resolveCampaignInvoiceState } from '@/lib/growth/campaignLifecycle';
 import type { CampaignHealth, CampaignHealthReason } from '@/lib/growth/health';
 import { FOOD_TAX_DEFAULT_APPLIED } from '@/lib/fundraiserCloseoutMath';
 import { resolveCloseoutTaxRate, formatTaxRate } from '@/lib/fundraiserTax';
@@ -296,6 +296,42 @@ export default function FundraisersPage() {
         setCloseoutResult(null);
     };
 
+    // ── CRM-CAMPAIGN-ARCHIVE-ACTION-1 ──────────────────────────────────────
+    // Archiving is filing/visibility, not finance completion -- it never
+    // touches invoice or payment state. The server enforces eligibility
+    // (closed-family only); this only decides the confirmation copy, which
+    // names that outstanding history explicitly rather than staying silent
+    // about it.
+    const handleArchiveCampaign = async (f: Fundraiser) => {
+        const invoiceState = resolveCampaignInvoiceState(f);
+        const unresolved = invoiceState !== 'paid' && invoiceState !== 'settled_externally' && invoiceState !== 'canceled';
+        const message = 'Archive this fundraiser? This removes it from your working Campaigns dashboard but '
+            + 'keeps its campaign, orders, invoice, and history.'
+            + (unresolved
+                ? ' This fundraiser still has unfinished invoice/payment history. Archiving will hide it from '
+                    + 'your working dashboard but will not mark anything paid.'
+                : '');
+        if (!confirm(message)) return;
+
+        try {
+            const res = await fetch(`/api/campaigns/${f.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: 'Archived' }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                alert(data.error || 'Failed to archive fundraiser. Please try again.');
+                return;
+            }
+            // Matches handleCloseout's own pattern: patch the row locally so it
+            // disappears from its section on this render, rather than a full reload.
+            setFundraisers(prev => prev.map(x => (x.id === f.id ? { ...x, status: 'Archived' } : x)));
+        } catch {
+            alert('Failed to archive fundraiser. Please try again.');
+        }
+    };
+
     const dismissCloseoutModal = () => {
         setCloseoutTarget(null);
         setCloseoutResult(null);
@@ -527,6 +563,7 @@ export default function FundraisersPage() {
                 filterStatus={filterStatus}
                 now={triageNow}
                 onCloseout={(c) => openCloseoutModal(c as Fundraiser)}
+                onArchive={(c) => handleArchiveCampaign(c as Fundraiser)}
                 onOpenDetail={setDetailCampaign}
             />
             </div>
