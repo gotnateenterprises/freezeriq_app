@@ -136,7 +136,18 @@ function isDuplicateCampaignSubmission(e: unknown): e is DuplicateCampaignSubmis
     return typeof e === 'object' && e !== null && (e as any).isDuplicateCampaignSubmission === true;
 }
 
-/** OPS-2 (gap 2): how recent a same-name campaign must be to count as "this same submission, again," not a legitimate, later, coincidentally-reused name. */
+/**
+ * OPS-2 (gap 2): how recent a same-(customer, name) campaign must be to
+ * count as "this same submission, again." A heuristic, not an identity —
+ * nothing here actually knows whether two requests are the same submission
+ * retried or two different ones that happen to share a name (StartFundraiserWizard
+ * auto-fills `${orgName} ${year} Fundraiser`, so this is a real collision the
+ * UI can produce, not just a contrived one). Within the window, a
+ * legitimately different second campaign is silently collapsed into the
+ * first instead of being created; outside it, protection stops and a true
+ * resubmission creates a second row. See T3/T4/T5 in
+ * tests/ops2CampaignCreationBypass.test.ts.
+ */
 const DUPLICATE_SUBMISSION_WINDOW_MS = 30_000;
 
 export async function POST(req: Request) {
@@ -324,18 +335,29 @@ export async function POST(req: Request) {
          */
         const runCreate = async <T>(create: (tx: typeof prisma) => Promise<T>): Promise<T> => {
             if (!opportunityId) {
-                // OPS-2 (gap 2): a direct create has no pre-existing row to
-                // conditionally claim the way the opportunityId branch below
-                // does — there is no FundraiserOpportunity or
-                // RebookingOpportunity to point at when the wizard opens for
-                // a brand-new organization. An advisory transaction lock
-                // gives the same atomic-claim guarantee without a new column
-                // or table: a concurrent identical submission (same tenant,
-                // same organization, same campaign name — a double-click, a
-                // retried request, or a second open tab) blocks here until
-                // this transaction commits or rolls back, then finds what
-                // this one left behind instead of racing it. Postgres
-                // releases the lock automatically when the transaction ends,
+                // OPS-2 (gap 2) — CORRECTED: a direct create has no
+                // pre-existing row to conditionally claim the way the
+                // opportunityId branch below does (RebookingOpportunity) or
+                // the canonical launch route does (FundraiserOpportunity) —
+                // there is nothing durable to point at when the wizard opens
+                // for a brand-new organization with no tracked opportunity.
+                // This advisory transaction lock is real, Postgres-serialized
+                // protection against a genuinely CONCURRENT identical
+                // submission (two open tabs, a double-click, a retry that
+                // overlaps the first request in flight): the second blocks on
+                // the lock until the first commits or rolls back, then sees
+                // what the first left behind and resolves to it instead of
+                // racing it. It is NOT durable request-level idempotency —
+                // a retry that arrives after DUPLICATE_SUBMISSION_WINDOW_MS
+                // has elapsed is indistinguishable from a new, unrelated
+                // campaign and WILL create a second row. Closing that
+                // remaining gap durably would need either a schema change
+                // (a client-supplied idempotency key column) or a
+                // pre-existing durable row to claim, neither of which exists
+                // for this path today; see
+                // tests/ops2CampaignCreationBypass.test.ts's T3/T4/T5 tests
+                // for the exact, proven boundary. Postgres releases the
+                // advisory lock automatically when the transaction ends,
                 // committed or not.
                 return prisma.$transaction(async (tx) => {
                     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${customerId} || ':' || ${name}))`;

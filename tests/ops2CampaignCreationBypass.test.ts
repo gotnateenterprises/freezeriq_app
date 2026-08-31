@@ -276,6 +276,61 @@ describe('POST /api/campaigns: duplicate-submission protection on the direct cre
         expect(res.status).toBe(200);
         expect(db.fundraiserCampaign.create).toHaveBeenCalledTimes(1);
     });
+
+    // ═════════════════════════════════════════════════════════════════════
+    // FINAL AUTHORITY PASS -- honest scope of the duplicate guard.
+    //
+    // The 30-second window (DUPLICATE_SUBMISSION_WINDOW_MS in
+    // app/api/campaigns/route.ts) is real, durable, Postgres-serialized
+    // protection against T0 (two genuinely concurrent submissions) and T1/T2
+    // (an immediate or near-immediate retry) -- proven by the tests above.
+    // It is NOT durable request-level idempotency: a retry outside the
+    // window is indistinguishable, at the database level, from an
+    // intentional new campaign with the same name, because nothing durable
+    // identifies "this exact submission attempt" the way FR-LAUNCH-1E's
+    // conditional claim identifies a specific opportunity row. There is no
+    // pre-existing row to attach that identity to for a brand-new
+    // organization with no tracked opportunity, and adding one would require
+    // a schema change, which this phase does not make. These two tests make
+    // that boundary explicit and regression-tested rather than an
+    // undocumented, easy-to-miss gap.
+    // ═════════════════════════════════════════════════════════════════════
+
+    it('T3/T4: a retry outside the duplicate-suppression window creates a SECOND campaign -- by design, this is NOT durable idempotency', async () => {
+        // fundraiserCampaign.findFirst defaults to null in beforeEach --
+        // exactly what the "no recent duplicate" query returns once the
+        // first campaign's created_at has aged out of the 30-second window
+        // (or, identically to the database, a genuinely fresh request).
+        const { res } = await post(validCoordinatorSelectsBody());
+        expect(res.status).toBe(200);
+        expect(db.fundraiserCampaign.create).toHaveBeenCalledTimes(1);
+        // Do not call this idempotent: a second identical POST right now,
+        // still simulating "no recent duplicate," would create a second
+        // FundraiserCampaign row with the same (customer_id, name). Nothing
+        // in this route prevents that once 30 seconds have passed.
+    });
+
+    it('T5 (honest limitation): two DIFFERENTLY-INTENDED campaigns for the same org, submitted within the window under the SAME name, are wrongly collapsed into one', async () => {
+        // StartFundraiserWizard auto-fills the campaign name as
+        // `${orgName} ${year} Fundraiser` (components/crm2/StartFundraiserWizard.tsx)
+        // whenever the field is left blank -- so a tenant launching a second,
+        // genuinely distinct campaign for the same organization in the same
+        // year, without renaming it, reaches this exact collision through
+        // the real UI, not merely a contrived test body. The database
+        // cannot distinguish that from a resubmitted retry -- both look
+        // identical: same customer_id, same name, within the window.
+        db.fundraiserCampaign.findFirst.mockResolvedValue({
+            id: 'camp-first-intentional-campaign', customer_id: 'cust-1', name: 'Spring Sale',
+        });
+        const { res, body } = await post(validCoordinatorSelectsBody());
+        // The tenant's second, genuinely different campaign silently never
+        // gets created -- they are handed back the FIRST one instead, with
+        // no error and no indication anything was skipped.
+        expect(res.status).toBe(200);
+        expect(body.id).toBe('camp-first-intentional-campaign');
+        expect(body.alreadyConverted).toBe(true);
+        expect(db.fundraiserCampaign.create).not.toHaveBeenCalled();
+    });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
