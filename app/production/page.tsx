@@ -6,10 +6,12 @@ import HoldingArea from '@/components/production/HoldingArea';
 import PrepList from '@/components/production/PrepList';
 import ProductionCalculator from '@/components/production/ProductionCalculator';
 import DeliveryQueue from '@/components/production/DeliveryQueue';
+// OPS-3: campaign-level fundraiser waiting lane, held until invoice payment.
+import FundraiserWaiting from '@/components/production/FundraiserWaiting';
 
 export default function ProductionPage() {
     const [activeTab, setActiveTab] = useState<'dashboard' | 'planner'>('dashboard');
-    const [data, setData] = useState<{ pending: any[], prep: any[], completed: any[] } | null>(null);
+    const [data, setData] = useState<{ pending: any[], prep: any[], completed: any[], fundraiserWaiting?: any[] } | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
     const refreshData = async () => {
@@ -128,6 +130,28 @@ export default function ProductionPage() {
                                     />
                                 )}
                             </div>
+                        </div>
+
+                        {/* OPS-3: FUNDRAISER ORDERS · WAITING.
+                            Deliberately its own lane, below the customer lanes and
+                            above the delivery queue. These orders are held at
+                            fundraiser_hold, which every customer lane above
+                            excludes — so a fundraiser can never be counted twice,
+                            and ordinary customer intake is unaffected. */}
+                        <div className="space-y-6">
+                            <div className="flex items-center justify-between">
+                                <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+                                    <div className="w-2 h-8 bg-emerald-500 rounded-full" />
+                                    Fundraisers Waiting
+                                </h2>
+                                <span className="text-xs font-bold text-slate-400">
+                                    Released to production when the invoice is paid
+                                </span>
+                            </div>
+                            <FundraiserWaiting
+                                batches={data?.fundraiserWaiting || []}
+                                loading={isLoading && !data}
+                            />
                         </div>
 
                         {/* Bottom Row: Delivery Queue */}

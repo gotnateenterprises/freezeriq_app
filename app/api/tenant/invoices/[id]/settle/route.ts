@@ -178,14 +178,50 @@ export async function POST(
             //    deleted them, so they moved here — the one place an invoice now
             //    becomes paid — and their conditions are unchanged.
 
-            // 1. A paid ordinary invoice releases its order to the kitchen.
-            //    Campaign invoices are excluded exactly as INV-A excluded them:
-            //    their fulfilment lives on the campaign's own orders, and a
-            //    campaign invoice has no linked order to promote in the first place.
+            // 1. A paid invoice releases its work to the kitchen.
+            //
+            //    ORDINARY invoice: promote the order linked by invoice_id. A
+            //    campaign invoice has no such linked order, which is why this
+            //    branch is scoped and why the campaign case needs its own.
             if (!invoice.campaign_id) {
                 await tx.order.updateMany({
                     where: { invoice_id: invoice.id, business_id: businessId },
                     data: { status: 'production_ready' },
+                });
+            } else {
+                // ── OPS-3: the fundraiser production release. ────────────────
+                //
+                //    CAMPAIGN invoice: its fulfilment is the campaign's own
+                //    orders, reached by campaign_id (they are never linked by
+                //    invoice_id). This updateMany is the one that used to live
+                //    in app/api/campaigns/[id]/closeout/route.ts and ran at
+                //    CLOSEOUT — releasing food before the invoice was even sent.
+                //    It is unchanged apart from where it runs: same predicate,
+                //    same target status.
+                //
+                //    EXACT-ONCE, twice over, with no new schema and no time
+                //    window:
+                //      1. it is inside `result.count !== 1` above, so only the
+                //         request that actually won the PAID transition reaches
+                //         it — a second Record Payment returns the already-paid
+                //         payload and never gets here;
+                //      2. `status: 'fundraiser_hold'` is itself the durable
+                //         claim — once these rows are production_ready they can
+                //         never match again, so a replay, a retry, a refresh, or
+                //         a future duplicate payment event promotes nothing.
+                //
+                //    business_id is asserted on the Order rows themselves, not
+                //    inferred from the campaign, so a campaign id can never
+                //    reach across tenants.
+                await tx.order.updateMany({
+                    where: {
+                        campaign_id: invoice.campaign_id,
+                        business_id: businessId,
+                        source: 'fundraiser' as any,
+                        status: 'fundraiser_hold' as any,
+                        canceled_at: null,
+                    },
+                    data: { status: 'production_ready' as any },
                 });
             }
 
@@ -407,11 +443,18 @@ export async function DELETE(
             //    which is where that decision belongs.
 
             // ── Linked fulfilment orders are deliberately NOT reverted.
-            //    Settlement promotes an ordinary invoice's order to
-            //    production_ready. Production is a PHYSICAL fact — correcting a
-            //    bookkeeping mistake does not un-cook food — and the order's prior
+            //    Settlement promotes an ordinary invoice's order — and, since
+            //    OPS-3, a campaign invoice's fundraiser orders — to
+            //    production_ready. Production is a PHYSICAL fact: correcting a
+            //    bookkeeping mistake does not un-cook food, and the order's prior
             //    status is not recorded, so "restoring" it would be a guess that
             //    could pull real work out of the kitchen queue.
+            //
+            //    OPS-3 reviewed this and deliberately left it exactly as it is.
+            //    Un-releasing a fundraiser batch here would silently delete a
+            //    kitchen requirement for food that may already be in progress.
+            //    Handling a genuine post-release payment reversal is registered
+            //    as future debt, not solved by a side effect of an undo button.
 
             return result;
         });

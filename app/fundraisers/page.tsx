@@ -635,11 +635,16 @@ export default function FundraisersPage() {
                                 <CheckCircle2 size={18} aria-hidden="true" />
                                 Campaign closed
                             </div>
-                            {closeoutResult.promoted_order_count !== undefined && (
-                                <p className="text-sm text-emerald-700 dark:text-emerald-400 font-bold">
-                                    {closeoutResult.promoted_order_count} order{closeoutResult.promoted_order_count !== 1 ? 's' : ''} moved to production.
-                                </p>
-                            )}
+                            {/* OPS-3: closeout no longer moves orders to production —
+                                the fundraiser's invoice being PAID does. Saying
+                                "N orders moved to production" here was true before
+                                that change and is false after it, so it now states
+                                the real next step instead of a count that is always
+                                zero. promoted_order_count remains in the API shape
+                                and is deliberately not rendered. */}
+                            <p className="text-sm text-emerald-700 dark:text-emerald-400 font-bold">
+                                Orders stay held until this fundraiser&apos;s invoice is paid, then release to production.
+                            </p>
                             {closeoutResult.settlement_total !== undefined && closeoutResult.settlement_total !== null && (
                                 <p className="text-sm text-emerald-700 dark:text-emerald-400 font-bold font-mono">
                                     Settlement total: ${Number(closeoutResult.settlement_total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

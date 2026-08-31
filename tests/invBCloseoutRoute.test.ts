@@ -248,11 +248,34 @@ describe('closeout has no send or payment side effects', () => {
         expect(calls.some((c) => /email|send/i.test(c.op))).toBe(false);
     });
 
-    it('still promotes held fundraiser orders, after the claim', async () => {
+    /**
+     * OPS-3 INVERTED THIS TEST ON PURPOSE.
+     *
+     * It used to read "still promotes held fundraiser orders, after the claim"
+     * and assert `ops` contained 'orders.promote'. That assertion was correct
+     * about the code and wrong about the product: closeout released food to the
+     * kitchen in the same transaction that creates the invoice as a DRAFT —
+     * before it was sent, let alone paid.
+     *
+     * The release moved, unchanged, to the one place an invoice becomes PAID
+     * (app/api/tenant/invoices/[id]/settle/route.ts). Closeout must now promote
+     * NOTHING, which is what this asserts. The paid-side half is proven in
+     * tests/ops3FundraiserBatchProduction.test.ts.
+     */
+    it('OPS-3: does NOT promote held fundraiser orders — closeout is not the release gate', async () => {
         await post({ applyFoodTax: false });
         const ops = calls.map((c) => c.op);
-        expect(ops).toContain('orders.promote');
-        expect(ops.indexOf('campaign.claim')).toBeLessThan(ops.indexOf('orders.promote'));
+        expect(ops).not.toContain('orders.promote');
+        // The rest of closeout is untouched: it still claims the campaign and
+        // still writes the DRAFT invoice, in that order.
+        expect(ops).toContain('campaign.claim');
+        expect(ops).toContain('invoice.create');
+        expect(ops.indexOf('campaign.claim')).toBeLessThan(ops.indexOf('invoice.create'));
+    });
+
+    it('OPS-3: reports promoted_order_count 0 rather than dropping the field', async () => {
+        const body = await (await post({ applyFoodTax: false })).json();
+        expect(body.promoted_order_count).toBe(0);
     });
 });
 

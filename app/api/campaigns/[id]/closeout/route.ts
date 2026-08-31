@@ -338,25 +338,32 @@ export async function POST(
                     throw new CampaignAlreadyClosedError();
                 }
 
-                // 3. Batch-promote fundraiser_hold orders to production_ready.
-                //    Runs ONLY after the claim is won, so a losing request can
-                //    never release held orders.
-                //    Only targets:
-                //      - orders belonging to this campaign
-                //      - source = 'fundraiser' (coordinator-entered)
-                //      - status = 'fundraiser_hold' (not yet promoted)
-                //      - not canceled
-                const promoted = await tx.order.updateMany({
-                    where: {
-                        campaign_id: campaignId,
-                        source: 'fundraiser' as any,
-                        status: 'fundraiser_hold' as any,
-                        canceled_at: null
-                    },
-                    data: {
-                        status: 'production_ready' as any
-                    }
-                });
+                // 3. OPS-3: closeout NO LONGER releases held orders to the kitchen.
+                //
+                //    It used to. The `tx.order.updateMany` that lived here promoted
+                //    this campaign's fundraiser_hold orders straight to
+                //    production_ready, in the same transaction that creates the
+                //    invoice below as a DRAFT. That released food to be cooked
+                //    before the organization's invoice had even been SENT, let
+                //    alone paid — the exact leak docs/ai/SETTLEMENT_CONSTITUTION.md
+                //    was written to close, whose hold half shipped and whose
+                //    paid-gate half never did.
+                //
+                //    The release now hangs off the one place an invoice actually
+                //    becomes PAID: app/api/tenant/invoices/[id]/settle/route.ts,
+                //    inside the winner-only branch of its conditional PAID
+                //    transition. The updateMany moved there UNCHANGED — same
+                //    campaign_id + source + status + canceled_at predicate, same
+                //    target status — so what "released" means did not change, only
+                //    when it happens.
+                //
+                //    Closeout keeps everything else it ever did: the campaign
+                //    claim above, the settlement snapshot, and the DRAFT invoice
+                //    below. None of the money is touched by this phase.
+                //
+                //    promoted_order_count stays in the response shape (0 now) so
+                //    no caller breaks on a missing field; the closeout UI copy was
+                //    corrected to stop claiming orders moved to production.
 
                 // 5. Create exactly ONE DRAFT invoice, after the claim is won.
                 //
@@ -424,7 +431,10 @@ export async function POST(
                 return {
                     settlementTotal,
                     closedAt,
-                    promotedCount: promoted.count,
+                    // OPS-3: always 0 — closeout no longer releases orders. Kept in
+                    // the shape rather than deleted so no caller breaks on a
+                    // missing field. See the note at step 3 above.
+                    promotedCount: 0,
                     invoiceId,
                     lines,
                     financials,
