@@ -964,6 +964,7 @@ export default function CoordinatorPortal() {
                         onCancel={(id) => setCancelOrderId(id)}
                         onViewAll={() => setShowAllOrders(!showAllOrders)}
                         limit={showAllOrders ? 999 : 3}
+                        hasExternalPaymentLink={hasPaymentInfo}
                     />
                     <QuietLinks
                         guideHref={'/coordinator/portal/guide'}
@@ -1010,6 +1011,7 @@ export default function CoordinatorPortal() {
                         onCancel={(id) => setCancelOrderId(id)}
                         onViewAll={() => setShowAllOrders(!showAllOrders)}
                         limit={showAllOrders ? 999 : 3}
+                        hasExternalPaymentLink={hasPaymentInfo}
                     />
                 </>)}
 
@@ -1062,6 +1064,7 @@ export default function CoordinatorPortal() {
                         onViewAll={() => setShowAllOrders(!showAllOrders)}
                         limit={showAllOrders ? 999 : 3}
                         isClosed={isClosed}
+                        hasExternalPaymentLink={hasPaymentInfo}
                     />
                 </>)}
                 </>)}
