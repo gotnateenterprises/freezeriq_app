@@ -1027,6 +1027,20 @@ export default function FundraiserClient({
                                     />
                                 </label>
 
+                                {/* PRIVACY-DISCLOSURE-1: proven, not assumed, against
+                                    app/api/coordinator/route.ts's GET (deliberately
+                                    PII-filtered — no email/phone/address) and
+                                    lib/email.ts's sendFundraiserCoordinatorNotification
+                                    (name, email, phone, participant, items, and
+                                    payment-owed DO reach the coordinator by email at
+                                    order time). Placed before the submit button, not
+                                    after, so it is read before the action it describes
+                                    rather than as an afterthought. tenantName (above)
+                                    is this exact page's own established brand
+                                    variable — reused, not a second source. */}
+                                <p style={{ margin: '.6rem 0 0', textAlign: 'center', fontSize: '.62rem', color: '#b09484' }}>
+                                    The name, email, and phone you provide are shared with your fundraiser coordinator and {tenantName} to manage this order, payment, and fundraiser fulfillment.
+                                </p>
                                 <button
                                     onClick={submitOrder}
                                     disabled={!canSubmit}
