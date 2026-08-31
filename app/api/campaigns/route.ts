@@ -16,6 +16,11 @@ import {
   refusalHttpStatus,
   type ConvertibleOpportunity,
 } from '@/lib/rebookingConversion';
+// OPS-2 (gap 1): the same confirmed-delivery-date and order-deadline checks
+// the canonical opportunity launch already enforces, reused rather than
+// reinvented so a direct creation can never require a weaker date contract
+// than a launched one.
+import { checkConfirmedDate, checkOrderDeadline } from '@/lib/fundraiserLaunch';
 
 
 // Helper to safely serialize BigInt
@@ -68,6 +73,10 @@ interface CreateCampaignBody {
   name: string;
   bundleGoal?: number | null;
   endDate?: string | null;
+  // OPS-2 (gap 1): the confirmed delivery/pickup day — the DELIVERY/PICKUP
+  // day, distinct from endDate (the supporter order deadline). Required for
+  // every normal creation; see the coordinator_selects branch below.
+  deliveryDate?: string | null;
   missionText?: string | null;
   aboutText?: string | null;
   participantLabel?: string | null;
@@ -93,10 +102,42 @@ interface CreateCampaignBody {
  * FR-RETENTION-5 — thrown when the opportunity could not be claimed inside the
  * transaction. Carries no message the tenant sees; the caller re-reads the row
  * and produces the accurate reason.
+ *
+ * OPS-2 (gap 2): identified by a marker rather than `instanceof`, discovered
+ * while adding DuplicateCampaignSubmission right below — subclassing a
+ * built-in loses the prototype link when the class is downlevelled, so
+ * `instanceof` is false under the test transform even though it holds in the
+ * app build today. Same fix already applied for this exact reason to
+ * app/api/opportunities/[id]/launch/route.ts's own claim-failure class; a
+ * field cannot drift the way a downlevel target can.
  */
 class OpportunityClaimFailed extends Error {
+    readonly isOpportunityClaimFailed = true as const;
     constructor() { super('opportunity_claim_failed'); }
 }
+
+function isOpportunityClaimFailure(e: unknown): e is OpportunityClaimFailed {
+    return typeof e === 'object' && e !== null && (e as any).isOpportunityClaimFailed === true;
+}
+
+/**
+ * OPS-2 (gap 2) — thrown when a concurrent or resubmitted request already
+ * created the campaign this request was about to create. Carries the
+ * existing campaign's id so the catch handler can hand it back instead of
+ * creating a second one. Marker property, not `instanceof` — see
+ * OpportunityClaimFailed just above.
+ */
+class DuplicateCampaignSubmission extends Error {
+    readonly isDuplicateCampaignSubmission = true as const;
+    constructor(readonly existingCampaignId: string) { super('duplicate_campaign_submission'); }
+}
+
+function isDuplicateCampaignSubmission(e: unknown): e is DuplicateCampaignSubmission {
+    return typeof e === 'object' && e !== null && (e as any).isDuplicateCampaignSubmission === true;
+}
+
+/** OPS-2 (gap 2): how recent a same-name campaign must be to count as "this same submission, again," not a legitimate, later, coincidentally-reused name. */
+const DUPLICATE_SUBMISSION_WINDOW_MS = 30_000;
 
 export async function POST(req: Request) {
     // FR-RETENTION-5: captured outside the try so the claim-failure handler can
@@ -125,6 +166,7 @@ export async function POST(req: Request) {
             name,
             bundleGoal,
             endDate,
+            deliveryDate,
             missionText,
             aboutText,
             participantLabel,
@@ -282,7 +324,35 @@ export async function POST(req: Request) {
          */
         const runCreate = async <T>(create: (tx: typeof prisma) => Promise<T>): Promise<T> => {
             if (!opportunityId) {
-                return prisma.$transaction(async (tx) => create(tx as unknown as typeof prisma));
+                // OPS-2 (gap 2): a direct create has no pre-existing row to
+                // conditionally claim the way the opportunityId branch below
+                // does — there is no FundraiserOpportunity or
+                // RebookingOpportunity to point at when the wizard opens for
+                // a brand-new organization. An advisory transaction lock
+                // gives the same atomic-claim guarantee without a new column
+                // or table: a concurrent identical submission (same tenant,
+                // same organization, same campaign name — a double-click, a
+                // retried request, or a second open tab) blocks here until
+                // this transaction commits or rolls back, then finds what
+                // this one left behind instead of racing it. Postgres
+                // releases the lock automatically when the transaction ends,
+                // committed or not.
+                return prisma.$transaction(async (tx) => {
+                    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${customerId} || ':' || ${name}))`;
+
+                    const recentDuplicate = await tx.fundraiserCampaign.findFirst({
+                        where: {
+                            customer_id: customerId,
+                            name,
+                            created_at: { gte: new Date(Date.now() - DUPLICATE_SUBMISSION_WINDOW_MS) },
+                        },
+                        select: { id: true },
+                        orderBy: { created_at: 'desc' },
+                    });
+                    if (recentDuplicate) throw new DuplicateCampaignSubmission(recentDuplicate.id);
+
+                    return create(tx as unknown as typeof prisma);
+                });
             }
             return prisma.$transaction(async (tx) => {
                 const claimed = await tx.rebookingOpportunity.updateMany({
@@ -333,6 +403,37 @@ export async function POST(req: Request) {
             return NextResponse.json({
                 error: `A new fundraiser campaign must specify the allowed Bundle pool: bundleSelection with mode 'coordinator_selects', candidateFamilyIds, and selectionLimit.`,
             }, { status: 400 });
+        }
+
+        // ── OPS-2 (gap 1): confirmed delivery/pickup date is required ──────────
+        //
+        // The canonical opportunity launch (app/api/opportunities/[id]/launch)
+        // has always required a confirmed delivery date before a campaign can
+        // exist. This route — the direct creation path StartFundraiserWizard
+        // posts to for an organization with no FundraiserOpportunity at all —
+        // never asked for one: delivery_date was simply left null, on every
+        // campaign this route has ever created. Reusing checkConfirmedDate (the
+        // exact check the launch route itself runs, not a second copy of its
+        // logic) means both creation paths can never define "confirmed"
+        // differently.
+        const dateCheck = checkConfirmedDate(deliveryDate);
+        if (!dateCheck.ok) {
+            return NextResponse.json({ error: dateCheck.error }, { status: 400 });
+        }
+        // endDate's own presence is unchanged by this phase — it was optional
+        // on this route before OPS-2 and stays optional here. What's new is
+        // only the relationship: an endDate that IS supplied must not sit
+        // after the now-required delivery date, reusing checkOrderDeadline
+        // (the launch route's own relationship check) rather than a second
+        // copy of "deadline cannot be after delivery."
+        if (endDate) {
+            const deadlineCheck = checkOrderDeadline({
+                endDate,
+                confirmedDeliveryDate: dateCheck.confirmedDeliveryDate,
+            });
+            if (!deadlineCheck.ok) {
+                return NextResponse.json({ error: deadlineCheck.error }, { status: 400 });
+            }
         }
 
         // ── coordinator_selects: the only campaign-creation path this route
@@ -463,6 +564,9 @@ export async function POST(req: Request) {
                             tax_status: taxSnapshot.status as any,
                             tax_rate_percent: taxSnapshot.ratePercent,
                             end_date: endDate ? new Date(endDate) : undefined,
+                            // OPS-2 (gap 1): PART L's own pattern — the confirmed
+                            // date is the DELIVERY day, never start_date.
+                            delivery_date: new Date(`${dateCheck.confirmedDeliveryDate}T00:00:00.000Z`),
                             // @ts-ignore - Stale client
                             mission_text: missionText,
                             // @ts-ignore - Stale client
@@ -512,7 +616,7 @@ export async function POST(req: Request) {
         // concurrent request won the race or the state changed underneath us.
         // The transaction rolled back, so no campaign was created. Re-read and
         // answer with what is now true rather than a generic error.
-        if (e instanceof OpportunityClaimFailed) {
+        if (isOpportunityClaimFailure(e)) {
             if (attemptedBusinessId && attemptedOpportunityId) {
                 const now = await prisma.rebookingOpportunity.findFirst({
                     where: { id: attemptedOpportunityId, business_id: attemptedBusinessId },
@@ -529,6 +633,15 @@ export async function POST(req: Request) {
                 error: 'A fundraiser for this organization was just created somewhere else. Reload to see it.',
                 refusal: 'already_converted',
             }, { status: 409 });
+        }
+        // OPS-2 (gap 2): a concurrent or resubmitted request already created
+        // this campaign. Tenant-scoped re-read, exactly like the claim-failure
+        // handler above — the id on the error is never trusted blindly.
+        if (isDuplicateCampaignSubmission(e) && attemptedBusinessId) {
+            const already = await prisma.fundraiserCampaign.findFirst({
+                where: { id: e.existingCampaignId, customer: { business_id: attemptedBusinessId } },
+            });
+            if (already) return NextResponse.json({ ...already, alreadyConverted: true });
         }
         console.error("Failed to create campaign:", e);
         return NextResponse.json({ error: e.message || "Internal Server Error" }, { status: 500 });

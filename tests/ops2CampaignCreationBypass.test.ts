@@ -44,8 +44,41 @@
  * classified separately: it explicitly writes status:'Lead' (not 'Active'),
  * has no live single-campaign UI, and is a genuine legacy/migration tool
  * (Part L option B) -- not the primary bypass, not touched by this phase.
- * See the Final Report for the (theoretical, low-severity, not-currently-
- * reachable) note about its own not_required default.
+ *
+ * OPS-2 COMPLETION CORRECTION -- three gaps the first pass left open, all
+ * closed below:
+ *
+ *   GAP 1 (date authority): the fix above closed the Bundle-pool half of the
+ *   contract but never checked the date half. StartFundraiserWizard --
+ *   which BOTH surviving callers of this route use, including the
+ *   FundraisersTab.tsx path this phase just rewired -- posts to
+ *   /api/campaigns with no delivery_date field at all; the route never asked
+ *   for one. A campaign could go Active with a real allowed-Bundle pool and
+ *   still no confirmed delivery date. The route now requires and validates
+ *   one (deliveryDate), reusing lib/fundraiserLaunch.ts's own
+ *   checkConfirmedDate/checkOrderDeadline -- the exact functions the
+ *   canonical launch route calls -- rather than a second date contract.
+ *
+ *   GAP 2 (duplicate creation): the opportunityId branch of runCreate has a
+ *   real atomic claim (FR-LAUNCH-1E's conditional UPDATE); the direct/no-
+ *   opportunity branch -- what a brand-new organization always uses -- had
+ *   none. A double-click, a retried request, or two open tabs could create
+ *   two campaigns for the same submission. runCreate's direct branch now
+ *   takes a Postgres advisory transaction lock keyed to (customer_id, name)
+ *   before checking for a campaign already created in the last 30 seconds,
+ *   so a concurrent identical submission resolves to what the first one
+ *   already created instead of racing it -- no schema change, no new table.
+ *
+ *   GAP 3 (Lead/import orderability): resolveCampaignOrderMode never checked
+ *   campaign.status at all -- only closed_at and bundle_selection_status. A
+ *   status:'Lead' row (exactly what fundraisers/upload creates, carrying the
+ *   schema's not_required default) fell through to the not_required
+ *   "legacy fallback: business-wide validation preserved" branch and was
+ *   immediately orderable against the whole catalog if its id were known.
+ *   The gate now requires status === 'Active' first, independent of and in
+ *   addition to the bundle-selection matrix -- a historical Active
+ *   not_required campaign is unaffected; a pre-launch Lead row now fails
+ *   closed.
  */
 
 import { readFileSync } from 'fs';
@@ -65,8 +98,17 @@ const db: any = {
     business: { findUnique: jest.fn() },
     rebookingOpportunity: { findFirst: jest.fn(), updateMany: jest.fn(), update: jest.fn() },
     bundle: { findMany: jest.fn(async () => []) },
+    // findFirst here also backs gap 2's recent-duplicate check (inside the
+    // transaction) and its catch-handler re-read; defaults to "none found"
+    // below so every other test's happy path is unaffected.
     fundraiserCampaign: { create: jest.fn(), findFirst: jest.fn() },
     campaignBundle: { createMany: jest.fn() },
+    // OPS-2 (gap 2): the advisory-lock statement. A real no-op against this
+    // mock -- what's under test is runCreate's LOGIC given the lock already
+    // serialized the race, exactly how FR-LAUNCH-1E's own tests exercise the
+    // conditional-UPDATE branch by asserting the code's response to a
+    // count:0 claim rather than reproducing a real concurrent transaction.
+    $executeRaw: jest.fn(),
 };
 db.$transaction = jest.fn(async (fn: any) => fn(db));
 jest.mock('@/lib/db', () => ({ prisma: db }));
@@ -77,8 +119,10 @@ beforeEach(() => {
     db.customer.findFirst.mockResolvedValue({ id: 'cust-1', tax_status: 'UNKNOWN' });
     db.business.findUnique.mockResolvedValue({ default_food_tax_percent: 8 });
     db.fundraiserCampaign.create.mockImplementation(async (args: any) => ({ id: 'camp-1', ...args.data }));
+    db.fundraiserCampaign.findFirst.mockResolvedValue(null);
     db.campaignBundle.createMany.mockResolvedValue({ count: 0 });
     db.$transaction.mockImplementation(async (fn: any) => fn(db));
+    db.$executeRaw.mockResolvedValue(undefined);
 });
 
 const post = async (body: unknown) => {
@@ -91,6 +135,17 @@ const post = async (body: unknown) => {
     const res = await POST(req);
     return { res, body: await res.json().catch(() => ({})) };
 };
+
+// OPS-2 (gap 1): a valid coordinator_selects body with BOTH required dates
+// present and correctly ordered (deadline on/before delivery). Individual
+// tests override just the field(s) under test.
+const validCoordinatorSelectsBody = (extra: Record<string, unknown> = {}) => ({
+    customerId: 'cust-1', name: 'Spring Sale',
+    deliveryDate: '2026-05-10',
+    endDate: '2026-05-01',
+    bundleSelection: { mode: 'coordinator_selects' as const, candidateFamilyIds: ['fam1'], selectionLimit: 1 },
+    ...extra,
+});
 
 // ═════════════════════════════════════════════════════════════════════════════
 // PART D/O — the confirmed bypass, executed for real against the actual route.
@@ -114,19 +169,18 @@ describe('POST /api/campaigns: a normal new campaign can never become not_requir
         expect(db.fundraiserCampaign.create).not.toHaveBeenCalled();
     });
 
-    it('1. NORMAL_VALID_LAUNCH: a real coordinator_selects payload still succeeds exactly as before', async () => {
+    it('1. NORMAL_VALID_LAUNCH: a real coordinator_selects payload with a confirmed delivery date still succeeds', async () => {
         db.bundle.findMany.mockResolvedValue([
             { id: 'b-fam1-s5', name: 'Family A (S5)', serving_tier: 'serves_5', family_id: 'fam1' },
             { id: 'b-fam1-s2', name: 'Family A (S2)', serving_tier: 'serves_2', family_id: 'fam1' },
         ]);
-        const { res, body } = await post({
-            customerId: 'cust-1', name: 'Spring Sale', endDate: '2026-05-01',
-            bundleSelection: { mode: 'coordinator_selects', candidateFamilyIds: ['fam1'], selectionLimit: 1 },
-        });
+        const { res, body } = await post(validCoordinatorSelectsBody());
         expect(res.status).toBe(200);
         const data = db.fundraiserCampaign.create.mock.calls[0][0].data;
         expect(data.status).toBe('Active');
         expect(data.bundle_selection_status).toBe('pending');
+        // GAP 1: the field this whole correction exists to populate.
+        expect(data.delivery_date).toEqual(new Date('2026-05-10T00:00:00.000Z'));
         expect(db.campaignBundle.createMany).toHaveBeenCalled();
     });
 
@@ -134,6 +188,94 @@ describe('POST /api/campaigns: a normal new campaign can never become not_requir
     // real gate (resolveCampaignOrderMode) in the describe block below, using
     // exactly the bundle_selection_status a real new campaign now gets
     // ('pending') -- not restated here as a second, weaker assertion.
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// OPS-2 COMPLETION -- GAP 1: confirmed delivery date is required, distinct
+// from and correctly related to the supporter order deadline (endDate).
+// ═════════════════════════════════════════════════════════════════════════════
+describe('POST /api/campaigns: confirmed delivery-date authority (gap 1)', () => {
+    beforeEach(() => {
+        db.bundle.findMany.mockResolvedValue([
+            { id: 'b-fam1-s5', name: 'Family A (S5)', serving_tier: 'serves_5', family_id: 'fam1' },
+            { id: 'b-fam1-s2', name: 'Family A (S2)', serving_tier: 'serves_2', family_id: 'fam1' },
+        ]);
+    });
+
+    it('a normal creation with NO deliveryDate at all is refused -- the exact gap this correction closes', async () => {
+        const { res, body } = await post(validCoordinatorSelectsBody({ deliveryDate: undefined }));
+        expect(res.status).toBe(400);
+        expect(db.fundraiserCampaign.create).not.toHaveBeenCalled();
+        expect(String(body.error)).toMatch(/confirmed delivery date/i);
+    });
+
+    it('an unparseable deliveryDate is refused', async () => {
+        const { res } = await post(validCoordinatorSelectsBody({ deliveryDate: 'not-a-date' }));
+        expect(res.status).toBe(400);
+        expect(db.fundraiserCampaign.create).not.toHaveBeenCalled();
+    });
+
+    it('an order deadline (endDate) after the confirmed delivery date is refused', async () => {
+        const { res, body } = await post(validCoordinatorSelectsBody({
+            deliveryDate: '2026-05-01', endDate: '2026-05-10',
+        }));
+        expect(res.status).toBe(400);
+        expect(db.fundraiserCampaign.create).not.toHaveBeenCalled();
+        expect(String(body.error)).toMatch(/deliver/i);
+    });
+
+    it('endDate remains optional -- unchanged by this correction -- as long as deliveryDate is present', async () => {
+        const { res } = await post(validCoordinatorSelectsBody({ endDate: undefined }));
+        expect(res.status).toBe(200);
+        const data = db.fundraiserCampaign.create.mock.calls[0][0].data;
+        expect(data.end_date).toBeUndefined();
+        expect(data.delivery_date).toEqual(new Date('2026-05-10T00:00:00.000Z'));
+    });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// OPS-2 COMPLETION -- GAP 2: two repeated/concurrent normal launches for the
+// same (customer, name) resolve to ONE FundraiserCampaign.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('POST /api/campaigns: duplicate-submission protection on the direct creation path (gap 2)', () => {
+    beforeEach(() => {
+        db.bundle.findMany.mockResolvedValue([
+            { id: 'b-fam1-s5', name: 'Family A (S5)', serving_tier: 'serves_5', family_id: 'fam1' },
+            { id: 'b-fam1-s2', name: 'Family A (S2)', serving_tier: 'serves_2', family_id: 'fam1' },
+        ]);
+    });
+
+    it('a resubmitted identical request resolves to the campaign the first request already created, not a second one', async () => {
+        // Simulates the state a genuinely concurrent second request would see
+        // after waiting on the advisory lock: the first request's campaign
+        // already committed. The recent-duplicate check inside the
+        // transaction (and, on the thrown-error path, the catch handler's
+        // re-read) both go through this same mock.
+        db.fundraiserCampaign.findFirst.mockResolvedValue({
+            id: 'camp-existing', customer_id: 'cust-1', name: 'Spring Sale',
+        });
+        const { res, body } = await post(validCoordinatorSelectsBody());
+        expect(res.status).toBe(200);
+        expect(body.id).toBe('camp-existing');
+        expect(body.alreadyConverted).toBe(true);
+        expect(db.fundraiserCampaign.create).not.toHaveBeenCalled();
+    });
+
+    it('takes the advisory lock scoped to this exact (customer, name) submission before checking for a duplicate', async () => {
+        await post(validCoordinatorSelectsBody());
+        expect(db.$executeRaw).toHaveBeenCalled();
+        // A tagged-template call arrives as (stringsArray, ...interpolatedValues).
+        const [strings, ...values] = db.$executeRaw.mock.calls[0];
+        expect(strings.join('')).toMatch(/pg_advisory_xact_lock/);
+        expect(values).toEqual(['cust-1', 'Spring Sale']);
+    });
+
+    it('no recent duplicate found -- the normal, non-racing case -- still creates exactly one campaign', async () => {
+        // beforeEach already defaults fundraiserCampaign.findFirst to null.
+        const { res } = await post(validCoordinatorSelectsBody());
+        expect(res.status).toBe(200);
+        expect(db.fundraiserCampaign.create).toHaveBeenCalledTimes(1);
+    });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -152,7 +294,7 @@ describe('resolveCampaignOrderMode: the existing gate a fixed campaign now corre
         expect(mode.mode).toBe('pending');
     });
 
-    it('proves the exact mechanism of the bug this phase closes: a not_required campaign IS immediately orderable against any submitted bundle', async () => {
+    it('proves the exact mechanism of the bug this phase closes: a not_required campaign IS immediately orderable against any submitted bundle -- but ONLY once it has actually launched (status Active)', async () => {
         const mode = await resolveCampaignOrderMode(
             { status: 'Active', closed_at: null, bundle_selection_status: 'not_required', bundle_selection_limit: 0, id: 'camp-1' },
             TENANT_A,
@@ -161,6 +303,38 @@ describe('resolveCampaignOrderMode: the existing gate a fixed campaign now corre
         expect(mode.mode).toBe('legacy');
         const eligibility = validateBundleEligibility(mode, ['any-bundle-id-from-the-whole-catalog']);
         expect(eligibility.ok).toBe(true);
+    });
+
+    // ── GAP 3: a pre-launch Lead/import row must never reach this same
+    //    legacy-allow branch merely because its bundle mode happens to be
+    //    the schema's not_required default. ─────────────────────────────────
+    it('GAP 3: a status:Lead campaign (exactly what fundraisers/upload creates) is NOT orderable even with its exact id, even carrying not_required', async () => {
+        const mode = await resolveCampaignOrderMode(
+            { status: 'Lead', closed_at: null, bundle_selection_status: 'not_required', bundle_selection_limit: 0, id: 'camp-imported' },
+            TENANT_A,
+        );
+        expect(mode.allowed).toBe(false);
+        expect((mode as any).reasonCode).toBe('not_launched');
+        const eligibility = validateBundleEligibility(mode, ['any-bundle-id-from-the-whole-catalog']);
+        expect(eligibility.ok).toBe(false);
+    });
+
+    it('GAP 3 regression: a Closed campaign remains non-orderable independent of the new status check', async () => {
+        const mode = await resolveCampaignOrderMode(
+            { status: 'Closed', closed_at: new Date('2026-01-01'), bundle_selection_status: 'not_required', bundle_selection_limit: 0, id: 'camp-closed' },
+            TENANT_A,
+        );
+        expect(mode.allowed).toBe(false);
+        expect((mode as any).reasonCode).toBe('closed');
+    });
+
+    it('GAP 3 regression: an Archived campaign remains non-orderable independent of the new status check', async () => {
+        const mode = await resolveCampaignOrderMode(
+            { status: 'Archived', closed_at: null, bundle_selection_status: 'not_required', bundle_selection_limit: 0, id: 'camp-archived' },
+            TENANT_A,
+        );
+        expect(mode.allowed).toBe(false);
+        expect((mode as any).reasonCode).toBe('closed');
     });
 });
 
@@ -191,11 +365,15 @@ describe('tenant/auth security on POST /api/campaigns', () => {
         // belonging to another tenant simply never appears in the result set,
         // so it can never be validated as a candidate.
         db.bundle.findMany.mockResolvedValue([]); // simulates: no bundle in THIS tenant matches
-        const { res, body } = await post({
-            customerId: 'cust-1', name: 'Spring Sale',
+        // A valid deliveryDate/endDate here so this request actually reaches
+        // the Bundle-family validation under test, rather than being refused
+        // one check earlier (gap 1's date requirement) for an unrelated
+        // reason that would make this assertion pass without proving anything.
+        const { res, body } = await post(validCoordinatorSelectsBody({
             bundleSelection: { mode: 'coordinator_selects', candidateFamilyIds: ['foreign-family'], selectionLimit: 1 },
-        });
+        }));
         expect(res.status).toBe(400);
+        expect(String(body.error)).toMatch(/families/i);
         expect(db.fundraiserCampaign.create).not.toHaveBeenCalled();
     });
 });
@@ -216,14 +394,34 @@ describe('source proof', () => {
         expect(src).toMatch(/checkOpportunityLaunchable/);
     });
 
-    it('lib/campaignOrderBundles.ts (public orderability gate) is completely untouched by this phase', () => {
+    it('lib/campaignOrderBundles.ts (public orderability gate) keeps its legacy fallback comment and now also gates on launch status', () => {
         const src = read('lib/campaignOrderBundles.ts');
         expect(src).toMatch(/Legacy: no candidate pool, preserve business-wide fallback/);
+        // GAP 3
+        expect(src).toMatch(/campaign\.status !== 'Active'/);
     });
 
     it('the New Campaign form in FundraisersTab.tsx now opens the canonical wizard instead of POSTing bundleSelection-less bodies', () => {
         const src = read('components/crm/FundraisersTab.tsx');
         expect(src).toMatch(/StartFundraiserWizard/);
         expect(src).not.toMatch(/handleCreate/);
+    });
+
+    it('GAP 1: app/api/campaigns/route.ts reuses the launch route\'s own date checks rather than a second copy', () => {
+        const src = read('app/api/campaigns/route.ts');
+        expect(src).toMatch(/checkConfirmedDate/);
+        expect(src).toMatch(/checkOrderDeadline/);
+        expect(src).toMatch(/from '@\/lib\/fundraiserLaunch'/);
+    });
+
+    it('GAP 2: runCreate\'s direct-creation branch takes an advisory lock before creating', () => {
+        const src = read('app/api/campaigns/route.ts');
+        expect(src).toMatch(/pg_advisory_xact_lock/);
+    });
+
+    it('lib/fundraiserLaunch.ts: checkOpportunityLaunchable now delegates its date check to the shared checkConfirmedDate, not a duplicated copy', () => {
+        const src = read('lib/fundraiserLaunch.ts');
+        expect(src).toMatch(/export function checkConfirmedDate/);
+        expect(src).toMatch(/checkConfirmedDate\(o\.confirmed_delivery_date\)/);
     });
 });

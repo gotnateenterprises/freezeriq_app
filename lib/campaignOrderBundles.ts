@@ -87,6 +87,31 @@ export async function resolveCampaignOrderMode(
         };
     }
 
+    // 1a. OPS-2 (gap 3): only a launched campaign may accept supporter orders.
+    // The live lifecycle vocabulary this app actually writes is Lead -> Active
+    // -> Closed (plus Archived, already covered by isCampaignClosed above) —
+    // see app/api/fundraisers/upload/route.ts, app/api/campaigns/route.ts and
+    // app/api/campaigns/[id]/closeout/route.ts, the only three places that set
+    // fundraiserCampaign.status. A Lead row (a CSV import, or any other
+    // pre-launch administrative state) is not "closed" — closed_at is null and
+    // its status isn't in CLOSED_STATUSES — so without this check it fell
+    // through to the bundle-selection matrix below and, carrying the schema's
+    // default bundle_selection_status of 'not_required', was accepted as an
+    // immediately-orderable legacy campaign the moment its ID was known. This
+    // check is independent of and in addition to bundle_selection_status: that
+    // field describes the Bundle pool, never whether the fundraiser is running
+    // at all. A historical row already Active (with or without not_required)
+    // is unaffected — Active is exactly what it already is.
+    if (campaign.status !== 'Active') {
+        return {
+            allowed: false,
+            mode: 'invalid',
+            reasonCode: 'not_launched',
+            safeMessage: 'This fundraiser is not yet accepting orders.',
+            activeOrderableBundleIds: []
+        };
+    }
+
     // 1b. FR-ORDERABILITY-1-R: the SUPPORTER ordering deadline.
     //
     // Checked BEFORE the bundle-selection matrix so it applies to every mode.

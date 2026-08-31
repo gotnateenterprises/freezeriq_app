@@ -53,6 +53,62 @@ export interface LaunchableOpportunity {
 }
 
 /**
+ * OPS-2 (gap 1) — the shape-and-plausibility check behind a confirmed
+ * delivery/pickup date, shared by every caller that must prove one exists
+ * before creating a campaign. Deliberately carries no HTTP status: the two
+ * current callers disagree on the right one (checkOpportunityLaunchable
+ * treats a missing date as a 409 state conflict — the opportunity just isn't
+ * ready yet; a direct campaign-creation request treats it as a 400 bad
+ * request — the caller simply didn't send one). Each caller applies its own
+ * status to the same codes and messages, so the two paths can never define
+ * "confirmed" two different ways while still answering with the status their
+ * own contract requires.
+ */
+export function checkConfirmedDate(
+    raw: Date | string | null | undefined
+): LaunchOk<{ confirmedDeliveryDate: string }> | { ok: false; code: string; error: string } {
+    // date_confirmed without a confirmed date would be a contradiction, but the
+    // column is nullable, so it is proven rather than assumed.
+    if (!raw) {
+        return {
+            ok: false,
+            code: 'missing_confirmed_date',
+            error: 'This opportunity has no confirmed delivery date.',
+        };
+    }
+
+    const confirmed = calendarDateOfDateOnlyValue(raw);
+    if (!confirmed) {
+        return {
+            ok: false,
+            code: 'unreadable_confirmed_date',
+            error: 'This opportunity has no confirmed delivery date.',
+        };
+    }
+
+    // OPS-LAUNCH-HOTFIX-1: a structural sanity floor, not a business-logic
+    // "is this a sensible date" check (this file reads no clock, on purpose).
+    // calendarDateOfDateOnlyValue always zero-pads to at least 4 digits now, so
+    // an implausible year can only mean the stored value never had a normal
+    // 4-digit year to begin with — the exact shape that reached the database
+    // for one opportunity through some path other than this app's own writes,
+    // and that otherwise produced an unparseable Date at campaign-creation time.
+    // OPS-DATE-PICKER-HOTFIX-1: the threshold itself now lives in
+    // isPlausibleCalendarYear, shared with the CRM funnel panel's date
+    // display, so the two can never define "plausible" two different ways.
+    const year = Number(confirmed.slice(0, confirmed.indexOf('-')));
+    if (!isPlausibleCalendarYear(year)) {
+        return {
+            ok: false,
+            code: 'implausible_confirmed_date',
+            error: 'This opportunity\'s confirmed delivery date looks incorrect. Re-confirm the delivery date, then launch again.',
+        };
+    }
+
+    return { ok: true, confirmedDeliveryDate: confirmed };
+}
+
+/**
  * Whether this opportunity may become a campaign.
  *
  * A UI that hides the button is not a gate; this is the gate. All three
@@ -81,48 +137,12 @@ export function checkOpportunityLaunchable(
         };
     }
 
-    // date_confirmed without a confirmed date would be a contradiction, but the
-    // column is nullable, so it is proven rather than assumed.
-    if (!o.confirmed_delivery_date) {
-        return {
-            ok: false,
-            code: 'missing_confirmed_date',
-            error: 'This opportunity has no confirmed delivery date.',
-            status: 409,
-        };
+    const dateCheck = checkConfirmedDate(o.confirmed_delivery_date);
+    if (!dateCheck.ok) {
+        return { ok: false, code: dateCheck.code, error: dateCheck.error, status: 409 };
     }
 
-    const confirmed = calendarDateOfDateOnlyValue(o.confirmed_delivery_date);
-    if (!confirmed) {
-        return {
-            ok: false,
-            code: 'unreadable_confirmed_date',
-            error: 'This opportunity has no confirmed delivery date.',
-            status: 409,
-        };
-    }
-
-    // OPS-LAUNCH-HOTFIX-1: a structural sanity floor, not a business-logic
-    // "is this a sensible date" check (this file reads no clock, on purpose).
-    // calendarDateOfDateOnlyValue always zero-pads to at least 4 digits now, so
-    // an implausible year can only mean the stored value never had a normal
-    // 4-digit year to begin with — the exact shape that reached the database
-    // for one opportunity through some path other than this app's own writes,
-    // and that otherwise produced an unparseable Date at campaign-creation time.
-    // OPS-DATE-PICKER-HOTFIX-1: the threshold itself now lives in
-    // isPlausibleCalendarYear, shared with the CRM funnel panel's date
-    // display, so the two can never define "plausible" two different ways.
-    const year = Number(confirmed.slice(0, confirmed.indexOf('-')));
-    if (!isPlausibleCalendarYear(year)) {
-        return {
-            ok: false,
-            code: 'implausible_confirmed_date',
-            error: 'This opportunity\'s confirmed delivery date looks incorrect. Re-confirm the delivery date, then launch again.',
-            status: 409,
-        };
-    }
-
-    return { ok: true, confirmedDeliveryDate: confirmed };
+    return dateCheck;
 }
 
 /* ── Dates ───────────────────────────────────────────────────────────────── */

@@ -154,6 +154,12 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
     const [camp, setCamp] = useState({
         name: rebooking?.campaignName ?? '',
         endDate: rebooking?.endDate ?? '',
+        // OPS-2 (gap 1): a real, tenant-confirmed value, never invented — a
+        // rebooking response is evidence of a PREFERRED date, not a
+        // confirmed one, so this only starts the field; nothing is saved
+        // until the tenant confirms it here, matching every other field in
+        // this rebooking evidence panel.
+        deliveryDate: rebooking?.requestedPreferredStart ?? '',
         // FR-GOAL-CONFIG-1: pre-filled and visible, not a silent default —
         // the tenant sees exactly what goal they're launching with and can
         // change it right here.
@@ -327,6 +333,10 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                     // resolves it to the default rather than rejecting a literal 0.
                     bundleGoal: camp.bundleGoal || undefined,
                     endDate: camp.endDate,
+                    // OPS-2 (gap 1): the confirmed delivery/pickup day. The
+                    // server independently validates this — same as every
+                    // other field here, this is experience, not the gate.
+                    deliveryDate: camp.deliveryDate,
                     // FR-TAX-1: the tenant's confirmed tax treatment for THIS
                     // campaign. The server snapshots it onto the campaign; it
                     // is never recomputed from live values afterwards.
@@ -528,9 +538,24 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                             </section>
                         )}
 
-                        {/* Campaign fields — name, end date, bundle goal */}
+                        {/* Campaign fields — name, delivery date, end date, bundle goal */}
                         <FieldLabel label="Campaign Name">
                             <input id="wiz-camp-name" className={inputCls} value={camp.name} onChange={e => setCamp(c => ({ ...c, name: e.target.value }))} placeholder="e.g. Lincoln PTA 2026 Fundraiser" />
+                        </FieldLabel>
+                        {/* OPS-2 (gap 1): the confirmed delivery/pickup day — the
+                            DELIVERY/PICKUP day the tenant and organization actually
+                            negotiated, not the supporter order deadline below. The
+                            server refuses to create a campaign without this. */}
+                        <FieldLabel label="Confirmed Delivery / Pickup Date">
+                            <input id="wiz-delivery-date" type="date" className={inputCls} value={camp.deliveryDate}
+                                aria-describedby={isPastCalendarDate(camp.deliveryDate) ? 'wiz-delivery-date-warning' : undefined}
+                                onChange={e => setCamp(c => ({ ...c, deliveryDate: e.target.value }))} />
+                            {isPastCalendarDate(camp.deliveryDate) && (
+                                <p id="wiz-delivery-date-warning" role="alert"
+                                    className="mt-1 text-[12px] font-bold text-amber-700 dark:text-amber-400">
+                                    That date has already passed. Change it unless you meant it.
+                                </p>
+                            )}
                         </FieldLabel>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <FieldLabel label="Order Deadline">
@@ -726,6 +751,9 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                                 id="wiz-create-btn"
                                 disabled={
                                     !camp.name.trim() ||
+                                    // OPS-2 (gap 1): convenience only — the server
+                                    // is the real gate and re-validates this.
+                                    !camp.deliveryDate.trim() ||
                                     busy ||
                                     // INV-A: an invalid share cannot be submitted.
                                     orgShareError !== null ||
