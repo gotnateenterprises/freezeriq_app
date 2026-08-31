@@ -240,12 +240,49 @@ export class PrismaAdapter implements DBAdapter {
         ];
         const orders = await prisma.order.findMany({
             where: {
+                // ── OPS-3 CORRECTION: two exclusions, both COPIED from the
+                //    Kitchen Board (app/api/production/dashboard/route.ts),
+                //    which has always carried them on all three of its lanes.
+                //    This query is the OTHER definition of "visible to
+                //    production" — it feeds /sync (Manual Planner), /plan
+                //    (ingredient demand) and /runs (a PERSISTED ProductionRun) —
+                //    and it disagreed with the board on both points.
+                //
+                //    Neither rule is invented here; this makes the second
+                //    intake path agree with the first.
+                //
+                //    1. fundraiser_hold is an ABSOLUTE hold. OPS-3 releases a
+                //       campaign's orders only when its invoice is authoritatively
+                //       PAID (the settle route promotes them to production_ready).
+                //       Without this line the `customer.status = 'PRODUCTION'`
+                //       branch below — which asserts nothing about the ORDER —
+                //       silently bypassed that gate: PRODUCTION is an ordinary
+                //       CRM pipeline stage (STATUS_FLOW: ACTIVE -> PRODUCTION),
+                //       reachable manually or by progressStatus() on a sent
+                //       email, and a fundraiser organization is an ordinary
+                //       Customer row. Parking one there made every unpaid held
+                //       order it owns eligible for the kitchen.
+                //
+                //    2. A canceled order is never cooked. HoldingArea's cancel
+                //       is a soft delete (canceled_at) with a restore path; the
+                //       board excludes such rows everywhere, this did not.
+                //
+                //    The `customer.status = 'PRODUCTION'` compatibility branch
+                //    is deliberately KEPT. It is what makes an otherwise
+                //    ineligible order of a customer parked at that stage visible,
+                //    and ordinary-customer behaviour that depends on it is
+                //    proven unchanged in tests/ops3ProductionIntakeHold.test.ts.
+                //    It is narrowed by ORDER state, not removed.
+                business_id: this.businessId,
+                canceled_at: null,
                 OR: [
                     { status: { in: [...new Set(productionStatuses)] as any } },
                     { customer: { status: 'PRODUCTION' } }
                 ],
-                business_id: this.businessId,
-                NOT: { source: 'storefront', status: 'pending' }
+                AND: [
+                    { NOT: { status: 'fundraiser_hold' as any } },
+                    { NOT: { source: 'storefront', status: 'pending' } },
+                ]
             },
             include: {
                 items: {
