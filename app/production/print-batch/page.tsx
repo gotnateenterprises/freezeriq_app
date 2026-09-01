@@ -6,6 +6,8 @@ import { ArrowLeft, Printer, Trash2, Settings, CheckCircle, AlertCircle } from '
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import LabelTemplate from '@/components/LabelTemplate';
+import { resolveLabelAllergens } from '@/lib/allergens';
+import { resolveLabelIngredients, collectBlockedLabels } from '@/lib/mealLabel';
 
 interface BatchItem {
     name: string;
@@ -19,6 +21,14 @@ interface BatchItem {
 interface BatchJob {
     name: string;
     items: BatchItem[];
+    /**
+     * OPS-5: the serving tier this whole batch can truthfully claim
+     * ("Serves 5" / "Serves 2"), resolved server-side by
+     * /api/production/plan from the authoritative per-line tier. Null when the
+     * plan mixed tiers - the label then omits the claim rather than guessing,
+     * because KitchenEngine's prepTasks already merged the meals.
+     */
+    servingTier?: string | null;
 }
 
 export default function ProductionBatchPrintPage() {
@@ -72,24 +82,10 @@ export default function ProductionBatchPrintPage() {
         const uniqueIds = Array.from(new Set(items.map(i => i.id)));
         const details: Record<string, any> = {};
 
-        // Helper to detect allergens (Simple keyword match)
-        const detectAllergens = (ingreds: string) => {
-            const keywordMap: Record<string, string> = {
-                "peanut": "Peanut", "soy": "Soy", "wheat": "Gluten", "gluten": "Gluten",
-                "egg": "Egg", "fish": "Fish", "shellfish": "Shellfish", "crab": "Shellfish",
-                "lobster": "Shellfish", "shrimp": "Shellfish", "tree nut": "Tree Nut",
-                "almond": "Tree Nut", "walnut": "Tree Nut", "cashew": "Tree Nut", "pecan": "Tree Nut",
-                "sesame": "Sesame", "milk": "Dairy", "dairy": "Dairy", "butter": "Dairy",
-                "cheese": "Dairy", "cream": "Dairy", "yogurt": "Dairy", "whey": "Dairy"
-            };
-            const lower = ingreds.toLowerCase();
-            const found = new Set<string>();
-            Object.keys(keywordMap).forEach(k => {
-                if (lower.includes(k)) found.add(keywordMap[k]);
-            });
-            return Array.from(found).sort().join(", ");
-        };
-
+        // OPS-5: allergen detection is no longer defined here. It lives in
+        // lib/allergens.ts, the ONE authority every meal-label surface shares,
+        // so the same ingredient text can no longer produce different allergens
+        // depending on which print button the kitchen pressed.
         await Promise.all(uniqueIds.map(async (id) => {
             try {
                 // Determine if this is a recipe or just an item (simple check, assume recipe API works for both or handles it)
@@ -101,15 +97,17 @@ export default function ProductionBatchPrintPage() {
                         item.child_ingredient?.name || item.child_recipe?.name
                     ).filter(Boolean).join(', ') || '';
 
-                    const allergens = data.allergens || detectAllergens(ingredients);
-
                     details[id] = {
                         ...data,
                         processedIngredients: ingredients,
-                        processedAllergens: allergens
+                        processedAllergens: resolveLabelAllergens(data.allergens, ingredients)
                     };
                 }
             } catch (e) {
+                // OPS-5: the failure is still logged, but it is no longer
+                // SILENT. `details[id]` stays absent, and the print gate below
+                // turns that absence into a hard stop instead of a placeholder
+                // string on a physical label.
                 console.error(`Failed to fetch details for ${id}`, e);
             }
         }));
@@ -118,8 +116,47 @@ export default function ProductionBatchPrintPage() {
         setLoadingDetails(false);
     };
 
+    /**
+     * OPS-5 — the fail-closed print gate.
+     *
+     * Required food data is verified for EVERY queued label before any of them
+     * can print. A meal whose ingredients could not be loaded blocks the batch
+     * and is named, so the kitchen knows exactly which recipe to fix rather
+     * than discovering a bad label on the food.
+     *
+     * Scope is deliberate: only data the label FORMAT actually requires is
+     * gated. Ingredients are gated only when `config.showIngredients` is on AND
+     * the selected size actually renders them - the 2.25x1.25 and 4x6 layouts
+     * below take the simple name/qty/date path and never print an ingredient
+     * list, so blocking those would be a kitchen stoppage for data they do not
+     * use. Tenant branding is NOT gated either: a missing logo is cosmetic.
+     */
+    const blockedLabels = (!batch || loadingDetails)
+        ? []
+        : collectBlockedLabels(
+            batch.items,
+            Object.fromEntries(
+                Object.entries(batchDetails).map(([id, d]) => [id, d?.processedIngredients])
+            ),
+            // Ingredients are required only by the layout that actually prints
+            // them (see the doc comment above).
+            config.showIngredients && labelSize === '2x6',
+        );
+
     const handlePrintAll = async () => {
         if (!batch) return;
+
+        // OPS-5 FAIL CLOSED: never print a label whose required food data is
+        // missing. A physical label outlives the request that produced it.
+        if (blockedLabels.length > 0) {
+            alert(
+                'Printing stopped.\n\n'
+                + blockedLabels.map(b => b.reason).join('\n\n')
+                + '\n\nRemove the affected item(s) from the queue, or reload once the recipe data is available.'
+            );
+            return;
+        }
+
         setIsPrinting(true);
 
         if (printMethod === 'browser') {
@@ -160,13 +197,29 @@ export default function ProductionBatchPrintPage() {
         const expiry = new Date();
         expiry.setMonth(expiry.getMonth() + 6);
 
+        // OPS-5: ingredients are resolved through the fail-closed authority.
+        // There is deliberately NO placeholder fallback here - the old
+        // `|| "Ingredients loading..."` printed that literal string onto
+        // physical food labels whenever the recipe fetch failed. If this
+        // resolves to !ok, `blockedLabels` has already stopped the print, and
+        // the empty string below is only ever seen in the on-screen preview.
+        const ingredientCheck = resolveLabelIngredients(item.name, detail.processedIngredients);
+
+        // OPS-5: the serving tier is the batch-level authority resolved by
+        // /api/production/plan (a sold OrderItem.variant_size snapshot, or a
+        // manual row's tenant-scoped Bundle.serving_tier). It is NEVER
+        // re-derived here, and when the plan could not prove a single tier the
+        // field falls back to the recipe's own yield unit rather than claiming
+        // a serving size the batch cannot support.
+        const tier = batch?.servingTier;
+
         return {
             content: {
                 name: item.name,
-                ingredients: detail.processedIngredients || "Ingredients loading...",
+                ingredients: ingredientCheck.ok ? ingredientCheck.text : "",
                 allergens: detail.processedAllergens || "",
                 expiry: expiry.toLocaleDateString(),
-                mealSize: detail.base_yield_unit || `${Math.round(item.qty)} ${item.unit}`, // Fallback to unit
+                mealSize: tier || detail.base_yield_unit || `${Math.round(item.qty)} ${item.unit}`,
                 instructions: detail.label_text || "",
                 macros: detail.macros || ""
             },
@@ -226,13 +279,52 @@ export default function ProductionBatchPrintPage() {
                         </div>
                         <button
                             onClick={handlePrintAll}
-                            disabled={batch.items.length === 0 || isPrinting || loadingDetails}
+                            disabled={batch.items.length === 0 || isPrinting || loadingDetails || blockedLabels.length > 0}
                             className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center gap-2"
                         >
                             <Printer size={20} />
-                            {loadingDetails ? 'Loading Data...' : 'Print All'}
+                            {loadingDetails ? 'Loading Data...' : blockedLabels.length > 0 ? 'Printing Blocked' : 'Print All'}
                         </button>
                     </div>
+
+                    {/* OPS-5: fail-closed notice. Required food data is missing,
+                        so no label in this batch may print. */}
+                    {blockedLabels.length > 0 && (
+                        <div className="mt-6 bg-rose-50 dark:bg-rose-900/20 border-2 border-rose-300 dark:border-rose-800 rounded-xl p-5">
+                            <div className="flex items-start gap-3">
+                                <AlertCircle size={22} className="text-rose-600 shrink-0 mt-0.5" />
+                                <div>
+                                    <h4 className="font-black text-rose-900 dark:text-rose-200 mb-2">
+                                        Printing stopped — incomplete food data
+                                    </h4>
+                                    <ul className="space-y-1.5">
+                                        {blockedLabels.map((b, i) => (
+                                            <li key={i} className="text-sm font-medium text-rose-800 dark:text-rose-300">
+                                                {b.reason}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                    <p className="text-xs font-bold text-rose-700 dark:text-rose-400 mt-3">
+                                        Remove the affected item(s) from the queue, or reload once the recipe data is available.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* OPS-5: the plan mixed serving tiers, so prepTasks already
+                        merged those meals and no single tier is true for all of
+                        them. The label omits the claim rather than guessing. */}
+                    {batch.servingTier == null && !loadingDetails && (
+                        <div className="mt-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-800 rounded-xl p-4 flex items-start gap-3">
+                            <AlertCircle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+                            <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
+                                These labels will not show a serving size. This plan did not resolve to a single
+                                serving tier, so no tier can be printed truthfully. Plan Serves&nbsp;5 and
+                                Serves&nbsp;2 separately if you need per-tier meal labels.
+                            </p>
+                        </div>
+                    )}
                 </div>
 
                 {/* Live Preview */}
@@ -314,7 +406,27 @@ export default function ProductionBatchPrintPage() {
                     `
                 }} />
 
-                {batch.items.flatMap((item, i) => {
+                {/* OPS-5: the fail-closed gate lives in the PRINTABLE DOM, not
+                    only on the button. This block is `hidden print:block` — CSS
+                    hidden, always mounted — so an operator pressing Ctrl+P (or
+                    the browser's own Print command) bypasses `handlePrintAll`
+                    entirely and prints whatever is rendered here. Refusing to
+                    render the labels themselves is what actually makes an
+                    incomplete food label unprintable. */}
+                {blockedLabels.length > 0 ? (
+                    <div className="print-page">
+                        <div style={{ fontSize: '14pt', fontWeight: 900, lineHeight: 1.2, marginBottom: '8px' }}>
+                            DO NOT USE
+                        </div>
+                        <div style={{ fontSize: '9pt', fontWeight: 'bold', lineHeight: 1.3 }}>
+                            Label printing was stopped: required ingredient data could not be loaded
+                            for {blockedLabels.length} item{blockedLabels.length === 1 ? '' : 's'} in this batch.
+                        </div>
+                        <div style={{ fontSize: '8pt', marginTop: '8px', lineHeight: 1.3 }}>
+                            {blockedLabels.map(b => b.name).join(', ')}
+                        </div>
+                    </div>
+                ) : batch.items.flatMap((item, i) => {
                     const copies = Math.max(1, Math.round(item.copies || 1));
                     return Array.from({ length: copies }).map((_, copyIndex) => {
                         // Use Template for 2x6, Basic Text for others (until we make template responsive)

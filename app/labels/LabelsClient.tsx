@@ -9,6 +9,7 @@ import { Printer, Save, AlertTriangle, Eye, Settings, Trash2, Plus, Package, Arr
 import LabelRichText from '@/components/LabelRichText';
 import LabelTemplate from '@/components/LabelTemplate';
 import { useSession } from 'next-auth/react';
+import { resolveLabelAllergens, detectAllergenText } from '@/lib/allergens';
 
 export default function LabelsPage() {
     const router = useRouter();
@@ -218,23 +219,12 @@ export default function LabelsPage() {
                             else detectedSize = '1 Batch';
                         }
 
-                        // Allergen detection logic
-                        const keywordMap: Record<string, string> = {
-                            "peanut": "Peanut", "soy": "Soy", "wheat": "Gluten", "gluten": "Gluten",
-                            "egg": "Egg", "fish": "Fish", "shellfish": "Shellfish", "crab": "Shellfish",
-                            "lobster": "Shellfish", "shrimp": "Shellfish", "tree nut": "Tree Nut",
-                            "almond": "Tree Nut", "walnut": "Tree Nut", "cashew": "Tree Nut",
-                            "pecan": "Tree Nut", "sesame": "Sesame", "milk": "Dairy", "dairy": "Dairy",
-                            "butter": "Dairy", "cheese": "Dairy", "cream": "Dairy", "yogurt": "Dairy",
-                            "half n half": "Dairy", "half-n-half": "Dairy", "half and half": "Dairy",
-                            "whey": "Dairy", "casein": "Dairy", "lactose": "Dairy"
-                        };
-                        const ingredientsLower = ingredsString.toLowerCase();
-                        const detectedSet = new Set<string>();
-                        Object.keys(keywordMap).forEach(key => {
-                            if (ingredientsLower.includes(key)) detectedSet.add(keywordMap[key]);
-                        });
-                        const detectedAllergens = Array.from(detectedSet).sort().join(", ");
+                        // OPS-5: one shared allergen authority (lib/allergens.ts).
+                        // The tenant/AI-reviewed Recipe.allergens value now wins over
+                        // keyword detection, matching every other label surface. This
+                        // surface had the precedence INVERTED, so a substring match could
+                        // override a reviewed allergen list.
+                        const resolvedAllergens = resolveLabelAllergens(data.allergens, ingredsString);
 
                         // Preparation Selection Logic - PULL FROM label_text (Customer Facing)
                         let instructions = data.label_text || '';
@@ -262,7 +252,7 @@ export default function LabelsPage() {
                             ...prev,
                             name: data.name,
                             ingredients: ingredsString,
-                            allergens: detectedAllergens || data.allergens || '',
+                            allergens: resolvedAllergens,
                             mealSize: detectedSize,
                             macros: data.macros || '',
                             instructions
@@ -445,53 +435,13 @@ export default function LabelsPage() {
     };
 
     const detectAllergens = () => {
-        // Map ingredients to Allergen Categories
-        const keywordMap: Record<string, string> = {
-            "peanut": "Peanut",
-            "soy": "Soy",
-            "wheat": "Gluten",
-            "gluten": "Gluten",
-            "egg": "Egg",
-            "fish": "Fish",
-            "shellfish": "Shellfish",
-            "crab": "Shellfish",
-            "lobster": "Shellfish",
-            "shrimp": "Shellfish",
-            "tree nut": "Tree Nut",
-            "almond": "Tree Nut",
-            "walnut": "Tree Nut",
-            "cashew": "Tree Nut",
-            "pecan": "Tree Nut",
-            "sesame": "Sesame",
-            // Dairy Mapping
-            "milk": "Dairy",
-            "dairy": "Dairy",
-            "butter": "Dairy",
-            "cheese": "Dairy",
-            "cream": "Dairy",
-            "yogurt": "Dairy",
-            "half n half": "Dairy",
-            "half-n-half": "Dairy",
-            "half and half": "Dairy",
-            "whey": "Dairy",
-            "casein": "Dairy",
-            "lactose": "Dairy"
-        };
-
-        const ingredientsLower = labelContent.ingredients.toLowerCase();
-        const detectedSet = new Set<string>();
-
-        Object.keys(keywordMap).forEach(key => {
-            if (ingredientsLower.includes(key)) {
-                detectedSet.add(keywordMap[key]);
-            }
-        });
-
-        if (detectedSet.size > 0) {
-            const unique = Array.from(detectedSet).sort().join(", ");
-            setLabelContent(prev => ({ ...prev, allergens: unique }));
-        } else {
-            setLabelContent(prev => ({ ...prev, allergens: "" }));
+        // OPS-5: delegates to lib/allergens.ts, the ONE authority shared by every
+        // meal-label surface. The 28-keyword map that used to live here is now that
+        // module's union, so this button and the printed label can no longer
+        // disagree about the same ingredient text.
+        const detected = detectAllergenText(labelContent.ingredients);
+        setLabelContent(prev => ({ ...prev, allergens: detected }));
+        if (!detected) {
             alert("No common allergens detected.");
         }
     };

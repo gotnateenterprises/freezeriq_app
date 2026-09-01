@@ -4,6 +4,7 @@ import { PrismaAdapter } from '@/lib/prisma_adapter';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
+import { planServingTier } from '@/lib/mealLabel';
 
 export async function POST(request: Request) {
     try {
@@ -88,7 +89,25 @@ export async function POST(request: Request) {
 
         const result = await engine.generateProductionRun(orders);
 
-        return NextResponse.json(result);
+        // OPS-5: expose the serving tier this plan can TRUTHFULLY claim, so the
+        // meal-label path can consume an already-resolved authority instead of
+        // inventing a third one.
+        //
+        // `orders` above already carries the authoritative per-line tier that
+        // OPS-4/OPS-4A established: a sold line's frozen OrderItem.variant_size
+        // snapshot, or a manual line's tenant-scoped Bundle.serving_tier. This
+        // reads that same array - it re-derives nothing and queries nothing.
+        //
+        // planServingTier() returns null unless every line agrees, because
+        // KitchenEngine's prepTasks (the source the print batch is built from)
+        // are keyed by recipe name alone: a Serves-5 and a Serves-2 line for the
+        // same recipe merge into ONE entry, after which no per-recipe tier is
+        // recoverable. A null tier makes the label omit the claim rather than
+        // guess. Purely additive - no existing field changes.
+        return NextResponse.json({
+            ...result,
+            servingTier: planServingTier(orders.map((o: any) => o?.variant_size)),
+        });
 
     } catch (e: any) {
         console.error("Production Plan Error:", e);

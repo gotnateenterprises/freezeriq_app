@@ -6,6 +6,7 @@ import { Plus, Calculator, ShoppingCart, ChefHat, Trash2, Printer, Calendar, Loa
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { toFraction } from '@/lib/unit_converter';
+import { resolveLabelAllergens } from '@/lib/allergens';
 
 // Calculator Interfaces
 interface Bundle {
@@ -45,6 +46,13 @@ interface PlanResult {
     }>;
     prepTasks: Record<string, { qty: number; unit: string; id: string; label_text?: string }>;
     assemblyTasks: Record<string, { qty: number; unit: string }>;
+    /**
+     * OPS-5: the serving tier this plan can truthfully claim ("Serves 5" /
+     * "Serves 2"), resolved server-side by /api/production/plan from the
+     * authoritative per-line tier OPS-4/OPS-4A already established. Null when
+     * the plan mixed tiers - meal labels then omit the claim rather than guess.
+     */
+    servingTier?: string | null;
 }
 
 export function ProductionCalculator() {
@@ -437,7 +445,11 @@ export function ProductionCalculator() {
                                     if (businessId) {
                                         localStorage.setItem(`${businessId}_printBatch`, JSON.stringify({
                                             name: batchName,
-                                            items: selectedRecipes
+                                            items: selectedRecipes,
+                                            // OPS-5: carry the plan's authoritative serving tier to the
+                                            // label surface. Null when the plan mixed tiers, in which
+                                            // case the label omits the claim rather than guessing.
+                                            servingTier: result?.servingTier ?? null
                                         }));
                                         router.push('/production/print-batch');
                                     }
@@ -1029,25 +1041,22 @@ export function ProductionCalculator() {
                                                         .filter(Boolean)
                                                         .join(', ');
 
-                                                    // Auto-detect allergens
-                                                    const allergenMap: Record<string, string> = {
-                                                        "peanut": "Peanut", "soy": "Soy", "wheat": "Gluten", "gluten": "Gluten",
-                                                        "egg": "Egg", "fish": "Fish", "shellfish": "Shellfish", "milk": "Dairy",
-                                                        "dairy": "Dairy", "butter": "Dairy", "cheese": "Dairy", "cream": "Dairy",
-                                                        "tree nut": "Tree Nut", "almond": "Tree Nut", "walnut": "Tree Nut",
-                                                        "sesame": "Sesame"
-                                                    };
-                                                    const ingredsLower = ingredients.toLowerCase();
-                                                    const detectedAllergens = new Set<string>();
-                                                    Object.keys(allergenMap).forEach(k => {
-                                                        if (ingredsLower.includes(k)) detectedAllergens.add(allergenMap[k]);
-                                                    });
+                                                    // OPS-5: one shared allergen authority (lib/allergens.ts).
+                                                    // This surface previously had the LEAST complete keyword
+                                                    // map of the four - no shrimp/crab/lobster/cashew/pecan/
+                                                    // yogurt/whey - so a shrimp dish printed no allergen at
+                                                    // all from here while the same recipe declared Shellfish
+                                                    // from the Labels page.
+                                                    const resolvedAllergens = resolveLabelAllergens(recipe.allergens, ingredients);
 
-                                                    // Detect meal size from name
-                                                    let mealSize = recipe.base_yield_unit || 'batch';
-                                                    if (fullName.includes('Serves 2')) mealSize = 'Serves 2';
-                                                    else if (fullName.includes('Family')) mealSize = 'Family Size';
-                                                    else if (fullName.includes('Single')) mealSize = 'Single Serving';
+                                                    // OPS-5: the serving tier comes from the plan's resolved
+                                                    // authority, never from parsing the prepTask key. That
+                                                    // key is the bare recipe name (lib/kitchen_engine.ts
+                                                    // keys prepTasks by recipe.name), so the substring checks
+                                                    // this replaced could only ever match a recipe that
+                                                    // happened to be NAMED "... Serves 2" - and silently
+                                                    // fell through to the yield unit for every other one.
+                                                    let mealSize = result?.servingTier || recipe.base_yield_unit || 'batch';
 
                                                     // Best-by date (6 months out)
                                                     const expiry = new Date();
@@ -1065,7 +1074,7 @@ export function ProductionCalculator() {
                                                                 quantity: Math.round(task.qty),
                                                                 unit: mealSize,
                                                                 user: 'Batch Print',
-                                                                allergens: recipe.allergens || Array.from(detectedAllergens).sort().join(', '),
+                                                                allergens: resolvedAllergens,
                                                                 notes: '',
                                                                 isFinalLabel: true,
                                                                 businessName: branding?.business_name,
