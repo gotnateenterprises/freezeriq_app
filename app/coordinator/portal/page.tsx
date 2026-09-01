@@ -51,6 +51,7 @@ import { PreviousSupporters } from '@/components/coordinator/PreviousSupporters'
 import { LogoutButton } from '@/components/coordinator/LogoutButton';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
+import { customerFacingBusinessName } from '@/lib/tenantBrand';
 
 export default function CoordinatorPortal() {
     const { width, height } = useWindowSize();
@@ -753,8 +754,15 @@ export default function CoordinatorPortal() {
     const scrollToPreviousSupporters = () =>
         document.getElementById('previous-supporters')?.scrollIntoView({ behavior: 'smooth' });
 
-    // Tenant name for ActionBar closed state
-    const tenantName = campaign.customer?.business?.name || null;
+    // TENANT-BRAND-AUTHORITY-1: the customer-facing brand for WhatsNext/
+    // ActionBar ("{tenantName} confirms your totals", "Contact {tenantName}").
+    // Previously read raw Business.name (the internal identity, e.g. "My
+    // Freezer Chef") instead of the display_name-aware authority — the API
+    // already selects display_name onto campaign.customer.business (see
+    // FR-SHARE-COPY-1 above), this just needed to actually use it.
+    const tenantName = campaign.customer?.business
+        ? customerFacingBusinessName(campaign.customer.business)
+        : null;
 
     // Derive share URLs and asset hrefs for ShareCenter
     const shareUrl = getShopOrderUrl();

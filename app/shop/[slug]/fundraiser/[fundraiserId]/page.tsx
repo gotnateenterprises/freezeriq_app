@@ -5,6 +5,7 @@ import FundraiserClient from './FundraiserClient';
 import { computeFundraiserProgress } from '@/lib/fundraiserMetrics';
 import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
 import { toPublicCampaign } from '@/lib/publicFundraiserPayload';
+import { customerFacingBusinessName } from '@/lib/tenantBrand';
 import type { Metadata } from 'next';
 
 // ── OG Metadata (controls the Facebook/Twitter link preview) ───────────
@@ -19,23 +20,26 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
     const business = await prisma.business.findUnique({
         where: { slug },
-        select: { id: true, name: true, logo_url: true },
+        select: { id: true, name: true, display_name: true, logo_url: true },
     });
 
     if (!business) return { title: 'Fundraiser Not Found' };
 
-    // Tenant branding (display name + shareable logo)
+    // Tenant branding logo — still legitimately sourced from TenantBranding.
+    // TENANT-BRAND-AUTHORITY-1: the NAME itself no longer is (see below).
     const brandingRecords: any[] = await prisma.$queryRaw`
         SELECT b.business_name, b.logo_url FROM tenant_branding b
         JOIN users u ON b.user_id = u.id
         WHERE u.business_id = ${business.id} AND u.role = 'ADMIN'
         LIMIT 1
     `;
-    const tenantName = brandingRecords[0]?.business_name
-        && brandingRecords[0].business_name !== 'FreezerIQ'
-        && brandingRecords[0].business_name !== 'Freezer IQ'
-        ? brandingRecords[0].business_name
-        : business.name || 'Freezer Chef';
+    // TENANT-BRAND-AUTHORITY-1: the customer-facing brand for this share
+    // preview's title/description/og:site_name. Previously read
+    // tenant_branding.business_name (schema DEFAULT 'Freezer Chef') falling
+    // back to business.name falling back to a hardcoded 'Freezer Chef'
+    // literal — three wrong sources in a row for an unconfigured tenant. Now
+    // the single display_name-aware authority.
+    const tenantName = customerFacingBusinessName(business);
 
     // Campaign org name — TENANT-SCOPED. The campaign must belong to the business
     // resolved from the slug, so a mismatched slug/fundraiserId URL can never leak
@@ -130,7 +134,9 @@ async function getData(slug: string, fundraiserId: string) {
         // FR-ORDERABILITY-1-R: timezone is the tenant's authoritative zone for
         // the supporter ordering deadline. It stays server-side — it is used to
         // compute orderMode and is never passed across the client boundary.
-        select: { id: true, name: true, slug: true, logo_url: true, timezone: true }
+        // TENANT-BRAND-AUTHORITY-1: display_name is the customer-facing brand
+        // authority FundraiserClient.tsx resolves the tenant name from.
+        select: { id: true, name: true, display_name: true, slug: true, logo_url: true, timezone: true }
     });
 
     if (!business) return null;

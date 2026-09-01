@@ -3,6 +3,7 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { formatBundleCount, computeBundleUnitsFromItems, type FundraiserProgressResult } from '@/lib/fundraiserMetrics';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
+import { customerFacingBusinessName } from '@/lib/tenantBrand';
 
 /**
  * FR-ACCEPTANCE-MOBILE-POLISH-1. Display-only formatting for the per-order
@@ -119,11 +120,14 @@ export default function FundraiserClient({
     const { totalBundlesSold, bundleGoal } = bundleProgress as FundraiserProgressResult;
 
     const primaryColor = business.branding?.primary_color || '#4f46e5';
-    const tenantName = (business.branding?.business_name
-        && business.branding.business_name !== 'FreezerIQ'
-        && business.branding.business_name !== 'Freezer IQ')
-        ? business.branding.business_name
-        : (business.name || 'Freezer Chef');
+    // TENANT-BRAND-AUTHORITY-1: the customer-facing brand a fundraiser
+    // supporter reads. Previously prioritised business.branding?.business_name
+    // — the legacy TenantBranding column, which carries a schema DEFAULT of
+    // the literal 'Freezer Chef' — then business.name, then a hardcoded
+    // 'Freezer Chef' literal. Colors/logo legitimately still come from
+    // branding (unchanged below); only the NAME now comes from the single
+    // display_name-aware authority.
+    const tenantName = customerFacingBusinessName(business);
     const tenantLogo = business.branding?.logo_url || business.logo_url || null;
     const campaignTitle = campaign.name || `${campaign.organization_name} Fundraiser`;
 

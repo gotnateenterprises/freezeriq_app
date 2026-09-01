@@ -70,11 +70,21 @@ describe('PRIVACY-DISCLOSURE-1: supporter order form disclosure', () => {
         expect(disclosureLine).toMatch(/\{tenantName\}/);
         expect(disclosureLine).not.toMatch(/Freezer Chef/);
         expect(disclosureLine).not.toMatch(/FreezerIQ/);
-        // tenantName itself must still resolve from this page's own real
-        // branding data (business.branding.business_name / business.name),
+        // tenantName itself must still resolve from real tenant business data,
         // never a literal — proves the variable it reuses is genuine, not
         // itself hardcoded elsewhere in this same file.
-        expect(src).toMatch(/const tenantName = \(business\.branding\?\.business_name/);
+        //
+        // TENANT-BRAND-AUTHORITY-1: this used to pin the old inline expression
+        // (business.branding?.business_name with two literal 'Freezer Chef'/
+        // 'FreezerIQ' fallbacks baked in) as its proxy for "genuinely dynamic".
+        // That expression was ITSELF the bug this phase fixed — it read the
+        // legacy TenantBranding column (schema DEFAULT 'Freezer Chef') ahead of
+        // Business.display_name. The resolution is now the tested
+        // customerFacingBusinessName(business) authority, which is a strictly
+        // stronger proof of "genuine, not hardcoded" than the expression it
+        // replaces.
+        expect(src).toMatch(/from ['"]@\/lib\/tenantBrand['"]/);
+        expect(src).toMatch(/const tenantName = customerFacingBusinessName\(business\)/);
     });
 
     it('4. does not falsely claim data is private from the coordinator', () => {
