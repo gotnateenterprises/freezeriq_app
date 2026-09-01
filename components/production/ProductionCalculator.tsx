@@ -165,7 +165,15 @@ export function ProductionCalculator() {
     // Calculator Actions
     const updateOrder = (index: number, field: keyof OrderItem, value: any) => {
         const newOrders = [...orders];
-        newOrders[index] = { ...newOrders[index], [field]: value };
+        // OPS-4A: changing the BUNDLE on a row invalidates any variant_size it
+        // was carrying -- that snapshot belonged to whichever bundle was
+        // synced, not to whatever the dropdown now points at. Clearing it
+        // correctly turns the row into a manual one, so the server derives
+        // the newly-selected bundle's own current tier instead of keeping a
+        // stale sold-tier claim for a bundle that was never actually chosen.
+        newOrders[index] = field === 'bundle_id'
+            ? { ...newOrders[index], bundle_id: value, variant_size: undefined }
+            : { ...newOrders[index], [field]: value };
         setOrders(newOrders);
     };
 
@@ -243,10 +251,19 @@ export function ProductionCalculator() {
         setIsCalculating(true);
         try {
             const validOrders = orders.filter(o => o.bundle_id && o.quantity > 0);
+            // OPS-4A: split by whether this row carries a real sold-tier
+            // snapshot (it came from Auto-Sync, so variant_size was set --
+            // even a legacy null still means "synced") versus a bundle
+            // hand-picked from the dropdown (variant_size was never set at
+            // all). The server trusts variant_size only for the former; for
+            // the latter it always derives tier from the tenant-scoped
+            // Bundle itself, never from anything sent here.
+            const syncedOrders = validOrders.filter(o => o.variant_size != null);
+            const manualOrders = validOrders.filter(o => o.variant_size == null);
             const res = await fetch('/api/production/plan', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ orders: validOrders })
+                body: JSON.stringify({ syncedOrders, manualOrders })
             });
             const data = await res.json();
             setResult(data);

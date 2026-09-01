@@ -322,10 +322,11 @@ describe('4. ProductionCalculator (Manual Planner) threads variant_size through'
         expect(fn).toMatch(/variant_size:\s*d\.variant_size/);
     });
 
-    it('calculatePlan still POSTs the full order objects (no new filtering that would strip the field)', () => {
+    it('SUPERSEDED BY OPS-4A: calculatePlan no longer posts one flat "orders" array -- it splits into syncedOrders/manualOrders so the server can tell a real sold snapshot apart from a hand-picked bundle. Both branches still carry the full order objects; neither strips a field.', () => {
         const src = strip(read('components/production/ProductionCalculator.tsx'));
         const fn = src.slice(src.indexOf('const calculatePlan'), src.indexOf('const getSupplierSearchUrl'));
-        expect(fn).toMatch(/JSON\.stringify\(\{\s*orders:\s*validOrders\s*\}\)/);
+        expect(fn).toMatch(/JSON\.stringify\(\{\s*syncedOrders,\s*manualOrders\s*\}\)/);
+        expect(fn).toMatch(/validOrders\.filter\(o => o\.variant_size/);
     });
 });
 

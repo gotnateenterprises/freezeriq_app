@@ -68,6 +68,13 @@ const MODELS = [
     'documentTemplate',
     // TENANT-BRAND-AUTHORITY-2: GET/POST /api/tenant/branding.
     'tenantBranding',
+    // OPS-4A: PrismaAdapter.getBundleContents() reads this on every
+    // KitchenEngine production-plan call. Its own try/catch silently
+    // swallows a missing-model TypeError and returns [], which reads as
+    // "this bundle has no contents" instead of "the mock isn't wired" —
+    // a false green on exactly the ingredient-quantity assertions these
+    // tests exist to make.
+    'bundleContent',
 ];
 
 const METHODS = [
