@@ -462,15 +462,23 @@ describe('FR-COORD-123 · no overclaims survive', () => {
     });
 
     it('the pickup claim does not promise fields the order list lacks', () => {
-        // RecentOrders renders supporter name, an item count and the total. The
-        // coordinator GET deliberately excludes email/phone as PII, so the card
-        // must not claim the list shows how to contact anyone.
+        // SUPERSEDED IN PART by COORD-FULFILLMENT-1. The original rule was that
+        // the card must not mention contacting anyone, because the coordinator
+        // GET excluded email and phone. It no longer does: the order list now
+        // carries supporter email and phone for this campaign, so a contact
+        // claim would be TRUE. What must still hold is the narrower, still-real
+        // constraint — the list has no home address, so the card must not
+        // promise one, and it must not promise a per-order payment status that
+        // no Order field can support.
         const card = R(CARD);
         const pickup = card.slice(card.indexOf('When ordering closes'), card.indexOf('</details>'));
-        expect(pickup).not.toMatch(/how to reach|contact (them|information)|phone|email address/i);
+        expect(pickup).not.toMatch(/address|deliver to (them|their)/i);
+        expect(pickup).not.toMatch(/\bmarked paid\b|payment (status|confirmed)/i);
+
+        // And the tracker itself still never receives an address.
         const orders = strip(R('components/coordinator/RecentOrders.tsx'));
-        expect(orders).not.toContain('customer_email');
-        expect(orders).not.toContain('phone');
+        expect(orders).not.toContain('delivery_address');
+        expect(orders).not.toContain('deliveryAddress');
     });
 
     it('the guide no longer contradicts the card about email notifications', () => {

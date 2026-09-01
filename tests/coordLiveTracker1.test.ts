@@ -42,11 +42,32 @@ const RECENT_ORDERS = 'components/coordinator/RecentOrders.tsx';
 // this exact route, chosen because the full handler (bundle resolution,
 // share-copy, coordinator-identity lookups) is not meaningfully mockable as
 // a single unit and testing it that way would be brittle, not more correct.
+// COORD-FULFILLMENT-1: the campaign query became an explicit `select` allowlist
+// (it was `include`, which shipped every scalar including portal_token), so this
+// helper no longer anchors on `include: {`. It now brace-matches the orders
+// sub-block, which is boundary-independent and cannot silently slice the wrong
+// window if the surrounding comments change again.
 function ordersSelectBlock(): string {
     const src = read(COORD_ROUTE);
-    const start = src.indexOf('orders: {', src.indexOf('include: {'));
-    const end = src.indexOf('\n        },\n\n        // Fetch recently canceled');
-    return src.slice(start, end > start ? end : start + 900);
+    const start = src.indexOf('orders: {', src.indexOf('export async function GET'));
+    if (start < 0) throw new Error('orders select block not found in ' + COORD_ROUTE);
+    let depth = 0;
+    for (let i = src.indexOf('{', start); i < src.length; i++) {
+        if (src[i] === '{') depth++;
+        else if (src[i] === '}') {
+            depth--;
+            if (depth === 0) return src.slice(start, i + 1);
+        }
+    }
+    throw new Error('unbalanced braces slicing the orders select block');
+}
+
+/** The whole GET handler, bounded by the next top-level export. */
+function getHandler(): string {
+    const src = read(COORD_ROUTE);
+    const start = src.indexOf('export async function GET');
+    const next = src.indexOf('export async function POST', start);
+    return src.slice(start, next > start ? next : src.length);
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -61,8 +82,9 @@ describe('COORD-LIVE-TRACKER-1: auth/scope — proven, not merely re-asserted', 
     });
 
     it('3/4/5. the campaign id used for the query is guard.campaignId (session-derived) — never req.url, searchParams, or body', () => {
-        const src = read(COORD_ROUTE);
-        const getFn = src.slice(src.indexOf('export async function GET'), src.indexOf('export async function GET') + 1200);
+        // Bounded by the handler itself rather than a character count, which a
+        // added comment can silently push the assertion target out of.
+        const getFn = getHandler();
         expect(getFn).toMatch(/const campaignId = guard\.campaignId/);
         expect(getFn).toMatch(/where: \{ id: campaignId \}/);
         // No searchParams-derived or body-derived id feeds the campaign lookup.
@@ -177,35 +199,65 @@ describe('COORD-LIVE-TRACKER-1: order content — the data was already selected 
 // ═════════════════════════════════════════════════════════════════════════
 // PRIVACY (Part Q items 13-16)
 // ═════════════════════════════════════════════════════════════════════════
-describe('COORD-LIVE-TRACKER-1: privacy boundary — reconfirmed, not weakened', () => {
-    it('13/14/15/16. the orders select excludes email, phone, delivery_address, and any processor/payment id as actual Prisma field selections', () => {
+describe('COORD-LIVE-TRACKER-1: privacy boundary — REVISED by COORD-FULFILLMENT-1', () => {
+    // ─────────────────────────────────────────────────────────────────────
+    // SUPERSEDED RULING. This block used to assert that the coordinator must
+    // never receive supporter email or phone. That was the ruling at the time
+    // and it is no longer the owner's contract: a coordinator running a
+    // fundraiser has to be able to reach the people who ordered from it, and
+    // the supporter-facing disclosure has always told buyers their name, email
+    // and phone are shared with their fundraiser coordinator.
+    //
+    // The assertions are rewritten to the CURRENT ruling rather than deleted,
+    // so the boundary that genuinely still holds — no home address, no
+    // credential, no other campaign — stays enforced. The authorisation half is
+    // proven behaviourally against the real handler in
+    // tests/coordFulfillment1.test.ts; what remains here is the source-level
+    // shape of the query.
+    // ─────────────────────────────────────────────────────────────────────
+    it('13/14/15. the orders select now DOES fetch supporter phone and the linked customer email', () => {
         const block = ordersSelectBlock();
-        // The excluded-fields comment legitimately names them in prose (and is
-        // asserted present, below) -- what must never appear is the Prisma
-        // "field: true" selection syntax that would actually fetch them.
-        expect(block).not.toMatch(/customer_email:\s*true/);
-        expect(block).not.toMatch(/\bphone:\s*true/);
+        expect(block).toMatch(/\bphone:\s*true/);
+        expect(block).toMatch(/customer:\s*\{\s*select:\s*\{\s*contact_email:\s*true\s*\}\s*\}/);
+    });
+
+    it('13/14/15/16. the orders select still excludes delivery_address and any processor/payment id', () => {
+        const block = ordersSelectBlock();
+        // The one contact field that is still out of scope: fundraiser
+        // supporters are not delivered to individually.
         expect(block).not.toMatch(/delivery_address:\s*true/);
         expect(block).not.toMatch(/processor_payment_id:\s*true/);
         expect(block).not.toMatch(/payment_processor:\s*true/);
-        // The route's own existing self-documentation of that boundary.
-        expect(block).toMatch(/EXCLUDED: delivery_address, customer_email, phone/);
+        // And the route still says so in its own words.
+        expect(block).toMatch(/STILL EXCLUDED: delivery_address/);
     });
 
-    it('13/14/15/16. RecentOrders never reads an email/phone/delivery_address/processor property off an order or item -- it cannot expose what it never receives', () => {
+    it('the campaign projection is an allowlist that never fetches portal_token', () => {
+        const getFn = getHandler();
+        expect(getFn).toMatch(/select:\s*\{/);
+        expect(getFn).not.toMatch(/portal_token:\s*true/);
+        // `include` on the campaign returns every scalar, which is how the
+        // credential shipped in the first place.
+        expect(getFn).not.toMatch(/findFirst\(\{[\s\S]{0,120}include:/);
+    });
+
+    it('RecentOrders renders contact as actionable links but still never reads an address or processor property', () => {
         const src = read(RECENT_ORDERS);
-        // Checked as property-access patterns (o.email, it.phone, etc.), not
-        // bare words -- this file's own doc comments correctly discuss the
-        // privacy boundary in prose, which must not trip a false positive.
-        expect(src).not.toMatch(/\.email\b/);
-        expect(src).not.toMatch(/\.phone\b/);
+        expect(src).toMatch(/\.email\b/);
+        expect(src).toMatch(/\.phone\b/);
+        expect(src).toMatch(/mailto:/);
+        expect(src).toMatch(/tel:/);
+        // Checked as property-access patterns, not bare words, so the file's
+        // own prose about the boundary cannot trip a false positive.
         expect(src).not.toMatch(/\.delivery_address|\.deliveryAddress/);
         expect(src).not.toMatch(/\.processor/i);
     });
 
-    it('the top-level GET handler doc comment still states the privacy contract this phase preserves', () => {
+    it('the top-level GET handler doc comment states the CURRENT contact scope', () => {
         const src = read(COORD_ROUTE);
-        expect(src).toMatch(/No PII exposure: delivery addresses, emails, phones filtered from GET responses/);
+        expect(src).toMatch(/THIS SESSION'S CAMPAIGN ONLY/);
+        expect(src).toMatch(/Home address is never returned/);
+        expect(src).toMatch(/never carries portal_token/);
     });
 
     it('the new payment note never claims a settled/verified/processor-confirmed status Order data does not support', () => {

@@ -7,7 +7,13 @@
  *   GET  → view campaign details, privacy-filtered orders, available bundles
  *   POST → submit compiled fundraiser order on behalf of supporters
  *   PUT  → update coordinator payment settings (Venmo link, instructions)
- * - No PII exposure: delivery addresses, emails, phones filtered from GET responses
+ * - COORD-FULFILLMENT-1 contact scope: the GET returns supporter name, email and
+ *   phone for THIS SESSION'S CAMPAIGN ONLY, matching the supporter-facing
+ *   disclosure ("name, email, and phone ... shared with your fundraiser
+ *   coordinator"). Home address is never returned — fundraiser supporters are
+ *   not delivered to individually; FundraiserCampaign.pickup_location is the
+ *   fulfilment address. The campaign projection is an explicit allowlist and
+ *   never carries portal_token.
  * - Plan gating checked per-request against business subscription
  *
  * ACTOR: Fundraiser Coordinator
@@ -80,10 +86,49 @@ export async function GET(req: Request) {
         if (!guard.ok) return guard.response as NextResponse;
         const campaignId = guard.campaignId;
 
-        // 1. Fetch Campaign with Business Info by portal_token (private coordinator access)
+        // 1. Fetch the session's campaign.
+        //
+        // COORD-FULFILLMENT-1 — ALLOWLIST, NOT BLACKLIST.
+        //
+        // This used to be `include`, which returns every scalar on the row. That
+        // shipped FundraiserCampaign.portal_token — the coordinator's live access
+        // credential — into the browser on every portal load, where it sat in
+        // React state and in any response the client logged or cached. The whole
+        // point of FR-COORD-SEC-1B was to stop that credential travelling; a
+        // response body is quieter than a URL but it is still transport.
+        //
+        // Every field below is one a coordinator surface actually reads. Adding a
+        // field here is a deliberate act; nothing arrives by default. Deleting a
+        // secret after the fact was rejected — the secret must never be fetched.
         let campaign = await prisma.fundraiserCampaign.findFirst({
             where: { id: campaignId },
-            include: {
+            select: {
+                id: true,
+                name: true,
+                status: true,
+                end_date: true,
+                delivery_date: true,
+                delivery_time: true,
+                closed_at: true,
+                settlement_total: true,
+                pickup_location: true,
+                external_payment_link: true,
+                payment_instructions: true,
+                bundle_goal: true,
+                total_sales: true,
+                org_share_percent: true,
+                participant_label: true,
+                bundle_selection_status: true,
+                bundle_selection_limit: true,
+                // The PUBLIC scoreboard identifier (/fundraiser/<public_token>),
+                // which the portal renders as a shareable link. Public by design
+                // and by route: app/fundraiser/[token] resolves it with no auth.
+                // NOT portal_token, which is the private access credential.
+                public_token: true,
+                // Server-side only: distinguishes a coordinator-entered order
+                // (linked to the ORGANISATION) from a supporter's own order.
+                // Removed from the response below.
+                customer_id: true,
                 customer: {
                     select: {
                         name: true,
@@ -124,7 +169,15 @@ export async function GET(req: Request) {
                         total_amount: true,
                         created_at: true,
                         source: true,
-                        // Bundle-unit progress needs item-level data (no PII)
+                        // COORD-FULFILLMENT-1: supporter contact for THIS
+                        // campaign only. The supporter-facing disclosure already
+                        // states that name, email and phone are shared with the
+                        // fundraiser coordinator, so this matches what buyers
+                        // were told. Address remains excluded — see below.
+                        phone: true,
+                        customer_id: true,
+                        customer: { select: { contact_email: true } },
+                        // Bundle-unit progress needs item-level data
                         items: {
                             select: {
                                 quantity: true,
@@ -132,7 +185,9 @@ export async function GET(req: Request) {
                                 item_name: true,
                             }
                         }
-                        // EXCLUDED: delivery_address, customer_email, phone
+                        // STILL EXCLUDED: delivery_address. Fundraiser supporters
+                        // are not delivered to individually; the campaign's own
+                        // pickup_location is the fulfilment address.
                     }
                 }
             }
@@ -153,10 +208,14 @@ export async function GET(req: Request) {
             select: {
                 id: true,
                 customer_name: true,
+                participant_name: true,
                 total_amount: true,
                 created_at: true,
                 canceled_at: true,
                 source: true,
+                phone: true,
+                customer_id: true,
+                customer: { select: { contact_email: true } },
                 items: {
                     select: {
                         quantity: true,
@@ -345,10 +404,56 @@ export async function GET(req: Request) {
         const sharePickupLocation = ((campaign as any).pickup_location ?? '').trim();
         if (sharePickupLocation) sharePickupDeliveryLines.push(`Location: ${sharePickupLocation}`);
 
+        // ── COORD-FULFILLMENT-1: the supporter contact projection ────────────
+        //
+        // Supporter EMAIL is not a column on Order. It lives on the Customer row
+        // the order is linked to, and the two fundraiser order paths link
+        // DIFFERENT things:
+        //
+        //   public supporter order  -> a per-supporter Customer created from the
+        //                              address that supporter typed. Its
+        //                              contact_email IS the supporter's.
+        //   coordinator "+ Add Order" -> the ORGANISATION itself
+        //                              (customer_id: campaign.customer_id). Its
+        //                              contact_email is the org's own inbox.
+        //
+        // So the join is gated on durable identity, never on a display name: an
+        // order linked to the campaign's own organisation has no supporter email
+        // to report, and reporting the org's would show the coordinator their
+        // own address labelled as the buyer's. Coordinator-entered orders
+        // genuinely capture no email — the POST accepts the field but has no
+        // column for it — so null here is the truthful answer, not a gap.
+        const supporterEmail = (o: any): string | null => {
+            if (!o.customer_id) return null;
+            if (o.customer_id === campaign.customer_id) return null;
+            return o.customer?.contact_email ?? null;
+        };
+
+        // Explicit DTO. `customer` and `customer_id` are working fields and are
+        // dropped here rather than reaching the client; delivery_address was
+        // never selected at all.
+        const toSupporterOrder = (o: any) => ({
+            id: o.id,
+            customer_name: o.customer_name ?? null,
+            participant_name: o.participant_name ?? null,
+            email: supporterEmail(o),
+            phone: o.phone ?? null,
+            total_amount: o.total_amount,
+            created_at: o.created_at,
+            canceled_at: o.canceled_at ?? null,
+            source: o.source,
+            items: o.items ?? [],
+        });
+
+        // customer_id is fetched for the rule above and is not part of the
+        // coordinator's payload.
+        const { customer_id: _campaignCustomerId, ...campaignResponse } = campaign as any;
+
         return NextResponse.json({
-            ...campaign,
+            ...campaignResponse,
+            orders: (campaign.orders || []).map(toSupporterOrder),
             total_sales: computedTotalSales,
-            canceledOrders,
+            canceledOrders: canceledOrders.map(toSupporterOrder),
             availableBundles: bundles,
             orderMode,
             share: {

@@ -15,10 +15,13 @@
  * that the API response already carries. This renders that data instead of
  * throwing it away — no new fields were added to the API for this.
  *
- * PRIVACY BOUNDARY (unchanged, reconfirmed by tests/coordLiveTracker1.test.ts):
- * the API's own orders select excludes email, phone, and delivery_address —
- * this component never receives them, so there is nothing here that could
- * expose them.
+ * PRIVACY BOUNDARY (COORD-FULFILLMENT-1): the API now returns supporter email
+ * and phone for the session's OWN campaign, matching the supporter-facing
+ * disclosure ("name, email, and phone ... shared with your fundraiser
+ * coordinator"), and this component renders them as actionable links. Home
+ * address is still never fetched and never rendered: fundraiser supporters are
+ * not delivered to individually. Enforced behaviourally by
+ * tests/coordFulfillment1.test.ts against the real GET handler.
  */
 
 /** Mirrors lib/email.ts's private formatVariantLabel (not imported — that
@@ -50,10 +53,21 @@ export interface TrackerOrder {
     id: string;
     customer_name?: string | null;
     participant_name?: string | null;
+    /** COORD-FULFILLMENT-1: supporter contact for this campaign only. Either may
+     *  be null — a coordinator-entered order captures no email, and a supporter
+     *  may have left phone blank. Null renders nothing rather than a placeholder. */
+    email?: string | null;
+    phone?: string | null;
     total_amount?: number | string | null;
     created_at?: string | null;
     canceled_at?: string | null;
     items?: OrderLineItem[];
+}
+
+/** Digits only, so a formatted number still produces a dialable tel: href. */
+function telHref(phone: string): string {
+    const cleaned = phone.replace(/[^\d+]/g, '');
+    return cleaned ? `tel:${cleaned}` : '';
 }
 
 export function RecentOrders({
@@ -129,6 +143,33 @@ export function RecentOrders({
                                         );
                                     })}
                                 </ul>
+                            )}
+                            {/* COORD-FULFILLMENT-1: one compact wrapping row rather
+                                than two stacked lines, so a long order list stays
+                                scannable on a phone. Each contact is actionable —
+                                tapping calls or opens mail — because the coordinator
+                                uses this list to chase payment and pickup. Nothing
+                                renders when neither is present. */}
+                            {(o.email || o.phone) && (
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-0.5 text-[11px]">
+                                    {o.email && (
+                                        <a
+                                            href={`mailto:${o.email}`}
+                                            className="max-w-full truncate text-indigo-600 hover:underline"
+                                            title={o.email}
+                                        >
+                                            {o.email}
+                                        </a>
+                                    )}
+                                    {o.phone && telHref(o.phone) && (
+                                        <a
+                                            href={telHref(o.phone)}
+                                            className="whitespace-nowrap text-indigo-600 hover:underline"
+                                        >
+                                            {o.phone}
+                                        </a>
+                                    )}
+                                </div>
                             )}
                         </div>
                     );

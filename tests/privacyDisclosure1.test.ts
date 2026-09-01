@@ -14,11 +14,13 @@
  *     supporter's name, email (as a mailto link), phone, and participant
  *     name into the coordinator's order-notification email at order time.
  *   - app/api/coordinator/route.ts's GET (the coordinator's own portal
- *     view, as opposed to that one-time email) deliberately EXCLUDES
- *     delivery_address, email, and phone from its response — its own doc
- *     comment: "No PII exposure: delivery addresses, emails, phones
- *     filtered from GET responses." Only name/participant/items/totals
- *     reach the portal UI itself.
+ *     view, as opposed to that one-time email) returned only
+ *     name/participant/items/totals when this phase shipped.
+ *     SUPERSEDED BY COORD-FULFILLMENT-1: that GET now also returns supporter
+ *     email and phone, for the session's own campaign only. The disclosure
+ *     below is unaffected — it always said those three fields are shared with
+ *     the coordinator, so the API caught up to the copy rather than the copy
+ *     needing to change. Home address is still never returned.
  *   - The tenant (business) sees everything through its own CRM
  *     (app/api/orders/route.ts, app/customers/[id]/page.tsx) — ordinary,
  *     expected tenant-owns-its-data access, not a new exposure.
@@ -118,26 +120,56 @@ describe('PRIVACY-DISCLOSURE-1: supporter order form disclosure', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════
-// Part G finding, recorded as an executable fact rather than an assumption:
-// no coordinator-side reminder was added, because the precondition for one
-// is not met. The coordinator PORTAL UI (as opposed to the one-time order
-// email) never receives contact details to begin with -- proven against
-// app/api/coordinator/route.ts's own GET handler, not inferred.
+// Part G finding, as revised by COORD-FULFILLMENT-1: the coordinator portal
+// now DOES receive supporter contact details for its own campaign, so the
+// original "precondition not met" reasoning no longer applies. What is checked
+// here instead is the property that still matters — the shipped supporter copy
+// and the shipped API describe the same three fields, and neither extends to a
+// home address.
 // ═════════════════════════════════════════════════════════════════════════
-describe('PRIVACY-DISCLOSURE-1: coordinator-side reminder — proven unnecessary, not added', () => {
-    it('the coordinator portal GET response excludes email, phone, and delivery_address -- the precondition for Part G\'s reminder', () => {
+describe('PRIVACY-DISCLOSURE-1: the disclosure and the coordinator portal agree', () => {
+    // ─────────────────────────────────────────────────────────────────────
+    // SUPERSEDED PRECONDITION. This block previously recorded that no
+    // coordinator-side reminder was needed BECAUSE the portal never received
+    // contact details at all. COORD-FULFILLMENT-1 changed that: the portal now
+    // returns supporter name, email and phone for the coordinator's own
+    // campaign.
+    //
+    // That does NOT invalidate the disclosure — it is exactly what the
+    // disclosure has always said. The assertions below are re-pointed at the
+    // property that actually matters now: the shipped supporter-facing copy and
+    // the shipped API must describe the same three fields, and neither may
+    // extend to a home address.
+    // ─────────────────────────────────────────────────────────────────────
+    it('the disclosure names exactly the three fields the coordinator portal now returns', () => {
+        const clientSrc = read(CLIENT_PATH);
+        expect(clientSrc).toMatch(/name, email, and phone you provide are shared with your fundraiser coordinator/);
+
         const routeSrc = read('app/api/coordinator/route.ts');
-        expect(routeSrc).toMatch(/No PII exposure: delivery addresses, emails, phones filtered from GET responses/);
-        expect(routeSrc).toMatch(/EXCLUDED: delivery_address, customer_email, phone/);
+        expect(routeSrc).toMatch(/THIS SESSION'S CAMPAIGN ONLY/);
+        expect(routeSrc).toMatch(/shared with your fundraiser\n \* \*\s?coordinator|shared with your fundraiser/);
     });
 
-    it('the only supporter-identifying fields the coordinator portal GET selects are name/participant/items/totals -- names, not contact details', () => {
+    it('the coordinator GET selects supporter name, participant, phone and the linked email — and never an address', () => {
         const routeSrc = read('app/api/coordinator/route.ts');
-        const ordersSelectBlock = routeSrc.slice(routeSrc.indexOf('orders: {'), routeSrc.indexOf('orders: {') + 700);
+        const start = routeSrc.indexOf('orders: {', routeSrc.indexOf('export async function GET'));
+        const ordersSelectBlock = routeSrc.slice(start, start + 1200);
         expect(ordersSelectBlock).toMatch(/participant_name: true/);
         expect(ordersSelectBlock).toMatch(/customer_name: true/);
-        expect(ordersSelectBlock).not.toMatch(/phone: true/);
+        expect(ordersSelectBlock).toMatch(/phone: true/);
+        expect(ordersSelectBlock).toMatch(/contact_email: true/);
+        // The disclosure promises name/email/phone. It does NOT promise an
+        // address, and the API must not exceed what supporters were told.
         expect(ordersSelectBlock).not.toMatch(/delivery_address: true/);
+    });
+
+    it('the disclosure still makes no address claim, because no address is collected or shared', () => {
+        const clientSrc = read(CLIENT_PATH);
+        const notice = clientSrc.slice(
+            clientSrc.indexOf('The name, email, and phone you provide'),
+            clientSrc.indexOf('The name, email, and phone you provide') + 400,
+        );
+        expect(notice).not.toMatch(/address/i);
     });
 });
 
