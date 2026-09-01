@@ -102,7 +102,7 @@ export async function GET(req: Request) {
                                         At {{BusinessName}}, we bring over 10 years of experience in freezer meal preparation to your table—taking the stress out of dinnertime and replace it with comforting, crave-worthy flavors your whole family will love. Our freezer-ready meals are handcrafted with care and packed with nostalgia—from hearty casseroles and slow-simmered soups to warm, oven-baked favorites and cozy crockpot classics.
                                     </p>
                                     <p style="margin-bottom: 15px;">
-                                        Whether you're feeding a hungry crew or stocking up for busy weeknights, we make it easy to serve up real food that feels like a warm hug. Each dish is flash-frozen at peak freshness, ready when you are, and bursting with flavor in every bite. For more information about {{BusinessName}}, please visit their website: <strong><a href="https://myfreezerchef.com" style="color: #2563eb;">myfreezerchef.com</a></strong>
+                                        Whether you're feeding a hungry crew or stocking up for busy weeknights, we make it easy to serve up real food that feels like a warm hug. Each dish is flash-frozen at peak freshness, ready when you are, and bursting with flavor in every bite. For more information about {{BusinessName}}, please visit their website: {{BusinessWebsite}}
                                     </p>
                                 </div>
                             </div>

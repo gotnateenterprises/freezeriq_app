@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { uploadToS3 } from '@/lib/s3';
-import { customerFacingBusinessName } from '@/lib/tenantBrand';
+import { customerFacingBusinessName, customerFacingWebsite } from '@/lib/tenantBrand';
+import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
         // We find the branding record linked to the business admin or any user in this business
         const business = await prisma.business.findUnique({
             where: { id: user.business_id },
-            select: { slug: true, name: true, display_name: true, contact_email: true }
+            select: { slug: true, name: true, display_name: true, contact_email: true, custom_domain: true }
         });
 
         // TENANT-BRAND-AUTHORITY-2: the customer-facing business name. Never
@@ -46,6 +47,30 @@ export async function GET(req: NextRequest) {
         // authority, though it is preserved harmlessly for historical
         // continuity by the POST handler.
         const customerFacingName = business ? customerFacingBusinessName(business) : 'My Business';
+
+        // TENANT-WEBSITE-AUTHORITY-1: the tenant's own website — same
+        // authority pattern as the name above. Business.custom_domain when
+        // configured, this tenant's OWN storefront URL otherwise. Never
+        // another tenant's domain. resolveOutreachOrigin is the same
+        // pinned-platform-origin helper the flyer/packet routes already use
+        // for this exact purpose.
+        //
+        // req is trusted to be a real NextRequest in production, but this
+        // handler previously never dereferenced it — resolveOutreachOrigin
+        // throws on a req without a valid .url, which would otherwise take
+        // down the ENTIRE response (including the unrelated business_name/
+        // contact_email fields) over a non-critical piece of derived data.
+        // Falling back to the no-argument form lets its own documented-safe
+        // NEXTAUTH_URL/canonical-origin fallback apply instead of failing.
+        let platformOrigin: string;
+        try {
+            platformOrigin = resolveOutreachOrigin(req);
+        } catch {
+            platformOrigin = resolveOutreachOrigin();
+        }
+        const site = business
+            ? customerFacingWebsite(business, platformOrigin)
+            : { url: null, label: null };
 
         const branding = await prisma.tenantBranding.findFirst({
             where: {
@@ -66,6 +91,8 @@ export async function GET(req: NextRequest) {
         if (!branding) {
             return NextResponse.json({
                 business_name: customerFacingName,
+                business_website_url: site.url,
+                business_website_label: site.label,
                 business_slug: business?.slug,
                 contact_email: business?.contact_email || '',
                 tagline: '',
@@ -78,9 +105,12 @@ export async function GET(req: NextRequest) {
 
         return NextResponse.json({
             // Visual branding (colors, logo, tagline, thank-you copy) still
-            // comes from TenantBranding — only the name is overridden below.
+            // comes from TenantBranding — only the name/website are
+            // overridden below.
             ...branding,
             business_name: customerFacingName,
+            business_website_url: site.url,
+            business_website_label: site.label,
             business_slug: business?.slug,
             contact_email: business?.contact_email || ''
         });

@@ -48,12 +48,25 @@ export default function DocumentCenter({ customer, existingDoc, onSave }: Docume
     // Empty until the fetch resolves; a document generated before it resolves
     // simply keeps the literal token rather than guessing.
     const [businessName, setBusinessName] = useState<string>('');
+    // TENANT-WEBSITE-AUTHORITY-1: the {{BusinessWebsite}} merge field, from the
+    // SAME fetch above (customerFacingWebsite — Business.custom_domain, falling
+    // back to the tenant's own storefront URL). Empty when unresolved OR
+    // genuinely unavailable — the merge field is OMITTED rather than ever
+    // falling back to another tenant's domain.
+    const [businessWebsite, setBusinessWebsite] = useState<string>('');
 
     useEffect(() => {
         setMounted(true);
         fetch('/api/tenant/branding')
             .then(res => (res.ok ? res.json() : null))
-            .then(data => { if (data?.business_name) setBusinessName(data.business_name); })
+            .then(data => {
+                if (data?.business_name) setBusinessName(data.business_name);
+                if (data?.business_website_url && data?.business_website_label) {
+                    setBusinessWebsite(
+                        `<strong><a href="${data.business_website_url}" style="color: #2563eb;">${data.business_website_label}</a></strong>`
+                    );
+                }
+            })
             .catch(() => { /* the merge field simply stays unresolved */ });
     }, []);
 
@@ -193,6 +206,10 @@ export default function DocumentCenter({ customer, existingDoc, onSave }: Docume
             // (display_name-aware). Distinct from {{OrganizationName}} below,
             // which is the fundraising ORGANIZATION, not the tenant.
             .replace(/{{BusinessName}}/g, businessName || 'our team')
+            // TENANT-WEBSITE-AUTHORITY-1: omitted (empty string) when
+            // unavailable, never a hardcoded fallback — see the state
+            // declaration above.
+            .replace(/{{BusinessWebsite}}/g, businessWebsite)
             .replace(/{{OrganizationName}}/g, customer.name)
             .replace(/{{ContactName}}/g, customer.contact_name || customer.name.split(' ')[0])
             .replace(/{{ContactEmail}}/g, customer.email || '')
