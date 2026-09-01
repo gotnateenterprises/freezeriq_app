@@ -63,6 +63,11 @@ const MODELS = [
     // OPS-1: requireCoordinatorSession -> resolveCoordinatorSession reads this
     // model on every coordinator route call, guarded or not.
     'coordinatorSession',
+    // TENANT-BRAND-AUTHORITY-2: GET /api/documents/templates reads this to
+    // decide whether to return the isGlobal seed templates.
+    'documentTemplate',
+    // TENANT-BRAND-AUTHORITY-2: GET/POST /api/tenant/branding.
+    'tenantBranding',
 ];
 
 const METHODS = [

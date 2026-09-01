@@ -51,7 +51,12 @@ export default function StorefrontHero({
                         </div>
                     )}
                     <h2 className="text-xl md:text-2xl font-serif text-white drop-shadow-md">
-                        {(!businessName || businessName === 'FreezerIQ' || businessName === 'Freezer IQ') ? 'Freezer Chef' : businessName}
+                        {/* TENANT-BRAND-AUTHORITY-2: the exclusion guard below is
+                            legitimate and unrelated — it keeps the PLATFORM name
+                            ("FreezerIQ") from being mistaken for the tenant's own
+                            brand. What changed is the fallback it lands on: no
+                            longer a specific competing tenant's name. */}
+                        {(!businessName || businessName === 'FreezerIQ' || businessName === 'Freezer IQ') ? 'Our Kitchen' : businessName}
                     </h2>
                 </div>
                 <Link

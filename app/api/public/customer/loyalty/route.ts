@@ -1,6 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { customerFacingBusinessName } from '@/lib/tenantBrand';
 
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
@@ -53,7 +54,9 @@ export async function GET(request: Request) {
             balance: customer.loyalty_balance || 0,
             // @ts-ignore - Stale Prisma Client
             points: customer.loyalty_points,
-            business_name: business.name,
+            // TENANT-BRAND-AUTHORITY-2: display_name-aware, never the raw
+            // internal name.
+            business_name: customerFacingBusinessName(business),
             primary_color: branding?.primary_color || '#4f46e5'
         });
 

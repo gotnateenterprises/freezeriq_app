@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db';
 import { PUBLIC_BUNDLE_VISIBILITY } from '@/lib/storefrontEligibility';
 import { normalizeSlug, NO_SUCH_SLUG } from '@/lib/publicIdentity';
 import { isValidIanaTimeZone } from '@/lib/tenantTimezone';
+import { customerFacingBusinessName } from '@/lib/tenantBrand';
 
 /**
  * Safely coerce a JSONB field from $queryRaw into a plain JS array.
@@ -43,7 +44,9 @@ export async function GET(
             // FR-ORDERABILITY-1-R: timezone is the tenant's authoritative zone
             // for the fundraiser ordering deadline. Server-side only; it is not
             // part of the public payload.
-            select: { id: true, name: true, slug: true, logo_url: true, timezone: true }
+            // TENANT-BRAND-AUTHORITY-2: display_name is the customer-facing
+            // brand authority resolved into branding.business_name below.
+            select: { id: true, name: true, display_name: true, slug: true, logo_url: true, timezone: true }
         });
 
         if (!business) {
@@ -202,6 +205,10 @@ export async function GET(
             tagline: 'Intelligence for your Kitchen.',
             logo_url: business.logo_url
         };
+        // TENANT-BRAND-AUTHORITY-2: override whatever the row above set — the
+        // legacy tenant_branding.business_name column (schema DEFAULT literal
+        // 'Freezer Chef') is no longer a customer-facing name authority.
+        branding.business_name = customerFacingBusinessName(business);
 
 
         // 6. Fetch Storefront Config (Raw SQL to bypass Client field missing error)

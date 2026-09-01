@@ -28,6 +28,7 @@ import { buildSupporterOrderUrl } from '@/lib/previousSupporterInvite';
 import { resolveMaterialBundles } from '@/lib/coordinatorMaterialBundles';
 import { auth } from '@/auth';
 import { resolveCoordinatorSession } from '@/lib/coordinatorSession';
+import { customerFacingBusinessName } from '@/lib/tenantBrand';
 
 /**
  * Resolve which campaign this caller may have, from authentication alone.
@@ -173,15 +174,17 @@ export async function GET(req: Request) {
         }
 
         // 6. Fetch business name + storefront identity
+        // TENANT-BRAND-AUTHORITY-2: the printed flyer's tenant identity —
+        // display_name-aware, never the raw internal name.
         let businessName = 'FreezerIQ';
         let tenant: { slug: string | null; customDomain: string | null } = { slug: null, customDomain: null };
         if (businessId) {
             const business = await prisma.business.findUnique({
                 where: { id: businessId },
-                select: { name: true, slug: true, custom_domain: true },
+                select: { name: true, display_name: true, slug: true, custom_domain: true },
             });
             if (business) {
-                businessName = business.name;
+                businessName = customerFacingBusinessName(business);
                 tenant = { slug: business.slug, customDomain: business.custom_domain };
             }
         }

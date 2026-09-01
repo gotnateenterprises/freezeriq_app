@@ -37,7 +37,7 @@ export async function GET(req: Request) {
                             <p><strong>Contact:</strong> {{ContactName}} ({{ContactEmail}})</p>
                             
                             <h3>1. Agreement Terms</h3>
-                            <p>This agreement confirms that <strong>{{OrganizationName}}</strong> will participate in the Freezer Chef fundraising program.</p>
+                            <p>This agreement confirms that <strong>{{OrganizationName}}</strong> will participate in the {{BusinessName}} fundraising program.</p>
                             
                             <h3>2. Campaign Goal</h3>
                             <p>The target goal for this campaign is <strong>{{GoalAmount}}</strong>.</p>
@@ -88,21 +88,21 @@ export async function GET(req: Request) {
                 },
                 {
                     id: 'tmpl_fc_flyer_2026',
-                    name: 'Freezer Chef Flyer (2026)',
+                    name: 'Fundraiser Flyer (2026)',
                     type: 'Marketing',
                     category: 'Sales',
                     content: `
                         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 0 auto; color: #000; line-height: 1.5;">
 
-                            <h1 style="text-align: center; color: #1e3a8a; font-size: 28px; margin-bottom: 20px;">Please Join Us for A Freezer Chef Fundraiser!</h1>
+                            <h1 style="text-align: center; color: #1e3a8a; font-size: 28px; margin-bottom: 20px;">Please Join Us for A {{BusinessName}} Fundraiser!</h1>
 
                             <div style="display: flex; gap: 20px; align-items: start; margin-bottom: 20px;">
                                 <div style="flex: 1;">
                                     <p style="margin-bottom: 15px;">
-                                        At Freezer Chef, we bring over 10 years of experience in freezer meal preparation to your table—taking the stress out of dinnertime and replace it with comforting, crave-worthy flavors your whole family will love. Our freezer-ready meals are handcrafted with care and packed with nostalgia—from hearty casseroles and slow-simmered soups to warm, oven-baked favorites and cozy crockpot classics.
+                                        At {{BusinessName}}, we bring over 10 years of experience in freezer meal preparation to your table—taking the stress out of dinnertime and replace it with comforting, crave-worthy flavors your whole family will love. Our freezer-ready meals are handcrafted with care and packed with nostalgia—from hearty casseroles and slow-simmered soups to warm, oven-baked favorites and cozy crockpot classics.
                                     </p>
                                     <p style="margin-bottom: 15px;">
-                                        Whether you're feeding a hungry crew or stocking up for busy weeknights, we make it easy to serve up real food that feels like a warm hug. Each dish is flash-frozen at peak freshness, ready when you are, and bursting with flavor in every bite. For more information about Freezer Chef, please visit their website: <strong><a href="https://myfreezerchef.com" style="color: #2563eb;">myfreezerchef.com</a></strong>
+                                        Whether you're feeding a hungry crew or stocking up for busy weeknights, we make it easy to serve up real food that feels like a warm hug. Each dish is flash-frozen at peak freshness, ready when you are, and bursting with flavor in every bite. For more information about {{BusinessName}}, please visit their website: <strong><a href="https://myfreezerchef.com" style="color: #2563eb;">myfreezerchef.com</a></strong>
                                     </p>
                                 </div>
                             </div>

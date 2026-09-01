@@ -42,8 +42,19 @@ export default function DocumentCenter({ customer, existingDoc, onSave }: Docume
     const [files, setFiles] = useState<File[]>([]);
     const editorRef = useRef<HTMLDivElement>(null);
 
+    // TENANT-BRAND-AUTHORITY-2: the {{BusinessName}} merge field, resolved
+    // server-side by /api/tenant/branding (customerFacingBusinessName —
+    // display_name, never the legacy TenantBranding.business_name default).
+    // Empty until the fetch resolves; a document generated before it resolves
+    // simply keeps the literal token rather than guessing.
+    const [businessName, setBusinessName] = useState<string>('');
+
     useEffect(() => {
         setMounted(true);
+        fetch('/api/tenant/branding')
+            .then(res => (res.ok ? res.json() : null))
+            .then(data => { if (data?.business_name) setBusinessName(data.business_name); })
+            .catch(() => { /* the merge field simply stays unresolved */ });
     }, []);
 
     // Update editor content when previewContent changes externally (e.g. template load)
@@ -178,6 +189,10 @@ export default function DocumentCenter({ customer, existingDoc, onSave }: Docume
 
         // Client-side placeholder replacement
         content = content
+            // TENANT-BRAND-AUTHORITY-2: the tenant's own customer-facing brand
+            // (display_name-aware). Distinct from {{OrganizationName}} below,
+            // which is the fundraising ORGANIZATION, not the tenant.
+            .replace(/{{BusinessName}}/g, businessName || 'our team')
             .replace(/{{OrganizationName}}/g, customer.name)
             .replace(/{{ContactName}}/g, customer.contact_name || customer.name.split(' ')[0])
             .replace(/{{ContactEmail}}/g, customer.email || '')

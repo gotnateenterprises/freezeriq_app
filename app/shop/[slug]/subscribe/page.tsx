@@ -7,6 +7,7 @@ const prisma = new PrismaClient();
 import { notFound } from 'next/navigation';
 import SubscribeClient from './SubscribeClient';
 import { buildBrandVars } from '@/lib/storefront/brandTokens';
+import { customerFacingBusinessName } from '@/lib/tenantBrand';
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
     const { slug } = await params;
@@ -16,12 +17,11 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
     if (!business) return { title: 'Subscribe & Save' };
 
-    const branding = await prisma.tenantBranding.findFirst({
-        where: { user: { business_id: business.id } },
-    });
-
+    // TENANT-BRAND-AUTHORITY-2: the customer-facing brand for the page title.
+    // Previously read TenantBranding.business_name (schema DEFAULT literal
+    // 'Freezer Chef') falling back to the same hardcoded literal.
     return {
-        title: `Subscribe & Save | ${branding?.business_name || 'Freezer Chef'}`,
+        title: `Subscribe & Save | ${customerFacingBusinessName(business)}`,
         description: 'Build your custom meal box and save up to 20%.',
     };
 }

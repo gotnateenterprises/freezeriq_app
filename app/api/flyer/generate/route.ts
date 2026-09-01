@@ -21,6 +21,7 @@ import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
 import { buildSupporterOrderUrl } from '@/lib/previousSupporterInvite';
 import { resolveMaterialBundles } from '@/lib/coordinatorMaterialBundles';
 import { CLOSED_STATUSES } from '@/lib/campaignBundleSelection';
+import { customerFacingBusinessName } from '@/lib/tenantBrand';
 
 export async function POST(req: Request) {
     try {
@@ -185,14 +186,16 @@ export async function POST(req: Request) {
         }
 
         // 8. Fetch business name + storefront identity
+        // TENANT-BRAND-AUTHORITY-2: the printed flyer's tenant identity —
+        // display_name-aware, never the raw internal name.
         let businessName = 'FreezerIQ';
         let tenant: { slug: string | null; customDomain: string | null } = { slug: null, customDomain: null };
         const business = await prisma.business.findUnique({
             where: { id: businessId },
-            select: { name: true, slug: true, custom_domain: true },
+            select: { name: true, display_name: true, slug: true, custom_domain: true },
         });
         if (business) {
-            businessName = business.name;
+            businessName = customerFacingBusinessName(business);
             tenant = { slug: business.slug, customDomain: business.custom_domain };
         }
 

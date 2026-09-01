@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { uploadToS3 } from '@/lib/s3';
+import { customerFacingBusinessName } from '@/lib/tenantBrand';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,8 +37,15 @@ export async function GET(req: NextRequest) {
         // We find the branding record linked to the business admin or any user in this business
         const business = await prisma.business.findUnique({
             where: { id: user.business_id },
-            select: { slug: true, name: true, contact_email: true }
+            select: { slug: true, name: true, display_name: true, contact_email: true }
         });
+
+        // TENANT-BRAND-AUTHORITY-2: the customer-facing business name. Never
+        // TenantBranding.business_name (below) — that column carries a schema
+        // DEFAULT of the literal 'Freezer Chef' and is being retired as a name
+        // authority, though it is preserved harmlessly for historical
+        // continuity by the POST handler.
+        const customerFacingName = business ? customerFacingBusinessName(business) : 'My Business';
 
         const branding = await prisma.tenantBranding.findFirst({
             where: {
@@ -57,7 +65,7 @@ export async function GET(req: NextRequest) {
 
         if (!branding) {
             return NextResponse.json({
-                business_name: business?.name || 'My Business',
+                business_name: customerFacingName,
                 business_slug: business?.slug,
                 contact_email: business?.contact_email || '',
                 tagline: '',
@@ -69,7 +77,10 @@ export async function GET(req: NextRequest) {
         }
 
         return NextResponse.json({
+            // Visual branding (colors, logo, tagline, thank-you copy) still
+            // comes from TenantBranding — only the name is overridden below.
             ...branding,
+            business_name: customerFacingName,
             business_slug: business?.slug,
             contact_email: business?.contact_email || ''
         });
@@ -159,6 +170,12 @@ export async function POST(req: NextRequest) {
         // 3. Upsert Branding using business context
         // If we found an existing record for the business, update it.
         // Otherwise, create one for the current user.
+        //
+        // TENANT-BRAND-AUTHORITY-2: business_name is still written here for
+        // historical continuity (the column is NOT NULL with no way to omit it,
+        // and no schema change is authorized), but it is no longer read as the
+        // public-name authority anywhere — see the GET handler above and
+        // Business.display_name below, which IS authoritative.
         const branding = await prisma.tenantBranding.upsert({
             where: { user_id: existingBranding?.user_id || userId },
             create: {
@@ -188,11 +205,24 @@ export async function POST(req: NextRequest) {
             }
         });
 
-        // Persist contact_email on the Business model (business-level setting)
-        if (contactEmail !== undefined) {
+        // Persist contact_email AND the customer-facing display_name on the
+        // Business model.
+        //
+        // TENANT-BRAND-AUTHORITY-2: this form's "business name" field is the
+        // tenant's customer-facing brand, so its authoritative home is
+        // Business.display_name, not TenantBranding.business_name (above). An
+        // empty/whitespace value clears display_name to null, matching the
+        // column's own documented "no separate brand, fall back to Business.name"
+        // semantics — never an empty-string override.
+        const businessUpdateData: Record<string, any> = {};
+        if (contactEmail !== undefined) businessUpdateData.contact_email = contactEmail || null;
+        if (businessName !== undefined && businessName !== null) {
+            businessUpdateData.display_name = businessName.trim() || null;
+        }
+        if (Object.keys(businessUpdateData).length > 0) {
             await prisma.business.update({
                 where: { id: user.business_id },
-                data: { contact_email: contactEmail || null }
+                data: businessUpdateData
             });
         }
 
