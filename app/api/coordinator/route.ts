@@ -19,7 +19,7 @@
  */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { resolveVariantSize } from '@/lib/serving_multipliers';
+import { resolveSoldVariantSize } from '@/lib/orderItemTier';
 import { buildBundlePriceMap } from '@/lib/pricing';
 import { resolveCampaignOrderMode, validateBundleEligibility } from '@/lib/campaignOrderBundles';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
@@ -449,14 +449,24 @@ export async function POST(req: Request) {
         // Price validation uses centralized buildBundlePriceMap() (LAW 1)
         const bundlePriceMap = await buildBundlePriceMap(businessId, bundleIds);
 
-        // Name lookup for display/error messages only (not security-critical)
+        // Name lookup for display/error messages only (not security-critical).
+        // FULFILLMENT-CONTINUITY-1: this same tenant-scoped row now also supplies
+        // the serving tier, which IS security-critical — see bundleTierMap below.
         const dbBundles = bundleIds.length > 0
             ? await prisma.bundle.findMany({
                 where: { id: { in: bundleIds }, business_id: businessId },
-                select: { id: true, name: true }
+                select: { id: true, name: true, serving_tier: true }
             })
             : [];
         const bundleNameMap = new Map(dbBundles.map((b: any) => [b.id, b.name as string]));
+
+        // FULFILLMENT-CONTINUITY-1 — the menu defines what was sold.
+        // The tier comes from the tenant-scoped Bundle row, never from the
+        // request body: variant_size drives the kitchen's ingredient multiplier,
+        // so a client that could set it could make the kitchen cook a Serves-2
+        // bundle at the Serves-5 rate. Price was already server-authoritative
+        // (buildBundlePriceMap above); this makes tier agree.
+        const bundleTierMap = new Map(dbBundles.map((b: any) => [b.id, b.serving_tier as string | null]));
 
         // Resolve each item's price from DB — reject if any bundle is missing
         let resolvedItems: any[];
@@ -504,7 +514,7 @@ export async function POST(req: Request) {
                     create: resolvedItems.map((item: any) => ({
                         bundle_id: item.bundleId,
                         quantity: item.quantity,
-                        variant_size: resolveVariantSize(item.serving_tier),
+                        variant_size: resolveSoldVariantSize(bundleTierMap.get(item.bundleId), item.serving_tier),
                         item_name: item.serverName || item.name || null,
                         unit_price: item.serverPrice
                     }))

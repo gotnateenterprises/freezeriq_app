@@ -1,7 +1,7 @@
 import { DBAdapter } from './kitchen_engine';
 import { prisma } from './db';
 import { Recipe, Uuid, Bundle } from '../types';
-import { toDbOrderStatusReadCandidates } from './orderStatus';
+import { PRODUCTION_INTAKE_STATUSES, PRODUCTION_ORDER_EXCLUSIONS } from './productionIntake';
 
 export class PrismaAdapter implements DBAdapter {
     private businessId: string;
@@ -231,13 +231,15 @@ export class PrismaAdapter implements DBAdapter {
     }
 
     async getProductionOrders() {
-        // Phase 5G-2: use read-candidate helper so legacy IN_PRODUCTION and APPROVED
-        // rows are still visible alongside new canonical in_production and production_ready.
-        const productionStatuses = [
-            ...toDbOrderStatusReadCandidates('pending'),
-            ...toDbOrderStatusReadCandidates('production_ready'),
-            ...toDbOrderStatusReadCandidates('in_production'),
-        ];
+        // Phase 5G-2: the canonical -> stored status mapping (so legacy
+        // IN_PRODUCTION and APPROVED rows still match) is owned by
+        // lib/orderStatus.ts and re-exported, already deduplicated, as
+        // PRODUCTION_INTAKE_STATUSES by lib/productionIntake.ts.
+        //
+        // FULFILLMENT-CONTINUITY-1: the status set and the two exclusions below
+        // now come from that shared module rather than being rebuilt here. The
+        // values are unchanged — this is the same list this method already
+        // built inline, and the same AND-array the Kitchen Board carries.
         const orders = await prisma.order.findMany({
             where: {
                 // ── OPS-3 CORRECTION: two exclusions, both COPIED from the
@@ -276,13 +278,10 @@ export class PrismaAdapter implements DBAdapter {
                 business_id: this.businessId,
                 canceled_at: null,
                 OR: [
-                    { status: { in: [...new Set(productionStatuses)] as any } },
+                    { status: { in: [...PRODUCTION_INTAKE_STATUSES] as any } },
                     { customer: { status: 'PRODUCTION' } }
                 ],
-                AND: [
-                    { NOT: { status: 'fundraiser_hold' as any } },
-                    { NOT: { source: 'storefront', status: 'pending' } },
-                ]
+                AND: [...PRODUCTION_ORDER_EXCLUSIONS]
             },
             include: {
                 items: {

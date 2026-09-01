@@ -4,7 +4,7 @@ import { stripe } from '@/lib/stripe';
 import { getCustomerSession } from '@/lib/customerAuth';
 import { getPaymentProvider } from '@/lib/payments';
 import { geocodeAddress, resolveDeliveryZone } from '@/lib/delivery/zones';
-import { resolveVariantSize } from '@/lib/serving_multipliers';
+import { resolveSoldVariantSize } from '@/lib/orderItemTier';
 import { buildBundlePriceMap, findInactiveBundleNames } from '@/lib/pricing';
 
 export async function POST(req: Request) {
@@ -147,14 +147,24 @@ export async function POST(req: Request) {
 
         const bundlePriceMap = await buildBundlePriceMap(business.id, bundleIds);
 
-        // Name/image lookup for Stripe line item display (not security-critical)
+        // Name/image lookup for Stripe line item display (not security-critical).
+        // FULFILLMENT-CONTINUITY-1: the same tenant-scoped row now also supplies
+        // the serving tier, which IS security-critical — see bundleTierMap below.
         const dbBundles = bundleIds.length > 0
             ? await prisma.bundle.findMany({
                 where: { id: { in: bundleIds }, business_id: business.id },
-                select: { id: true, name: true, image_url: true }
+                select: { id: true, name: true, image_url: true, serving_tier: true }
             })
             : [];
         const bundleDisplayMap = new Map(dbBundles.map((b: any) => [b.id, { name: b.name, image_url: b.image_url }]));
+
+        // FULFILLMENT-CONTINUITY-1 — the menu defines what was sold.
+        // variant_size drives the kitchen's ingredient multiplier and the stock
+        // decrement, so it is resolved from the tenant-scoped Bundle row rather
+        // than the request body. A line with no resolvable bundle — the
+        // 'manual_upsell' sentinel, or an id this tenant does not own — keeps
+        // its previous behaviour and falls back to the supplied tier.
+        const bundleTierMap = new Map(dbBundles.map((b: any) => [b.id, b.serving_tier as string | null]));
 
         // Build line items with DB-validated prices
         const validatedLineItems = items.map((item: any) => {
@@ -185,8 +195,9 @@ export async function POST(req: Request) {
         const totalAmountCents = Math.round(finalTotal * 100);
 
         // 5. Generate Database Order First (Pending Payment)
-        // Serving tier mapping uses centralized resolveVariantSize()
-        // from lib/serving_multipliers.ts (SINGLE SOURCE OF TRUTH)
+        // Serving tier is resolved by lib/orderItemTier.ts from the tenant-scoped
+        // Bundle row, which delegates the string mapping to
+        // lib/serving_multipliers.ts (SINGLE SOURCE OF TRUTH for the vocabulary).
 
         const externalId = Math.random().toString(36).substring(2, 9).toUpperCase();
 
@@ -219,7 +230,7 @@ export async function POST(req: Request) {
                             quantity: item.quantity,
                             item_name: display ? display.name : item.name,
                             unit_price: unitPrice,
-                            variant_size: resolveVariantSize(item.serving_tier)
+                            variant_size: resolveSoldVariantSize(bundleTierMap.get(item.bundleId), item.serving_tier)
                         };
                     })
                 }

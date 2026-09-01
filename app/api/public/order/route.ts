@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
-import { resolveVariantSize, getServingMultiplier } from '@/lib/serving_multipliers';
+import { getServingMultiplier } from '@/lib/serving_multipliers';
+import { resolveSoldVariantSize } from '@/lib/orderItemTier';
 import { buildBundlePriceMap, findInactiveBundleNames } from '@/lib/pricing';
 import { resolveCampaignOrderMode, validateBundleEligibility } from '@/lib/campaignOrderBundles';
 import { isCampaignClosed, isCampaignPastOrderDeadline } from '@/lib/campaignBundleSelection';
@@ -218,6 +219,33 @@ export async function POST(req: Request) {
         }
 
         const bundlePriceMap = await buildBundlePriceMap(businessId, bundleIds);
+
+        // --- Server-side serving_tier authority ---
+        // FULFILLMENT-CONTINUITY-1 — the menu defines what was sold.
+        //
+        // variant_size decides how much food the kitchen cooks (LAW 2 scales
+        // every ingredient by it) and how much bundle stock is decremented.
+        // It used to come from the request body while the PRICE of the very
+        // same line was re-derived server-side, so a hand-edited request could
+        // buy a Serves-2 bundle at its correct Serves-2 price and have the
+        // kitchen cook it at the Serves-5 rate. The tier now comes from the
+        // tenant-scoped Bundle row, exactly as the price does.
+        //
+        // Separate query so lib/pricing.ts is not modified — same shape the
+        // tenant invoice route already uses for this rule.
+        const bundleServingTierMap = new Map<string, string | null>();
+        if (bundleIds.length > 0) {
+            const tierBundles = await prisma.bundle.findMany({
+                where: {
+                    id: { in: bundleIds },
+                    business_id: businessId,
+                },
+                select: { id: true, serving_tier: true },
+            });
+            for (const b of tierBundles) {
+                bundleServingTierMap.set(b.id, (b as any).serving_tier ?? null);
+            }
+        }
 
         let manualUpsellPrice: number | null = null;
         const hasManualUpsell = items.some((item: any) => item.bundleId === 'manual_upsell');
@@ -513,7 +541,7 @@ export async function POST(req: Request) {
                             create: resolvedItems.map((item: any) => ({
                                 bundle_id: (item.bundleId === 'manual_upsell' || !item.bundleId) ? null : item.bundleId,
                                 quantity: item.quantity,
-                                variant_size: resolveVariantSize(item.serving_tier),
+                                variant_size: resolveSoldVariantSize(bundleServingTierMap.get(item.bundleId), item.serving_tier),
                                 item_name: item.name,
                                 unit_price: item.serverPrice,
                                 is_subscription: !!item.isSubscription
@@ -538,7 +566,10 @@ export async function POST(req: Request) {
                 //    permitted — inventory reservation remains out of scope.
                 for (const item of items) {
                     if (item.bundleId && item.bundleId !== 'manual_upsell') {
-                        const variantSize = resolveVariantSize(item.serving_tier);
+                        // Same authority as the OrderItem row above — if these two
+                        // disagreed, the recorded size and the stock decrement
+                        // would describe different orders.
+                        const variantSize = resolveSoldVariantSize(bundleServingTierMap.get(item.bundleId), item.serving_tier);
                         const multiplier = getServingMultiplier(variantSize); // throws if undefined (LAW 8)
                         const decrementAmount = item.quantity * multiplier;
 
