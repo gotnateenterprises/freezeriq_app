@@ -526,6 +526,16 @@ export default function CoordinatorPortal() {
         }
     };
 
+    // COORD-FULFILLMENT-2: the printable per-supporter pickup tracker. A page,
+    // not a download — the coordinator prints it or saves it as a PDF from the
+    // browser's own dialog. Campaign comes from the session, so no id travels.
+    const handlePrintPickupTracker = () => {
+        trackAction('print_pickup_tracker');
+        // window.location, matching this file's existing navigation idiom —
+        // it does not import useRouter.
+        window.location.href = '/coordinator/portal/pickup-tracker';
+    };
+
     const handleDownloadPickupSheet = async () => {
         if (!campaign) {
             toast.error('Campaign not loaded yet. Please wait.');
@@ -994,6 +1004,7 @@ export default function CoordinatorPortal() {
                         deliveryDateLabel={deliveryDateLabel}
                         pickupLocation={campaign.pickup_location || undefined}
                         onDownloadPickupSheet={handleDownloadPickupSheet}
+                        onPrintPickupTracker={handlePrintPickupTracker}
                     />
                     <ShareCenter
                         shareUrl={shareUrl}
@@ -1040,10 +1051,14 @@ export default function CoordinatorPortal() {
                     {/* Delivery Kit: pickup sheet + tracker downloads */}
                     <section className="bg-white border border-slate-200 rounded-2xl p-4">
                         <h3 className="text-base font-black text-slate-900 mb-2">Delivery kit</h3>
+                        <button onClick={handlePrintPickupTracker}
+                            className="mb-2 block w-full rounded-xl bg-indigo-600 py-2.5 text-center text-xs font-bold text-white hover:bg-indigo-700">
+                            🖨️ Print pickup tracker
+                        </button>
                         <div className="flex gap-2">
                             <button onClick={handleDownloadPickupSheet}
                                 className="flex-1 rounded-xl border border-slate-200 bg-slate-50 py-2 text-center text-xs font-semibold text-slate-700">
-                                📦 Pickup sheet
+                                📦 Pickup spreadsheet
                             </button>
                             <button onClick={handleDownloadTracker}
                                 className="flex-1 rounded-xl border border-slate-200 bg-slate-50 py-2 text-center text-xs font-semibold text-slate-700">

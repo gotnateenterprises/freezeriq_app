@@ -1,21 +1,29 @@
 /**
  * Pickup Sheet Download API
  *
- * ACCESS MODEL: Token-based (no session auth)
- * - GET gated by `portal_token` on FundraiserCampaign
+ * ACCESS MODEL: coordinator SESSION cookie.
+ * - GET gated by requireCoordinatorSession; the campaign comes from the session
+ *   row, never from a URL. (The old header here still described the retired
+ *   portal_token-in-the-query model that FR-COORD-SEC-1B removed.)
  * - Returns a populated .xlsx file as a binary download
  *
  * ACTOR: Fundraiser Coordinator
- * SCOPE: Single campaign (resolved from portal_token)
+ * SCOPE: Single campaign (resolved from the coordinator session)
  *
- * PURPOSE: Generates a delivery-day pickup sheet with one row per order,
- * showing customer name, phone, per-bundle quantities, and total bundles.
- * This is a DATA EXPORT, not a blank template (unlike /api/tracker/download).
+ * PURPOSE: a spreadsheet view of the same day-of pickup data — one row per
+ * order, with per-bundle quantity columns and totals, which is what makes it
+ * useful for counting boxes. This is a DATA EXPORT, not a blank template
+ * (unlike /api/tracker/download).
+ *
+ * COORD-FULFILLMENT-2: for a per-supporter sheet you can print and tick off,
+ * see /coordinator/portal/pickup-tracker. Both read RELEASED orders only, via
+ * the same shared exclusions — see the orders query below.
  */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
+import { PRODUCTION_ORDER_EXCLUSIONS } from '@/lib/productionIntake';
 
 export async function GET(req: Request) {
     try {
@@ -67,9 +75,23 @@ export async function GET(req: Request) {
                 .map(b => ({ id: b!.id, name: b!.name }));
         }
 
-        // 3. Fetch all orders for this campaign with items
+        // 3. Fetch the campaign's RELEASED orders with items.
+        //
+        // COORD-FULFILLMENT-2: this query used to be `{ campaign_id,
+        // canceled_at: null }` with no status filter, so a fundraiser still
+        // waiting on its organisation invoice produced a pickup sheet listing
+        // boxes nobody had cooked. A pickup sheet is a fulfilment document; it
+        // must show released work only.
+        //
+        // Same shared exclusions the Kitchen Board, the production adapter and
+        // the printable pickup tracker use, so the two pickup documents cannot
+        // disagree about who is on the list.
         const orders = await prisma.order.findMany({
-            where: { campaign_id: campaign.id, canceled_at: null },
+            where: {
+                campaign_id: campaign.id,
+                canceled_at: null,
+                AND: [...PRODUCTION_ORDER_EXCLUSIONS],
+            },
             include: {
                 items: {
                     include: {

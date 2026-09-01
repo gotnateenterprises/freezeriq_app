@@ -28,6 +28,7 @@
  */
 
 import { readFileSync } from 'fs';
+import { SUPPORTER_ORDER_SELECT } from '@/lib/coordinatorSupporterOrders';
 import { join } from 'path';
 
 const ROOT = process.cwd();
@@ -159,14 +160,24 @@ describe('COORD-LIVE-TRACKER-1: auth/scope — proven, not merely re-asserted', 
 // ORDER CONTENT (Part Q items 6-12)
 // ═════════════════════════════════════════════════════════════════════════
 describe('COORD-LIVE-TRACKER-1: order content — the data was already selected server-side', () => {
-    it('6/7/8/9/10. the orders select already carries customer_name, participant_name, created_at, and per-item quantity/variant_size/item_name', () => {
-        const block = ordersSelectBlock();
-        expect(block).toContain('customer_name: true');
-        expect(block).toContain('participant_name: true');
-        expect(block).toContain('created_at: true');
-        expect(block).toContain('quantity: true');
-        expect(block).toContain('variant_size: true');
-        expect(block).toContain('item_name: true');
+    it('6/7/8/9/10. the shared supporter select carries customer_name, participant_name, created_at, and per-item quantity/variant_size/item_name', () => {
+        // COORD-FULFILLMENT-2 moved this shape into
+        // lib/coordinatorSupporterOrders.ts so the live tracker, the printable
+        // pickup tracker and the XLSX sheet cannot describe a supporter
+        // differently. Asserting the OBJECT is strictly stronger than the source
+        // grep it replaces: it survives formatting, and a surface that forgets
+        // to use it is caught by the companion test below.
+        const sel: any = SUPPORTER_ORDER_SELECT;
+        expect(sel.customer_name).toBe(true);
+        expect(sel.participant_name).toBe(true);
+        expect(sel.created_at).toBe(true);
+        expect(sel.items.select.quantity).toBe(true);
+        expect(sel.items.select.variant_size).toBe(true);
+        expect(sel.items.select.item_name).toBe(true);
+    });
+
+    it('6/7/8/9/10. the coordinator GET actually USES that shared select', () => {
+        expect(ordersSelectBlock()).toMatch(/select: SUPPORTER_ORDER_SELECT/);
     });
 
     it('12. newest-first, deterministic', () => {
@@ -215,21 +226,22 @@ describe('COORD-LIVE-TRACKER-1: privacy boundary — REVISED by COORD-FULFILLMEN
     // tests/coordFulfillment1.test.ts; what remains here is the source-level
     // shape of the query.
     // ─────────────────────────────────────────────────────────────────────
-    it('13/14/15. the orders select now DOES fetch supporter phone and the linked customer email', () => {
-        const block = ordersSelectBlock();
-        expect(block).toMatch(/\bphone:\s*true/);
-        expect(block).toMatch(/customer:\s*\{\s*select:\s*\{\s*contact_email:\s*true\s*\}\s*\}/);
+    it('13/14/15. the shared supporter select DOES fetch supporter phone and the linked customer email', () => {
+        const sel: any = SUPPORTER_ORDER_SELECT;
+        expect(sel.phone).toBe(true);
+        expect(sel.customer.select.contact_email).toBe(true);
     });
 
-    it('13/14/15/16. the orders select still excludes delivery_address and any processor/payment id', () => {
-        const block = ordersSelectBlock();
-        // The one contact field that is still out of scope: fundraiser
-        // supporters are not delivered to individually.
-        expect(block).not.toMatch(/delivery_address:\s*true/);
-        expect(block).not.toMatch(/processor_payment_id:\s*true/);
-        expect(block).not.toMatch(/payment_processor:\s*true/);
+    it('13/14/15/16. the shared supporter select still excludes delivery_address and any processor/payment id', () => {
+        // The one contact field still out of scope: fundraiser supporters are
+        // not delivered to individually.
+        const sel: any = SUPPORTER_ORDER_SELECT;
+        expect(sel).not.toHaveProperty('delivery_address');
+        expect(sel.customer.select).not.toHaveProperty('delivery_address');
+        expect(sel).not.toHaveProperty('processor_payment_id');
+        expect(sel).not.toHaveProperty('payment_processor');
         // And the route still says so in its own words.
-        expect(block).toMatch(/STILL EXCLUDED: delivery_address/);
+        expect(read(COORD_ROUTE)).toMatch(/STILL EXCLUDES delivery_address/);
     });
 
     it('the campaign projection is an allowlist that never fetches portal_token', () => {

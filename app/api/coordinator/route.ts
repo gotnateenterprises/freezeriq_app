@@ -34,6 +34,7 @@ import { buildSupporterOrderUrl, formatOrderDeadline } from '@/lib/previousSuppo
 import { customerFacingBusinessName } from '@/lib/tenantBrand';
 import { resolveMaterialBundles, groupMaterialMenus } from '@/lib/coordinatorMaterialBundles';
 import { hasInvalidOrderQuantity } from '@/lib/orderQuantity';
+import { SUPPORTER_ORDER_SELECT, toSupporterOrder } from '@/lib/coordinatorSupporterOrders';
 
 /**
  * Phase 7E-1C: Returns true if the campaign has been server-closed.
@@ -159,36 +160,22 @@ export async function GET(req: Request) {
                         }
                     }
                 },
+                // COORD-FULFILLMENT-2: the supporter-order shape is now owned by
+                // lib/coordinatorSupporterOrders.ts and shared with the printable
+                // pickup tracker and the XLSX pickup sheet, so the three surfaces
+                // cannot describe the same supporter differently. It carries
+                // contact (name/email/phone) and STILL EXCLUDES delivery_address —
+                // fundraiser supporters are not delivered to individually; the
+                // campaign's own pickup_location is the fulfilment address.
+                //
+                // NOTE the deliberate difference between this surface and the
+                // pickup tracker: the LIVE tracker shows every commitment,
+                // including orders still at fundraiser_hold. Only the pickup
+                // manifest filters to released work.
                 orders: {
                     where: { canceled_at: null },
                     orderBy: { created_at: 'desc' },
-                    select: {
-                        id: true,
-                        participant_name: true,
-                        customer_name: true,
-                        total_amount: true,
-                        created_at: true,
-                        source: true,
-                        // COORD-FULFILLMENT-1: supporter contact for THIS
-                        // campaign only. The supporter-facing disclosure already
-                        // states that name, email and phone are shared with the
-                        // fundraiser coordinator, so this matches what buyers
-                        // were told. Address remains excluded — see below.
-                        phone: true,
-                        customer_id: true,
-                        customer: { select: { contact_email: true } },
-                        // Bundle-unit progress needs item-level data
-                        items: {
-                            select: {
-                                quantity: true,
-                                variant_size: true,
-                                item_name: true,
-                            }
-                        }
-                        // STILL EXCLUDED: delivery_address. Fundraiser supporters
-                        // are not delivered to individually; the campaign's own
-                        // pickup_location is the fulfilment address.
-                    }
+                    select: SUPPORTER_ORDER_SELECT,
                 }
             }
         });
@@ -205,25 +192,7 @@ export async function GET(req: Request) {
                 NOT: { canceled_at: null }
             },
             orderBy: { canceled_at: 'desc' },
-            select: {
-                id: true,
-                customer_name: true,
-                participant_name: true,
-                total_amount: true,
-                created_at: true,
-                canceled_at: true,
-                source: true,
-                phone: true,
-                customer_id: true,
-                customer: { select: { contact_email: true } },
-                items: {
-                    select: {
-                        quantity: true,
-                        variant_size: true,
-                        item_name: true,
-                    }
-                }
-            }
+            select: SUPPORTER_ORDER_SELECT,
         });
 
         // 3. ACCESS CONTROL: Check Business Plan
@@ -404,56 +373,23 @@ export async function GET(req: Request) {
         const sharePickupLocation = ((campaign as any).pickup_location ?? '').trim();
         if (sharePickupLocation) sharePickupDeliveryLines.push(`Location: ${sharePickupLocation}`);
 
-        // ── COORD-FULFILLMENT-1: the supporter contact projection ────────────
-        //
-        // Supporter EMAIL is not a column on Order. It lives on the Customer row
-        // the order is linked to, and the two fundraiser order paths link
-        // DIFFERENT things:
-        //
-        //   public supporter order  -> a per-supporter Customer created from the
-        //                              address that supporter typed. Its
-        //                              contact_email IS the supporter's.
-        //   coordinator "+ Add Order" -> the ORGANISATION itself
-        //                              (customer_id: campaign.customer_id). Its
-        //                              contact_email is the org's own inbox.
-        //
-        // So the join is gated on durable identity, never on a display name: an
-        // order linked to the campaign's own organisation has no supporter email
-        // to report, and reporting the org's would show the coordinator their
-        // own address labelled as the buyer's. Coordinator-entered orders
-        // genuinely capture no email — the POST accepts the field but has no
-        // column for it — so null here is the truthful answer, not a gap.
-        const supporterEmail = (o: any): string | null => {
-            if (!o.customer_id) return null;
-            if (o.customer_id === campaign.customer_id) return null;
-            return o.customer?.contact_email ?? null;
-        };
+        // COORD-FULFILLMENT-2: the supporter projection — including the rule
+        // deciding whether a linked email is truthfully the supporter's rather
+        // than the organisation's own inbox — is owned by
+        // lib/coordinatorSupporterOrders.ts and shared with the pickup tracker.
+        // It drops the `customer` / `customer_id` working fields, so neither
+        // reaches the client.
+        const shapeOrder = (o: any) => toSupporterOrder(o, campaign.customer_id);
 
-        // Explicit DTO. `customer` and `customer_id` are working fields and are
-        // dropped here rather than reaching the client; delivery_address was
-        // never selected at all.
-        const toSupporterOrder = (o: any) => ({
-            id: o.id,
-            customer_name: o.customer_name ?? null,
-            participant_name: o.participant_name ?? null,
-            email: supporterEmail(o),
-            phone: o.phone ?? null,
-            total_amount: o.total_amount,
-            created_at: o.created_at,
-            canceled_at: o.canceled_at ?? null,
-            source: o.source,
-            items: o.items ?? [],
-        });
-
-        // customer_id is fetched for the rule above and is not part of the
+        // customer_id is fetched for that rule and is not part of the
         // coordinator's payload.
         const { customer_id: _campaignCustomerId, ...campaignResponse } = campaign as any;
 
         return NextResponse.json({
             ...campaignResponse,
-            orders: (campaign.orders || []).map(toSupporterOrder),
+            orders: (campaign.orders || []).map(shapeOrder),
             total_sales: computedTotalSales,
-            canceledOrders: canceledOrders.map(toSupporterOrder),
+            canceledOrders: canceledOrders.map(shapeOrder),
             availableBundles: bundles,
             orderMode,
             share: {

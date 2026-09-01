@@ -151,16 +151,21 @@ describe('PRIVACY-DISCLOSURE-1: the disclosure and the coordinator portal agree'
     });
 
     it('the coordinator GET selects supporter name, participant, phone and the linked email — and never an address', () => {
-        const routeSrc = read('app/api/coordinator/route.ts');
-        const start = routeSrc.indexOf('orders: {', routeSrc.indexOf('export async function GET'));
-        const ordersSelectBlock = routeSrc.slice(start, start + 1200);
-        expect(ordersSelectBlock).toMatch(/participant_name: true/);
-        expect(ordersSelectBlock).toMatch(/customer_name: true/);
-        expect(ordersSelectBlock).toMatch(/phone: true/);
-        expect(ordersSelectBlock).toMatch(/contact_email: true/);
+        // COORD-FULFILLMENT-2 moved the supporter select into
+        // lib/coordinatorSupporterOrders.ts, shared with the printable pickup
+        // tracker. Asserted as an object rather than by source grep.
+        const { SUPPORTER_ORDER_SELECT } = require('@/lib/coordinatorSupporterOrders');
+        const sel: any = SUPPORTER_ORDER_SELECT;
+        expect(sel.participant_name).toBe(true);
+        expect(sel.customer_name).toBe(true);
+        expect(sel.phone).toBe(true);
+        expect(sel.customer.select.contact_email).toBe(true);
         // The disclosure promises name/email/phone. It does NOT promise an
         // address, and the API must not exceed what supporters were told.
-        expect(ordersSelectBlock).not.toMatch(/delivery_address: true/);
+        expect(sel).not.toHaveProperty('delivery_address');
+        expect(sel.customer.select).not.toHaveProperty('delivery_address');
+        // And the coordinator GET must actually use it.
+        expect(read('app/api/coordinator/route.ts')).toMatch(/select: SUPPORTER_ORDER_SELECT/);
     });
 
     it('the disclosure still makes no address claim, because no address is collected or shared', () => {
