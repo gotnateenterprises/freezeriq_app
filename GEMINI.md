@@ -7,6 +7,7 @@ Read these files at the start of every task:
 - [ENVIRONMENT](docs/ai/ENVIRONMENT.md)
 - [INTEGRATIONS](docs/ai/INTEGRATIONS.md)
 - [WORKFLOWS](docs/ai/WORKFLOWS.md)
+- [FUNDRAISER_FULFILLMENT_CONTRACT](docs/ai/FUNDRAISER_FULFILLMENT_CONTRACT.md) — REQUIRED before any work on fundraisers, Production, packing, labels, Delivery, coordinator fulfillment, or serving-tier behavior. Canonical grouping, release, tier and identity rules.
 
 For any work on the coordinator panel or recipe library redesigns, also read:
 

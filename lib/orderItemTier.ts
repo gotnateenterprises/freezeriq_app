@@ -60,12 +60,18 @@
  * authenticated invoice and manual-order surfaces, and widening its return type
  * would reach further than this rule should.
  *
- * NOT APPLIED TO: app/api/orders/route.ts (tenant manual order entry).
- * components/AddOrderModal.tsx renders a serving-size selector that is separate
- * from the bundle selector, so an authenticated tenant may deliberately record a
- * different size against a bundle for a manual order. That is a human decision
- * on an internal surface, not a browser overriding the menu, and erasing it
- * would remove a working feature.
+ * APPLIED TO ALL FOUR ORDER-CREATION ROUTES: the public supporter route, the
+ * coordinator add-order route, the storefront checkout route, and
+ * app/api/orders/route.ts (tenant manual order entry).
+ *
+ * FC-1 initially exempted the manual route, because components/AddOrderModal.tsx
+ * renders a serving-size selector separate from the bundle selector and that
+ * looked like a deliberate custom sale. FC-1A found otherwise: the selector has
+ * no price effect (the line total comes from the Bundle's own price), the tier is
+ * never shown in the bundle dropdown, CB-1 already made Serves-2 and Serves-5
+ * separate Bundle rows with separate prices, and the selector predates that model
+ * — it is in the initial commit. Honouring it could only ever mean charging one
+ * tier's price while cooking another's. See the contract, section 4.4.
  */
 
 import { resolveVariantSize, type DbVariantSize } from './serving_multipliers';

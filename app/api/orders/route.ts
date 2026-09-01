@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { buildBundlePriceMap } from '@/lib/pricing';
+import { resolveSoldVariantSize } from '@/lib/orderItemTier';
 import { toDbSafeOrderStatus, toDbOrderStatusReadCandidates, validateOrderStatusTransition, normalizeOrderStatus } from '@/lib/orderStatus';
 import { LOYALTY_ACCRUAL_ENABLED } from '@/lib/loyalty';
 
@@ -162,13 +163,42 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Invalid bundle' }, { status: 400 });
         }
 
+        // --- Server-side serving_tier authority ---
+        // FULFILLMENT-CONTINUITY-1A — the menu defines what was sold, on this
+        // route too.
+        //
+        // Every item here is modern Bundle-backed: the guard above refuses any
+        // bundle_id missing from the tenant-scoped price map, and
+        // Bundle.serving_tier is NOT NULL. So the Bundle always has a tier to
+        // speak for the line, and the client's separate size selection is a
+        // second authority over a fact the chosen Bundle already carries —
+        // CB-1 made Serves-2 and Serves-5 SEPARATE Bundle rows with separate
+        // prices. The selection has no price effect either way, so honouring it
+        // could only ever mean charging one tier's price and cooking another's.
+        //
+        // Separate query so lib/pricing.ts is not modified — same shape the
+        // tenant invoice route already uses for this rule.
+        const bundleServingTierMap = new Map<string, string | null>();
+        if (bundleIds.length > 0) {
+            const tierBundles = await prisma.bundle.findMany({
+                where: {
+                    id: { in: bundleIds },
+                    business_id: session.user.businessId,
+                },
+                select: { id: true, serving_tier: true },
+            });
+            for (const b of tierBundles) {
+                bundleServingTierMap.set(b.id, (b as any).serving_tier ?? null);
+            }
+        }
+
         const orderItemsData = items.map((item: any) => {
             const price = bundlePriceMap.get(item.bundle_id) as number;
             totalAmount += price * item.quantity;
             return {
                 bundle_id: item.bundle_id,
                 quantity: parseInt(item.quantity),
-                variant_size: item.variant_size || 'serves_5'
+                variant_size: resolveSoldVariantSize(bundleServingTierMap.get(item.bundle_id), item.variant_size)
             };
         });
 

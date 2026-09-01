@@ -9,6 +9,7 @@ Read these files before making decisions:
 - [WORKFLOWS](docs/ai/WORKFLOWS.md)
 - [PHASE ROADMAP](docs/rebuild/phase-roadmap.md)
 - [UI_REDESIGN_SPEC](docs/ai/UI_REDESIGN_SPEC.md) — coordinator panel + recipe library redesigns; source of truth over any chat/handoff doc
+- [FUNDRAISER_FULFILLMENT_CONTRACT](docs/ai/FUNDRAISER_FULFILLMENT_CONTRACT.md) — REQUIRED before any work on fundraisers, Production, packing, labels, Delivery, coordinator fulfillment, or serving-tier behavior. Canonical grouping, release, tier and identity rules.
 
 ## Project Identity
 

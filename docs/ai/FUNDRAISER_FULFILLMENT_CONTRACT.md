@@ -149,14 +149,38 @@ real client already echoes the bundle's own tier, so normalizing is a no-op for
 them. Rejecting would invent an error code no client renders, and would fail an
 honest stale-tab order whenever a tenant edits a tier mid-session.
 
-## 4.4 The one deliberate exception
+## 4.4 There is no exception — including manual orders
 
-`app/api/orders/route.ts` (tenant manual order entry) is **not** normalized.
-`components/AddOrderModal.tsx` renders a serving-size selector that is separate
-from the bundle selector, so an authenticated tenant may knowingly record a
-different size for a manual order. That is a human decision on an internal
-surface, not a browser overriding the menu. Removing it would delete a working
-feature.
+**Every** order-creation path derives the tier from the tenant-scoped Bundle:
+the public supporter route, the coordinator add-order route, the storefront
+checkout route, and `app/api/orders/route.ts` (tenant manual order entry).
+
+FC-1 initially exempted the manual route because `components/AddOrderModal.tsx`
+renders a serving-size selector separate from the bundle selector, which looked
+like a deliberate custom sale. FC-1A re-traced it and that reading was wrong:
+
+1. **The selector has no price effect.** The line total comes purely from the
+   Bundle's own price, so honouring a mismatch could only ever mean charging one
+   tier's price while cooking another's. There is no custom-sale pricing
+   mechanism behind it.
+2. **The tier is invisible at the point of choice.** The bundle dropdown renders
+   name and price only — never `serving_tier` — so a tenant cannot see what they
+   would be overriding.
+3. **Tier is a property of the Bundle row.** `/api/bundles` derives both cost and
+   the price fallback from `serving_tier`, and CB-1 made Serves-2 and Serves-5
+   separate Bundle rows paired by `family_id`. The bundle a tenant picks already
+   *is* a tier.
+4. **The selector predates that model.** It is present in the initial commit,
+   from before tier became a per-Bundle-row property. It is a vestige.
+5. **Nothing documents it.** No doc, comment or test describes a custom-size
+   manual sale.
+
+The selector is now inert server-side. Removing it from the UI is a separate,
+optional cleanup — not required for correctness, and not authorized here.
+
+> If a genuine custom-size sale is ever wanted, it needs its own price
+> resolution and its own explicit product decision. It must not be reintroduced
+> as an unpriced override of the menu.
 
 ## 4.5 Legacy and importer paths
 
