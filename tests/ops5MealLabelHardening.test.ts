@@ -484,8 +484,12 @@ describe('4. serving tier: truthful or absent, never guessed', () => {
         // declaration and the comments, so it cannot tell a live wire from a
         // dead one. These two assertions pin the actual data flow:
         //   batch.servingTier -> tier -> content.mealSize
+        // SUPERSEDED BY OPS-5A: the tier is now resolved PER ITEM, because the
+        // meal manifest yields one batch row per (recipe, tier). The batch-level
+        // tier remains as the fallback. The wiring assertion is unchanged in
+        // intent — prove the value actually flows into content.mealSize.
         const code = strip(read('app/production/print-batch/page.tsx'));
-        expect(code).toMatch(/const tier = batch\?\.servingTier;/);
+        expect(code).toMatch(/const tier = item\.servingTier \?\? batch\?\.servingTier;/);
         expect(code).toMatch(/mealSize:\s*tier \|\|/);
         // and it must not be hard-wired to a constant.
         expect(code).not.toMatch(/const tier = (null|undefined|['"`])/);
@@ -602,31 +606,38 @@ describe('6. ProductionCalculator threads the plan tier into the print batch', (
         expect(batchBlock).toMatch(/servingTier/);
     });
 
-    it('PrepList — the OTHER live _printBatch writer — is unchanged and still fans labels out per meal', () => {
+    it('SUPERSEDED BY OPS-5A: PrepList — the OTHER live _printBatch writer — now uses the shared count authority AND carries a tier', () => {
         // components/production/PrepList.tsx (live: imported by
         // app/production/page.tsx) is a SECOND writer of the same localStorage
-        // key. It writes no servingTier, which is correct: its Kitchen-Board
-        // source carries no per-line tier, so the label truthfully claims none
-        // rather than guessing. Unlike ProductionCalculator it DOES set
-        // `copies`, so its labels already fan out per meal.
+        // key. At OPS-5 it fanned out per meal but could not name a tier,
+        // because the Kitchen Board's prep lane carried none. OPS-5A made that
+        // lane tier-aware and moved the count formula into lib/mealManifest.ts,
+        // so this writer no longer multiplies quantities inline.
         const s = strip(read('components/production/PrepList.tsx'));
         expect(s).toMatch(/_printBatch/);
-        expect(s).toMatch(/copies:\s*item\.total_quantity \* r\.quantity/);
-        expect(s).not.toMatch(/servingTier/);
+        expect(s).toMatch(/physicalMealCount\(item\.total_quantity, r\.quantity\)/);
+        expect(s).not.toMatch(/copies:\s*item\.total_quantity \* r\.quantity/);
+        expect(s).toMatch(/servingTier/);
     });
 
-    it('an absent servingTier (PrepList\'s batch) claims no tier rather than guessing', () => {
-        // planServingTier's contract, exercised as PrepList's data would be.
+    it('an absent servingTier still claims no tier rather than guessing', () => {
+        // Unchanged contract: a line that cannot prove a tier omits the claim.
         expect(planServingTier([])).toBeNull();
         expect(servingTierLabel(undefined)).toBeNull();
     });
 
-    it('the batch still carries the existing item shape (no field dropped)', () => {
+    it('SUPERSEDED BY OPS-5A: the batch item shape is preserved, now sourced from the meal manifest', () => {
+        // OPS-5 built the batch from prepTasks (ingredient demand). OPS-5A
+        // builds it from assemblyTasks (the physical meal manifest), so the
+        // field SOURCES changed from `data.*` to `row.*` while the item shape
+        // itself — name/id/qty/unit — is unchanged, plus a real copies count.
         const s = src();
         const batchBlock = s.slice(s.indexOf('const selectedRecipes'), s.indexOf('router.push(\'/production/print-batch\')'));
-        expect(batchBlock).toMatch(/id:\s*data\.id/);
-        expect(batchBlock).toMatch(/qty:\s*data\.qty/);
-        expect(batchBlock).toMatch(/unit:\s*data\.unit/);
+        expect(batchBlock).toMatch(/name:\s*row\.name/);
+        expect(batchBlock).toMatch(/id:\s*row\.id/);
+        expect(batchBlock).toMatch(/qty:\s*row\.qty/);
+        expect(batchBlock).toMatch(/unit:\s*row\.unit/);
+        expect(batchBlock).toMatch(/copies:\s*row\.qty/);
     });
 });
 

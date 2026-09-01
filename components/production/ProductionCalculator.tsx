@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { toFraction } from '@/lib/unit_converter';
 import { resolveLabelAllergens } from '@/lib/allergens';
+import { servingTierLabel } from '@/lib/mealLabel';
 
 // Calculator Interfaces
 interface Bundle {
@@ -45,7 +46,20 @@ interface PlanResult {
         purchaseQuantity?: number;
     }>;
     prepTasks: Record<string, { qty: number; unit: string; id: string; label_text?: string }>;
-    assemblyTasks: Record<string, { qty: number; unit: string }>;
+    /**
+     * OPS-5A: the PHYSICAL MEAL MANIFEST — one row per (recipe, authoritative
+     * tier) with a DISCRETE package count. This is what the print batch is
+     * built from. Never prepTasks, which is ingredient demand (3 x Serves-2
+     * is 1.5 there) and would round into the wrong number of labels.
+     */
+    assemblyTasks: Record<string, {
+        id: string;
+        name: string;
+        variant: string;
+        variantSize: string | null;
+        qty: number;
+        unit: string;
+    }>;
     /**
      * OPS-5: the serving tier this plan can truthfully claim ("Serves 5" /
      * "Serves 2"), resolved server-side by /api/production/plan from the
@@ -432,23 +446,38 @@ export function ProductionCalculator() {
                             onClick={() => {
                                 const batchName = prompt("Enter a name for this print batch:", `Batch - ${new Date().toLocaleDateString()}`);
                                 if (batchName) {
-                                    // Save selection and navigate
-                                    const selectedRecipes = Object.entries(result?.prepTasks || {})
-                                        .filter(([name]) => selectedForPrint.has(name))
-                                        .map(([name, data]) => ({
-                                            name,
-                                            id: data.id,
-                                            qty: data.qty,
-                                            unit: data.unit
+                                    // OPS-5A: the print batch is built from the PHYSICAL MEAL
+                                    // MANIFEST, not from prepTasks.
+                                    //
+                                    // prepTasks is ingredient demand: 3 x Serves-2 is 1.5 there,
+                                    // and rounding that would print 2 labels for 3 meals. The
+                                    // manifest carries a discrete package count and the
+                                    // authoritative tier per (recipe, tier), so a mixed plan
+                                    // now yields SEPARATE Serves-5 and Serves-2 rows instead of
+                                    // one row whose tier could not be named.
+                                    //
+                                    // Selection is still by recipe name, exactly as the Prep Plan
+                                    // list presents it; a recipe selected in a mixed plan simply
+                                    // contributes one batch row per tier.
+                                    const selectedRecipes = Object.values(result?.assemblyTasks || {})
+                                        .filter((row: any) => selectedForPrint.has(row.name))
+                                        .map((row: any) => ({
+                                            name: row.name,
+                                            id: row.id,
+                                            qty: row.qty,
+                                            unit: row.unit,
+                                            // The real physical label count — no `copies || 1`.
+                                            copies: row.qty,
+                                            variantSize: row.variantSize ?? null,
+                                            servingTier: servingTierLabel(row.variantSize)
                                         }));
 
                                     if (businessId) {
                                         localStorage.setItem(`${businessId}_printBatch`, JSON.stringify({
                                             name: batchName,
                                             items: selectedRecipes,
-                                            // OPS-5: carry the plan's authoritative serving tier to the
-                                            // label surface. Null when the plan mixed tiers, in which
-                                            // case the label omits the claim rather than guessing.
+                                            // Batch-level tier remains as a fallback for any item
+                                            // that could not prove its own; per-item tier wins.
                                             servingTier: result?.servingTier ?? null
                                         }));
                                         router.push('/production/print-batch');

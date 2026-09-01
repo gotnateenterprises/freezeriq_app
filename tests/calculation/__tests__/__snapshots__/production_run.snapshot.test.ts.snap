@@ -3,7 +3,7 @@
 exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 1: Single bundle × 1, serves_5 (family baseline) 1`] = `
 {
   "assemblyTasks": {
-    "Chicken Teriyaki - Family (5)": {
+    "rec-001-chicken-teriyaki::serves_5": {
       "allergens": "Soy",
       "id": "rec-001-chicken-teriyaki",
       "instructions": "Marinate chicken. Grill. Serve over rice.",
@@ -12,6 +12,7 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 1: Sing
       "qty": 1,
       "unit": "meals",
       "variant": "Family (5)",
+      "variantSize": "serves_5",
     },
   },
   "debug": {
@@ -129,7 +130,7 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 1: Sing
 exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 2: Single bundle × 1, serves_2 (half scaling) 1`] = `
 {
   "assemblyTasks": {
-    "Chicken Teriyaki - Family (5)": {
+    "rec-001-chicken-teriyaki::serves_2": {
       "allergens": "Soy",
       "id": "rec-001-chicken-teriyaki",
       "instructions": "Marinate chicken. Grill. Serve over rice.",
@@ -137,7 +138,8 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 2: Sing
       "name": "Chicken Teriyaki",
       "qty": 1,
       "unit": "meals",
-      "variant": "Family (5)",
+      "variant": "Couple (2)",
+      "variantSize": "serves_2",
     },
   },
   "debug": {
@@ -255,7 +257,7 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 2: Sing
 exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 3: Single bundle × 25 (high volume) 1`] = `
 {
   "assemblyTasks": {
-    "Chicken Teriyaki - Family (5)": {
+    "rec-001-chicken-teriyaki::serves_5": {
       "allergens": "Soy",
       "id": "rec-001-chicken-teriyaki",
       "instructions": "Marinate chicken. Grill. Serve over rice.",
@@ -264,6 +266,7 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 3: Sing
       "qty": 25,
       "unit": "meals",
       "variant": "Family (5)",
+      "variantSize": "serves_5",
     },
   },
   "debug": {
@@ -381,7 +384,29 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 3: Sing
 exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 4: Multi-bundle mixed sizes (family + couple) 1`] = `
 {
   "assemblyTasks": {
-    "BBQ Pulled Pork - Family (5)": {
+    "rec-001-chicken-teriyaki::serves_2": {
+      "allergens": "Soy",
+      "id": "rec-001-chicken-teriyaki",
+      "instructions": "Marinate chicken. Grill. Serve over rice.",
+      "label_text": "Contains: Soy",
+      "name": "Chicken Teriyaki",
+      "qty": 3,
+      "unit": "meals",
+      "variant": "Couple (2)",
+      "variantSize": "serves_2",
+    },
+    "rec-001-chicken-teriyaki::serves_5": {
+      "allergens": "Soy",
+      "id": "rec-001-chicken-teriyaki",
+      "instructions": "Marinate chicken. Grill. Serve over rice.",
+      "label_text": "Contains: Soy",
+      "name": "Chicken Teriyaki",
+      "qty": 5,
+      "unit": "meals",
+      "variant": "Family (5)",
+      "variantSize": "serves_5",
+    },
+    "rec-002-bbq-pulled-pork::serves_5": {
       "allergens": null,
       "id": "rec-002-bbq-pulled-pork",
       "instructions": "Slow cook pork. Shred. Mix with sauce.",
@@ -390,16 +415,7 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 4: Mult
       "qty": 5,
       "unit": "meals",
       "variant": "Family (5)",
-    },
-    "Chicken Teriyaki - Family (5)": {
-      "allergens": "Soy",
-      "id": "rec-001-chicken-teriyaki",
-      "instructions": "Marinate chicken. Grill. Serve over rice.",
-      "label_text": "Contains: Soy",
-      "name": "Chicken Teriyaki",
-      "qty": 8,
-      "unit": "meals",
-      "variant": "Family (5)",
+      "variantSize": "serves_5",
     },
   },
   "debug": {
@@ -635,17 +651,7 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 4: Mult
 exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 5: Full bundle × 10 (all 3 recipes) 1`] = `
 {
   "assemblyTasks": {
-    "BBQ Pulled Pork - Family (5)": {
-      "allergens": null,
-      "id": "rec-002-bbq-pulled-pork",
-      "instructions": "Slow cook pork. Shred. Mix with sauce.",
-      "label_text": undefined,
-      "name": "BBQ Pulled Pork",
-      "qty": 10,
-      "unit": "meals",
-      "variant": "Family (5)",
-    },
-    "Chicken Teriyaki - Family (5)": {
+    "rec-001-chicken-teriyaki::serves_5": {
       "allergens": "Soy",
       "id": "rec-001-chicken-teriyaki",
       "instructions": "Marinate chicken. Grill. Serve over rice.",
@@ -654,8 +660,20 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 5: Full
       "qty": 10,
       "unit": "meals",
       "variant": "Family (5)",
+      "variantSize": "serves_5",
     },
-    "Garlic Broccoli - Family (5)": {
+    "rec-002-bbq-pulled-pork::serves_5": {
+      "allergens": null,
+      "id": "rec-002-bbq-pulled-pork",
+      "instructions": "Slow cook pork. Shred. Mix with sauce.",
+      "label_text": undefined,
+      "name": "BBQ Pulled Pork",
+      "qty": 10,
+      "unit": "meals",
+      "variant": "Family (5)",
+      "variantSize": "serves_5",
+    },
+    "rec-003-garlic-broccoli::serves_5": {
       "allergens": undefined,
       "id": "rec-003-garlic-broccoli",
       "instructions": undefined,
@@ -664,6 +682,7 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 5: Full
       "qty": 10,
       "unit": "meals",
       "variant": "Family (5)",
+      "variantSize": "serves_5",
     },
   },
   "debug": {
@@ -962,7 +981,7 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 5: Full
 exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 6: Double-portion bundle (bundleContent.qty = 2) 1`] = `
 {
   "assemblyTasks": {
-    "Chicken Teriyaki - Family (5)": {
+    "rec-001-chicken-teriyaki::serves_5": {
       "allergens": "Soy",
       "id": "rec-001-chicken-teriyaki",
       "instructions": "Marinate chicken. Grill. Serve over rice.",
@@ -971,6 +990,7 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 6: Doub
       "qty": 10,
       "unit": "meals",
       "variant": "Family (5)",
+      "variantSize": "serves_5",
     },
   },
   "debug": {
@@ -1088,7 +1108,7 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 6: Doub
 exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 7: Start fresh variant (1.0 identity multiplier) 1`] = `
 {
   "assemblyTasks": {
-    "Chicken Teriyaki - Family (5)": {
+    "rec-001-chicken-teriyaki::serves_5": {
       "allergens": "Soy",
       "id": "rec-001-chicken-teriyaki",
       "instructions": "Marinate chicken. Grill. Serve over rice.",
@@ -1097,6 +1117,7 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 7: Star
       "qty": 1,
       "unit": "meals",
       "variant": "Family (5)",
+      "variantSize": "serves_5",
     },
   },
   "debug": {
@@ -1214,27 +1235,51 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 7: Star
 exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 8: Realistic production day (3 bundles, mixed sizes/quantities) 1`] = `
 {
   "assemblyTasks": {
-    "BBQ Pulled Pork - Family (5)": {
-      "allergens": null,
-      "id": "rec-002-bbq-pulled-pork",
-      "instructions": "Slow cook pork. Shred. Mix with sauce.",
-      "label_text": undefined,
-      "name": "BBQ Pulled Pork",
-      "qty": 12,
-      "unit": "meals",
-      "variant": "Family (5)",
-    },
-    "Chicken Teriyaki - Family (5)": {
+    "rec-001-chicken-teriyaki::serves_2": {
       "allergens": "Soy",
       "id": "rec-001-chicken-teriyaki",
       "instructions": "Marinate chicken. Grill. Serve over rice.",
       "label_text": "Contains: Soy",
       "name": "Chicken Teriyaki",
-      "qty": 24,
+      "qty": 4,
+      "unit": "meals",
+      "variant": "Couple (2)",
+      "variantSize": "serves_2",
+    },
+    "rec-001-chicken-teriyaki::serves_5": {
+      "allergens": "Soy",
+      "id": "rec-001-chicken-teriyaki",
+      "instructions": "Marinate chicken. Grill. Serve over rice.",
+      "label_text": "Contains: Soy",
+      "name": "Chicken Teriyaki",
+      "qty": 20,
       "unit": "meals",
       "variant": "Family (5)",
+      "variantSize": "serves_5",
     },
-    "Garlic Broccoli - Family (5)": {
+    "rec-002-bbq-pulled-pork::serves_2": {
+      "allergens": null,
+      "id": "rec-002-bbq-pulled-pork",
+      "instructions": "Slow cook pork. Shred. Mix with sauce.",
+      "label_text": undefined,
+      "name": "BBQ Pulled Pork",
+      "qty": 4,
+      "unit": "meals",
+      "variant": "Couple (2)",
+      "variantSize": "serves_2",
+    },
+    "rec-002-bbq-pulled-pork::serves_5": {
+      "allergens": null,
+      "id": "rec-002-bbq-pulled-pork",
+      "instructions": "Slow cook pork. Shred. Mix with sauce.",
+      "label_text": undefined,
+      "name": "BBQ Pulled Pork",
+      "qty": 8,
+      "unit": "meals",
+      "variant": "Family (5)",
+      "variantSize": "serves_5",
+    },
+    "rec-003-garlic-broccoli::serves_5": {
       "allergens": undefined,
       "id": "rec-003-garlic-broccoli",
       "instructions": undefined,
@@ -1243,6 +1288,7 @@ exports[`KitchenEngine.generateProductionRun — Snapshot Tests Scenario 8: Real
       "qty": 8,
       "unit": "meals",
       "variant": "Family (5)",
+      "variantSize": "serves_5",
     },
   },
   "debug": {

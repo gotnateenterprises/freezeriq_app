@@ -15,7 +15,19 @@ interface BatchItem {
     qty: number;
     unit: string;
     status?: 'pending' | 'printed' | 'error';
+    /**
+     * OPS-5A: the DISCRETE physical package count for this meal, from the
+     * meal manifest. Both writers now supply it, so the old `copies || 1`
+     * fallback is a last-resort guard rather than the normal authority — it
+     * was why a batch of 40 meals printed a single label.
+     */
     copies?: number;
+    /**
+     * OPS-5A: this item's OWN authoritative serving tier ("Serves 5" /
+     * "Serves 2"). Per-item because a mixed plan now yields one row per tier;
+     * it wins over the batch-level tier below.
+     */
+    servingTier?: string | null;
 }
 
 interface BatchJob {
@@ -143,6 +155,19 @@ export default function ProductionBatchPrintPage() {
             config.showIngredients && labelSize === '2x6',
         );
 
+    /**
+     * OPS-5A: meals in this batch whose serving tier could not be proven.
+     * Their labels omit the tier rather than guessing — the mixed-tier case is
+     * no longer one of these, because the manifest splits it into per-tier rows.
+     */
+    const untieredLabels = (!batch || loadingDetails)
+        ? []
+        : Array.from(new Set(
+            batch.items
+                .filter(item => !(item.servingTier ?? batch.servingTier))
+                .map(item => item.name)
+        ));
+
     const handlePrintAll = async () => {
         if (!batch) return;
 
@@ -211,7 +236,10 @@ export default function ProductionBatchPrintPage() {
         // re-derived here, and when the plan could not prove a single tier the
         // field falls back to the recipe's own yield unit rather than claiming
         // a serving size the batch cannot support.
-        const tier = batch?.servingTier;
+        // OPS-5A: the item's own tier wins. A mixed plan now produces one batch
+        // row per (recipe, tier), so each label can name its own tier truthfully
+        // instead of the whole batch having to fall silent.
+        const tier = item.servingTier ?? batch?.servingTier;
 
         return {
             content: {
@@ -319,16 +347,20 @@ export default function ProductionBatchPrintPage() {
                         </div>
                     )}
 
-                    {/* OPS-5: the plan mixed serving tiers, so prepTasks already
-                        merged those meals and no single tier is true for all of
-                        them. The label omits the claim rather than guessing. */}
-                    {batch.servingTier == null && !loadingDetails && (
+                    {/* OPS-5A: a mixed plan is no longer a limitation — the meal
+                        manifest yields one row per (recipe, tier), so each label
+                        names its own tier. This notice now fires ONLY when an item
+                        genuinely has no provable tier (a legacy line with no sold
+                        snapshot), where omitting the claim is still the honest
+                        outcome. */}
+                    {untieredLabels.length > 0 && !loadingDetails && (
                         <div className="mt-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-800 rounded-xl p-4 flex items-start gap-3">
                             <AlertCircle size={18} className="text-amber-600 shrink-0 mt-0.5" />
                             <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
-                                These labels will not show a serving size. This plan did not resolve to a single
-                                serving tier, so no tier can be printed truthfully. Plan Serves&nbsp;5 and
-                                Serves&nbsp;2 separately if you need per-tier meal labels.
+                                {untieredLabels.length} label{untieredLabels.length === 1 ? '' : 's'} will not show a
+                                serving size, because no sold serving tier could be proven for
+                                {' '}{untieredLabels.join(', ')}. Every other label in this batch still prints its
+                                own tier.
                             </p>
                         </div>
                     )}

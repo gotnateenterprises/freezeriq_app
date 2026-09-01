@@ -129,6 +129,9 @@ export async function GET() {
             total_quantity: number;
             order_ids: Set<string>;
             status: string;
+            // OPS-5A: the sold tier this prep row was ordered at. Carried so the
+            // meal labels PrepList prints can name it truthfully.
+            variant_size: string | null;
             recipes: { id: string, name: string, quantity: number, label_text?: string | null }[];
         }>();
 
@@ -137,7 +140,19 @@ export async function GET() {
                 if (!item.bundle) return;
                 const bid = item.bundle.id;
                 const status = order.status; // Group by usage status
-                const key = `${bid}-${status}`;
+                // OPS-5A: group by the SOLD TIER as well. OrderItem.variant_size
+                // is the frozen snapshot of what was actually sold; two orders
+                // of the same bundle at different tiers are different physical
+                // meals and must not share a prep row, or the labels printed
+                // from that row could not name a tier truthfully.
+                //
+                // In practice this splits nothing: CB-1 made Serves-2 and
+                // Serves-5 separate Bundle rows paired by family_id, so one
+                // bundle_id normally carries exactly one tier. It only splits
+                // where the data genuinely disagrees -- which is precisely the
+                // case where a merged row would have been a lie.
+                const variantSize = (item as any).variant_size ?? null;
+                const key = `${bid}-${status}-${variantSize ?? 'unknown'}`;
 
                 if (!prepMap.has(key)) {
                     prepMap.set(key, {
@@ -147,6 +162,7 @@ export async function GET() {
                         total_quantity: 0,
                         order_ids: new Set<string>(),
                         status: status,
+                        variant_size: variantSize,
                         recipes: (item.bundle.contents || []).map(c => ({
                             id: c.recipe?.id || 'unknown',
                             name: c.recipe?.name || 'Unknown Recipe',

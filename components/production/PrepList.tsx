@@ -6,6 +6,8 @@ import { toFraction } from '@/lib/unit_converter';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
+import { physicalMealCount } from '@/lib/mealManifest';
+import { servingTierLabel } from '@/lib/mealLabel';
 
 interface PrepItem {
     bundle_id: string;
@@ -13,6 +15,8 @@ interface PrepItem {
     sku: string;
     total_quantity: number;
     order_count: number;
+    /** OPS-5A: the sold tier this prep row was ordered at, from the Kitchen Board. */
+    variant_size?: string | null;
     // Phase 5H-0: canonical status values expected from API. Legacy APPROVED and
     // IN_PRODUCTION handling is kept in the bucket normalization below in case
     // cached API responses still carry legacy values during the transition period.
@@ -68,15 +72,26 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
             return;
         }
 
+        // OPS-5A: the physical package count comes from the ONE shared
+        // authority, not from an inline multiplication here. Both print-batch
+        // writers must agree on what "how many labels" means, and the formula
+        // (order quantity x bundle-content quantity, never the serving
+        // multiplier) lives in lib/mealManifest.ts.
+        const tier = servingTierLabel(item.variant_size);
         const batch = {
             name: `Production: ${item.bundle_name}`,
-            items: item.recipes.map(r => ({
-                id: r.id,
-                name: r.name,
-                qty: item.total_quantity * r.quantity,
-                unit: 'ea',
-                copies: item.total_quantity * r.quantity // This helps the batch print page
-            }))
+            servingTier: tier,
+            items: item.recipes.map(r => {
+                const count = physicalMealCount(item.total_quantity, r.quantity);
+                return {
+                    id: r.id,
+                    name: r.name,
+                    qty: count,
+                    unit: 'ea',
+                    copies: count,
+                    servingTier: tier
+                };
+            })
         };
 
         localStorage.setItem(`${session.user.businessId}_printBatch`, JSON.stringify(batch));

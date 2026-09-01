@@ -1,6 +1,7 @@
 import { Uuid, Recipe } from '../types';
 import { optimizeUnit, convertUnit } from './unit_converter';
-import { getServingMultiplier, getMultiplierTable } from './serving_multipliers';
+import { getServingMultiplier, getMultiplierTable, normalizeStrictServingTier } from './serving_multipliers';
+import { MEAL_UNIT, manifestKey, physicalMealCount, resolveManifestVariantSize } from './mealManifest';
 import {
     DriftAlertCollector,
     DriftAlertConfig,
@@ -106,21 +107,46 @@ export class KitchenEngine {
             }
         }
 
-        // 1b. Create Assembly Tasks (Top Level Only)
-        const assemblyTasks: Record<string, { id: string, name: string, variant: string, qty: number, unit: string, allergens?: string | null, label_text?: string | null, instructions?: string | null }> = {};
+        // ── 1b. THE PHYSICAL MEAL MANIFEST (OPS-5A) ──────────────────────────
+        //
+        // This loop is NOT ingredient demand. Note what it does not multiply by:
+        // `servingMultiplier`. Its unit is 'meals', and its qty is a count of
+        // physical packages that need a tray, a lid and a LABEL. 3 x Serves-2
+        // is 3 packages even though it is only 1.5 base-equivalent of food.
+        // Nothing downstream may derive a label count from prepTasks, which is
+        // the ingredient-scaled number.
+        const assemblyTasks: Record<string, { id: string, name: string, variant: string, variantSize: string | null, qty: number, unit: string, allergens?: string | null, label_text?: string | null, instructions?: string | null }> = {};
 
         for (const order of orders) {
-            const bundleInfo = await this.db.getBundleInfo(order.bundle_id);
-            const tier = bundleInfo?.serving_tier || 'family';
-
-            let variantLabel = 'Family (5)';
-            const lowerTier = tier.toLowerCase();
-            if (lowerTier.includes('couple') || lowerTier.includes('serves 2')) variantLabel = 'Couple (2)';
-            if (lowerTier.includes('single')) variantLabel = 'Single (1)';
-
-            if (!['family', 'couple', 'single'].includes(lowerTier)) {
-                variantLabel = tier;
+            // OPS-5A — TIER AUTHORITY REPAIR.
+            //
+            // `order.variant_size` is authoritative: for a SOLD line it is the
+            // frozen OrderItem.variant_size snapshot, and for a MANUAL line
+            // /api/production/plan already resolved it from the tenant-scoped
+            // Bundle (OPS-4A). This loop previously read
+            // `getBundleInfo(order.bundle_id).serving_tier` ALWAYS, which
+            // silently re-tiered every sold order to whatever the Bundle row
+            // happens to say TODAY -- the exact re-derivation OPS-4/OPS-4A
+            // forbade everywhere else. The locked snapshots recorded the
+            // result: a `serves_2` order labelled "Family (5)".
+            //
+            // The Bundle is now consulted ONLY when the line carries no tier at
+            // all, which is the genuine legacy case, preserving the old
+            // fallback rather than inventing a new one.
+            let legacyBundleTier: string | null = null;
+            if (!normalizeStrictServingTier(order.variant_size)) {
+                const bundleInfo = await this.db.getBundleInfo(order.bundle_id);
+                legacyBundleTier = bundleInfo?.serving_tier ?? null;
             }
+            const variantSize = resolveManifestVariantSize(order.variant_size, legacyBundleTier);
+
+            // The engine's long-standing display vocabulary, preserved as-is.
+            // `variantSize` above is the canonical machine-readable field that
+            // consumers should read; `variant` remains for display only.
+            let variantLabel: string;
+            if (variantSize === 'serves_2') variantLabel = 'Couple (2)';
+            else if (variantSize === 'serves_5') variantLabel = 'Family (5)';
+            else variantLabel = legacyBundleTier || 'Family (5)';
 
             const bundleRecipes = await this.db.getBundleContents(order.bundle_id);
 
@@ -128,21 +154,26 @@ export class KitchenEngine {
                 const recipe = this.recipeCache.get(item.recipe_id);
                 if (!recipe) continue;
 
-                const key = `${recipe.name} - ${variantLabel}`;
+                // OPS-5A: keyed by recipe IDENTITY + tier, not by display name.
+                // A name is not unique -- two recipes a tenant named the same
+                // would otherwise merge, combining their ALLERGENS onto one
+                // physical food label while keeping only the first one's id.
+                const key = manifestKey(recipe.id, variantSize as any);
 
                 if (!assemblyTasks[key]) {
                     assemblyTasks[key] = {
                         id: recipe.id,
                         name: recipe.name,
                         variant: variantLabel,
+                        variantSize,
                         qty: 0,
-                        unit: 'meals',
+                        unit: MEAL_UNIT,
                         allergens: recipe.allergens,
                         label_text: recipe.label_text,
                         instructions: recipe.instructions
                     };
                 }
-                assemblyTasks[key].qty += order.quantity * (item.quantity || 1);
+                assemblyTasks[key].qty += physicalMealCount(order.quantity, item.quantity);
             }
         }
 
