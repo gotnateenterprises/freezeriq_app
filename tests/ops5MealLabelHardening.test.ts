@@ -369,6 +369,43 @@ describe('3. ingredient truth: no placeholder may reach a printed label', () => 
             .toBeLessThan(printBlock.indexOf('batch.items.flatMap'));
     });
 
+    it('DEFECT D1: the page-level loading state is print:hidden — Ctrl+P cannot print a "Loading batch..." sheet', () => {
+        // This early return replaces the entire component, so the print block's
+        // own guard never runs. Without a print rule of its own the browser
+        // happily printed a physical sheet reading "Loading batch...".
+        const code = strip(read('app/production/print-batch/page.tsx'));
+        const line = code.split('\n').find(l => l.includes('Loading batch'));
+        expect(line).toBeDefined();
+        expect(line).toMatch(/print:hidden/);
+    });
+
+    it('EVERY printable placeholder string in print-batch is inside a print:hidden container', () => {
+        // Any element that renders a transitional string must either be
+        // print-hidden or not exist at print time.
+        const code = strip(read('app/production/print-batch/page.tsx'));
+        // The file has exactly two print regions: the screen-only header, which
+        // opens at the first `print:hidden`, and the printable block, which
+        // opens at `hidden print:block`. A transitional string is safe only if
+        // it sits in the screen-only region (or carries print:hidden itself).
+        const headerStart = code.indexOf('print:hidden');
+        const printBlockStart = code.indexOf('hidden print:block');
+        expect(headerStart).toBeGreaterThan(-1);
+        expect(printBlockStart).toBeGreaterThan(headerStart);
+
+        for (const marker of ['Loading batch', 'Loading Data...', 'Loading recipe assets']) {
+            const idx = code.indexOf(marker);
+            if (idx === -1) continue;
+            const ownLine = code.split('\n').find(l => l.includes(marker)) || '';
+            const screenOnly = idx > headerStart && idx < printBlockStart;
+            expect(screenOnly || /print:hidden/.test(ownLine)).toBe(true);
+        }
+
+        // And nothing resembling a placeholder may live in the printable block.
+        const printable = code.slice(printBlockStart);
+        expect(printable).not.toMatch(/Loading/i);
+        expect(printable).not.toMatch(/Ingredients loading/i);
+    });
+
     it('the gate is scoped to the layout that actually prints ingredients (Part H: no needless stoppage)', () => {
         // Only the 2x6 layout renders LabelTemplate; 2.25x1.25 and 4x6 take the
         // simple name/qty/date path and never show an ingredient list. The

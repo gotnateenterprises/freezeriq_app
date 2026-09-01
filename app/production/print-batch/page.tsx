@@ -232,7 +232,14 @@ export default function ProductionBatchPrintPage() {
         };
     };
 
-    if (!batch) return <div className="p-12 text-center">Loading batch...</div>;
+    // OPS-5: `print:hidden` is load-bearing, not cosmetic. This early return
+    // replaces the WHOLE component, so the print block below never mounts - but
+    // this div carried no print rule of its own, and an operator pressing Ctrl+P
+    // here printed a physical sheet reading "Loading batch...". There is no
+    // empty state and no redirect, so a direct visit with no queued batch (or
+    // before the session hydrates and businessId resolves) sits here forever.
+    // Nothing printable may say "loading".
+    if (!batch) return <div className="p-12 text-center print:hidden">Loading batch...</div>;
 
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-900 print:bg-white">
