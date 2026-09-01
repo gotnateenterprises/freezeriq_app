@@ -11,15 +11,24 @@ export async function GET() {
         const db = new PrismaAdapter(businessId);
         const rawOrders = await db.getProductionOrders();
 
-        // Aggregate by bundle_id
+        // OPS-4: aggregate by (bundle_id, variant_size), never bundle_id alone.
+        // OrderItem.variant_size is the frozen historical snapshot of the tier
+        // actually sold (docs/ai/FUNDRAISER_FULFILLMENT_CONTRACT.md §4). The
+        // previous bundle_id-only key discarded it from this endpoint's output
+        // entirely, so a synced Serves-2 order — correctly tiered by
+        // getProductionOrders() above — silently became untiered here, and the
+        // Manual Planner's "Calculate Plan" step then defaulted it to
+        // Serves-5/family, roughly doubling ingredient demand.
         const aggregated = rawOrders.reduce((acc, curr) => {
             const bid = curr.bundle_id;
-            if (!acc[bid]) {
-                acc[bid] = { bundle_id: bid, quantity: 0 };
+            const variant = curr.variant_size ?? null;
+            const key = `${bid}::${variant ?? ''}`;
+            if (!acc[key]) {
+                acc[key] = { bundle_id: bid, quantity: 0, variant_size: variant };
             }
-            acc[bid].quantity += curr.quantity;
+            acc[key].quantity += curr.quantity;
             return acc;
-        }, {} as Record<string, { bundle_id: string; quantity: number }>);
+        }, {} as Record<string, { bundle_id: string; quantity: number; variant_size: string | null }>);
 
         return NextResponse.json(Object.values(aggregated));
     } catch (e: any) {

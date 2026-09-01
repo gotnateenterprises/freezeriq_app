@@ -17,6 +17,13 @@ interface Bundle {
 interface OrderItem {
     bundle_id: string;
     quantity: number;
+    // OPS-4: the sold serving tier, when known (e.g. a row synced from a real
+    // order). A synced order's variant_size is a frozen historical snapshot
+    // (docs/ai/FUNDRAISER_FULFILLMENT_CONTRACT.md §4) and must survive this
+    // round-trip unchanged — never invented, never defaulted here. Omitted on
+    // a manually-typed row, exactly as before this phase; that row has no
+    // sale behind it to snapshot.
+    variant_size?: string | null;
 }
 
 interface PlanResult {
@@ -201,10 +208,13 @@ export function ProductionCalculator() {
                 return;
             }
 
-            // Map to order items - existing order state expects { bundle_id, quantity }
+            // Map to order items - existing order state expects { bundle_id, quantity }.
+            // OPS-4: variant_size carried through unchanged — /sync now preserves
+            // it per (bundle, tier) group instead of discarding it.
             const newOrders = data.map((d: any) => ({
                 bundle_id: d.bundle_id,
-                quantity: d.quantity
+                quantity: d.quantity,
+                variant_size: d.variant_size
             }));
 
             // Logic: Show custom modal for choices
