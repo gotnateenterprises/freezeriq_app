@@ -71,11 +71,14 @@ interface PlanResult {
 
 export function ProductionCalculator() {
     const router = useRouter();
-    const { data: session } = useSession() as { data: any };
+    const { data: session, status } = useSession() as { data: any; status: 'loading' | 'authenticated' | 'unauthenticated' };
     const businessId = session?.user?.businessId;
 
     // Calculator State
     const [bundles, setBundles] = useState<Bundle[]>([]);
+    // OPS-5B: whether the Bundle dropdown has loaded. Separate from businessId
+    // on purpose -- see the Bundle-load effect below.
+    const [bundlesLoadState, setBundlesLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
     const [orders, setOrders] = useState<OrderItem[]>([{ bundle_id: '', quantity: 10 }]);
     const [result, setResult] = useState<PlanResult | null>(null);
     const [isCalculating, setIsCalculating] = useState(false);
@@ -100,15 +103,46 @@ export function ProductionCalculator() {
     // Batch Print State
     const [selectedForPrint, setSelectedForPrint] = useState<Set<string>>(new Set());
 
+    // OPS-5B: Bundle loading is its own effect, gated on NextAuth's own
+    // resolved `status` -- not on `businessId`. The Bundle dropdown was
+    // observed empty for a tenant with active Bundles even though every
+    // other tenant-scoped fetch on this same page (Kitchen Board, branding)
+    // succeeded; those resolve tenant server-side via auth() and are never
+    // gated by any client session field, while this effect alone gated its
+    // fetch behind a CLIENT copy of businessId that can lag the server's own
+    // session. app/customers/page.tsx already established the correct
+    // pattern -- gate on `status`, the value NextAuth itself resolves -- so
+    // this reuses it rather than inventing a third signal. The API route
+    // (app/api/bundles) remains the sole authority for tenant scope and the
+    // is_active filter (OPS-MANUAL-PLANNER-BUNDLE-FILTER-1); nothing about
+    // that route changes here.
+    useEffect(() => {
+        if (status !== 'authenticated') return;
+        let cancelled = false;
+        setBundlesLoadState('loading');
+
+        fetch('/api/bundles?activeOnly=true')
+            .then(res => {
+                if (!res.ok) throw new Error(`Bundle load failed: ${res.status}`);
+                return res.json();
+            })
+            .then(data => {
+                if (cancelled) return;
+                if (!Array.isArray(data)) throw new Error('Unexpected bundle response shape');
+                setBundles(data);
+                setBundlesLoadState('ready');
+            })
+            .catch(err => {
+                if (cancelled) return;
+                console.error("Failed to fetch bundles", err);
+                setBundlesLoadState('error');
+            });
+
+        return () => { cancelled = true; };
+    }, [status]);
+
     useEffect(() => {
         if (!businessId) return;
-
-        // Fetch Bundles — active only; archived Bundles must not be selectable
-        // for new production runs (OPS-MANUAL-PLANNER-BUNDLE-FILTER-1).
-        fetch('/api/bundles?activeOnly=true')
-            .then(res => res.json())
-            .then(data => setBundles(data))
-            .catch(err => console.error("Failed to fetch bundles", err));
 
         // Load Queue & Checked Items
         const savedQueue = localStorage.getItem(`${businessId}_productionQueue`);
@@ -529,6 +563,11 @@ export function ProductionCalculator() {
             {/* Input Section */}
             <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 mb-8 print:hidden">
                 <h3 className="font-bold text-lg mb-4 text-slate-900 dark:text-white">What are we making?</h3>
+                {bundlesLoadState === 'error' && (
+                    <div className="mb-4 text-sm font-bold text-rose-600 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-4 py-3">
+                        Unable to load Bundles. Please refresh and try again.
+                    </div>
+                )}
                 <div className="space-y-3">
                     {orders.map((order, i) => (
                         <div key={i} className="flex gap-4 items-center">
@@ -537,7 +576,12 @@ export function ProductionCalculator() {
                                 value={order.bundle_id}
                                 onChange={(e) => updateOrder(i, 'bundle_id', e.target.value)}
                             >
-                                <option value="">Select Bundle...</option>
+                                <option value="">
+                                    {bundlesLoadState === 'loading' ? 'Loading Bundles...'
+                                        : bundlesLoadState === 'error' ? 'Unable to load Bundles'
+                                        : bundles.length === 0 ? 'No active Bundles found'
+                                        : 'Select Bundle...'}
+                                </option>
                                 {bundles.map(b => (
                                     <option key={b.id} value={b.id}>{b.name} ({b.sku})</option>
                                 ))}
