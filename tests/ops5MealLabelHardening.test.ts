@@ -619,8 +619,12 @@ describe('6. ProductionCalculator threads the plan tier into the print batch', (
     });
 
     it('DEFECT D4: the printBatch payload carries servingTier', () => {
+        // SUPERSEDED BY OPS-5E: the localStorage key literal moved into
+        // lib/printBatchStorage.ts (one storage-key authority), so this
+        // anchors on the write call instead of the raw key. The assertion
+        // itself is unchanged: the payload must still carry a tier.
         const s = src();
-        const batchBlock = s.slice(s.indexOf('_printBatch'), s.indexOf('_printBatch') + 500);
+        const batchBlock = s.slice(s.indexOf('writePrintBatch('), s.indexOf('writePrintBatch(') + 500);
         expect(batchBlock).toMatch(/servingTier/);
     });
 
@@ -631,8 +635,12 @@ describe('6. ProductionCalculator threads the plan tier into the print batch', (
         // because the Kitchen Board's prep lane carried none. OPS-5A made that
         // lane tier-aware and moved the count formula into lib/mealManifest.ts,
         // so this writer no longer multiplies quantities inline.
+        // SUPERSEDED BY OPS-5E: PrepList is still that second live writer, but
+        // it now writes through the shared lib/printBatchStorage.ts authority
+        // rather than constructing `${businessId}_printBatch` itself, so the
+        // key literal no longer appears here. Everything else is unchanged.
         const s = strip(read('components/production/PrepList.tsx'));
-        expect(s).toMatch(/_printBatch/);
+        expect(s).toMatch(/writePrintBatch\(/);
         expect(s).toMatch(/physicalMealCount\(item\.total_quantity, r\.quantity\)/);
         expect(s).not.toMatch(/copies:\s*item\.total_quantity \* r\.quantity/);
         expect(s).toMatch(/servingTier/);

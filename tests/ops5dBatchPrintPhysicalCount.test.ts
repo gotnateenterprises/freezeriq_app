@@ -217,9 +217,13 @@ describe('"Batch Print All Labels" derives copies from the physical manifest, ne
     });
 
     it('the handler reuses the existing browser-print batch surface -- no second renderer (Part F/Part D)', () => {
+        // SUPERSEDED BY OPS-5E: the key literal moved into the shared
+        // lib/printBatchStorage.ts authority, so this anchors on the write
+        // call. The navigation assertion is unchanged and is the one that
+        // actually proves the handoff reaches the print surface.
         const src = strip(read(FILE));
         const block = batchAllLabelsHandler(src);
-        expect(block).toMatch(/_printBatch/);
+        expect(block).toMatch(/writePrintBatch\(/);
         expect(block).toMatch(/router\.push\(['"`]\/production\/print-batch['"`]\)/);
     });
 
@@ -238,8 +242,12 @@ describe('"Batch Print All Labels" derives copies from the physical manifest, ne
 
 describe('the individual "Print Labels (N)" button shows and requests the physical count, never prepTasks', () => {
     function individualButtonBlock(src: string): string {
+        // SUPERSEDED BY OPS-5E: the manifest rows for this recipe are now
+        // resolved one statement earlier (const manifestRows), because the
+        // button also needs them to detect a mixed-tier recipe. Anchor there
+        // so the assemblyTasks lookup stays inside the window.
         const idx = src.indexOf("Print Labels ({");
-        const start = src.lastIndexOf('const physicalCopies', idx);
+        const start = src.lastIndexOf('const manifestRows', idx);
         if (idx === -1 || start === -1) throw new Error('Could not locate the individual Print Labels button');
         return src.slice(start, idx + 30);
     }

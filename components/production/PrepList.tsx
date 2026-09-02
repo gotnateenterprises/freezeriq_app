@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { physicalMealCount } from '@/lib/mealManifest';
 import { servingTierLabel } from '@/lib/mealLabel';
+import { writePrintBatch } from '@/lib/printBatchStorage';
 
 interface PrepItem {
     bundle_id: string;
@@ -61,11 +62,11 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
     };
 
     const handlePrintLabels = (item: PrepItem) => {
-        if (!session?.user?.businessId) {
-            toast.error("Session not loaded");
-            return;
-        }
-
+        // OPS-5E: no client session gate. This used to refuse the click
+        // outright when useSession()'s businessId had not resolved -- the same
+        // unreliable dependency that silently killed the Manual Planner's
+        // batch print (OPS-5B/OPS-5C proved it twice). The storage key now
+        // comes from the shared authority and never depends on it.
         if (!item.recipes || !Array.isArray(item.recipes)) {
             console.error("❌ Label Print Error: No recipes found for bundle", item);
             toast.error("No recipe data found for this bundle.");
@@ -94,7 +95,11 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
             })
         };
 
-        localStorage.setItem(`${session.user.businessId}_printBatch`, JSON.stringify(batch));
+        const written = writePrintBatch({ ...batch, businessId: session?.user?.businessId ?? null });
+        if (!written.ok) {
+            toast.error(written.reason);
+            return;
+        }
         router.push('/production/print-batch');
     };
 

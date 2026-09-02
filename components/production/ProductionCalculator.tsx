@@ -8,6 +8,7 @@ import { useSession } from 'next-auth/react';
 import { toFraction } from '@/lib/unit_converter';
 import { servingTierLabel } from '@/lib/mealLabel';
 import { loadBundles } from '@/lib/bundleLoader';
+import { writePrintBatch, distinctTierCount } from '@/lib/printBatchStorage';
 
 // Calculator Interfaces
 interface Bundle {
@@ -491,16 +492,23 @@ export function ProductionCalculator() {
                                             servingTier: servingTierLabel(row.variantSize)
                                         }));
 
-                                    if (businessId) {
-                                        localStorage.setItem(`${businessId}_printBatch`, JSON.stringify({
-                                            name: batchName,
-                                            items: selectedRecipes,
-                                            // Batch-level tier remains as a fallback for any item
-                                            // that could not prove its own; per-item tier wins.
-                                            servingTier: result?.servingTier ?? null
-                                        }));
-                                        router.push('/production/print-batch');
+                                    // OPS-5E: same repair as "Batch Print All Labels" -- this
+                                    // button carried the identical silent `if (businessId)`
+                                    // swallow, and would have failed the same way.
+                                    const written = writePrintBatch({
+                                        name: batchName,
+                                        items: selectedRecipes,
+                                        // Batch-level tier remains as a fallback for any item
+                                        // that could not prove its own; per-item tier wins.
+                                        servingTier: result?.servingTier ?? null,
+                                        businessId: businessId ?? null
+                                    });
+
+                                    if (!written.ok) {
+                                        alert(`Could not prepare the print batch.\n\n${written.reason}`);
+                                        return;
                                     }
+                                    router.push('/production/print-batch');
                                 }
                             }}
                             className="flex items-center gap-2 bg-indigo-600 text-white border border-indigo-500 px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 animate-in zoom-in duration-200"
@@ -1084,16 +1092,31 @@ export function ProductionCalculator() {
                                             servingTier: servingTierLabel(row.variantSize)
                                         }));
 
-                                        if (businessId) {
-                                            localStorage.setItem(`${businessId}_printBatch`, JSON.stringify({
-                                                name: `Batch - ${new Date().toLocaleDateString()}`,
-                                                items: allRecipes,
-                                                // Batch-level tier remains as a fallback for any item
-                                                // that could not prove its own; per-item tier wins.
-                                                servingTier: result?.servingTier ?? null
-                                            }));
-                                            router.push('/production/print-batch');
+                                        // OPS-5E: the handoff no longer depends on a client
+                                        // businessId. This exact click did NOTHING on the
+                                        // deployed OPS-5D preview because it was wrapped in
+                                        // `if (businessId) { ...; router.push(...) }` with no
+                                        // else -- and OPS-5B/OPS-5C had already proven twice
+                                        // that useSession()'s businessId is not reliably
+                                        // present here. The key now comes from the one shared
+                                        // authority (lib/printBatchStorage.ts), businessId is
+                                        // recorded inside the payload as an advisory tenant
+                                        // guard rather than a gate, and a failed write is
+                                        // SHOWN rather than swallowed.
+                                        const written = writePrintBatch({
+                                            name: `Batch - ${new Date().toLocaleDateString()}`,
+                                            items: allRecipes,
+                                            // Batch-level tier remains as a fallback for any item
+                                            // that could not prove its own; per-item tier wins.
+                                            servingTier: result?.servingTier ?? null,
+                                            businessId: businessId ?? null
+                                        });
+
+                                        if (!written.ok) {
+                                            alert(`Could not prepare the print batch.\n\n${written.reason}`);
+                                            return;
                                         }
+                                        router.push('/production/print-batch');
                                     }}
                                     className="flex items-center gap-2 text-sm font-bold text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 px-3 py-2 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors print:hidden disabled:opacity-50 border border-indigo-200 dark:border-indigo-800"
                                 >
@@ -1110,12 +1133,18 @@ export function ProductionCalculator() {
                                     // manifest (assemblyTasks), NEVER from prepTasks' qty --
                                     // that is ingredient demand (lib/kitchen_engine.ts: "Nothing
                                     // downstream may derive a label count from prepTasks").
-                                    // Summed across tiers when this recipe appears at more than
-                                    // one serving size in the plan, so no tier's copies are
-                                    // silently dropped (Part L).
-                                    const physicalCopies = Object.values(result.assemblyTasks || {})
-                                        .filter((row: any) => row.id === data.id)
+                                    const manifestRows = Object.values(result.assemblyTasks || {})
+                                        .filter((row: any) => row.id === data.id);
+                                    const physicalCopies = manifestRows
                                         .reduce((sum: number, row: any) => sum + row.qty, 0);
+                                    // OPS-5E / Part H: a recipe can appear at MORE THAN ONE tier
+                                    // in the same plan (S5 qty2 + S2 qty3). The Label Designer
+                                    // this button routes into can only claim ONE serving tier, so
+                                    // sending it the summed 5 would print five labels all naming
+                                    // the wrong tier -- collapsing two tiers into an untrue one.
+                                    // A mixed-tier recipe therefore goes through the tier-aware
+                                    // batch surface instead, which keeps one row per tier.
+                                    const isMixedTier = distinctTierCount(manifestRows as any) > 1;
                                     return (
                                         <div key={name} className="flex justify-between items-center p-4 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 hover:border-amber-200 transition-colors cursor-pointer"
                                             onClick={() => {
@@ -1135,6 +1164,29 @@ export function ProductionCalculator() {
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
+                                                        if (isMixedTier) {
+                                                            // Tier-aware route: one batch row per tier.
+                                                            const written = writePrintBatch({
+                                                                name: `${name} - ${new Date().toLocaleDateString()}`,
+                                                                items: manifestRows.map((row: any) => ({
+                                                                    name: row.name,
+                                                                    id: row.id,
+                                                                    qty: row.qty,
+                                                                    unit: row.unit,
+                                                                    copies: row.qty,
+                                                                    variantSize: row.variantSize ?? null,
+                                                                    servingTier: servingTierLabel(row.variantSize)
+                                                                })),
+                                                                servingTier: null,
+                                                                businessId: businessId ?? null
+                                                            });
+                                                            if (!written.ok) {
+                                                                alert(`Could not prepare the print batch.\n\n${written.reason}`);
+                                                                return;
+                                                            }
+                                                            router.push('/production/print-batch');
+                                                            return;
+                                                        }
                                                         router.push(`/labels?recipeId=${data.id}&printQty=${physicalCopies}&from=production`);
                                                     }}
                                                     className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 px-2.5 py-1.5 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"

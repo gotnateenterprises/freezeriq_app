@@ -8,6 +8,7 @@ import { useSession } from 'next-auth/react';
 import LabelTemplate from '@/components/LabelTemplate';
 import { resolveLabelAllergens } from '@/lib/allergens';
 import { resolveLabelIngredients, collectBlockedLabels } from '@/lib/mealLabel';
+import { readPrintBatch, writePrintBatch, clearPrintBatch } from '@/lib/printBatchStorage';
 
 interface BatchItem {
     name: string;
@@ -49,6 +50,8 @@ export default function ProductionBatchPrintPage() {
     const businessId = session?.user?.businessId;
 
     const [batch, setBatch] = useState<BatchJob | null>(null);
+    /** OPS-5E: why no batch is showing, so this page never waits forever. */
+    const [batchError, setBatchError] = useState<string | null>(null);
     const [labelSize, setLabelSize] = useState('2x6'); // Default to 2" x 6"
     const [printMethod, setPrintMethod] = useState<'browser' | 'api'>('browser');
     const [isPrinting, setIsPrinting] = useState(false);
@@ -68,25 +71,30 @@ export default function ProductionBatchPrintPage() {
 
     const [branding, setBranding] = useState<any>(null);
 
+    // OPS-5E: the load is no longer gated on a client businessId. It used to
+    // early-return whenever useSession() had not resolved one, leaving this
+    // page on "Loading batch..." forever -- the reader half of the same
+    // defect that silently killed the Manual Planner's batch-print click.
+    // The key comes from the one shared authority, and every failure mode
+    // (nothing queued, damaged data, storage disabled, another tenant's
+    // batch) now produces a visible message instead of an endless wait.
     useEffect(() => {
-        if (!businessId) return;
-        const savedBatch = localStorage.getItem(`${businessId}_printBatch`);
-        if (savedBatch) {
-            try {
-                const parsed = JSON.parse(savedBatch);
-                setBatch(parsed);
-
-                // Fetch Details for all items
-                if (parsed.items && parsed.items.length > 0) {
-                    fetchBatchDetails(parsed.items);
-                }
-
-                // Fetch Branding
-                fetch('/api/tenant/branding').then(res => res.json()).then(setBranding).catch(console.error);
-            } catch (e) {
-                console.error("Failed to parse batch");
-            }
+        const result = readPrintBatch(businessId ?? null);
+        if (!result.ok) {
+            setBatchError(result.reason);
+            setBatch(null);
+            return;
         }
+
+        setBatchError(null);
+        setBatch(result.batch as BatchJob);
+
+        if (result.batch.items && result.batch.items.length > 0) {
+            fetchBatchDetails(result.batch.items as BatchItem[]);
+        }
+
+        // Fetch Branding
+        fetch('/api/tenant/branding').then(res => res.json()).then(setBranding).catch(console.error);
     }, [businessId]);
 
     const fetchBatchDetails = async (items: BatchItem[]) => {
@@ -195,7 +203,7 @@ export default function ProductionBatchPrintPage() {
 
                 if (confirm("Did the labels print correctly?")) {
                     // Could clear batch or redirect
-                    localStorage.removeItem(`${businessId}_printBatch`);
+                    clearPrintBatch();
                     router.push('/production');
                 }
             }, 1000);
@@ -209,8 +217,13 @@ export default function ProductionBatchPrintPage() {
         if (!batch) return;
         const newItems = batch.items.filter((_, i) => i !== index);
         setBatch({ ...batch, items: newItems });
-        if (businessId) {
-            localStorage.setItem(`${businessId}_printBatch`, JSON.stringify({ ...batch, items: newItems }));
+        // OPS-5E: persist through the shared authority. Removing the last item
+        // legitimately empties the batch, which the helper refuses to store —
+        // the on-screen state above is still correct either way.
+        if (newItems.length > 0) {
+            writePrintBatch({ ...batch, items: newItems, businessId: businessId ?? null } as any);
+        } else {
+            clearPrintBatch();
         }
     };
 
@@ -267,6 +280,28 @@ export default function ProductionBatchPrintPage() {
     // empty state and no redirect, so a direct visit with no queued batch (or
     // before the session hydrates and businessId resolves) sits here forever.
     // Nothing printable may say "loading".
+    // OPS-5E: "Loading batch..." is no longer a terminal state. When the batch
+    // genuinely could not be loaded, say WHY and offer a way back, rather than
+    // sitting on a spinner-less loading string forever.
+    if (!batch && batchError) {
+        return (
+            <div className="p-12 max-w-xl mx-auto text-center print:hidden">
+                <div className="flex justify-center mb-4 text-amber-500">
+                    <AlertCircle size={40} />
+                </div>
+                <h1 className="text-2xl font-black text-slate-900 dark:text-white mb-2">No labels to print</h1>
+                <p className="text-slate-500 font-medium mb-8">{batchError}</p>
+                <Link
+                    href="/production"
+                    className="inline-flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors"
+                >
+                    <ArrowLeft size={18} />
+                    Back to Production
+                </Link>
+            </div>
+        );
+    }
+
     if (!batch) return <div className="p-12 text-center print:hidden">Loading batch...</div>;
 
     return (
