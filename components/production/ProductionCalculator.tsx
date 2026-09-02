@@ -8,6 +8,7 @@ import { useSession } from 'next-auth/react';
 import { toFraction } from '@/lib/unit_converter';
 import { resolveLabelAllergens } from '@/lib/allergens';
 import { servingTierLabel } from '@/lib/mealLabel';
+import { loadBundles } from '@/lib/bundleLoader';
 
 // Calculator Interfaces
 interface Bundle {
@@ -71,7 +72,7 @@ interface PlanResult {
 
 export function ProductionCalculator() {
     const router = useRouter();
-    const { data: session, status } = useSession() as { data: any; status: 'loading' | 'authenticated' | 'unauthenticated' };
+    const { data: session } = useSession() as { data: any };
     const businessId = session?.user?.businessId;
 
     // Calculator State
@@ -103,43 +104,28 @@ export function ProductionCalculator() {
     // Batch Print State
     const [selectedForPrint, setSelectedForPrint] = useState<Set<string>>(new Set());
 
-    // OPS-5B: Bundle loading is its own effect, gated on NextAuth's own
-    // resolved `status` -- not on `businessId`. The Bundle dropdown was
-    // observed empty for a tenant with active Bundles even though every
-    // other tenant-scoped fetch on this same page (Kitchen Board, branding)
-    // succeeded; those resolve tenant server-side via auth() and are never
-    // gated by any client session field, while this effect alone gated its
-    // fetch behind a CLIENT copy of businessId that can lag the server's own
-    // session. app/customers/page.tsx already established the correct
-    // pattern -- gate on `status`, the value NextAuth itself resolves -- so
-    // this reuses it rather than inventing a third signal. The API route
-    // (app/api/bundles) remains the sole authority for tenant scope and the
-    // is_active filter (OPS-MANUAL-PLANNER-BUNDLE-FILTER-1); nothing about
-    // that route changes here.
+    // OPS-5C: the Bundle fetch fires unconditionally on mount -- no client
+    // auth-readiness gate of any kind (not businessId, not NextAuth's
+    // status). OPS-5B's status-gate deadlocked in production: the effect
+    // only gets one guaranteed run per mount (dependency array [status]),
+    // and ProductionCalculator mounts fresh on a client tab click rather
+    // than at page load, so that one run could see a not-yet-'authenticated'
+    // status with nothing left in the file to give it a second chance.
+    // app/api/bundles is already fully self-defending -- it authenticates
+    // and tenant-scopes server-side (OPS-MANUAL-PLANNER-BUNDLE-FILTER-1) --
+    // so the client does not need to know it is authenticated before
+    // asking; the server decides whether to answer. The load STATE MACHINE
+    // itself (loading -> ready/error, guaranteed to terminate on every
+    // response shape) lives in lib/bundleLoader.ts, not here.
     useEffect(() => {
-        if (status !== 'authenticated') return;
         let cancelled = false;
-        setBundlesLoadState('loading');
-
-        fetch('/api/bundles?activeOnly=true')
-            .then(res => {
-                if (!res.ok) throw new Error(`Bundle load failed: ${res.status}`);
-                return res.json();
-            })
-            .then(data => {
-                if (cancelled) return;
-                if (!Array.isArray(data)) throw new Error('Unexpected bundle response shape');
-                setBundles(data);
-                setBundlesLoadState('ready');
-            })
-            .catch(err => {
-                if (cancelled) return;
-                console.error("Failed to fetch bundles", err);
-                setBundlesLoadState('error');
-            });
-
+        loadBundles(
+            () => fetch('/api/bundles?activeOnly=true'),
+            { setBundles, setBundlesLoadState },
+            () => cancelled,
+        );
         return () => { cancelled = true; };
-    }, [status]);
+    }, []);
 
     useEffect(() => {
         if (!businessId) return;

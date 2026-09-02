@@ -65,20 +65,24 @@ describe('the Bundle-load effect is not gated behind the client businessId field
         expect(block).not.toMatch(/if\s*\(\s*!businessId\s*\)\s*return;/);
     });
 
-    it('FIX: the effect instead gates on NextAuth\'s own resolved status, matching the established app/customers/page.tsx pattern', () => {
+    // SUPERSEDED BY OPS-5C: on the deployed OPS-5B preview, this exact
+    // status==='authenticated' gate deadlocked -- the effect only gets one
+    // guaranteed run per mount (dependency array [status]), and
+    // ProductionCalculator mounts fresh on a client tab click rather than at
+    // page load, so that one run could see a not-yet-'authenticated' status
+    // with nothing left in the file to give it a second chance. OPS-5C
+    // removed the client auth-readiness gate entirely -- app/api/bundles is
+    // already fully self-defending, so the client does not need to know it
+    // is authenticated before asking. See tests/ops5cBundleLoaderDeadlock.test.ts.
+    it('OPS-5C: the effect no longer gates on NextAuth status -- that gate was itself the production defect', () => {
         const src = strip(read(FILE));
         const block = bundleEffectBlock(src);
-        expect(block).toMatch(/status\s*!==\s*['"]authenticated['"]/);
-
-        // Prove this is genuinely the SAME idiom already used elsewhere, not a
-        // new invention (Part D: reuse, do not introduce a new authority).
-        const customersSrc = strip(read('app/customers/page.tsx'));
-        expect(customersSrc).toMatch(/status\s*===\s*['"]authenticated['"]/);
+        expect(block).not.toMatch(/status\s*!==\s*['"]authenticated['"]/);
     });
 
-    it('useSession is destructured for status, not just data', () => {
+    it('OPS-5C: useSession is no longer destructured for status -- nothing in this file needs it', () => {
         const src = strip(read(FILE));
-        expect(src).toMatch(/const\s*\{\s*data:\s*session,\s*status\s*\}\s*=\s*useSession\(\)/);
+        expect(src).not.toMatch(/const\s*\{\s*data:\s*session,\s*status\s*\}\s*=\s*useSession\(\)/);
     });
 });
 
@@ -86,23 +90,30 @@ describe('the Bundle-load effect is not gated behind the client businessId field
 // PART F / M5 — a fetch failure must be visible, never a silent empty list.
 // ═════════════════════════════════════════════════════════════════════════════
 describe('a failed or malformed Bundle response is never mistaken for "zero Bundles"', () => {
-    it('DEFECT: the raw response is checked for res.ok before being parsed', () => {
+    // SUPERSEDED BY OPS-5C: the res.ok check, the array-shape guard, and the
+    // failure -> 'error' state transition all still exist and are still
+    // true -- they just moved out of this component's inline effect and
+    // into lib/bundleLoader.ts's resolveBundleListResponse()/loadBundles(),
+    // which tests/ops5cBundleLoaderDeadlock.test.ts proves BEHAVIORALLY
+    // (mock Response objects, not source-text regexes) for every failure
+    // shape (401, 500, malformed JSON, non-array JSON, network rejection).
+    // The three checks below confirm this component still DELEGATES to that
+    // authority rather than re-implementing (or dropping) the safety net.
+    it('the effect delegates response-safety to the shared lib/bundleLoader.ts authority', () => {
         const src = strip(read(FILE));
         const block = bundleEffectBlock(src);
-        expect(block).toMatch(/if\s*\(\s*!res\.ok\s*\)/);
+        expect(block).toMatch(/loadBundles\(/);
     });
 
-    it('DEFECT: the parsed payload is verified to be an array before being trusted as the Bundle list', () => {
-        const src = strip(read(FILE));
-        const block = bundleEffectBlock(src);
-        expect(block).toMatch(/Array\.isArray\(data\)/);
+    it('lib/bundleLoader.ts itself checks res.ok and the array shape before trusting a response', () => {
+        const src = strip(read('lib/bundleLoader.ts'));
+        expect(src).toMatch(/if\s*\(\s*!res\.ok\s*\)/);
+        expect(src).toMatch(/Array\.isArray\(data\)/);
     });
 
-    it('DEFECT: the failure path sets a distinct error state rather than swallowing the error into an empty options list', () => {
-        const src = strip(read(FILE));
-        const block = bundleEffectBlock(src);
-        expect(block).toMatch(/\.catch\(/);
-        expect(block).toMatch(/setBundlesLoadState\(\s*['"]error['"]\s*\)/);
+    it('lib/bundleLoader.ts sets a distinct error state rather than swallowing a failure into an empty options list', () => {
+        const src = strip(read('lib/bundleLoader.ts'));
+        expect(src).toMatch(/setBundlesLoadState\(\s*['"]error['"]\s*\)/);
     });
 
     it('a genuine zero-Bundle tenant and a fetch failure render DIFFERENT, truthful messages -- neither is fabricated data', () => {
