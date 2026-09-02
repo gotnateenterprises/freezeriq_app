@@ -464,9 +464,14 @@ describe('7. OPS-5 protections still intact', () => {
     });
 
     it('the centralized allergen authority survives on every live surface', () => {
+        // OPS-5D: ProductionCalculator.tsx removed from this list -- it no
+        // longer formats label content at all (both its print actions now
+        // delegate to these two surfaces, proven in
+        // tests/ops5MealLabelHardening.test.ts). Not a safety reduction:
+        // allergen resolution used to happen in three places, now two, both
+        // still covered here.
         for (const f of [
             'app/production/print-batch/page.tsx',
-            'components/production/ProductionCalculator.tsx',
             'app/labels/LabelsClient.tsx',
         ]) {
             expect(strip(read(f))).toMatch(/from ['"]@\/lib\/allergens['"]/);

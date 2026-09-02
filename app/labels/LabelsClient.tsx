@@ -383,12 +383,21 @@ export default function LabelsPage() {
                 // Deduct from inventory
                 await deductInventory(printQty);
 
+                // OPS-5D: a MOCK printer response is not evidence a label
+                // reached a printer -- the API route echoes the printer's
+                // own `mock` flag, and the operator must be told the truth
+                // rather than an unconditional "Sent Successfully."
+                const copyWord = printQty === 1 ? 'label' : 'labels';
+                const truthfulMessage = data.mock
+                    ? `MOCK mode: ${printQty} ${copyWord} prepared, but no physical printer is connected — nothing was actually printed.`
+                    : `Print job sent to your printer (${printQty} ${copyWord}).`;
+
                 if (from === 'production') {
-                    if (confirm('Print Job Sent Successfully! Return to Production page?')) {
+                    if (confirm(`${truthfulMessage} Return to Production page?`)) {
                         router.push('/production');
                     }
                 } else {
-                    alert('Print Job Sent Successfully!');
+                    alert(truthfulMessage);
                 }
             } else {
                 alert('Print Failed: ' + (data.error || 'Check Settings'));

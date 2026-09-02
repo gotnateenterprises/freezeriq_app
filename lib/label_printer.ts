@@ -7,6 +7,8 @@ export interface PrintJob {
     expiryDate: string;
     quantity: number;
     user: string;
+    /** The serving-tier label this job's callers already send (e.g. "Serves 2"). */
+    unit?: string;
     // New Fields for Final Label
     allergens?: string;
     notes?: string;
@@ -20,14 +22,26 @@ export interface PrintJob {
 }
 
 export interface LabelPrinter {
-    printLabel(job: PrintJob): Promise<{ success: boolean; message: string }>;
+    printLabel(job: PrintJob): Promise<{ success: boolean; message: string; mock: boolean }>;
 }
 
 class MockLabelPrinter implements LabelPrinter {
-    async printLabel(job: PrintJob): Promise<{ success: boolean; message: string }> {
-        console.log("🖨️ [MOCK PRINT] Printing Label:", job);
+    async printLabel(job: PrintJob): Promise<{ success: boolean; message: string; mock: boolean }> {
+        // OPS-5D: `copies` logged explicitly, not the ambiguous `quantity`
+        // field name the wire payload still uses for DCG compatibility — a
+        // reader of these logs must be able to tell copy count from serving
+        // tier at a glance. No PII: this job carries recipe/branding data
+        // only, never a supporter name or address.
+        console.log(`🖨️ [MOCK PRINT] recipe=${job.recipeName} copies=${job.quantity} tier=${job.unit}`);
         await new Promise(resolve => setTimeout(resolve, 800)); // Simulate network delay
-        return { success: true, message: `Label sent to Mock Printer (${job.isFinalLabel ? 'Final' : 'Prep'})` };
+        // OPS-5D: no physical printer is connected in mock mode, so this
+        // message must never claim delivery — callers surface `mock` to the
+        // operator rather than a bare "sent successfully."
+        return {
+            success: true,
+            mock: true,
+            message: `MOCK: ${job.quantity} label${job.quantity === 1 ? '' : 's'} prepared for "${job.recipeName}" (${job.isFinalLabel ? 'Final' : 'Prep'}) — no physical printer connected, nothing was actually printed.`,
+        };
     }
 }
 
@@ -42,7 +56,7 @@ class DateCodeGeniePrinter implements LabelPrinter {
         this.printerProfileId = printerProfileId;
     }
 
-    async printLabel(job: PrintJob): Promise<{ success: boolean; message: string }> {
+    async printLabel(job: PrintJob): Promise<{ success: boolean; message: string; mock: boolean }> {
         try {
             // Construct Payload for DCG Cloud Print
             // Note: Schema is inferred. Expects ProfileID/LocationID and Content.
@@ -77,15 +91,15 @@ class DateCodeGeniePrinter implements LabelPrinter {
             });
 
             if (response.ok) {
-                return { success: true, message: "Label sent to DateCodeGenie!" };
+                return { success: true, mock: false, message: "Label sent to DateCodeGenie!" };
             } else {
                 const errText = await response.text();
                 console.error(`DCG Print Error: ${response.status}`, errText);
-                return { success: false, message: `DCG Error: ${response.statusText}` };
+                return { success: false, mock: false, message: `DCG Error: ${response.statusText}` };
             }
         } catch (e) {
             console.error("DCG Network Error", e);
-            return { success: false, message: "Network Error contacting Printer API" };
+            return { success: false, mock: false, message: "Network Error contacting Printer API" };
         }
     }
 }

@@ -32,10 +32,14 @@ export async function POST(req: Request) {
         const result = await printer.printLabel(job);
 
         if (!result.success) {
-            return NextResponse.json({ error: result.message }, { status: 500 });
+            return NextResponse.json({ error: result.message, mock: result.mock }, { status: 500 });
         }
 
-        return NextResponse.json({ success: true, message: result.message });
+        // OPS-5D: `mock` tells the caller whether this response is evidence
+        // of an actual physical print (a real printer answered) or merely a
+        // mock queue for preview/testing — a 200 from this route is not, by
+        // itself, proof that a label reached a printer.
+        return NextResponse.json({ success: true, message: result.message, mock: result.mock });
 
     } catch (e) {
         console.error("Print API Error:", e);

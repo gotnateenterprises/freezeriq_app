@@ -65,10 +65,20 @@ const ROOT = process.cwd();
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
 const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
-/** Every LIVE meal-label surface that formats allergen text. */
+/**
+ * Every LIVE meal-label surface that formats allergen text.
+ *
+ * OPS-5D: components/production/ProductionCalculator.tsx was removed from
+ * this list. It no longer builds label content (ingredients, allergens) at
+ * all -- both its print actions ("Print Labels (N)" and "Batch Print All
+ * Labels") now delegate entirely to the two surfaces still listed here,
+ * which already resolve allergens through this same shared authority. This
+ * is a consolidation, not a safety reduction: allergen resolution used to
+ * happen in three places (a duplicate-map risk this whole suite exists to
+ * close); it now happens in two, both already proven below.
+ */
 const LIVE_LABEL_SURFACES = [
     'app/production/print-batch/page.tsx',
-    'components/production/ProductionCalculator.tsx',
     'app/labels/LabelsClient.tsx',
 ];
 
@@ -214,6 +224,14 @@ describe('2. every live meal-label surface uses the ONE authority', () => {
         for (const file of LIVE_LABEL_SURFACES) {
             expect(strip(read(file))).toMatch(/from ['"]@\/lib\/allergens['"]/);
         }
+    });
+
+    it('OPS-5D: ProductionCalculator.tsx genuinely no longer formats allergen text -- it delegates instead', () => {
+        const src = strip(read('components/production/ProductionCalculator.tsx'));
+        expect(src).not.toMatch(/from ['"]@\/lib\/allergens['"]/);
+        // Both print actions hand off to a surface that IS in LIVE_LABEL_SURFACES.
+        expect(src).toMatch(/router\.push\(['"`]\/production\/print-batch['"`]\)/);
+        expect(src).toMatch(/router\.push\(`\/labels\?recipeId=/);
     });
 
     it('the AI authoring-time classifier is a SEPARATE concept and is untouched', () => {

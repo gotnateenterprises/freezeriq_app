@@ -6,7 +6,6 @@ import { Plus, Calculator, ShoppingCart, ChefHat, Trash2, Printer, Calendar, Loa
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { toFraction } from '@/lib/unit_converter';
-import { resolveLabelAllergens } from '@/lib/allergens';
 import { servingTierLabel } from '@/lib/mealLabel';
 import { loadBundles } from '@/lib/bundleLoader';
 
@@ -1055,122 +1054,45 @@ export function ProductionCalculator() {
                                     Print Recipes
                                 </button>
                                 <button
-                                    onClick={async () => {
-                                        if (!result || !result.prepTasks || Object.keys(result.prepTasks).length === 0) {
+                                    onClick={() => {
+                                        if (!result || !result.assemblyTasks || Object.keys(result.assemblyTasks).length === 0) {
                                             alert('No recipes to print labels for. Please calculate a production plan first.');
                                             return;
                                         }
 
-                                        const btn = document.activeElement as HTMLButtonElement;
-                                        const totalRecipes = Object.keys(result.prepTasks).length;
-                                        if (btn) {
-                                            btn.disabled = true;
-                                            btn.textContent = `Fetching ${totalRecipes} recipes...`;
-                                        }
+                                        // OPS-5D: this button now builds the SAME physical meal
+                                        // manifest batch the "Print Batch (N)" button already uses,
+                                        // and opens the existing OPS-5-hardened browser-print
+                                        // surface -- rather than independently deriving copy counts
+                                        // from prepTasks (ingredient demand: lib/kitchen_engine.ts's
+                                        // own comment is explicit that "Nothing downstream may
+                                        // derive a label count from prepTasks") and POSTing straight
+                                        // to a printer API that, absent DCG_API_KEY/DCG_LOCATION_ID,
+                                        // is a MOCK that cannot truthfully claim physical delivery.
+                                        // assemblyTasks is the one physical-count authority
+                                        // (OPS-5A); reusing it here, and reusing the browser-print
+                                        // route, means there is no second print renderer and
+                                        // nothing here can claim a false "sent successfully."
+                                        const allRecipes = Object.values(result.assemblyTasks).map((row: any) => ({
+                                            name: row.name,
+                                            id: row.id,
+                                            qty: row.qty,
+                                            unit: row.unit,
+                                            // The real physical label count — no `copies || 1`.
+                                            copies: row.qty,
+                                            variantSize: row.variantSize ?? null,
+                                            servingTier: servingTierLabel(row.variantSize)
+                                        }));
 
-                                        try {
-                                            // Fetch branding
-                                            let branding: any = null;
-                                            try {
-                                                const brandRes = await fetch('/api/tenant/branding');
-                                                if (brandRes.ok) branding = await brandRes.json();
-                                            } catch (e) {
-                                                console.error('Failed to fetch branding', e);
-                                            }
-
-                                            // Fetch all recipe details
-                                            const entries = Object.entries(result.prepTasks);
-                                            let successCount = 0;
-                                            let failCount = 0;
-
-                                            for (let i = 0; i < entries.length; i++) {
-                                                const [fullName, task] = entries[i];
-                                                if (btn) btn.textContent = `Printing ${i + 1}/${totalRecipes}...`;
-
-                                                try {
-                                                    // Fetch recipe data
-                                                    const recipeRes = await fetch(`/api/recipes/${task.id}`);
-                                                    if (!recipeRes.ok) { failCount++; continue; }
-                                                    const recipe = await recipeRes.json();
-                                                    if (recipe.error) { failCount++; continue; }
-
-                                                    // Build ingredients string
-                                                    const ingredients = (recipe.child_items || [])
-                                                        .map((item: any) => item.child_ingredient?.name || item.child_recipe?.name)
-                                                        .filter(Boolean)
-                                                        .join(', ');
-
-                                                    // OPS-5: one shared allergen authority (lib/allergens.ts).
-                                                    // This surface previously had the LEAST complete keyword
-                                                    // map of the four - no shrimp/crab/lobster/cashew/pecan/
-                                                    // yogurt/whey - so a shrimp dish printed no allergen at
-                                                    // all from here while the same recipe declared Shellfish
-                                                    // from the Labels page.
-                                                    const resolvedAllergens = resolveLabelAllergens(recipe.allergens, ingredients);
-
-                                                    // OPS-5: the serving tier comes from the plan's resolved
-                                                    // authority, never from parsing the prepTask key. That
-                                                    // key is the bare recipe name (lib/kitchen_engine.ts
-                                                    // keys prepTasks by recipe.name), so the substring checks
-                                                    // this replaced could only ever match a recipe that
-                                                    // happened to be NAMED "... Serves 2" - and silently
-                                                    // fell through to the yield unit for every other one.
-                                                    let mealSize = result?.servingTier || recipe.base_yield_unit || 'batch';
-
-                                                    // Best-by date (6 months out)
-                                                    const expiry = new Date();
-                                                    expiry.setMonth(expiry.getMonth() + 6);
-
-                                                    // Send print job
-                                                    const printRes = await fetch('/api/production/print-label', {
-                                                        method: 'POST',
-                                                        headers: { 'Content-Type': 'application/json' },
-                                                        body: JSON.stringify({
-                                                            job: {
-                                                                recipeName: recipe.name,
-                                                                ingredients,
-                                                                expiryDate: expiry.toLocaleDateString(),
-                                                                quantity: Math.round(task.qty),
-                                                                unit: mealSize,
-                                                                user: 'Batch Print',
-                                                                allergens: resolvedAllergens,
-                                                                notes: '',
-                                                                isFinalLabel: true,
-                                                                businessName: branding?.business_name,
-                                                                logoUrl: branding?.logo_url,
-                                                                primaryColor: branding?.primary_color,
-                                                                secondaryColor: branding?.secondary_color,
-                                                                accentColor: branding?.accent_color,
-                                                                metadata: {
-                                                                    mealSize,
-                                                                    instructions: recipe.label_text || task.label_text || ''
-                                                                }
-                                                            }
-                                                        })
-                                                    });
-                                                    const printData = await printRes.json();
-                                                    if (printRes.ok && printData.success) successCount++;
-                                                    else failCount++;
-                                                } catch (e) {
-                                                    console.error(`Failed to print label for ${fullName}`, e);
-                                                    failCount++;
-                                                }
-                                            }
-
-                                            // Summary
-                                            if (failCount === 0) {
-                                                alert(`✅ All ${successCount} label print jobs sent successfully!`);
-                                            } else {
-                                                alert(`Label printing complete:\n✅ ${successCount} succeeded\n❌ ${failCount} failed\n\nCheck your printer connection for failed jobs.`);
-                                            }
-                                        } catch (e) {
-                                            console.error('Batch label print error:', e);
-                                            alert('An error occurred during batch label printing.');
-                                        } finally {
-                                            if (btn) {
-                                                btn.disabled = false;
-                                                btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6"/><rect x="6" y="14" width="12" height="8" rx="1"/></svg> Batch Print All Labels';
-                                            }
+                                        if (businessId) {
+                                            localStorage.setItem(`${businessId}_printBatch`, JSON.stringify({
+                                                name: `Batch - ${new Date().toLocaleDateString()}`,
+                                                items: allRecipes,
+                                                // Batch-level tier remains as a fallback for any item
+                                                // that could not prove its own; per-item tier wins.
+                                                servingTier: result?.servingTier ?? null
+                                            }));
+                                            router.push('/production/print-batch');
                                         }
                                     }}
                                     className="flex items-center gap-2 text-sm font-bold text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 px-3 py-2 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors print:hidden disabled:opacity-50 border border-indigo-200 dark:border-indigo-800"
@@ -1183,39 +1105,51 @@ export function ProductionCalculator() {
                         <div className="space-y-4">
                             {Object.entries(result.prepTasks)
                                 .sort((a, b) => a[0].localeCompare(b[0]))
-                                .map(([name, data]) => (
-                                    <div key={name} className="flex justify-between items-center p-4 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 hover:border-amber-200 transition-colors cursor-pointer"
-                                        onClick={() => {
-                                            const next = new Set(selectedForPrint);
-                                            if (next.has(name)) next.delete(name);
-                                            else next.add(name);
-                                            setSelectedForPrint(next);
-                                        }}
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${selectedForPrint.has(name) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'}`}>
-                                                {selectedForPrint.has(name) && <Check size={14} className="text-white" />}
+                                .map(([name, data]) => {
+                                    // OPS-5D: the physical label copy count comes from the
+                                    // manifest (assemblyTasks), NEVER from prepTasks' qty --
+                                    // that is ingredient demand (lib/kitchen_engine.ts: "Nothing
+                                    // downstream may derive a label count from prepTasks").
+                                    // Summed across tiers when this recipe appears at more than
+                                    // one serving size in the plan, so no tier's copies are
+                                    // silently dropped (Part L).
+                                    const physicalCopies = Object.values(result.assemblyTasks || {})
+                                        .filter((row: any) => row.id === data.id)
+                                        .reduce((sum: number, row: any) => sum + row.qty, 0);
+                                    return (
+                                        <div key={name} className="flex justify-between items-center p-4 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 hover:border-amber-200 transition-colors cursor-pointer"
+                                            onClick={() => {
+                                                const next = new Set(selectedForPrint);
+                                                if (next.has(name)) next.delete(name);
+                                                else next.add(name);
+                                                setSelectedForPrint(next);
+                                            }}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${selectedForPrint.has(name) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'}`}>
+                                                    {selectedForPrint.has(name) && <Check size={14} className="text-white" />}
+                                                </div>
+                                                <span className="font-bold text-slate-700 dark:text-slate-300">{name}</span>
                                             </div>
-                                            <span className="font-bold text-slate-700 dark:text-slate-300">{name}</span>
+                                            <div className="flex items-center gap-3">
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        router.push(`/labels?recipeId=${data.id}&printQty=${physicalCopies}&from=production`);
+                                                    }}
+                                                    className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 px-2.5 py-1.5 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+                                                    title={`Print ${physicalCopies} labels for ${name}`}
+                                                >
+                                                    <Printer size={14} />
+                                                    Print Labels ({physicalCopies})
+                                                </button>
+                                                <span className="font-mono font-bold text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded text-sm">
+                                                    {Math.round(data.qty)} {data.unit}
+                                                </span>
+                                            </div>
                                         </div>
-                                        <div className="flex items-center gap-3">
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    router.push(`/labels?recipeId=${data.id}&printQty=${Math.round(data.qty)}&from=production`);
-                                                }}
-                                                className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 px-2.5 py-1.5 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
-                                                title={`Print ${Math.round(data.qty)} labels for ${name}`}
-                                            >
-                                                <Printer size={14} />
-                                                Print Labels ({Math.round(data.qty)})
-                                            </button>
-                                            <span className="font-mono font-bold text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded text-sm">
-                                                {Math.round(data.qty)} {data.unit}
-                                            </span>
-                                        </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                         </div>
                     </div>
                 </div>
