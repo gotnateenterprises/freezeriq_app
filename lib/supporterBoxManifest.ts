@@ -1,82 +1,59 @@
 /**
- * OPS-6 — the ONE supporter outer-box manifest authority.
+ * OPS-6 / OPS-6A — LAYER 1: what the supporter PURCHASED.
  *
- * CONTRACT: docs/ai/FUNDRAISER_FULFILLMENT_CONTRACT.md §7, which names this
- * artifact and its content precisely:
+ * CONTRACT: docs/ai/FUNDRAISER_FULFILLMENT_CONTRACT.md §7.
  *
- *     CUSTOMER OUTER-BOX LABELS | one per supporter box | not built
- *     Future content: supporter name, bundle name, serving tier,
- *                     optional render-time Box N of M
- *     "No persisted box-number schema is authorized at this time. Box
- *      numbering, if built, is a render-time computation only."
+ * ══════════════════════════════════════════════════════════════════════════
+ * THIS MODULE IS NOT ABOUT BOXES.
+ * ══════════════════════════════════════════════════════════════════════════
  *
- * So nothing here is stored. Every value is computed from the source Order at
- * render time, and this module holds no Prisma import, no React, and no I/O —
- * it is a pure function over rows the caller already fetched tenant-scoped.
+ * OPS-6 conflated two things that OPS-6A separates:
  *
- * WHAT AN OUTER-BOX LABEL ANSWERS
+ *   LAYER 1 (here)              what the supporter BOUGHT
+ *                               -> PurchasedBundleInstance[]
  *
- * Not "what food is this?" — that is the MEAL label (lib/mealLabel.ts,
- * lib/mealManifest.ts), a different layer with a different grain. This one
- * answers the packing question: WHO does this box belong to, WHICH bundle is
- * inside, WHAT tier was actually sold, and WHICH box is this of that
- * supporter's order.
+ *   LAYER 2 (physicalBoxPacking) how those purchases are PACKED
+ *                               -> PhysicalBox[]
  *
- * ONE PHYSICAL PURCHASED BUNDLE INSTANCE = ONE LABEL
+ * OPS-6 assumed one purchased bundle instance = one physical outer box. The
+ * owner's real operation is not that: a Serves-5 bundle fills a large box, but
+ * a Serves-2 bundle only fills HALF of one, so two Serves-2 bundles from the
+ * same order share a single large box. Two purchases, one box, one label.
  *
- * The count comes from OrderItem.quantity and nothing else. Deliberately NOT
- * from:
+ * So "how many boxes?" is no longer answerable here, and deliberately is not.
+ * This module answers only "what did they buy, and is each line truthful
+ * enough to print?". lib/physicalBoxPacking.ts answers the box question, and
+ * it is the ONLY thing that may.
  *
- *   - prepTasks / assemblyTasks     (ingredient- and meal-grain, not box-grain)
- *   - BundleContent meal count      (how many MEALS are inside one box)
- *   - the serving multiplier         (serves_2 = 0.5 scales FOOD, not boxes)
- *   - lib/fundraiserMetrics weighting (serves_2 = 0.5 toward a fundraising
- *                                      goal; three Serves-2 bundles are three
- *                                      physical boxes, not one and a half)
+ * The split is enforced by naming, not just convention: nothing here is called
+ * a box, and nothing here counts one. A future reader cannot mistake a
+ * PurchasedBundleInstance for a shipping carton.
  *
- * A supporter who bought 3 bundles gets 3 boxes however much food is in them.
+ * PURCHASE TRUTH IS IMMUTABLE
  *
- * WHY THIS IS A NEW MODULE AND NOT A REUSED ONE
- *
- * lib/fundraiserProductionBatch.ts (OPS-3) already groups sold OrderItems by
- * (bundle identity, tier) and is the canonical fundraiser batch — but it
- * AGGREGATES ACROSS ORDERS into one campaign-level requirement, which is
- * exactly what a box label must not do: once Jane's and Bob's lines are summed
- * there is no per-order total left to say "Box 2 of 3" against. This module is
- * its per-order sibling, not a replacement, and it never re-implements the
- * batch's job.
- *
- * app/delivery/print-packing-slips/page.tsx already fans one printed sheet out
- * per physical bundle instance (`for (let i = 0; i < item.quantity; i++)`),
- * which is the same counting rule proven on a live surface. That page produces
- * an 8.5x11 paper insert that goes INSIDE the box and carries no tier and no
- * box number; this produces the adhesive label that goes ON it. The counting
- * rule is deliberately expressed once here, as a tested pure function, rather
- * than a second inline loop. The packing-slip page still owns its own copy —
- * see the deferred-findings note in the OPS-6 report; consolidating it would
- * mean editing a live Delivery render path, which OPS-6 is scoped out of.
+ * Layer 2 may GROUP these instances. It may never modify their identity.
+ * Nothing in either layer writes an Order or an OrderItem.
  *
  * FAIL CLOSED
  *
- * A physical label is not a UI card. It is laminated to a box, handed to a
- * volunteer, and outlives every request that produced it. So every required
- * fact is proven before ANY label for that order is emitted, and a missing
- * fact blocks the order and names it rather than printing a guess. There is no
- * partial success for one order: an order either yields a complete, truthful
- * set of boxes or it yields none.
+ * A physical label is laminated to a box, handed to a volunteer, and outlives
+ * every request that produced it. Every required fact is proven before ANY
+ * instance for that order is emitted, and a missing fact blocks the order and
+ * names it rather than printing a guess. There is no partial success for one
+ * order.
  */
 
 // The strict serving-tier presentation formatter, shared with the meal labels.
 //
 // Reused, not re-implemented: lib/mealLabel.ts's servingTierLabel accepts ONLY
 // the canonical `serves_5` / `serves_2` vocabulary and returns null for
-// anything else, which is precisely the fail-closed behaviour Part H requires.
-// A second formatter here would be a third serving-tier authority, and OPS-5
+// anything else, which is precisely the fail-closed behaviour required. A
+// second formatter here would be a third serving-tier authority, and OPS-5
 // already paid for what happens when one question has four implementations
 // (four divergent allergen keyword maps printing different labels for the same
 // meal). Importing a pure presentation function does NOT merge the two label
-// systems: the dependency runs one way, this module never becomes a meal-label
-// concern, and lib/mealLabel.ts still holds no supporter identity.
+// systems: the dependency runs one way, and lib/mealLabel.ts still holds no
+// supporter identity.
 //
 // NOT lib/fundraiserProductionBatch.ts's formatServingTier: that one renders
 // any string by underscore-splitting and capitalising, so a legacy `family`
@@ -96,7 +73,7 @@ import { servingTierLabel } from './mealLabel';
 // reach a label.
 import { purchaserDisplayName } from './purchaserName';
 
-/** An OrderItem as an outer-box label needs it. */
+/** An OrderItem as the outer-box layers need it. */
 export interface BoxManifestOrderItem {
     id: string;
     /**
@@ -118,12 +95,12 @@ export interface BoxManifestOrderItem {
 }
 
 /**
- * An Order as an outer-box label needs it.
+ * An Order as the outer-box layers need it.
  *
  * Note what is absent: no phone, no email, no delivery_address, no Customer
  * relation. Those are not "omitted from the label" — they are not accepted by
  * this module at all, so no future edit here can put them on a box. The
- * supporter's own contact details are not needed to pack their box.
+ * supporter's contact details are not needed to pack their box.
  */
 export interface BoxManifestOrder {
     id: string;
@@ -135,20 +112,37 @@ export interface BoxManifestOrder {
     items: BoxManifestOrderItem[];
 }
 
-/** One printed outer-box label. */
-export interface SupporterBoxLabel {
+/**
+ * ONE physical bundle the supporter actually bought.
+ *
+ * An OrderItem of quantity 3 yields THREE of these. That fan-out happens here,
+ * in Layer 1, deliberately: Layer 2 pairs Serves-2 bundles two at a time, and
+ * pairing must be able to combine two instances of the SAME OrderItem (a
+ * qty-2 Serves-2 line is one large box, not two half-empty ones). If fan-out
+ * happened after packing, that case would be unreachable.
+ *
+ * This is a PURCHASE, not a carton. It has no box number and no box type.
+ */
+export interface PurchasedBundleInstance {
     orderId: string;
     orderItemId: string;
     /** 0-based instance within its OrderItem. Traceability, not display. */
-    physicalInstanceIndex: number;
+    instanceIndex: number;
     supporterName: string;
     bundleName: string;
-    /** Already presentation-ready: "Serves 2" / "Serves 5". */
+    /** Presentation-ready: "Serves 2" / "Serves 5". */
     servingTier: string;
-    /** 1-based, within the SOURCE ORDER. */
-    boxNumber: number;
-    /** Total eligible physical bundle instances in the SOURCE ORDER. */
-    boxTotal: number;
+    /**
+     * The canonical frozen tier token — 'serves_2' | 'serves_5'. Carried
+     * because Layer 2 must branch on the tier, and matching a display string
+     * would make packing depend on presentation.
+     */
+    variantSize: string;
+    /**
+     * Deterministic position within the order, 0-based. Layer 2 pairs in this
+     * exact order, so the same order always yields the same boxes.
+     */
+    sequence: number;
 }
 
 export interface BlockedBoxOrder {
@@ -156,24 +150,20 @@ export interface BlockedBoxOrder {
     reason: string;
 }
 
-export interface SupporterBoxManifest {
-    labels: SupporterBoxLabel[];
-    blocked: BlockedBoxOrder[];
-}
-
 /**
  * Names that must never be printed as a supporter.
  *
  * These are machine placeholders, not people. 'a supporter' is included
  * because it is purchaserDisplayName's own both-names-empty fallback — a
- * perfectly good word in a coordinator email, and a useless thing to hand a
+ * perfectly good phrase in a coordinator email, and a useless thing to hand a
  * volunteer holding a box.
  *
- * DELIBERATELY ABSENT: 'guest'. The owner ruling carves it out ("unless
- * 'Guest' is an intentional stored supporter name entered by the owner"), and
- * a stored "Guest" typed by a tenant is indistinguishable from a placeholder
- * one. Blocking it would break a legitimate entry, so it prints. See the
- * OPS-6 report, which flags this as the one judgement call in Part G.
+ * OPS-6A OWNER RULING: 'guest' is now here too. OPS-6 deliberately allowed it,
+ * reasoning that a stored "Guest" might be an intentional tenant entry and
+ * blocking it would break a legitimate name. The owner has since ruled the
+ * other way, and the reasoning is better than mine was: the largest field on
+ * the box exists to answer "whose box is this?", and "Guest" does not answer
+ * it. A box that cannot name its owner is not distributable, so it blocks.
  */
 const PLACEHOLDER_SUPPORTER_NAMES: ReadonlySet<string> = new Set([
     'undefined',
@@ -182,6 +172,7 @@ const PLACEHOLDER_SUPPORTER_NAMES: ReadonlySet<string> = new Set([
     'unknown customer',
     'unknown supporter',
     'customer',
+    'guest',
     'n/a',
     'na',
     '-',
@@ -193,7 +184,7 @@ function isPlaceholderName(value: string): boolean {
 }
 
 /**
- * The supporter this box belongs to, from ORDER-TIME identity only.
+ * The supporter this purchase belongs to, from ORDER-TIME identity only.
  *
  * PRECEDENCE, and why:
  *   1. Order.first_name / Order.last_name — the order-time purchaser identity
@@ -202,13 +193,13 @@ function isPlaceholderName(value: string): boolean {
  *      historical rows that predate (1) and never backfilled.
  *
  * The mutable CRM record is deliberately NOT consulted. Customer.name and
- * Customer.contact_name are editable organization/contact fields that a tenant
- * may rename at any time, and for a fundraiser the Customer IS THE
- * ORGANIZATION (schema: `type OrgType @default(fundraiser_org)`), not the
- * supporter — so `customer.name` on a fundraiser order is the school or team,
- * which would put the wrong name on every box. That is exactly what the live
- * DeliveryQueue path did (`order.customer?.name || 'Unknown'`), and it is why
- * this module does not even accept a Customer relation.
+ * Customer.contact_name are editable fields a tenant may rename at any time,
+ * and for a fundraiser the Customer IS THE ORGANIZATION (schema:
+ * `type OrgType @default(fundraiser_org)`) — so `customer.name` on a
+ * fundraiser order is the school or team, which would put the wrong name on
+ * every box. That is exactly what the pre-OPS-6 DeliveryQueue path did
+ * (`order.customer?.name || 'Unknown'`), and it is why this module does not
+ * even accept a Customer relation.
  *
  * Returns null when no usable order-time name exists. A null BLOCKS the order.
  * No name is ever fabricated — not from an email local-part, not from a
@@ -234,7 +225,7 @@ export function resolveSupporterName(order: BoxManifestOrder): string | null {
 }
 
 /**
- * The bundle name this box shows, from the FROZEN sale-time snapshot first.
+ * The bundle name this purchase shows, from the FROZEN sale-time snapshot.
  *
  * OrderItem.item_name is the name captured when the sale happened — every
  * order-creation route writes it (the public supporter route, storefront
@@ -245,9 +236,9 @@ export function resolveSupporterName(order: BoxManifestOrder): string | null {
  *
  * This is the OPPOSITE precedence to lib/fundraiserProductionBatch.ts's
  * `item.bundle?.name || item.item_name`, and the difference is deliberate:
- * that is a kitchen aggregation display, refreshed every time the dashboard
- * loads, where showing the tenant's current name is helpful. This is a
- * physical artifact that outlives the render.
+ * that is a kitchen aggregation display, refreshed on every dashboard load,
+ * where the tenant's current name is helpful. This is a physical artifact that
+ * outlives the render.
  *
  * Returns null when neither a snapshot nor a joined Bundle name exists, which
  * BLOCKS the order rather than printing "Item".
@@ -266,31 +257,45 @@ export function resolveBundleName(item: BoxManifestOrderItem): string | null {
  * OrderItem.variant_size, and nothing else. Bundle.serving_tier is a mutable
  * free-form String (schema default: "family") describing what the bundle sells
  * TODAY; re-deriving from it would let a bundle edit rewrite what a historical
- * box says it contains. lib/orderItemTier.ts states the rule this enforces:
+ * box says it contains — and, after OPS-6A, would also silently change how
+ * that order is PACKED. lib/orderItemTier.ts states the rule this enforces:
  * "OrderItem.variant_size is the frozen snapshot of the tier actually
  * purchased, and is never re-derived afterwards."
  *
- * Note that resolveSoldVariantSize() from that module is deliberately NOT
- * called here. It is the WRITE-side helper — it takes Bundle.serving_tier as
- * authoritative in order to CREATE the snapshot at sale time. Calling it on a
- * read would resurrect the mutable Bundle value and re-derive the very
- * snapshot it exists to freeze.
+ * resolveSoldVariantSize() from that module is deliberately NOT called here.
+ * It is the WRITE-side helper — it takes Bundle.serving_tier as authoritative
+ * in order to CREATE the snapshot at sale time. Calling it on a read would
+ * resurrect the mutable Bundle value and re-derive the very snapshot it exists
+ * to freeze.
  *
- * Returns null for absent or unrecognised values, which BLOCKS. Never guesses
- * a tier, and in particular never falls back to `serves_5` the way
- * resolveVariantSize() and lib/fundraiserProductionBatch.ts do — a default is
- * right for aggregation arithmetic and wrong on a physical label.
+ * Returns null for absent or unrecognised values, which BLOCKS. Never guesses,
+ * and in particular never falls back to `serves_5` the way resolveVariantSize()
+ * and lib/fundraiserProductionBatch.ts do — a default is right for aggregation
+ * arithmetic and wrong on a physical label.
  */
 export function resolveSoldTier(item: BoxManifestOrderItem): string | null {
     return servingTierLabel(item?.variant_size);
 }
 
 /**
+ * The canonical frozen tier token for packing — 'serves_2' | 'serves_5'.
+ *
+ * Deliberately derived from the SAME strict check as resolveSoldTier, so the
+ * tier a box is packed by and the tier printed on its label can never
+ * disagree. Returns null exactly when resolveSoldTier does.
+ */
+export function resolvePackingVariantSize(item: BoxManifestOrderItem): string | null {
+    const label = servingTierLabel(item?.variant_size);
+    if (!label) return null;
+    return String(item.variant_size);
+}
+
+/**
  * Is this line a physical purchased BUNDLE instance at all?
  *
- * Only a line with real Bundle identity becomes a box. A line with no
+ * Only a line with real Bundle identity becomes a purchase. A line with no
  * bundle_id is a non-bundle line — a manual upsell in today's data — and is
- * SKIPPED, not blocked: it is legitimate, it simply is not a box.
+ * SKIPPED, not blocked: it is legitimate, it simply is not something to pack.
  *
  * Tax, delivery fees and discounts cannot reach here in the first place:
  * schema.prisma keeps them as Order COLUMNS (`tax_amount`, `delivery_fee`),
@@ -299,7 +304,7 @@ export function resolveSoldTier(item: BoxManifestOrderItem): string | null {
  *
  * Quantity is checked separately, by quantityFault: a malformed quantity on an
  * otherwise-eligible bundle line must BLOCK rather than be skipped, because
- * silently dropping it would understate every other box's "of M" total.
+ * silently dropping it would understate every box's "of M" total.
  */
 export function isBoxEligibleItem(item: BoxManifestOrderItem): boolean {
     return typeof item?.bundle_id === 'string' && item.bundle_id.trim() !== '';
@@ -315,35 +320,35 @@ export function quantityFault(item: BoxManifestOrderItem): string | null {
 }
 
 /**
- * Deterministic line ordering. Part N: never database default row order, and
- * never unordered object iteration.
+ * Deterministic line ordering. Never database default row order, and never
+ * unordered object iteration.
  *
  * OrderItem has neither a `position` column nor a `created_at` column (see
  * prisma/schema.prisma) — `id` is the only authoritative stable field on the
  * row, so it is the sort key. Sorting INSIDE this function rather than
- * trusting the caller's array order is what makes Box N/M independent of how
- * the rows arrived: a re-fetch, a differently-ordered query, or a shuffled
- * array all produce the identical sequence. The server route orders by the
- * same key so client and server can never disagree.
+ * trusting the caller's array order is what makes the instance sequence — and
+ * therefore Layer 2's pairing, and therefore Box N/M — independent of how the
+ * rows arrived: a re-fetch, a differently-ordered query, or a shuffled array
+ * all produce the identical sequence. The server route orders by the same key
+ * so client and server can never disagree.
  */
 function orderedItems(items: BoxManifestOrderItem[]): BoxManifestOrderItem[] {
     return [...(items || [])].sort((a, z) => String(a?.id ?? '').localeCompare(String(z?.id ?? '')));
 }
 
 /**
- * Build every outer-box label for ONE source Order.
+ * Every physical bundle instance ONE source Order purchased.
  *
- * BOX NUMBERING IS WITHIN THIS ORDER. Two separate Orders are two separate
- * numberings, even when the supporter name, email or phone match — merging
- * them would require deciding that two rows are the same person, and the
- * fulfillment contract disqualifies exactly that inference (§1.3: customer_id
- * is not the grouping key). A supporter who ordered twice gets "Box 1 of 1"
- * and "Box 1 of 2", which is correct: they are two separate purchases packed
- * separately.
+ * Quantity is fanned out here (see PurchasedBundleInstance) and each instance
+ * is stamped with its deterministic `sequence`, which is the order Layer 2
+ * pairs in.
+ *
+ * Verifies EVERY line before emitting ANY instance, so a bad line can never
+ * produce a set of boxes numbered against a total that excludes it.
  */
-export function buildOrderBoxLabels(
+export function buildPurchasedInstances(
     order: BoxManifestOrder,
-): { ok: true; labels: SupporterBoxLabel[] } | { ok: false; reason: string } {
+): { ok: true; instances: PurchasedBundleInstance[] } | { ok: false; reason: string } {
     if (!order || typeof order.id !== 'string' || order.id === '') {
         return { ok: false, reason: 'This order could not be identified, so no box labels were produced.' };
     }
@@ -352,7 +357,7 @@ export function buildOrderBoxLabels(
     if (!supporterName) {
         return {
             ok: false,
-            reason: `Order ${order.id} has no supporter name on record, so its box labels were not produced. `
+            reason: `Order ${order.id} has no usable supporter name on record, so its box labels were not produced. `
                 + 'Add the purchaser\'s name to the order and try again.',
         };
     }
@@ -362,19 +367,19 @@ export function buildOrderBoxLabels(
     if (eligible.length === 0) {
         return {
             ok: false,
-            reason: `Order ${order.id} has no purchased bundles on it, so there is no box to label.`,
+            reason: `Order ${order.id} has no purchased bundles on it, so there is nothing to pack.`,
         };
     }
 
-    // Verify EVERY line before emitting ANY label, so a bad line can never
-    // produce a set of labels numbered against a total that excludes it.
-    const resolved: { item: BoxManifestOrderItem; bundleName: string; servingTier: string }[] = [];
+    const instances: PurchasedBundleInstance[] = [];
+    let sequence = 0;
+
     for (const item of eligible) {
         const fault = quantityFault(item);
         if (fault) {
             return {
                 ok: false,
-                reason: `Order ${order.id} could not be labelled because one of its bundles has an unusable quantity: ${fault}.`,
+                reason: `Order ${order.id} could not be packed because one of its bundles has an unusable quantity: ${fault}.`,
             };
         }
 
@@ -382,80 +387,45 @@ export function buildOrderBoxLabels(
         if (!bundleName) {
             return {
                 ok: false,
-                reason: `Order ${order.id} could not be labelled because one of its bundles has no name on record.`,
+                reason: `Order ${order.id} could not be packed because one of its bundles has no name on record.`,
             };
         }
 
         const servingTier = resolveSoldTier(item);
-        if (!servingTier) {
+        const variantSize = resolvePackingVariantSize(item);
+        if (!servingTier || !variantSize) {
             return {
                 ok: false,
-                reason: `Order ${order.id} could not be labelled because the serving size sold for "${bundleName}" `
+                reason: `Order ${order.id} could not be packed because the serving size sold for "${bundleName}" `
                     + 'is missing or unrecognised. The sold serving size is never guessed.',
             };
         }
 
-        resolved.push({ item, bundleName, servingTier });
-    }
-
-    const boxTotal = resolved.reduce((sum, r) => sum + r.item.quantity, 0);
-
-    const labels: SupporterBoxLabel[] = [];
-    let boxNumber = 0;
-    for (const { item, bundleName, servingTier } of resolved) {
-        for (let instance = 0; instance < item.quantity; instance++) {
-            boxNumber += 1;
-            labels.push({
+        for (let instanceIndex = 0; instanceIndex < item.quantity; instanceIndex++) {
+            instances.push({
                 orderId: order.id,
                 orderItemId: item.id,
-                physicalInstanceIndex: instance,
+                instanceIndex,
                 supporterName,
                 bundleName,
                 servingTier,
-                boxNumber,
-                boxTotal,
+                variantSize,
+                sequence: sequence++,
             });
         }
     }
 
-    return { ok: true, labels };
+    return { ok: true, instances };
 }
 
 /**
- * Build the outer-box manifest for a SET of source Orders.
+ * How many physical bundles this order purchased.
  *
- * Orders are processed independently and each keeps its own Box N/M. A blocked
- * order does not stop the others — it is reported by id so the operator can
- * fix it — but it also contributes NO labels, so nothing printed is ever a
- * guess. Orders come back in a deterministic id order for the same reason the
- * lines do.
+ * This is the PURCHASE count, not the box count — after OPS-6A they are
+ * routinely different, and conflating them is the exact defect this phase
+ * exists to fix. For boxes, use lib/physicalBoxPacking.ts.
  */
-export function buildSupporterBoxManifest(orders: BoxManifestOrder[]): SupporterBoxManifest {
-    const labels: SupporterBoxLabel[] = [];
-    const blocked: BlockedBoxOrder[] = [];
-
-    const sorted = [...(orders || [])].sort((a, z) =>
-        String(a?.id ?? '').localeCompare(String(z?.id ?? '')),
-    );
-
-    for (const order of sorted) {
-        const result = buildOrderBoxLabels(order);
-        if (result.ok) {
-            labels.push(...result.labels);
-        } else {
-            blocked.push({ orderId: order?.id ?? '(unknown)', reason: result.reason });
-        }
-    }
-
-    return { labels, blocked };
-}
-
-/**
- * Total eligible physical bundle instances across a set of orders.
- *
- * The Part O reconstruction check, exported so a header count and the printed
- * sheet count can never be computed two different ways.
- */
-export function countPhysicalBoxes(orders: BoxManifestOrder[]): number {
-    return buildSupporterBoxManifest(orders).labels.length;
+export function countPurchasedInstances(order: BoxManifestOrder): number {
+    const result = buildPurchasedInstances(order);
+    return result.ok ? result.instances.length : 0;
 }

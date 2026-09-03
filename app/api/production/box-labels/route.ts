@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
-import { buildSupporterBoxManifest, type BoxManifestOrder } from '@/lib/supporterBoxManifest';
+import { type BoxManifestOrder } from '@/lib/supporterBoxManifest';
+import { buildPhysicalBoxManifest } from '@/lib/physicalBoxPacking';
 
 /**
  * OPS-6 — the tenant-authorized supporter outer-box label manifest.
@@ -115,11 +116,18 @@ export async function POST(request: Request) {
         const foundIds = new Set(orders.map((o) => o.id));
         const unavailableCount = orderIds.filter((id) => !foundIds.has(id)).length;
 
-        const manifest = buildSupporterBoxManifest(orders as unknown as BoxManifestOrder[]);
+        // OPS-6A: the response is PHYSICAL BOXES, not purchased bundles. One
+        // box = one printed label, and a paired Serves-2 box is ONE of each
+        // even though it holds two purchases.
+        const manifest = buildPhysicalBoxManifest(orders as unknown as BoxManifestOrder[]);
 
         return NextResponse.json({
-            labels: manifest.labels,
+            boxes: manifest.boxes,
             blocked: manifest.blocked,
+            purchasedBundleCount: manifest.purchasedBundleCount,
+            physicalBoxCount: manifest.physicalBoxCount,
+            largeBoxCount: manifest.largeBoxCount,
+            smallBoxCount: manifest.smallBoxCount,
             requestedCount: orderIds.length,
             unavailableCount,
         });

@@ -8,23 +8,34 @@ import {
     clearBoxLabelBatch,
     fetchAuthenticatedBusinessId,
 } from '@/lib/printBatchStorage';
-import type { SupporterBoxLabel, BlockedBoxOrder } from '@/lib/supporterBoxManifest';
+import {
+    boxContentLines,
+    formatBoxContentLine,
+    type PhysicalBox,
+} from '@/lib/physicalBoxPacking';
+import type { BlockedBoxOrder } from '@/lib/supporterBoxManifest';
 
 /**
- * OPS-6 — the supporter outer-box label sheet.
+ * OPS-6 / OPS-6A — the supporter outer-box label sheet.
  *
  * CONTRACT: docs/ai/FUNDRAISER_FULFILLMENT_CONTRACT.md §7. This is the
  * CUSTOMER OUTER-BOX label, a different system from the meal label at
- * /production/print-batch. It says who the box belongs to, which bundle is
- * inside, what tier was sold, and which box it is — and nothing else. No
- * ingredients, no allergens, no cooking instructions: those are the meal
- * label's job, printed per meal INSIDE the box, and duplicating them here
- * would create a second place for food data to drift.
+ * /production/print-batch. It says who the box belongs to, which bundles are
+ * inside, what tier each was sold at, and which box it is — and nothing else.
+ * No ingredients, no allergens, no cooking instructions: those are the meal
+ * label's job, printed per meal INSIDE the box.
+ *
+ * ONE PHYSICAL BOX = ONE SHEET
+ *
+ * OPS-6A: a paired Serves-2 box holds two purchased bundles and gets ONE
+ * label listing both. Sheets therefore equal PHYSICAL BOXES, which is
+ * routinely fewer than purchased bundles. The packing itself is decided by
+ * lib/physicalBoxPacking.ts — this page renders, it does not pair.
  *
  * NO SUPPORTER DATA REACHES THIS PAGE FROM THE CLIENT
  *
- * localStorage holds Order IDs; the label content is fetched from
- * /api/production/box-labels, which resolves it from the authenticated
+ * localStorage holds Order IDs; the box contents are fetched from
+ * /api/production/box-labels, which resolves them from the authenticated
  * session. So the supporter's name — required printed content — is never in a
  * URL, never in browser storage, and never in this page's own history entry.
  *
@@ -37,29 +48,53 @@ import type { SupporterBoxLabel, BlockedBoxOrder } from '@/lib/supporterBoxManif
  * components, and an absent id would degrade a security check into "no
  * opinion".
  *
- * FAIL CLOSED, IN THE PRINTABLE DOM
+ * BRANDING FAILS OPEN, PACKING FAILS CLOSED
  *
- * The print block is `hidden print:block` — CSS-hidden but always mounted — so
- * an operator pressing Ctrl+P bypasses the button entirely and prints whatever
- * is rendered there. Blocked orders therefore render a DO NOT USE sheet rather
- * than being merely absent from the button's handler, which is what actually
- * makes an unprovable box label unprintable.
+ * The tenant logo is cosmetic. A missing logo, a failed branding request, or
+ * an image that 404s at print time must never stop a kitchen from labelling
+ * boxes — so branding is fetched separately, never awaited before the boxes
+ * render, and degrades logo -> tenant name -> nothing. Packing truth gets the
+ * opposite treatment: a blocked order renders DO NOT USE inside the
+ * always-mounted print DOM, so Ctrl+P cannot bypass the gate.
  */
 
 interface BoxLabelResponse {
-    labels: SupporterBoxLabel[];
+    boxes: PhysicalBox[];
     blocked: BlockedBoxOrder[];
+    purchasedBundleCount: number;
+    physicalBoxCount: number;
+    largeBoxCount: number;
+    smallBoxCount: number;
     requestedCount: number;
     unavailableCount: number;
 }
 
 export default function BoxLabelsPage() {
-    const [labels, setLabels] = useState<SupporterBoxLabel[] | null>(null);
+    const [boxes, setBoxes] = useState<PhysicalBox[] | null>(null);
     const [blocked, setBlocked] = useState<BlockedBoxOrder[]>([]);
+    const [counts, setCounts] = useState({ purchased: 0, physical: 0, large: 0, small: 0 });
     const [unavailableCount, setUnavailableCount] = useState(0);
     const [batchError, setBatchError] = useState<string | null>(null);
     const [batchName, setBatchName] = useState('Box Labels');
     const [isPrinting, setIsPrinting] = useState(false);
+
+    /**
+     * Tenant branding, from the ONE canonical authority (/api/tenant/branding,
+     * which resolves the customer-facing name through
+     * lib/tenantBrand.ts customerFacingBusinessName and is scoped to the
+     * server session). No second outer-label logo setting is introduced, and
+     * no tenant name or logo is ever hardcoded — a null here simply prints no
+     * header.
+     *
+     * `logoBroken` handles the case the fetch cannot: a logo_url that is
+     * configured but fails to LOAD at print time. The <img> onError flips it
+     * and the name renders instead.
+     */
+    const [branding, setBranding] = useState<{ logoUrl: string | null; businessName: string | null }>({
+        logoUrl: null,
+        businessName: null,
+    });
+    const [logoBroken, setLogoBroken] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -72,16 +107,30 @@ export default function BoxLabelsPage() {
             if (!queued.ok) {
                 // A batch that fails ownership verification is discarded, not
                 // merely hidden, so a later reload in this browser cannot pick
-                // it up. Only discarded once the tenant is actually known —
-                // a transient identity failure must not destroy the operator's
-                // queued work.
+                // it up. Only discarded once the tenant is actually known — a
+                // transient identity failure must not destroy queued work.
                 if (currentBusinessId) clearBoxLabelBatch();
                 setBatchError(queued.reason);
-                setLabels(null);
+                setBoxes(null);
                 return;
             }
 
             if (queued.batch.name) setBatchName(queued.batch.name);
+
+            // Branding is deliberately NOT awaited: it is cosmetic, and the
+            // boxes below must render even if this never resolves.
+            fetch('/api/tenant/branding')
+                .then(res => (res.ok ? res.json() : null))
+                .then(data => {
+                    if (cancelled || !data) return;
+                    setBranding({
+                        logoUrl: typeof data.logo_url === 'string' && data.logo_url ? data.logo_url : null,
+                        businessName: typeof data.business_name === 'string' && data.business_name.trim()
+                            ? data.business_name.trim()
+                            : null,
+                    });
+                })
+                .catch(() => { /* cosmetic only — never blocks packing or printing */ });
 
             try {
                 const res = await fetch('/api/production/box-labels', {
@@ -97,7 +146,7 @@ export default function BoxLabelsPage() {
                             ? 'Your session has expired, so these box labels were not opened. Please sign in again.'
                             : 'These box labels could not be prepared. Please return to Production and try again.',
                     );
-                    setLabels(null);
+                    setBoxes(null);
                     return;
                 }
 
@@ -106,23 +155,29 @@ export default function BoxLabelsPage() {
 
                 setBlocked(data.blocked || []);
                 setUnavailableCount(data.unavailableCount || 0);
+                setCounts({
+                    purchased: data.purchasedBundleCount || 0,
+                    physical: data.physicalBoxCount || 0,
+                    large: data.largeBoxCount || 0,
+                    small: data.smallBoxCount || 0,
+                });
 
-                if (!data.labels || data.labels.length === 0) {
+                if (!data.boxes || data.boxes.length === 0) {
                     setBatchError(
                         (data.blocked || []).length > 0
-                            ? 'None of the selected orders could be labelled. See the reasons below.'
+                            ? 'None of the selected orders could be packed. See the reasons below.'
                             : 'No box labels could be produced for the selected orders.',
                     );
-                    setLabels([]);
+                    setBoxes([]);
                     return;
                 }
 
                 setBatchError(null);
-                setLabels(data.labels);
+                setBoxes(data.boxes);
             } catch {
                 if (cancelled) return;
                 setBatchError('These box labels could not be prepared (the request failed). Please return to Production and try again.');
-                setLabels(null);
+                setBoxes(null);
             }
         })();
 
@@ -131,9 +186,9 @@ export default function BoxLabelsPage() {
 
     const handlePrintAll = () => {
         // FAIL CLOSED: an order whose required truth is missing blocks the
-        // whole sheet. Printing the provable ones and quietly dropping the rest
-        // would hand the kitchen a stack of boxes with no way to notice one is
-        // missing its label.
+        // whole sheet. Printing the provable ones and quietly dropping the
+        // rest would hand the kitchen a stack of boxes with no way to notice
+        // one is missing its label.
         if (blocked.length > 0) {
             alert(
                 'Printing stopped.\n\n'
@@ -147,10 +202,36 @@ export default function BoxLabelsPage() {
         setTimeout(() => setIsPrinting(false), 1000);
     };
 
-    const totalBoxes = labels?.length ?? 0;
-    const supporterCount = new Set((labels || []).map(l => l.orderId)).size;
+    const supporterCount = new Set((boxes || []).map(b => b.orderId)).size;
 
-    if (!labels && batchError) {
+    /**
+     * The printed header: tenant logo, else tenant name, else nothing.
+     *
+     * Never another tenant's identity, and never a hardcoded default — both
+     * values come from this tenant's own authenticated branding response.
+     */
+    const renderBrandHeader = () => {
+        if (branding.logoUrl && !logoBroken) {
+            return (
+                <img
+                    src={branding.logoUrl}
+                    alt={branding.businessName || ''}
+                    onError={() => setLogoBroken(true)}
+                    style={{ maxHeight: '0.62in', maxWidth: '2.6in', objectFit: 'contain', display: 'block' }}
+                />
+            );
+        }
+        if (branding.businessName) {
+            return (
+                <div style={{ fontSize: '12pt', fontWeight: 700, letterSpacing: '0.02em' }}>
+                    {branding.businessName}
+                </div>
+            );
+        }
+        return null;
+    };
+
+    if (!boxes && batchError) {
         return (
             <div className="p-12 max-w-xl mx-auto text-center print:hidden">
                 <div className="flex justify-center mb-4 text-amber-500">
@@ -169,7 +250,7 @@ export default function BoxLabelsPage() {
         );
     }
 
-    if (!labels) return <div className="p-12 text-center print:hidden">Preparing box labels…</div>;
+    if (!boxes) return <div className="p-12 text-center print:hidden">Preparing box labels…</div>;
 
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-900 print:bg-white">
@@ -184,10 +265,17 @@ export default function BoxLabelsPage() {
                             <Package className="text-indigo-600" />
                             {batchName}
                         </h1>
+                        {/* OPS-6A: purchased bundles and physical boxes are
+                            different numbers, and the operational one is
+                            BOXES. Both are named so neither can be mistaken
+                            for the other. */}
                         <p className="text-slate-500 font-medium">
                             {supporterCount} order{supporterCount === 1 ? '' : 's'}
                             {' · '}
-                            {totalBoxes} box label{totalBoxes === 1 ? '' : 's'} queued
+                            {counts.purchased} bundle{counts.purchased === 1 ? '' : 's'}
+                            {' · '}
+                            {counts.physical} physical box{counts.physical === 1 ? '' : 'es'}
+                            {counts.physical > 0 && ` (${counts.large} large · ${counts.small} small)`}
                         </p>
                     </div>
                 </div>
@@ -200,7 +288,7 @@ export default function BoxLabelsPage() {
                         </div>
                         <button
                             onClick={handlePrintAll}
-                            disabled={totalBoxes === 0 || isPrinting || blocked.length > 0}
+                            disabled={counts.physical === 0 || isPrinting || blocked.length > 0}
                             className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center gap-2"
                         >
                             <Printer size={20} />
@@ -214,7 +302,7 @@ export default function BoxLabelsPage() {
                                 <AlertCircle size={22} className="text-rose-600 shrink-0 mt-0.5" />
                                 <div>
                                     <h4 className="font-black text-rose-900 dark:text-rose-200 mb-2">
-                                        Printing stopped — these orders could not be labelled
+                                        Printing stopped — these orders could not be packed
                                     </h4>
                                     <ul className="space-y-1.5">
                                         {blocked.map((b, i) => (
@@ -239,17 +327,24 @@ export default function BoxLabelsPage() {
                     )}
                 </div>
 
-                {/* On-screen queue. Same data as the printed sheet. */}
+                {/* On-screen queue. Same boxes as the printed sheet. */}
                 <div className="space-y-3">
-                    {labels.map((label, i) => (
-                        <div key={`${label.orderItemId}-${label.physicalInstanceIndex}`} className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-4">
+                    {boxes.map((box, i) => (
+                        <div key={`${box.orderId}-${box.boxNumber}`} className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-4">
                             <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-slate-500 font-bold text-xs shrink-0">
                                 {i + 1}
                             </div>
                             <div className="min-w-0">
-                                <div className="font-bold text-slate-900 dark:text-white truncate">{label.supporterName}</div>
+                                <div className="font-bold text-slate-900 dark:text-white truncate">
+                                    {box.supporterName}
+                                    <span className="ml-2 text-xs font-bold uppercase text-slate-400">
+                                        {box.boxType} box
+                                    </span>
+                                </div>
                                 <div className="text-xs text-slate-500 font-medium truncate">
-                                    {label.bundleName} · {label.servingTier} · Box {label.boxNumber} of {label.boxTotal}
+                                    Box {box.boxNumber} of {box.boxTotal}
+                                    {' · '}
+                                    {boxContentLines(box).map(formatBoxContentLine).join(' + ')}
                                 </div>
                             </div>
                         </div>
@@ -303,33 +398,51 @@ export default function BoxLabelsPage() {
                         </div>
                         <div style={{ fontSize: '11pt', fontWeight: 'bold', lineHeight: 1.35 }}>
                             Box label printing was stopped: {blocked.length} order
-                            {blocked.length === 1 ? '' : 's'} could not be labelled truthfully.
+                            {blocked.length === 1 ? '' : 's'} could not be packed truthfully.
                         </div>
                         <div style={{ fontSize: '9pt', marginTop: '12px', lineHeight: 1.35 }}>
                             Return to Production, fix the affected order(s), and queue the labels again.
                         </div>
                     </div>
                 ) : (
-                    labels.map((label) => (
-                        <div
-                            key={`${label.orderItemId}-${label.physicalInstanceIndex}`}
-                            className="print-page"
-                        >
-                            {/* Part J visual hierarchy: the supporter name is
-                                the strongest element, because the packing
-                                question this label answers first is "whose box
-                                is this?". */}
-                            <div style={{ fontSize: '30pt', fontWeight: 900, lineHeight: 1.05, marginBottom: '0.22in', wordBreak: 'break-word' }}>
-                                {label.supporterName}
+                    boxes.map((box) => (
+                        <div key={`${box.orderId}-${box.boxNumber}`} className="print-page">
+                            {/* Tenant branding: logo, else name, else nothing.
+                                Cosmetic — never blocks the truth below it. */}
+                            <div style={{ minHeight: '0.62in', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '0.16in' }}>
+                                {renderBrandHeader()}
                             </div>
-                            <div style={{ fontSize: '17pt', fontWeight: 700, lineHeight: 1.15, marginBottom: '0.06in', wordBreak: 'break-word' }}>
-                                {label.bundleName}
+
+                            {/* Part J hierarchy: the supporter name is the
+                                strongest element, because the packing question
+                                this label answers first is "whose box is
+                                this?". */}
+                            <div style={{ fontSize: '28pt', fontWeight: 900, lineHeight: 1.05, marginBottom: '0.14in', wordBreak: 'break-word' }}>
+                                {box.supporterName}
                             </div>
-                            <div style={{ fontSize: '15pt', fontWeight: 600, lineHeight: 1.2 }}>
-                                {label.servingTier}
+
+                            <div style={{ fontSize: '19pt', fontWeight: 900, marginBottom: '0.18in', letterSpacing: '0.01em' }}>
+                                Box {box.boxNumber} of {box.boxTotal}
                             </div>
-                            <div style={{ fontSize: '20pt', fontWeight: 900, marginTop: '0.28in', letterSpacing: '0.01em' }}>
-                                Box {label.boxNumber} of {label.boxTotal}
+
+                            {/* Everything physically in this carton. A paired
+                                Serves-2 box lists both bundles; identical
+                                purchases merge to "... ×2". */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.05in' }}>
+                                {boxContentLines(box).map((line, i) => (
+                                    <div
+                                        key={i}
+                                        style={{ fontSize: '14pt', fontWeight: 700, lineHeight: 1.2, wordBreak: 'break-word' }}
+                                    >
+                                        {formatBoxContentLine(line)}
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Operationally useful, deliberately subordinate
+                                to the supporter name and Box N of M. */}
+                            <div style={{ fontSize: '8pt', fontWeight: 700, letterSpacing: '0.08em', marginTop: '0.2in', textTransform: 'uppercase', opacity: 0.75 }}>
+                                {box.boxType} box
                             </div>
                         </div>
                     ))

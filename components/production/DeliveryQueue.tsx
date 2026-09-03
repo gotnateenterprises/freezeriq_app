@@ -5,6 +5,10 @@ import { Package, Printer } from 'lucide-react';
 import { format } from 'date-fns';
 import { useRouter } from 'next/navigation';
 import { writeBoxLabelBatch, fetchAuthenticatedBusinessId } from '@/lib/printBatchStorage';
+// OPS-6A: the ONE physical packing authority. Pure (no Prisma, no I/O), so the
+// lane header can consume the exact same rule the printed labels do rather
+// than re-deriving a second, divergent box count.
+import { summarizeItemPacking } from '@/lib/physicalBoxPacking';
 
 interface Order {
     id: string;
@@ -36,6 +40,11 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
     /** OPS-6: why a label click did not proceed. A click never ends in silence. */
     const [labelError, setLabelError] = useState<string | null>(null);
     const [queueing, setQueueing] = useState(false);
+
+    // OPS-6A: truthful physical carton counts for this lane, from the shared
+    // packing authority. Identity-free — a count is not a label, so it must
+    // not depend on whether every order has a printable supporter name.
+    const packing = summarizeItemPacking(orders as any);
 
     // KB-1A: the Kitchen Board stops at ready_to_ship. Delivery completion moved to
     // the guarded delivery workflow (DD-1); the mark-delivered handler, its
@@ -122,22 +131,32 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
             <div className="flex flex-wrap gap-4 justify-between items-center bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm">
                 <div>
                     <h2 className="text-xl font-black text-slate-900 dark:text-white">Packed &amp; Ready</h2>
-                    {/* OPS-6: orders and BOXES are different counts. A supporter
-                        who bought three bundles is one order and three boxes,
-                        and calling either number "orders" is the same
-                        job-count/copy-count conflation OPS-5D closed on the
-                        meal side. Both are named. */}
+                    {/* OPS-6A: orders, purchased BUNDLES and physical BOXES are
+                        three different numbers, and the operational one for
+                        delivery is BOXES. OPS-6 counted one box per purchased
+                        bundle, which overstated the truck load: two Serves-2
+                        bundles travel in ONE large carton. The count now comes
+                        from the same packing authority the printed labels use,
+                        so the header and the sheet count can never disagree. */}
                     <p className="text-slate-500 font-medium">
                         {orders.length} order{orders.length === 1 ? '' : 's'}
                         {' · '}
-                        {orders.reduce(
-                            (sum, o) => sum + (o.items || []).reduce(
-                                (n, item) => n + (item.bundle?.id ? (Number(item.quantity) || 0) : 0),
-                                0,
-                            ),
-                            0,
-                        )} boxes packed and ready for delivery
+                        {packing.purchasedBundleCount} bundle{packing.purchasedBundleCount === 1 ? '' : 's'}
+                        {' · '}
+                        {packing.physicalBoxCount} physical box{packing.physicalBoxCount === 1 ? '' : 'es'}
+                        {packing.physicalBoxCount > 0 && ` (${packing.largeBoxCount} large · ${packing.smallBoxCount} small)`}
                     </p>
+                    {/* Never silently dropped: a line whose sold tier cannot be
+                        proven is not packable, and an operator who is short a
+                        carton needs to know why rather than discover it at the
+                        truck. */}
+                    {packing.unpackable > 0 && (
+                        <p className="text-xs font-bold text-amber-600 dark:text-amber-400 mt-1">
+                            {packing.unpackable} bundle{packing.unpackable === 1 ? '' : 's'} could not be
+                            packed automatically (no provable sold serving size) and {packing.unpackable === 1 ? 'is' : 'are'} not
+                            included in the box count.
+                        </p>
+                    )}
                 </div>
                 {/* Part M: printing a whole lane must not mean clicking every
                     supporter in turn. */}
