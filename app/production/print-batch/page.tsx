@@ -6,9 +6,9 @@ import { ArrowLeft, Printer, Trash2, Settings, CheckCircle, AlertCircle } from '
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import LabelTemplate from '@/components/LabelTemplate';
-import { resolveLabelAllergens } from '@/lib/allergens';
+import { resolveLabelAllergens, labelAllergenDisplay } from '@/lib/allergens';
 import { resolveLabelIngredients, collectBlockedLabels } from '@/lib/mealLabel';
-import { readPrintBatch, writePrintBatch, clearPrintBatch } from '@/lib/printBatchStorage';
+import { readPrintBatch, writePrintBatch, clearPrintBatch, fetchAuthenticatedBusinessId } from '@/lib/printBatchStorage';
 
 interface BatchItem {
     name: string;
@@ -78,24 +78,47 @@ export default function ProductionBatchPrintPage() {
     // The key comes from the one shared authority, and every failure mode
     // (nothing queued, damaged data, storage disabled, another tenant's
     // batch) now produces a visible message instead of an endless wait.
+    // OPS-5F: the batch is verified against the SERVER-AUTHENTICATED tenant
+    // before a single label renders. localStorage is per-browser, so after a
+    // logout/login a stale Tenant A batch is still sitting under the shared
+    // key -- Tenant B must never see it. The current tenant deliberately does
+    // NOT come from useSession(): OPS-5B/5C/5E each traced a production
+    // failure to that value being absent here, and an absent id would
+    // silently weaken a security check into "no opinion".
+    //
+    // `batch` stays null until ownership is positively proven, so nothing can
+    // render during verification.
     useEffect(() => {
-        const result = readPrintBatch(businessId ?? null);
-        if (!result.ok) {
-            setBatchError(result.reason);
-            setBatch(null);
-            return;
-        }
+        let cancelled = false;
 
-        setBatchError(null);
-        setBatch(result.batch as BatchJob);
+        (async () => {
+            const currentBusinessId = await fetchAuthenticatedBusinessId();
+            if (cancelled) return;
 
-        if (result.batch.items && result.batch.items.length > 0) {
-            fetchBatchDetails(result.batch.items as BatchItem[]);
-        }
+            const result = readPrintBatch(currentBusinessId);
+            if (!result.ok) {
+                // A batch that fails ownership verification is not merely
+                // hidden -- it is discarded, so it cannot be picked up by a
+                // later reload in this browser.
+                if (currentBusinessId) clearPrintBatch();
+                setBatchError(result.reason);
+                setBatch(null);
+                return;
+            }
 
-        // Fetch Branding
-        fetch('/api/tenant/branding').then(res => res.json()).then(setBranding).catch(console.error);
-    }, [businessId]);
+            setBatchError(null);
+            setBatch(result.batch as BatchJob);
+
+            if (result.batch.items && result.batch.items.length > 0) {
+                fetchBatchDetails(result.batch.items as BatchItem[]);
+            }
+
+            // Fetch Branding
+            fetch('/api/tenant/branding').then(res => res.json()).then(setBranding).catch(console.error);
+        })();
+
+        return () => { cancelled = true; };
+    }, []);
 
     const fetchBatchDetails = async (items: BatchItem[]) => {
         setLoadingDetails(true);
@@ -258,7 +281,12 @@ export default function ProductionBatchPrintPage() {
             content: {
                 name: item.name,
                 ingredients: ingredientCheck.ok ? ingredientCheck.text : "",
-                allergens: detail.processedAllergens || "",
+                // OPS-5F: one presentation rule -- a successful resolution
+                // that identified nothing renders NO allergen box, rather
+                // than a box reading the stored "None Confirmed" sentinel.
+                // A data FAILURE never reaches here (blockedLabels stops the
+                // run first), so this cannot mask one.
+                allergens: labelAllergenDisplay(detail.processedAllergens),
                 expiry: expiry.toLocaleDateString(),
                 mealSize: tier || detail.base_yield_unit || `${Math.round(item.qty)} ${item.unit}`,
                 instructions: detail.label_text || "",
@@ -317,7 +345,16 @@ export default function ProductionBatchPrintPage() {
                             <Printer className="text-indigo-600" />
                             {batch.name}
                         </h1>
-                        <p className="text-slate-500 font-medium">{batch.items.length} Labels Queued</p>
+                        {/* OPS-5F: `items.length` is the number of MEAL TYPES,
+                            not labels -- 5 meals x 3 copies is 15 labels, and
+                            calling that "5 Labels Queued" was the same
+                            job-count/copy-count conflation this phase chain has
+                            been closing. Both numbers, named. */}
+                        <p className="text-slate-500 font-medium">
+                            {batch.items.length} meal type{batch.items.length === 1 ? '' : 's'}
+                            {' · '}
+                            {batch.items.reduce((sum, item) => sum + Math.max(1, Math.round(item.copies || 1)), 0)} labels queued
+                        </p>
                     </div>
                 </div>
 
@@ -456,6 +493,16 @@ export default function ProductionBatchPrintPage() {
                                 margin: 0;
                             }
                             body { margin: 0; padding: 0; }
+                            /* OPS-5F: the LAST label must not force a break
+                               after itself. Every .print-page carried
+                               break-after: always, including the final one,
+                               so a 15-label run emitted an empty 16th sheet.
+                               The final label still renders in full -- only
+                               the trailing break is dropped. */
+                            .print-page:last-child {
+                                break-after: auto;
+                                page-break-after: auto;
+                            }
                             .print-page {
                                 break-after: always;
                                 page-break-after: always;

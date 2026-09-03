@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { physicalMealCount } from '@/lib/mealManifest';
 import { servingTierLabel } from '@/lib/mealLabel';
-import { writePrintBatch } from '@/lib/printBatchStorage';
+import { writePrintBatch, fetchAuthenticatedBusinessId } from '@/lib/printBatchStorage';
 
 interface PrepItem {
     bundle_id: string;
@@ -61,7 +61,7 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
         }, 500);
     };
 
-    const handlePrintLabels = (item: PrepItem) => {
+    const handlePrintLabels = async (item: PrepItem) => {
         // OPS-5E: no client session gate. This used to refuse the click
         // outright when useSession()'s businessId had not resolved -- the same
         // unreliable dependency that silently killed the Manual Planner's
@@ -95,7 +95,15 @@ export default function PrepList({ items, onRefresh }: PrepListProps) {
             })
         };
 
-        const written = writePrintBatch({ ...batch, businessId: session?.user?.businessId ?? null });
+        // OPS-5F: stamped with the SERVER-authenticated tenant, never the
+        // client session value, so the print page can verify ownership.
+        const ownerBusinessId = await fetchAuthenticatedBusinessId();
+        if (!ownerBusinessId) {
+            toast.error('Your business could not be confirmed. Please reload and sign in again.');
+            return;
+        }
+
+        const written = writePrintBatch({ ...batch, businessId: ownerBusinessId });
         if (!written.ok) {
             toast.error(written.reason);
             return;

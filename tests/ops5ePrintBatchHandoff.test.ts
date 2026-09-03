@@ -78,6 +78,10 @@ const BATCH = (over: Partial<PrintBatchPayload> = {}): PrintBatchPayload => ({
     name: 'Batch - test',
     items: [{ name: 'Chicken Fajitas', id: 'rec-cf', qty: 3, unit: 'meals', copies: 3, variantSize: 'serves_2', servingTier: 'Serves 2' }],
     servingTier: 'Serves 2',
+    // OPS-5F: every real writer now stamps the server-authenticated owner, so
+    // the default fixture does too. Tests that specifically exercise a missing
+    // or foreign owner override it.
+    businessId: 'biz-a',
     ...over,
 });
 
@@ -86,34 +90,45 @@ const BATCH = (over: Partial<PrintBatchPayload> = {}): PrintBatchPayload => ({
 // This is the exact deployed failure, reproduced behaviorally.
 // ═════════════════════════════════════════════════════════════════════════════
 describe('the print-batch handoff completes without any client businessId', () => {
-    it('writes successfully when businessId is undefined (the deployed failure state)', () => {
+    // SUPERSEDED IN PART BY OPS-5F. The defect this suite exists to pin -- an
+    // unreliable CLIENT session value silently killing the handoff -- is
+    // unchanged and still enforced below and throughout this file. What OPS-5F
+    // changed, at the owner's explicit instruction ahead of multi-tenant
+    // launch, is WHERE the tenant id comes from and how strictly it is
+    // enforced at READ time: it is now the SERVER-authenticated id
+    // (/api/tenant/identity) and ownership must be positively proven, because
+    // localStorage is per-browser and a stale Tenant A batch must never render
+    // for Tenant B. So a batch is no longer readable without a proven owner --
+    // and correspondingly, every writer now stamps one. See
+    // tests/ops5fPrintCloseout.test.ts.
+
+    it('writes successfully when the CLIENT businessId is undefined (the deployed failure state)', () => {
+        // Still the core OPS-5E guarantee: nothing about the client session
+        // can prevent the batch from being written.
         installStorage();
         const result = writePrintBatch(BATCH({ businessId: undefined }));
         expect(result.ok).toBe(true);
     });
 
-    it('the batch written with no businessId is readable with no businessId', () => {
+    it('OPS-5F: a batch stamped with the server-authenticated owner round-trips', () => {
         installStorage();
-        writePrintBatch(BATCH({ businessId: undefined }));
-        const result = readPrintBatch(undefined);
+        writePrintBatch(BATCH({ businessId: 'biz-a' }));
+        const result = readPrintBatch('biz-a');
         expect(result.ok).toBe(true);
         if (result.ok) expect(result.batch.items).toHaveLength(1);
     });
 
-    it('a batch written WITH a businessId is still readable when the reader has none', () => {
-        // The exact asymmetry that broke the deployed handoff: writer resolved
-        // the session, reader did not (or vice versa).
-        installStorage();
-        writePrintBatch(BATCH({ businessId: 'biz-a' }));
-        const result = readPrintBatch(undefined);
-        expect(result.ok).toBe(true);
-    });
-
-    it('a batch written WITHOUT a businessId is readable when the reader HAS one', () => {
+    it('OPS-5F: a batch that cannot prove its owner is refused rather than rendered', () => {
         installStorage();
         writePrintBatch(BATCH({ businessId: undefined }));
-        const result = readPrintBatch('biz-a');
-        expect(result.ok).toBe(true);
+        expect(readPrintBatch('biz-a').ok).toBe(false);
+        expect(readPrintBatch(undefined).ok).toBe(false);
+    });
+
+    it('OPS-5F: a reader that cannot confirm its own tenant refuses rather than rendering', () => {
+        installStorage();
+        writePrintBatch(BATCH({ businessId: 'biz-a' }));
+        expect(readPrintBatch(undefined).ok).toBe(false);
     });
 });
 
@@ -127,10 +142,13 @@ describe('there is exactly ONE print-batch storage key authority', () => {
     });
 
     it('writer and reader round-trip through the same key with no coordination', () => {
+        // SUPERSEDED BY OPS-5F: the round trip now also proves ownership, so
+        // the read passes the batch's (server-stamped) owner. The key-agreement
+        // assertion this test exists for is unchanged.
         const store = installStorage();
         writePrintBatch(BATCH());
         expect(store.has(PRINT_BATCH_STORAGE_KEY)).toBe(true);
-        expect(readPrintBatch().ok).toBe(true);
+        expect(readPrintBatch('biz-a').ok).toBe(true);
     });
 
     it('DEFECT: no live file re-derives a `${businessId}_printBatch` key any more', () => {
@@ -247,11 +265,13 @@ describe('no handoff failure is ever silent', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 describe('tenant safety without gating', () => {
     it('a batch belonging to another tenant is refused when both ids are known', () => {
+        // SUPERSEDED BY OPS-5F only in wording: the rejection message now says
+        // "different business". The refusal itself is unchanged and stricter.
         installStorage();
         writePrintBatch(BATCH({ businessId: 'biz-a' }));
         const result = readPrintBatch('biz-b');
         expect(result.ok).toBe(false);
-        if (!result.ok) expect(result.reason).toMatch(/different account/i);
+        if (!result.ok) expect(result.reason).toMatch(/different business/i);
     });
 
     it('a matching tenant id reads normally', () => {
@@ -261,6 +281,9 @@ describe('tenant safety without gating', () => {
     });
 
     it('businessId is never used to decide whether the WRITE may happen', () => {
+        // Unchanged by OPS-5F: the storage helper never gates a write on the
+        // tenant id. (Callers now refuse EARLIER when the SERVER cannot
+        // confirm the tenant -- a visible refusal, never a silent one.)
         installStorage();
         expect(writePrintBatch(BATCH({ businessId: null })).ok).toBe(true);
         expect(writePrintBatch(BATCH({ businessId: undefined })).ok).toBe(true);
@@ -329,8 +352,8 @@ describe('OPS-5D physical counts survive the handoff repair', () => {
     it('those exact counts survive a real write/read round trip', async () => {
         installStorage();
         const result = await run([{ bundle_id: S2, quantity: 3, variant_size: 'serves_2' }]);
-        expect(writePrintBatch({ name: 'b', items: toBatchItems(result) as any }).ok).toBe(true);
-        const back = readPrintBatch();
+        expect(writePrintBatch({ name: 'b', items: toBatchItems(result) as any, businessId: 'biz-a' }).ok).toBe(true);
+        const back = readPrintBatch('biz-a');
         expect(back.ok).toBe(true);
         if (back.ok) {
             expect(back.batch.items).toHaveLength(5);
@@ -391,9 +414,10 @@ describe('PrepList and the print-batch reader use the same authority', () => {
         const prepListBatch: PrintBatchPayload = {
             name: 'Production: Clean Eating/Paleo',
             items: [{ name: 'Chicken Fajitas', id: 'rec-cf', qty: 3, unit: 'ea', copies: 3, servingTier: 'Serves 2' }],
+            businessId: 'biz-a',
         };
         expect(writePrintBatch(prepListBatch).ok).toBe(true);
-        const back = readPrintBatch();
+        const back = readPrintBatch('biz-a');
         expect(back.ok).toBe(true);
         if (back.ok) expect(back.batch.items[0].copies).toBe(3);
     });

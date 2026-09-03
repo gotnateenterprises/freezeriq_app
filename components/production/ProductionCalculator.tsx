@@ -8,7 +8,7 @@ import { useSession } from 'next-auth/react';
 import { toFraction } from '@/lib/unit_converter';
 import { servingTierLabel } from '@/lib/mealLabel';
 import { loadBundles } from '@/lib/bundleLoader';
-import { writePrintBatch, distinctTierCount } from '@/lib/printBatchStorage';
+import { writePrintBatch, distinctTierCount, fetchAuthenticatedBusinessId } from '@/lib/printBatchStorage';
 
 // Calculator Interfaces
 interface Bundle {
@@ -463,7 +463,7 @@ export function ProductionCalculator() {
                     {/* Batch Print Button - Only show if items selected */}
                     {selectedForPrint.size > 0 && (
                         <button
-                            onClick={() => {
+                            onClick={async () => {
                                 const batchName = prompt("Enter a name for this print batch:", `Batch - ${new Date().toLocaleDateString()}`);
                                 if (batchName) {
                                     // OPS-5A: the print batch is built from the PHYSICAL MEAL
@@ -495,13 +495,20 @@ export function ProductionCalculator() {
                                     // OPS-5E: same repair as "Batch Print All Labels" -- this
                                     // button carried the identical silent `if (businessId)`
                                     // swallow, and would have failed the same way.
+                                    // OPS-5F: stamped with the SERVER-authenticated tenant so
+                                    // the print page can verify ownership before rendering.
+                                    const ownerBusinessId = await fetchAuthenticatedBusinessId();
+                                    if (!ownerBusinessId) {
+                                        alert('Could not prepare the print batch.\n\nYour business could not be confirmed. Please reload and sign in again.');
+                                        return;
+                                    }
                                     const written = writePrintBatch({
                                         name: batchName,
                                         items: selectedRecipes,
                                         // Batch-level tier remains as a fallback for any item
                                         // that could not prove its own; per-item tier wins.
                                         servingTier: result?.servingTier ?? null,
-                                        businessId: businessId ?? null
+                                        businessId: ownerBusinessId
                                     });
 
                                     if (!written.ok) {
@@ -1062,7 +1069,7 @@ export function ProductionCalculator() {
                                     Print Recipes
                                 </button>
                                 <button
-                                    onClick={() => {
+                                    onClick={async () => {
                                         if (!result || !result.assemblyTasks || Object.keys(result.assemblyTasks).length === 0) {
                                             alert('No recipes to print labels for. Please calculate a production plan first.');
                                             return;
@@ -1103,13 +1110,21 @@ export function ProductionCalculator() {
                                         // recorded inside the payload as an advisory tenant
                                         // guard rather than a gate, and a failed write is
                                         // SHOWN rather than swallowed.
+                                        // OPS-5F: stamped with the SERVER-authenticated tenant
+                                        // (never the unreliable client session value) so the
+                                        // print page can verify ownership before rendering.
+                                        const ownerBusinessId = await fetchAuthenticatedBusinessId();
+                                        if (!ownerBusinessId) {
+                                            alert('Could not prepare the print batch.\n\nYour business could not be confirmed. Please reload and sign in again.');
+                                            return;
+                                        }
                                         const written = writePrintBatch({
                                             name: `Batch - ${new Date().toLocaleDateString()}`,
                                             items: allRecipes,
                                             // Batch-level tier remains as a fallback for any item
                                             // that could not prove its own; per-item tier wins.
                                             servingTier: result?.servingTier ?? null,
-                                            businessId: businessId ?? null
+                                            businessId: ownerBusinessId
                                         });
 
                                         if (!written.ok) {
@@ -1162,10 +1177,16 @@ export function ProductionCalculator() {
                                             </div>
                                             <div className="flex items-center gap-3">
                                                 <button
-                                                    onClick={(e) => {
+                                                    onClick={async (e) => {
                                                         e.stopPropagation();
                                                         if (isMixedTier) {
                                                             // Tier-aware route: one batch row per tier.
+                                                            // OPS-5F: server-authenticated owner stamp.
+                                                            const ownerBusinessId = await fetchAuthenticatedBusinessId();
+                                                            if (!ownerBusinessId) {
+                                                                alert('Could not prepare the print batch.\n\nYour business could not be confirmed. Please reload and sign in again.');
+                                                                return;
+                                                            }
                                                             const written = writePrintBatch({
                                                                 name: `${name} - ${new Date().toLocaleDateString()}`,
                                                                 items: manifestRows.map((row: any) => ({
@@ -1178,7 +1199,7 @@ export function ProductionCalculator() {
                                                                     servingTier: servingTierLabel(row.variantSize)
                                                                 })),
                                                                 servingTier: null,
-                                                                businessId: businessId ?? null
+                                                                businessId: ownerBusinessId
                                                             });
                                                             if (!written.ok) {
                                                                 alert(`Could not prepare the print batch.\n\n${written.reason}`);

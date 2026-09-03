@@ -124,12 +124,50 @@ export function writePrintBatch(payload: PrintBatchPayload): PrintBatchWriteResu
 }
 
 /**
+ * Fetches the SERVER-AUTHENTICATED current tenant id.
+ *
+ * OPS-5F: the ownership check below is a security decision, so it must not
+ * rest on `useSession().user.businessId` -- OPS-5B/5C/5E each traced a
+ * production failure to that value being absent in these very components.
+ * An absent client id would silently weaken the check to "no opinion".
+ * This asks the server, which derives the tenant from the session cookie.
+ *
+ * Returns null on ANY failure (401, network, malformed). Callers must treat
+ * null as "cannot verify" and refuse to render or write a batch -- never as
+ * permission to proceed.
+ */
+export async function fetchAuthenticatedBusinessId(
+    fetchImpl: typeof fetch = fetch,
+): Promise<string | null> {
+    try {
+        const res = await fetchImpl('/api/tenant/identity');
+        if (!res.ok) return null;
+        const data = await res.json();
+        const id = data?.businessId;
+        return typeof id === 'string' && id.length > 0 ? id : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Loads the print batch written by any of the planner/prep surfaces.
  *
- * `currentBusinessId` is optional and advisory: when BOTH it and the stored
- * batch carry a tenant id and they disagree, the batch is refused so one
- * tenant's meals can never be printed under another's session in a shared
- * browser. A missing id on either side is not an error and never blocks.
+ * OPS-5F — STRICT TENANT OWNERSHIP. `currentBusinessId` must be the
+ * server-authenticated id (see fetchAuthenticatedBusinessId). The batch is
+ * refused unless BOTH sides are present AND identical:
+ *
+ *   - missing current tenant  -> refuse (cannot verify ownership)
+ *   - missing stored owner    -> refuse (legacy/unsafe batch, pre-OPS-5F)
+ *   - mismatch                -> refuse (stale batch from another tenant)
+ *
+ * OPS-5E made this comparison advisory so a missing id could never block the
+ * handoff. That was the right trade while the only risk was a broken click;
+ * it is the wrong one before multi-tenant launch, where a stale Tenant A
+ * batch left in a shared browser must never render for Tenant B. Refusing is
+ * now always safe because the WRITE path stamps every batch with the same
+ * server-authenticated id, so a batch that cannot prove its owner is either
+ * pre-OPS-5F or tampered with.
  */
 export function readPrintBatch(currentBusinessId?: string | null): PrintBatchReadResult {
     let raw: string | null;
@@ -154,8 +192,16 @@ export function readPrintBatch(currentBusinessId?: string | null): PrintBatchRea
         return { ok: false, reason: 'The queued print batch is missing its meal list. Please build the batch again.' };
     }
 
-    if (currentBusinessId && parsed.businessId && parsed.businessId !== currentBusinessId) {
-        return { ok: false, reason: 'The queued print batch belongs to a different account. Please build the batch again.' };
+    // OPS-5F: ownership must be POSITIVELY proven, in this order, before any
+    // label is rendered. Each branch refuses; none falls through to render.
+    if (!currentBusinessId) {
+        return { ok: false, reason: 'Your business could not be confirmed, so this label batch was not opened. Please reload and sign in again.' };
+    }
+    if (!parsed.businessId) {
+        return { ok: false, reason: 'This label batch could not prove which business it belongs to. Please return to Production and prepare a new batch.' };
+    }
+    if (parsed.businessId !== currentBusinessId) {
+        return { ok: false, reason: 'This label batch belongs to a different business. Please return to Production and prepare a new batch.' };
     }
 
     return { ok: true, batch: parsed as PrintBatchPayload };

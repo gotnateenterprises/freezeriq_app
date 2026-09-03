@@ -187,3 +187,54 @@ export function resolveLabelAllergens(
     if (stored) return stored;
     return detectAllergenText(ingredientText);
 }
+
+/**
+ * OPS-5F — the ONE presentation rule for allergens on a PHYSICAL MEAL LABEL.
+ *
+ * OWNER RULING:
+ *   allergens identified      -> show the allergen box, listing them
+ *   none identified           -> show NOTHING (no box, no heading, no text)
+ *
+ * WHY A SENTINEL LIST IS NEEDED
+ *
+ * "No allergens" is not always the empty string. The authoring-time
+ * classifier (app/api/recipes/detect-allergens) deliberately WRITES the
+ * literal string "None Confirmed" into Recipe.allergens when it reviewed a
+ * recipe and found none — a meaningful record for the person editing the
+ * recipe. resolveLabelAllergens() then returns that stored value verbatim
+ * (stored review outranks keyword matching, unchanged), so the label printed
+ * a box reading "None Confirmed" for a reviewed recipe while an unreviewed
+ * one with genuinely no keyword hits printed no box at all. Same real-world
+ * meaning, two different labels. This collapses both to the owner's rule.
+ *
+ * THIS DOES NOT MASK FAILURE
+ *
+ * It only reinterprets a SUCCESSFUL resolution that identified nothing. A
+ * failure to load the underlying food data is a different condition entirely
+ * and is still caught upstream by lib/mealLabel.ts's fail-closed gate
+ * (collectBlockedLabels), which stops the whole print run and names the
+ * affected meals. Suppressing the box here can never make a data failure
+ * look like a clean "no allergens", because a data failure never reaches
+ * this function -- nothing renders at all.
+ *
+ * The authoring-time classifier is untouched: "None Confirmed" remains the
+ * correct value to STORE, it is simply not something to PRINT.
+ */
+const NO_ALLERGENS_IDENTIFIED = new Set([
+    'none confirmed',
+    'none identified',
+    'none detected',
+    'none',
+    'no allergens',
+    'no known allergens',
+    'n/a',
+    'na',
+    '-',
+]);
+
+export function labelAllergenDisplay(resolvedAllergens: string | null | undefined): string {
+    const text = (resolvedAllergens ?? '').trim();
+    if (!text) return '';
+    if (NO_ALLERGENS_IDENTIFIED.has(text.toLowerCase())) return '';
+    return text;
+}
