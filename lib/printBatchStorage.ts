@@ -217,6 +217,136 @@ export function clearPrintBatch(): void {
     }
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// OPS-6 — the SUPPORTER OUTER-BOX label handoff.
+//
+// Same module on purpose: OPS-5E's ruling was that there must be ONE
+// storage-key authority, and two modules each owning a localStorage key is how
+// a writer and a reader drift apart. Distinct KEY on purpose too: a meal batch
+// and a box batch are different payload shapes, and sharing one key would let
+// queuing box labels silently destroy a queued meal batch.
+//
+// WHAT IS STORED: opaque Order IDs, and nothing else.
+//
+// The supporter's NAME is required printed content, but that does not put it in
+// browser storage. The page stores ids, then asks the server for the label
+// content over an authenticated request, so the transient client-side artifact
+// carries no supporter identity at all — nothing to leak from a shared kiosk
+// browser, nothing in a URL, nothing in a screenshot of the address bar.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** The single localStorage key for the transient outer-box label batch. */
+export const BOX_LABEL_STORAGE_KEY = 'freezeriq_boxLabelBatch';
+
+export interface BoxLabelBatchPayload {
+    /** Opaque Order IDs. Never supporter data. */
+    orderIds: string[];
+    /**
+     * The tenant this batch was queued by, from the SERVER-AUTHENTICATED
+     * identity (fetchAuthenticatedBusinessId). Required — see readBoxLabelBatch.
+     */
+    businessId: string | null;
+    /** Operator-facing batch name. Never a supporter name. */
+    name?: string;
+}
+
+export type BoxLabelBatchReadResult =
+    | { ok: true; batch: BoxLabelBatchPayload }
+    | { ok: false; reason: string };
+
+/**
+ * Queues an outer-box label batch. Never throws.
+ *
+ * A caller that receives `{ ok: false }` MUST surface the reason rather than
+ * navigating or silently doing nothing — the OPS-5E rule that a print click
+ * may never end in silence applies here identically.
+ */
+export function writeBoxLabelBatch(payload: BoxLabelBatchPayload): PrintBatchWriteResult {
+    if (!payload || !Array.isArray(payload.orderIds) || payload.orderIds.length === 0) {
+        return { ok: false, reason: 'There are no orders in this batch to label.' };
+    }
+    if (!payload.businessId) {
+        return { ok: false, reason: 'Your business could not be confirmed, so no label batch was prepared. Please reload and sign in again.' };
+    }
+
+    let serialized: string;
+    try {
+        serialized = JSON.stringify({
+            orderIds: payload.orderIds,
+            businessId: payload.businessId,
+            name: payload.name,
+        });
+    } catch {
+        return { ok: false, reason: 'This label batch could not be prepared (its data could not be saved).' };
+    }
+
+    try {
+        localStorage.setItem(BOX_LABEL_STORAGE_KEY, serialized);
+    } catch {
+        return { ok: false, reason: 'This label batch could not be saved in your browser. Check that storage is not full or disabled, then try again.' };
+    }
+
+    return { ok: true };
+}
+
+/**
+ * Loads the queued outer-box batch, refusing anything it cannot prove.
+ *
+ * STRICT TENANT OWNERSHIP, identical in shape and order to readPrintBatch's
+ * OPS-5F rule, and for the same reason: localStorage is per-browser, so a
+ * batch Tenant A left behind must never open for Tenant B after a
+ * logout/login. `currentBusinessId` must be the SERVER-authenticated id.
+ *
+ * This is defence in depth, not the security boundary. Even a forged payload
+ * only ever yields Order IDs, and the server route re-checks every one of them
+ * against the authenticated tenant before returning a single field of label
+ * content.
+ */
+export function readBoxLabelBatch(currentBusinessId?: string | null): BoxLabelBatchReadResult {
+    let raw: string | null;
+    try {
+        raw = localStorage.getItem(BOX_LABEL_STORAGE_KEY);
+    } catch {
+        return { ok: false, reason: 'This browser would not allow the label batch to be read. Check that storage is not disabled.' };
+    }
+
+    if (!raw) {
+        return { ok: false, reason: 'No box labels are queued. Choose orders from Packed & Ready in Production and select Box Labels.' };
+    }
+
+    let parsed: any;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        return { ok: false, reason: 'The queued label batch could not be read (its saved data is damaged). Please queue the labels again.' };
+    }
+
+    if (!parsed || !Array.isArray(parsed.orderIds) || parsed.orderIds.length === 0) {
+        return { ok: false, reason: 'The queued label batch is missing its order list. Please queue the labels again.' };
+    }
+
+    if (!currentBusinessId) {
+        return { ok: false, reason: 'Your business could not be confirmed, so this label batch was not opened. Please reload and sign in again.' };
+    }
+    if (!parsed.businessId) {
+        return { ok: false, reason: 'This label batch could not prove which business it belongs to. Please return to Production and queue a new batch.' };
+    }
+    if (parsed.businessId !== currentBusinessId) {
+        return { ok: false, reason: 'This label batch belongs to a different business. Please return to Production and queue a new batch.' };
+    }
+
+    return { ok: true, batch: parsed as BoxLabelBatchPayload };
+}
+
+/** Clears the queued outer-box batch. Never throws. */
+export function clearBoxLabelBatch(): void {
+    try {
+        localStorage.removeItem(BOX_LABEL_STORAGE_KEY);
+    } catch {
+        // An unclearable batch is harmless; the next write overwrites it.
+    }
+}
+
 /**
  * How many distinct serving tiers this recipe appears at in a manifest.
  *

@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from 'react';
 import { Package, Printer } from 'lucide-react';
 import { format } from 'date-fns';
 import { useRouter } from 'next/navigation';
+import { writeBoxLabelBatch, fetchAuthenticatedBusinessId } from '@/lib/printBatchStorage';
 
 interface Order {
     id: string;
@@ -17,6 +19,9 @@ interface Order {
     created_at: string;
     items: {
         quantity: number;
+        // OPS-6: the frozen sale-time tier snapshot, shown per line so the
+        // operator can see what each box will claim before printing.
+        variant_size?: string | null;
         bundle: { id: string; name: string; sku: string };
     }[];
 }
@@ -28,36 +33,76 @@ interface DeliveryQueueProps {
 
 export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps) {
     const router = useRouter();
+    /** OPS-6: why a label click did not proceed. A click never ends in silence. */
+    const [labelError, setLabelError] = useState<string | null>(null);
+    const [queueing, setQueueing] = useState(false);
 
     // KB-1A: the Kitchen Board stops at ready_to_ship. Delivery completion moved to
     // the guarded delivery workflow (DD-1); the mark-delivered handler, its
     // bulk-status call to 'delivered', and the selection it drove were removed here.
 
-    const handlePrintLabel = (order: Order) => {
-        // Construct label URL - Using existing /labels route or similar logic
-        // The /production/page.tsx had specific logic for this.
-        // We'll redirect to /labels with params
-        // Assuming we print one label per order-bundle? Or a shipping label?
-        // Prompt says "Box Label Printing".
-        // Let's assume we want to print a label for the order contents.
+    /**
+     * OPS-6 — queue supporter OUTER-BOX labels for these orders.
+     *
+     * WHAT THIS REPLACES, AND WHY IT WAS UNSAFE
+     *
+     * The previous handler built a /labels URL by hand and its own comments
+     * admitted it was guessing ("Assuming we print one label per order-bundle?
+     * Or a shipping label?", "Simple heuristic: Take the first bundle"). It:
+     *
+     *   - read `order.items[0]` ONLY, so a supporter who bought three bundles
+     *     across two lines got one label, not three;
+     *   - had no box numbering at all;
+     *   - never read variant_size, so no sold serving tier appeared;
+     *   - passed a BUNDLE id as `recipeId`, a category error the /labels page
+     *     would have looked up as a Recipe;
+     *   - took the name from `order.customer?.name` — the MUTABLE CRM record,
+     *     which for a fundraiser order is the ORGANIZATION, not the supporter —
+     *     falling back to the literal string 'Unknown';
+     *   - and put that supporter name AND their home delivery address into the
+     *     URL query string, where they persist in browser history, server
+     *     logs, analytics and referrers. /labels never read either parameter
+     *     (OPS-5 added a guard test pinning that), so this was pure leakage
+     *     with no function.
+     *
+     * Now: only opaque Order IDs are handed over, and the label content is
+     * resolved server-side from the authenticated session. No supporter data
+     * reaches a URL or browser storage.
+     *
+     * Printing a label is NOT a lifecycle transition. Nothing here marks an
+     * order packed or delivered (§8) — those are later phases.
+     */
+    const queueBoxLabels = async (targetOrders: Order[], name: string) => {
+        setLabelError(null);
 
-        // Simple heuristic: Take the first bundle to generate a label preview
-        if (order.items.length === 0) return;
-        const item = order.items[0];
+        const orderIds = targetOrders.map(o => o.id).filter(Boolean);
+        if (orderIds.length === 0) {
+            setLabelError('There are no orders here to make box labels for.');
+            return;
+        }
 
-        const params = new URLSearchParams({
-            recipeId: item.bundle.id, // Using bundle ID as recipe ID proxy for label? check /labels
-            qty: item.quantity.toString(),
-            unit: 'ea',
-            bundleHint: item.bundle.name,
-            printQty: item.quantity.toString(),
-            sku: item.bundle.sku,
-            customer: order.customer?.name || 'Unknown',
-            address: order.customer?.delivery_address || '',
-            orderId: order.id.slice(0, 8)
-        });
+        setQueueing(true);
+        try {
+            // The tenant comes from the SERVER, not useSession(): OPS-5B/5C/5E
+            // each traced a production failure to that client value being
+            // absent in Production components, and a falsy id there used to
+            // swallow the whole click in silence.
+            const ownerBusinessId = await fetchAuthenticatedBusinessId();
+            if (!ownerBusinessId) {
+                setLabelError('Your business could not be confirmed, so no box labels were prepared. Please reload and sign in again.');
+                return;
+            }
 
-        router.push(`/labels?${params.toString()}`);
+            const written = writeBoxLabelBatch({ orderIds, businessId: ownerBusinessId, name });
+            if (!written.ok) {
+                setLabelError(written.reason);
+                return;
+            }
+
+            router.push('/production/box-labels');
+        } finally {
+            setQueueing(false);
+        }
     };
 
     if (orders.length === 0) {
@@ -74,12 +119,45 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
 
     return (
         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
-            <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm">
+            <div className="flex flex-wrap gap-4 justify-between items-center bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm">
                 <div>
                     <h2 className="text-xl font-black text-slate-900 dark:text-white">Packed &amp; Ready</h2>
-                    <p className="text-slate-500 font-medium">{orders.length} orders packed and ready for delivery</p>
+                    {/* OPS-6: orders and BOXES are different counts. A supporter
+                        who bought three bundles is one order and three boxes,
+                        and calling either number "orders" is the same
+                        job-count/copy-count conflation OPS-5D closed on the
+                        meal side. Both are named. */}
+                    <p className="text-slate-500 font-medium">
+                        {orders.length} order{orders.length === 1 ? '' : 's'}
+                        {' · '}
+                        {orders.reduce(
+                            (sum, o) => sum + (o.items || []).reduce(
+                                (n, item) => n + (item.bundle?.id ? (Number(item.quantity) || 0) : 0),
+                                0,
+                            ),
+                            0,
+                        )} boxes packed and ready for delivery
+                    </p>
                 </div>
+                {/* Part M: printing a whole lane must not mean clicking every
+                    supporter in turn. */}
+                <button
+                    onClick={() => queueBoxLabels(orders, 'Box Labels — Packed & Ready')}
+                    disabled={queueing || orders.length === 0}
+                    className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center gap-2"
+                >
+                    <Package size={18} />
+                    {queueing ? 'Preparing…' : 'Box Labels — All Orders'}
+                </button>
             </div>
+
+            {/* OPS-6: a label click must never end in silence (the OPS-5E
+                rule). Every refusal reason surfaces here. */}
+            {labelError && (
+                <div className="bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-300 dark:border-amber-800 rounded-2xl p-4 text-sm font-bold text-amber-800 dark:text-amber-300">
+                    {labelError}
+                </div>
+            )}
 
             <div className="grid grid-cols-1 gap-4">
                 {orders.map(order => (
@@ -107,9 +185,10 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
 
                         <div className="flex items-center gap-2 self-end md:self-center">
                             <button
-                                onClick={() => handlePrintLabel(order)}
-                                className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                                title="Print Label"
+                                onClick={() => queueBoxLabels([order], 'Box Labels')}
+                                disabled={queueing}
+                                className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50"
+                                title="Box labels for this order"
                             >
                                 <Printer size={20} />
                             </button>
