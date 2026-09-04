@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
         // We find the branding record linked to the business admin or any user in this business
         const business = await prisma.business.findUnique({
             where: { id: user.business_id },
-            select: { slug: true, name: true, display_name: true, contact_email: true, custom_domain: true }
+            select: { slug: true, name: true, display_name: true, contact_email: true, custom_domain: true, logo_url: true }
         });
 
         // TENANT-BRAND-AUTHORITY-2: the customer-facing business name. Never
@@ -88,6 +88,27 @@ export async function GET(req: NextRequest) {
             orderBy: { created_at: 'asc' }
         });
 
+        // TENANT-LOGO-AUTHORITY-1 (OPS-6A.1). Two legitimate DB columns can
+        // hold a tenant's logo — TenantBranding.logo_url (set via the
+        // Branding Settings upload at /settings/storefront, the live path)
+        // and Business.logo_url (a second column with no current UI writer,
+        // read directly by app/coordinator/portal/page.tsx and by the public
+        // storefront). Before this fix, GET here consulted ONLY the former,
+        // so a value that only ever reached Business.logo_url could never
+        // print on a meal or outer-box label even though every other
+        // customer-facing surface either already falls back to it
+        // (app/api/public/tenant/[slug]/route.ts's no-row branch) or merges
+        // both explicitly (FundraiserClient.tsx:131 —
+        // `business.branding?.logo_url || business.logo_url || null`).
+        //
+        // This applies that SAME established precedence here, once, so every
+        // one of this route's ~12 consumers (both label print pages among
+        // them) benefits identically. TenantBranding.logo_url wins when the
+        // tenant explicitly uploaded one; Business.logo_url is the fallback.
+        // No third authority: nothing here writes a logo anywhere, and no
+        // new storage location is introduced.
+        const resolvedLogoUrl = branding?.logo_url || business?.logo_url || null;
+
         if (!branding) {
             return NextResponse.json({
                 business_name: customerFacingName,
@@ -96,7 +117,7 @@ export async function GET(req: NextRequest) {
                 business_slug: business?.slug,
                 contact_email: business?.contact_email || '',
                 tagline: '',
-                logo_url: null,
+                logo_url: resolvedLogoUrl,
                 primary_color: '#10b981',
                 secondary_color: '#6366f1',
                 accent_color: '#f59e0b'
@@ -104,15 +125,16 @@ export async function GET(req: NextRequest) {
         }
 
         return NextResponse.json({
-            // Visual branding (colors, logo, tagline, thank-you copy) still
-            // comes from TenantBranding — only the name/website are
+            // Visual branding (colors, tagline, thank-you copy) still comes
+            // from TenantBranding — only the name/website/logo are
             // overridden below.
             ...branding,
             business_name: customerFacingName,
             business_website_url: site.url,
             business_website_label: site.label,
             business_slug: business?.slug,
-            contact_email: business?.contact_email || ''
+            contact_email: business?.contact_email || '',
+            logo_url: resolvedLogoUrl
         });
     } catch (error) {
         console.error('Error fetching branding:', error);
