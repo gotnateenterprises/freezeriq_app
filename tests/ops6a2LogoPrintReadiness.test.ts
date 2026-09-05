@@ -392,20 +392,28 @@ describe('16-20. print', () => {
         expect(fn).toMatch(/branding\.businessName/);
     });
 
-    it('19. the 4x6 print contract is unchanged', () => {
+    it('19. the print contract is the OL600WX sheet, sticker 4 x 2.5', () => {
+        // SUPERSEDED BY BOX-LABEL-SHEET-1: one 4x6 page per box became eight
+        // 4 x 2.5 stickers on a US Letter sheet. Same guarantee — an exact,
+        // non-approximated printed size — restated for the new medium.
         const s = read(PAGE);
-        expect(s).toMatch(/size:\s*4in 6in/);
-        expect(s).toMatch(/width:\s*4in/);
-        expect(s).toMatch(/height:\s*6in/);
+        expect(s).toMatch(/size:\s*8\.5in 11in/);
+        expect(s).toMatch(/width:\s*\$\{OL600_SHEET\.labelWidthIn\}in/);
+        expect(s).toMatch(/height:\s*\$\{OL600_SHEET\.labelHeightIn\}in/);
+        const { OL600_SHEET } = require('@/lib/labelSheetLayout');
+        expect(OL600_SHEET.labelWidthIn).toBe(4);
+        expect(OL600_SHEET.labelHeightIn).toBe(2.5);
     });
 
     it('20. no trailing blank page — the OPS-5F last-child exemption is intact', () => {
+        // REVISED BY BOX-LABEL-SHEET-1: the repeating printed unit is now the
+        // SHEET, so the exemption moved from .print-page to .label-sheet.
         const s = read(PAGE);
-        expect(s).toMatch(/\.print-page\s*\{[^}]*break-after:\s*always/);
-        expect(s).toMatch(/\.print-page:last-child\s*\{[\s\S]*?break-after:\s*auto/);
+        expect(s).toMatch(/\.label-sheet\s*\{[^}]*break-after:\s*always/);
+        expect(s).toMatch(/\.label-sheet:last-child\s*\{[\s\S]*?break-after:\s*auto/);
         const exemption = s.slice(
-            s.indexOf('.print-page:last-child'),
-            s.indexOf('}', s.indexOf('.print-page:last-child')),
+            s.indexOf('.label-sheet:last-child'),
+            s.indexOf('}', s.indexOf('.label-sheet:last-child')),
         );
         expect(exemption).not.toMatch(/display:\s*none|visibility:\s*hidden|height:\s*0/);
     });

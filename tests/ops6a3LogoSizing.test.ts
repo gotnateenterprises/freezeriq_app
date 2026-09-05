@@ -27,12 +27,16 @@ const readInches = (src: string, name: string): number => {
     return Number(m[1]);
 };
 
-// The 4x6 label geometry, read from the page's own print CSS.
-const PAGE_W_IN = 4;
-const PAGE_H_IN = 6;
-const PAD_IN = 0.25;
-const USABLE_W_IN = PAGE_W_IN - PAD_IN * 2; // 3.5
-const USABLE_H_IN = PAGE_H_IN - PAD_IN * 2; // 5.5
+// REVISED BY BOX-LABEL-SHEET-1: the medium changed from a 4x6 page-per-box
+// to a 4 x 2.5 sticker, eight to a US Letter OL600WX sheet. The logo was
+// re-sized for that sticker, so this file's geometry now describes the
+// STICKER. The guarantees it protects are unchanged: proportional, bounded,
+// non-clipping, and subordinate to the supporter name.
+const LABEL_W_IN = 4;
+const LABEL_H_IN = 2.5;
+const PAD_IN = 0.12;
+const USABLE_W_IN = LABEL_W_IN - PAD_IN * 2; // 3.76
+const USABLE_H_IN = LABEL_H_IN - PAD_IN * 2; // 2.26
 
 /** The size this SQUARE logo actually renders at under `contain`. */
 const squareRendered = (maxH: number, maxW: number) => Math.min(maxH, maxW);
@@ -42,14 +46,17 @@ describe('OPS-6A.3 logo sizing', () => {
     const maxH = readInches(src, 'LOGO_MAX_HEIGHT_IN');
     const maxW = readInches(src, 'LOGO_MAX_WIDTH_IN');
 
-    it('1. the logo is NOTICEABLY larger than the previous 0.62in ceiling', () => {
-        const PREVIOUS_IN = 0.62;
+    it('1. the logo is substantial on the sticker without dominating it', () => {
+        // SUPERSEDED BY BOX-LABEL-SHEET-1. The old "1.5-1.8x the 0.62in 4x6
+        // ceiling" band described a page with 5.5in of usable height; the
+        // sticker has 2.26in, so carrying 1.05in across would have swallowed
+        // the supporter name. The guarantee is restated for the new medium:
+        // big enough to read as branding, small enough to stay secondary.
         const rendered = squareRendered(maxH, maxW);
-        expect(rendered).toBeGreaterThan(PREVIOUS_IN);
-        // The owner asked for roughly 50-75% more presence.
-        const growth = rendered / PREVIOUS_IN;
-        expect(growth).toBeGreaterThanOrEqual(1.5);
-        expect(growth).toBeLessThanOrEqual(1.8);
+        // Occupies a meaningful share of the sticker's height...
+        expect(rendered / USABLE_H_IN).toBeGreaterThan(0.12);
+        // ...but never more than a third of it.
+        expect(rendered / USABLE_H_IN).toBeLessThan(0.34);
     });
 
     it('2. aspect ratio is preserved — bounded by max-* with contain, never fixed w+h', () => {
@@ -65,32 +72,43 @@ describe('OPS-6A.3 logo sizing', () => {
     it('3. the logo can never overflow or clip the printable area', () => {
         expect(maxW).toBeLessThanOrEqual(USABLE_W_IN);
         expect(maxH).toBeLessThan(USABLE_H_IN);
-        // Width ceiling raised too, so a future WIDE wordmark also benefits
-        // without ever exceeding the printable width.
-        expect(maxW).toBeGreaterThan(2.6);
+        // REVISED BY BOX-LABEL-SHEET-1: the old floor (maxW > 2.6in) belonged
+        // to the 4x6 page. On a 4in sticker the width ceiling must instead
+        // leave room for the Box N of M that now shares the header row.
+        expect(maxW).toBeLessThan(USABLE_W_IN * 0.5);
     });
 
-    it('4. the whole label still fits on ONE 4x6 sheet in the worst case', () => {
-        // Worst case: two-line supporter name and four content lines.
+    it('4. the whole sticker still fits in its 4 x 2.5 slot in the worst case', () => {
+        // REVISED BY BOX-LABEL-SHEET-1 for the sticker's own typography.
+        // Worst case: two-line supporter name, and content lines wrapped to
+        // four rendered rows (the packing rules bound a box to at most TWO
+        // content lines, so four rendered rows already assumes both wrap).
+        // Box N of M now shares the header row, so it costs no extra height.
         const PT = 1 / 72;
-        const header = maxH + 0.16;
-        const name = 28 * 1.05 * 2 * PT + 0.14;
-        const boxNofM = 19 * 1.2 * PT + 0.18;
-        const contents = 14 * 1.2 * 4 * PT + 0.05 * 3;
-        const boxType = 8 * 1.2 * PT + 0.2;
-        const total = header + name + boxNofM + contents + boxType;
+        const header = maxH + 0.04;
+        const name = 17 * 1.05 * 2 * PT + 0.06;
+        const contents = 9 * 1.22 * 4 * PT + 0.02 * 3;
+        const boxType = 6.5 * 1.2 * PT;
+        const total = header + name + contents + boxType;
         expect(total).toBeLessThan(USABLE_H_IN);
         // Meaningful headroom, not a hairline pass.
-        expect(USABLE_H_IN - total).toBeGreaterThan(0.75);
+        expect(USABLE_H_IN - total).toBeGreaterThan(0.3);
     });
 
     it('5. the supporter name remains the primary identifier', () => {
-        // The name block is the largest TEXT and is not shrunk by this phase.
-        const printBlock = src.slice(src.indexOf('hidden print:block'));
-        expect(printBlock).toMatch(/fontSize: '28pt', fontWeight: 900/);
-        // The reserved header block stays smaller than the name's own visual
-        // weight allowance, so the logo cannot dominate the carton.
-        const nameBlockIn = 28 * 1.05 * (1 / 72);
+        // Scoped to the STICKER, not the whole print block: the fail-closed
+        // "DO NOT USE" refusal sheet also carries a 900-weight heading, and
+        // matching that instead would be a false pass.
+        const sticker = src.slice(src.indexOf('className="label-slot"'));
+        const nameSize = Number((sticker.match(/fontSize: '([\d.]+)pt', fontWeight: 900, lineHeight: 1\.05/) || [])[1]);
+        expect(nameSize).toBeGreaterThan(0);
+        // The name outranks every other text element on the sticker.
+        const contentSize = Number((sticker.match(/fontSize: '([\d.]+)pt', fontWeight: 700, lineHeight: 1\.22/) || [])[1]);
+        const typeSize = Number((sticker.match(/fontSize: '([\d.]+)pt'[^}]*textTransform: 'uppercase'/) || [])[1]);
+        expect(nameSize).toBeGreaterThan(contentSize);
+        expect(nameSize).toBeGreaterThan(typeSize);
+        // ...and the logo cannot dominate it.
+        const nameBlockIn = nameSize * 1.05 * (1 / 72);
         expect(maxH).toBeLessThan(nameBlockIn * 3);
     });
 
@@ -101,14 +119,16 @@ describe('OPS-6A.3 logo sizing', () => {
         expect(printBlock).toMatch(/minHeight: LOGO_MAX_HEIGHT_IN/);
     });
 
-    it('7. the 4x6 print contract and page-break protection are untouched', () => {
+    it('7. the print contract and page-break protection are intact', () => {
+        // REVISED BY BOX-LABEL-SHEET-1: the printed PAGE is now the US Letter
+        // stock sheet and the sticker is 4 x 2.5 within it. Same guarantees,
+        // new medium.
         const raw = read(PAGE);
-        expect(raw).toMatch(/size:\s*4in 6in/);
-        expect(raw).toMatch(/width:\s*4in/);
-        expect(raw).toMatch(/height:\s*6in/);
-        expect(raw).toMatch(/padding:\s*0\.25in/);
+        expect(raw).toMatch(/size:\s*8\.5in 11in/);
+        expect(raw).toMatch(/width:\s*\$\{OL600_SHEET\.labelWidthIn\}in/);
+        expect(raw).toMatch(/height:\s*\$\{OL600_SHEET\.labelHeightIn\}in/);
         expect(raw).toMatch(/overflow:\s*hidden/);
-        expect(raw).toMatch(/\.print-page:last-child\s*\{[\s\S]*?break-after:\s*auto/);
+        expect(raw).toMatch(/\.label-sheet:last-child\s*\{[\s\S]*?break-after:\s*auto/);
     });
 
     it('8. logo authority, readiness and fallback logic are untouched', () => {

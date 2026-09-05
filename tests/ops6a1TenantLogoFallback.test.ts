@@ -287,8 +287,10 @@ describe('2/4. rendering contract', () => {
     it('the logo does not crowd the supporter name — its container has a bounded height and its own bottom margin', () => {
         const s = strip(read(PAGE));
         const printBlock = s.slice(s.indexOf('hidden print:block'));
+        // Widened by BOX-LABEL-SHEET-1: the header row now also carries the
+        // Box N of M, so the styled container sits further from the call.
         const headerContainer = printBlock.slice(
-            printBlock.indexOf('renderBrandHeader()') - 200,
+            Math.max(0, printBlock.indexOf('renderBrandHeader()') - 500),
             printBlock.indexOf('renderBrandHeader()'),
         );
         // REVISED BY OPS-6A.3: the header height is now a named constant
@@ -345,21 +347,23 @@ describe('8-11. owner-approved label content is untouched', () => {
 // 12/13. PRINT CONTRACT.
 // ═════════════════════════════════════════════════════════════════════════════
 describe('12/13. print contract', () => {
-    it('12. the 4x6 shipping-label contract is unchanged', () => {
+    it('12. the printed sticker size is exact — OL600WX 4 x 2.5 on US Letter', () => {
+        // SUPERSEDED BY BOX-LABEL-SHEET-1: was one 4x6 page per box.
         const s = read(PAGE);
-        expect(s).toMatch(/size:\s*4in 6in/);
-        expect(s).toMatch(/width:\s*4in/);
-        expect(s).toMatch(/height:\s*6in/);
+        expect(s).toMatch(/size:\s*8\.5in 11in/);
+        expect(s).toMatch(/width:\s*\$\{OL600_SHEET\.labelWidthIn\}in/);
+        expect(s).toMatch(/height:\s*\$\{OL600_SHEET\.labelHeightIn\}in/);
     });
 
     it('13. no trailing blank print page — the OPS-5F last-child exemption is intact', () => {
+        // REVISED BY BOX-LABEL-SHEET-1: the repeating printed unit is the SHEET.
         const s = read(PAGE);
-        expect(s).toMatch(/\.print-page\s*\{[^}]*break-after:\s*always/);
-        expect(s).toMatch(/\.print-page:last-child\s*\{[\s\S]*?break-after:\s*auto/);
-        expect(s).toMatch(/\.print-page:last-child\s*\{[\s\S]*?page-break-after:\s*auto/);
+        expect(s).toMatch(/\.label-sheet\s*\{[^}]*break-after:\s*always/);
+        expect(s).toMatch(/\.label-sheet:last-child\s*\{[\s\S]*?break-after:\s*auto/);
+        expect(s).toMatch(/\.label-sheet:last-child\s*\{[\s\S]*?page-break-after:\s*auto/);
         const exemption = s.slice(
-            s.indexOf('.print-page:last-child'),
-            s.indexOf('}', s.indexOf('.print-page:last-child')),
+            s.indexOf('.label-sheet:last-child'),
+            s.indexOf('}', s.indexOf('.label-sheet:last-child')),
         );
         expect(exemption).not.toMatch(/display:\s*none|visibility:\s*hidden|height:\s*0|content-visibility/);
     });
@@ -372,11 +376,20 @@ describe('12/13. print contract', () => {
         expect((s.match(/renderBrandHeader\(\)/g) || []).length).toBe(1);
     });
 
-    it('one print-page element per physical box — unchanged by this phase', () => {
+    it('one printed STICKER per physical box — now slots on a sheet', () => {
+        // SUPERSEDED BY BOX-LABEL-SHEET-1. The old assertion pinned one full
+        // PAGE per box; the owner's real stock puts eight stickers on one
+        // sheet. The invariant it protected — a physical box maps to exactly
+        // one sticker, never two, and two boxes never share one — is
+        // unchanged and is proven behaviourally in
+        // tests/boxLabelSheet1Ol600.test.ts against the pagination authority.
         const s = strip(read(PAGE));
         const printBlock = s.slice(s.indexOf('hidden print:block'));
-        expect(printBlock).toMatch(/boxes\.map\(\(box\) =>/);
-        expect(printBlock).toMatch(/className="print-page"/);
+        expect(printBlock).toMatch(/sheets\.map\(\(sheet\) =>/);
+        expect(printBlock).toMatch(/sheet\.slots\.map\(\(slot\) =>/);
+        expect(printBlock).toMatch(/className="label-slot"/);
+        // One slot renders at most one box, and a blank slot renders nothing.
+        expect(printBlock).toMatch(/if \(!slot\.label\) return null;/);
     });
 });
 

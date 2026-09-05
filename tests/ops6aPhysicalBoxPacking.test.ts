@@ -912,35 +912,49 @@ describe('46-49. tenant security', () => {
 // 50-54. PRINT.
 // ═════════════════════════════════════════════════════════════════════════════
 describe('50-54. print', () => {
-    it('50/51. one print-page element per PHYSICAL box', () => {
+    it('50/51. one printed STICKER per PHYSICAL box', () => {
+        // SUPERSEDED BY BOX-LABEL-SHEET-1: the printed unit is now a slot on
+        // an OL600WX sheet, not a whole page. The invariant is unchanged and
+        // is now proven BEHAVIOURALLY as well as structurally — one box
+        // occupies exactly one slot, never two, and two boxes never share one.
         const s = strip(read(PAGE));
         const printBlock = s.slice(s.indexOf('hidden print:block'));
-        // The printed DOM iterates BOXES, not purchased instances.
-        expect(printBlock).toMatch(/boxes\.map\(\(box\) =>/);
-        expect(printBlock).toMatch(/className="print-page"/);
-        expect(printBlock).not.toMatch(/contents\.map\(\(?\w*\)? =>\s*\(?\s*<div[^>]*print-page/);
-        // Behavioural counterpart: boxes.length IS the physical box count.
-        expect(packed(FIXTURE_A()).boxes).toHaveLength(1);
-        expect(packed(FIXTURE_B()).boxes).toHaveLength(3);
+        expect(printBlock).toMatch(/sheets\.map\(\(sheet\) =>/);
+        expect(printBlock).toMatch(/sheet\.slots\.map\(\(slot\) =>/);
+        expect(printBlock).toMatch(/className="label-slot"/);
+        // A slot renders at most ONE box, and a blank slot renders nothing.
+        expect(printBlock).toMatch(/if \(!slot\.label\) return null;/);
+
+        // Behavioural counterpart: boxes.length IS the physical box count,
+        // and pagination places exactly that many stickers.
+        const { paginateLabelSheets, placedLabels } = require('@/lib/labelSheetLayout');
+        const a = packed(FIXTURE_A()).boxes;
+        const b = packed(FIXTURE_B()).boxes;
+        expect(a).toHaveLength(1);
+        expect(b).toHaveLength(3);
+        expect(placedLabels(paginateLabelSheets(a, 1))).toHaveLength(1);
+        expect(placedLabels(paginateLabelSheets(b, 1))).toHaveLength(3);
     });
 
     it('52. no trailing blank sheet after the final label', () => {
+        // REVISED BY BOX-LABEL-SHEET-1: exemption moved to .label-sheet.
         const s = read(PAGE);
-        expect(s).toMatch(/\.print-page\s*\{[^}]*break-after:\s*always/);
-        expect(s).toMatch(/\.print-page:last-child\s*\{[\s\S]*?break-after:\s*auto/);
-        expect(s).toMatch(/\.print-page:last-child\s*\{[\s\S]*?page-break-after:\s*auto/);
+        expect(s).toMatch(/\.label-sheet\s*\{[^}]*break-after:\s*always/);
+        expect(s).toMatch(/\.label-sheet:last-child\s*\{[\s\S]*?break-after:\s*auto/);
+        expect(s).toMatch(/\.label-sheet:last-child\s*\{[\s\S]*?page-break-after:\s*auto/);
         const exemption = s.slice(
-            s.indexOf('.print-page:last-child'),
-            s.indexOf('}', s.indexOf('.print-page:last-child')),
+            s.indexOf('.label-sheet:last-child'),
+            s.indexOf('}', s.indexOf('.label-sheet:last-child')),
         );
         expect(exemption).not.toMatch(/display:\s*none|visibility:\s*hidden|height:\s*0|content-visibility/);
     });
 
-    it('52b. the 4x6 shipping-label contract is preserved', () => {
+    it('52b. the printed sticker size is exact — OL600WX 4 x 2.5', () => {
+        // SUPERSEDED BY BOX-LABEL-SHEET-1: was a 4x6 page per box.
         const s = read(PAGE);
-        expect(s).toMatch(/size:\s*4in 6in/);
-        expect(s).toMatch(/width:\s*4in/);
-        expect(s).toMatch(/height:\s*6in/);
+        expect(s).toMatch(/size:\s*8\.5in 11in/);
+        expect(s).toMatch(/width:\s*\$\{OL600_SHEET\.labelWidthIn\}in/);
+        expect(s).toMatch(/height:\s*\$\{OL600_SHEET\.labelHeightIn\}in/);
     });
 
     it('53. a paired Serves-2 box gets ONE sheet, not two', () => {
@@ -971,8 +985,14 @@ describe('50-54. print', () => {
         expect(printBlock).toMatch(/Box \{box\.boxNumber\} of \{box\.boxTotal\}/);
         expect(printBlock).toMatch(/formatBoxContentLine\(line\)/);
         // Supporter name is the largest element; box type is subordinate.
-        const nameSize = Number((printBlock.match(/fontSize: '(\d+)pt', fontWeight: 900, lineHeight: 1\.05/) || [])[1]);
-        const typeSize = Number((printBlock.match(/fontSize: '(\d+)pt'[^}]*textTransform: 'uppercase'/) || [])[1]);
+        // REVISED BY BOX-LABEL-SHEET-1: point sizes were re-proportioned for
+        // the 4 x 2.5 sticker and the box-type size is now fractional
+        // (6.5pt), so the sizes are parsed as decimals. The HIERARCHY being
+        // asserted is unchanged and is the actual guarantee.
+        const nameSize = Number((printBlock.match(/fontSize: '([\d.]+)pt', fontWeight: 900, lineHeight: 1\.05/) || [])[1]);
+        const typeSize = Number((printBlock.match(/fontSize: '([\d.]+)pt'[^}]*textTransform: 'uppercase'/) || [])[1]);
+        expect(nameSize).toBeGreaterThan(0);
+        expect(typeSize).toBeGreaterThan(0);
         expect(nameSize).toBeGreaterThan(typeSize);
         // No internal identifiers are PRINTED. React `key` props are stripped
         // first: a key is reconciliation metadata, never rendered text, and

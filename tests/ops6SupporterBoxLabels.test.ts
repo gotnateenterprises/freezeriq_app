@@ -167,13 +167,16 @@ describe('1-5. purchased bundle counting', () => {
     });
 
     it('5. no extra blank physical page after the final label', () => {
+        // REVISED BY BOX-LABEL-SHEET-1: the repeating printed unit is now the
+        // OL600WX SHEET rather than a per-box page, so the OPS-5F exemption
+        // moved from .print-page to .label-sheet. Same guarantee.
         const s = read(PAGE);
-        expect(s).toMatch(/\.print-page\s*\{[^}]*break-after:\s*always/);
-        expect(s).toMatch(/\.print-page:last-child\s*\{[\s\S]*?break-after:\s*auto/);
-        expect(s).toMatch(/\.print-page:last-child\s*\{[\s\S]*?page-break-after:\s*auto/);
+        expect(s).toMatch(/\.label-sheet\s*\{[^}]*break-after:\s*always/);
+        expect(s).toMatch(/\.label-sheet:last-child\s*\{[\s\S]*?break-after:\s*auto/);
+        expect(s).toMatch(/\.label-sheet:last-child\s*\{[\s\S]*?page-break-after:\s*auto/);
         const exemption = s.slice(
-            s.indexOf('.print-page:last-child'),
-            s.indexOf('}', s.indexOf('.print-page:last-child')),
+            s.indexOf('.label-sheet:last-child'),
+            s.indexOf('}', s.indexOf('.label-sheet:last-child')),
         );
         expect(exemption).not.toMatch(/display:\s*none|visibility:\s*hidden|height:\s*0|content-visibility/);
     });

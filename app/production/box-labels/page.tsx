@@ -15,6 +15,15 @@ import {
 } from '@/lib/physicalBoxPacking';
 import type { BlockedBoxOrder } from '@/lib/supporterBoxManifest';
 import { chooseBrandHeader, isLogoSettling, type TenantLogoStatus } from '@/lib/tenantLogo';
+import {
+    OL600_SHEET,
+    FIRST_SLOT,
+    LAST_SLOT,
+    paginateLabelSheets,
+    normalizeStartPosition,
+    occupiedSlotCount,
+    slotOrigin,
+} from '@/lib/labelSheetLayout';
 
 /**
  * OPS-6 / OPS-6A — the supporter outer-box label sheet.
@@ -67,33 +76,44 @@ import { chooseBrandHeader, isLogoSettling, type TenantLogoStatus } from '@/lib/
 const LOGO_SETTLE_TIMEOUT_MS = 2500;
 
 /**
- * OPS-6A.3 — printed tenant-logo size on the 4x6 outer-box label.
+ * BOX-LABEL-SHEET-1 — the 4" x 2.5" OL600WX sticker.
  *
- * The logo previously rendered at 0.62in and read as a tiny icon rather than
- * a branded header. The owner asked for roughly 50-75% more presence, with
- * the supporter name still the primary identifier.
+ * The label content is unchanged in MEANING from the owner-approved 4x6
+ * version; only its typography is re-proportioned for a sticker with a fifth
+ * of the area. It is a genuine compact layout, deliberately NOT a CSS
+ * transform scale of the old page, which would have produced illegibly small
+ * text and hairline strokes on a thermal/laser sticker.
  *
- * WHY HEIGHT IS THE LEVER THAT MATTERS
+ * SPACE BUDGET, worst case
  *
- * The tenant's logo is square (500x500), so `contain` scaling was bound
- * ENTIRELY by the height ceiling — the old 2.6in width ceiling was never
- * reached and raising it alone would have changed nothing. Height goes
- * 0.62in -> 1.05in: +69% linear, and the square renders 1.05in wide too.
+ * Usable area after 0.12in padding: 3.76in x 2.26in.
  *
- * The width ceiling is raised as well so a future tenant with a WIDE
- * wordmark benefits equally. 3.4in sits just inside the printable width
- * (4in page - 0.25in padding per side = 3.5in), so a wide logo can never
- * overflow or clip horizontally.
+ *   header row (logo + Box N/M)  0.40in
+ *   supporter name, 2 lines      0.50in
+ *   contents, up to 4 rendered   0.54in
+ *   LARGE/SMALL BOX              0.11in
+ *   gaps                         0.17in
+ *                                -------
+ *                                ~1.72in against 2.26in
  *
- * VERTICAL BUDGET, worst case (two-line supporter name, four content lines):
- *   header 1.21in + name 0.96in + box N/M 0.50in + contents 1.08in
- *   + box type 0.33in  =  ~4.08in against 5.5in of printable height.
- * Roughly 1.4in of headroom remains, so nothing is pushed off the sheet —
- * and `.print-page` keeps `overflow: hidden`, so one box still means exactly
- * one 4x6 sheet regardless.
+ * CONTENT LENGTH IS BOUNDED BY THE PACKING RULES, NOT BY TRUNCATION
+ *
+ * A physical box holds at most TWO purchased instances (an S5 alone, or two
+ * S2s), and boxContentLines merges identical ones — so a sticker can never
+ * need more than TWO content lines. Nothing is ever dropped to make the
+ * layout fit; long names wrap instead, and the slot's own `overflow: hidden`
+ * exists solely so a pathological name can never bleed into the neighbouring
+ * sticker.
+ *
+ * The logo is re-sized for this medium rather than inheriting the 4x6 value:
+ * 1.05in on a 2.5in-tall sticker would have dominated the supporter name,
+ * which is the primary operational identifier.
  */
-const LOGO_MAX_HEIGHT_IN = '1.05in';
-const LOGO_MAX_WIDTH_IN = '3.4in';
+const LOGO_MAX_HEIGHT_IN = '0.40in';
+const LOGO_MAX_WIDTH_IN = '1.30in';
+
+/** Inner padding of one sticker, keeping content off the die-cut edge. */
+const LABEL_PADDING_IN = '0.12in';
 
 interface BoxLabelResponse {
     boxes: PhysicalBox[];
@@ -114,6 +134,19 @@ export default function BoxLabelsPage() {
     const [batchError, setBatchError] = useState<string | null>(null);
     const [batchName, setBatchName] = useState('Box Labels');
     const [isPrinting, setIsPrinting] = useState(false);
+
+    /**
+     * BOX-LABEL-SHEET-1: which slot on the FIRST sheet to begin at, so a
+     * part-used OL600WX sheet is not wasted. Print placement only — it can
+     * never change how many physical boxes exist or their Box N of M.
+     */
+    const [startPosition, setStartPosition] = useState<number>(FIRST_SLOT);
+    /**
+     * Screen-only alignment mode: prints one sheet of empty slot outlines so
+     * the operator can check registration on plain paper before committing
+     * real label stock. Carries no supporter data whatsoever.
+     */
+    const [alignmentMode, setAlignmentMode] = useState(false);
 
     /**
      * Tenant branding, from the ONE canonical authority (/api/tenant/branding,
@@ -306,7 +339,32 @@ export default function BoxLabelsPage() {
         setTimeout(() => setIsPrinting(false), 1000);
     };
 
+    /**
+     * Print one sheet of empty slot outlines so the operator can check
+     * registration on plain paper before committing real label stock.
+     * Carries no supporter data at all.
+     */
+    const handleAlignmentTest = () => {
+        setAlignmentMode(true);
+        setIsPrinting(true);
+        // Let React commit the alignment DOM before the print snapshot.
+        setTimeout(() => {
+            window.print();
+            setAlignmentMode(false);
+            setIsPrinting(false);
+        }, 100);
+    };
+
     const supporterCount = new Set((boxes || []).map(b => b.orderId)).size;
+
+    /**
+     * BOX-LABEL-SHEET-1: physical boxes -> OL600WX sheets.
+     *
+     * The box list arrives already in its canonical physical order from
+     * lib/physicalBoxPacking.ts; pagination preserves that order exactly and
+     * neither drops nor repeats a box. One physical box remains one sticker.
+     */
+    const sheets = paginateLabelSheets(boxes || [], startPosition);
 
     /**
      * The printed header: tenant logo, else tenant name, else nothing.
@@ -396,9 +454,36 @@ export default function BoxLabelsPage() {
                 <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 mb-8">
                     <div className="flex flex-wrap gap-6 items-end justify-between">
                         <div>
-                            <div className="text-xs font-bold text-slate-500 uppercase mb-1">Label Size</div>
-                            <div className="font-bold text-slate-900 dark:text-white">4&quot; × 6&quot; (Shipping)</div>
+                            <div className="text-xs font-bold text-slate-500 uppercase mb-1">Label Stock</div>
+                            <div className="font-bold text-slate-900 dark:text-white">
+                                OL600WX — 4&quot; × 2.5&quot;, 8 per sheet
+                            </div>
+                            <div className="text-xs text-slate-500 font-medium mt-0.5">
+                                {sheets.length} sheet{sheets.length === 1 ? '' : 's'} · US Letter
+                            </div>
                         </div>
+
+                        {/* BOX-LABEL-SHEET-1: use up a part-used sheet. Print
+                            placement only — it cannot change box counts or
+                            Box N of M. */}
+                        <div>
+                            <label htmlFor="startPosition" className="block text-xs font-bold text-slate-500 uppercase mb-1">
+                                Start at label position
+                            </label>
+                            <select
+                                id="startPosition"
+                                value={startPosition}
+                                onChange={(e) => setStartPosition(normalizeStartPosition(e.target.value))}
+                                className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold"
+                            >
+                                {Array.from({ length: LAST_SLOT }, (_, i) => i + FIRST_SLOT).map((p) => (
+                                    <option key={p} value={p}>
+                                        {p === FIRST_SLOT ? 'Position 1 — New sheet' : `Position ${p}`}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
                         <button
                             onClick={handlePrintAll}
                             disabled={counts.physical === 0 || isPrinting || blocked.length > 0}
@@ -406,6 +491,32 @@ export default function BoxLabelsPage() {
                         >
                             <Printer size={20} />
                             {blocked.length > 0 ? 'Printing Blocked' : 'Print All'}
+                        </button>
+                    </div>
+
+                    {/* Printer settings the operator MUST use. Screen only —
+                        never on a sticker. */}
+                    <div className="mt-6 bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 rounded-xl p-4">
+                        <h4 className="font-black text-slate-900 dark:text-white text-sm mb-2">
+                            Before printing on label stock
+                        </h4>
+                        <ul className="text-xs font-medium text-slate-600 dark:text-slate-300 space-y-1">
+                            <li>Load <strong>OnlineLabels OL600 / OL600WX</strong> sheets.</li>
+                            <li>Paper: <strong>US Letter 8.5 × 11</strong>, Portrait.</li>
+                            <li>Scale: <strong>100% / Actual Size</strong>.</li>
+                            <li>Margins: <strong>None</strong> (browser margins off).</li>
+                            <li>Do <strong>not</strong> select Fit to Page or Shrink to Fit.</li>
+                        </ul>
+                        <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mt-2">
+                            This stock has 0.18&quot; side margins, which sit inside some printers&apos;
+                            non-printable area. Run the alignment test on plain paper first.
+                        </p>
+                        <button
+                            onClick={handleAlignmentTest}
+                            disabled={isPrinting}
+                            className="mt-3 border border-slate-300 dark:border-slate-600 px-4 py-2 rounded-lg font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+                        >
+                            Print Alignment Test (plain paper)
                         </button>
                     </div>
 
@@ -440,123 +551,236 @@ export default function BoxLabelsPage() {
                     )}
                 </div>
 
-                {/* On-screen queue. Same boxes as the printed sheet. */}
-                <div className="space-y-3">
-                    {boxes.map((box, i) => (
-                        <div key={`${box.orderId}-${box.boxNumber}`} className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-4">
-                            <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-slate-500 font-bold text-xs shrink-0">
-                                {i + 1}
+                {/* On-screen sheet preview. Same pagination the printer gets —
+                    both come from paginateLabelSheets, so what is shown here
+                    and what lands on the stock cannot disagree. */}
+                <div className="space-y-8">
+                    {sheets.map((sheet) => (
+                        <div key={sheet.sheetNumber}>
+                            <div className="flex items-baseline justify-between mb-3">
+                                <h3 className="font-black text-slate-900 dark:text-white">
+                                    Sheet {sheet.sheetNumber} of {sheets.length}
+                                </h3>
+                                <span className="text-xs font-bold text-slate-500">
+                                    {occupiedSlotCount(sheet)} of {OL600_SHEET.labelsPerSheet} positions used
+                                </span>
                             </div>
-                            <div className="min-w-0">
-                                <div className="font-bold text-slate-900 dark:text-white truncate">
-                                    {box.supporterName}
-                                    <span className="ml-2 text-xs font-bold uppercase text-slate-400">
-                                        {box.boxType} box
-                                    </span>
-                                </div>
-                                <div className="text-xs text-slate-500 font-medium truncate">
-                                    Box {box.boxNumber} of {box.boxTotal}
-                                    {' · '}
-                                    {boxContentLines(box).map(formatBoxContentLine).join(' + ')}
-                                </div>
+
+                            {/* 2 x 4, mirroring the physical sheet's reading order. */}
+                            <div className="grid grid-cols-2 gap-2">
+                                {sheet.slots.map((slot) => (
+                                    <div
+                                        key={slot.position}
+                                        className={
+                                            slot.label
+                                                ? 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 min-h-[4.5rem]'
+                                                : 'border border-dashed border-slate-300 dark:border-slate-700 rounded-lg p-3 min-h-[4.5rem] flex items-center justify-center'
+                                        }
+                                    >
+                                        {slot.label ? (
+                                            <div className="min-w-0">
+                                                <div className="flex items-baseline justify-between gap-2">
+                                                    <span className="font-bold text-slate-900 dark:text-white truncate">
+                                                        {slot.label.supporterName}
+                                                    </span>
+                                                    <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                                                        #{slot.position}
+                                                    </span>
+                                                </div>
+                                                <div className="text-xs text-slate-500 font-medium">
+                                                    Box {slot.label.boxNumber} of {slot.label.boxTotal}
+                                                    <span className="ml-2 uppercase text-[10px] font-bold text-slate-400">
+                                                        {slot.label.boxType}
+                                                    </span>
+                                                </div>
+                                                <div className="text-xs text-slate-500 font-medium truncate">
+                                                    {boxContentLines(slot.label).map(formatBoxContentLine).join(' + ')}
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <span className="text-xs font-bold text-slate-400">
+                                                Position {slot.position} — blank
+                                            </span>
+                                        )}
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     ))}
                 </div>
             </div>
 
-            {/* PRINT OPTIMIZED LAYOUT */}
+            {/* PRINT OPTIMIZED LAYOUT — OL600WX 8-up US Letter sheets */}
             <div className="hidden print:block">
                 <style dangerouslySetInnerHTML={{
                     __html: `
                         @media print {
+                            /* BOX-LABEL-SHEET-1: the printed page is now the
+                               STOCK SHEET (US Letter), not a single sticker.
+                               margin:0 is essential — the OL600 geometry below
+                               positions every sticker from the true sheet
+                               corner, so any browser margin would shift the
+                               whole grid off the die-cut. */
                             @page {
-                                size: 4in 6in;
+                                size: 8.5in 11in;
                                 margin: 0;
                             }
                             body { margin: 0; padding: 0; }
-                            /* OPS-5F's rule, reused: the LAST label must not
-                               force a break after itself, or an N-label run
-                               emits an empty (N+1)th sheet. The exemption
-                               out-specifies the general rule (0,2,0 vs 0,1,0)
-                               so declaration order cannot defeat it, and the
-                               final label still renders in full — only the
-                               trailing break is dropped. */
-                            .print-page:last-child {
+                            /* OPS-5F's rule, carried forward to sheets: the
+                               LAST sheet must not force a break after itself,
+                               or an N-sheet run emits an empty (N+1)th page.
+                               The exemption out-specifies the general rule
+                               (0,2,0 vs 0,1,0) so declaration order cannot
+                               defeat it. */
+                            .label-sheet:last-child {
                                 break-after: auto;
                                 page-break-after: auto;
                             }
-                            .print-page {
+                            .label-sheet {
                                 break-after: always;
                                 page-break-after: always;
-                                width: 4in;
-                                height: 6in;
+                                position: relative;
+                                width: 8.5in;
+                                height: 11in;
                                 overflow: hidden;
+                                box-sizing: border-box;
+                            }
+                            /* Each sticker is absolutely placed at its exact
+                               manufacturer origin. Absolute inches rather than
+                               a CSS grid: a grid's rounding and gap handling
+                               would drift against a die-cut sheet. */
+                            .label-slot {
+                                position: absolute;
+                                width: ${OL600_SHEET.labelWidthIn}in;
+                                height: ${OL600_SHEET.labelHeightIn}in;
+                                overflow: hidden;
+                                box-sizing: border-box;
                                 display: flex;
                                 flex-direction: column;
-                                justify-content: center;
-                                align-items: center;
-                                text-align: center;
-                                padding: 0.25in;
+                                padding: ${LABEL_PADDING_IN};
+                            }
+                            .align-slot {
+                                position: absolute;
+                                width: ${OL600_SHEET.labelWidthIn}in;
+                                height: ${OL600_SHEET.labelHeightIn}in;
                                 box-sizing: border-box;
+                                border: 1px dashed #999;
+                                border-radius: ${OL600_SHEET.cornerRadiusIn}in;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
                             }
                         }
                     `,
                 }} />
 
                 {blocked.length > 0 ? (
-                    <div className="print-page">
-                        <div style={{ fontSize: '22pt', fontWeight: 900, lineHeight: 1.1, marginBottom: '12px' }}>
+                    /* FAIL CLOSED, unchanged in intent: a batch that cannot be
+                       packed truthfully prints a single refusal sheet rather
+                       than any sticker at all. */
+                    <div className="label-sheet" style={{ padding: '1in', textAlign: 'center' }}>
+                        <div style={{ fontSize: '28pt', fontWeight: 900, lineHeight: 1.1, marginBottom: '0.2in' }}>
                             DO NOT USE
                         </div>
-                        <div style={{ fontSize: '11pt', fontWeight: 'bold', lineHeight: 1.35 }}>
+                        <div style={{ fontSize: '13pt', fontWeight: 'bold', lineHeight: 1.35 }}>
                             Box label printing was stopped: {blocked.length} order
                             {blocked.length === 1 ? '' : 's'} could not be packed truthfully.
                         </div>
-                        <div style={{ fontSize: '9pt', marginTop: '12px', lineHeight: 1.35 }}>
+                        <div style={{ fontSize: '11pt', marginTop: '0.15in', lineHeight: 1.35 }}>
                             Return to Production, fix the affected order(s), and queue the labels again.
                         </div>
                     </div>
-                ) : (
-                    boxes.map((box) => (
-                        <div key={`${box.orderId}-${box.boxNumber}`} className="print-page">
-                            {/* Tenant branding: logo, else name, else nothing.
-                                Cosmetic — never blocks the truth below it. */}
-                            <div style={{ minHeight: LOGO_MAX_HEIGHT_IN, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '0.16in' }}>
-                                {renderBrandHeader()}
-                            </div>
-
-                            {/* Part J hierarchy: the supporter name is the
-                                strongest element, because the packing question
-                                this label answers first is "whose box is
-                                this?". */}
-                            <div style={{ fontSize: '28pt', fontWeight: 900, lineHeight: 1.05, marginBottom: '0.14in', wordBreak: 'break-word' }}>
-                                {box.supporterName}
-                            </div>
-
-                            <div style={{ fontSize: '19pt', fontWeight: 900, marginBottom: '0.18in', letterSpacing: '0.01em' }}>
-                                Box {box.boxNumber} of {box.boxTotal}
-                            </div>
-
-                            {/* Everything physically in this carton. A paired
-                                Serves-2 box lists both bundles; identical
-                                purchases merge to "... ×2". */}
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.05in' }}>
-                                {boxContentLines(box).map((line, i) => (
-                                    <div
-                                        key={i}
-                                        style={{ fontSize: '14pt', fontWeight: 700, lineHeight: 1.2, wordBreak: 'break-word' }}
-                                    >
-                                        {formatBoxContentLine(line)}
+                ) : alignmentMode ? (
+                    /* ALIGNMENT TEST: one sheet of empty slot outlines, for
+                       checking registration on plain paper before committing
+                       real stock. Deliberately carries NO supporter data. */
+                    <div className="label-sheet">
+                        {Array.from({ length: OL600_SHEET.labelsPerSheet }, (_, i) => {
+                            const position = i + FIRST_SLOT;
+                            const { leftIn, topIn } = slotOrigin(position);
+                            return (
+                                <div
+                                    key={position}
+                                    className="align-slot"
+                                    style={{ left: `${leftIn}in`, top: `${topIn}in` }}
+                                >
+                                    <div style={{ textAlign: 'center', fontSize: '10pt', fontWeight: 700 }}>
+                                        <div style={{ fontSize: '20pt', fontWeight: 900 }}>{position}</div>
+                                        <div style={{ opacity: 0.7 }}>
+                                            {OL600_SHEET.labelWidthIn}&quot; × {OL600_SHEET.labelHeightIn}&quot;
+                                        </div>
                                     </div>
-                                ))}
-                            </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                ) : (
+                    sheets.map((sheet) => (
+                        <div key={sheet.sheetNumber} className="label-sheet">
+                            {sheet.slots.map((slot) => {
+                                // A blank slot is a deliberately skipped
+                                // sticker (a part-used sheet), never a missing
+                                // physical box. Nothing is rendered into it.
+                                if (!slot.label) return null;
+                                const box = slot.label;
+                                return (
+                                    <div
+                                        key={slot.position}
+                                        className="label-slot"
+                                        style={{ left: `${slot.leftIn}in`, top: `${slot.topIn}in` }}
+                                    >
+                                        {/* Header row: brand on the left, Box N of M
+                                            on the right. Sharing one row is what buys
+                                            the vertical space the supporter name needs
+                                            on a 2.5in sticker. */}
+                                        <div style={{
+                                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                            gap: '0.08in', minHeight: LOGO_MAX_HEIGHT_IN, marginBottom: '0.04in',
+                                        }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+                                                {renderBrandHeader()}
+                                            </div>
+                                            <div style={{ fontSize: '10pt', fontWeight: 900, whiteSpace: 'nowrap', letterSpacing: '0.01em' }}>
+                                                Box {box.boxNumber} of {box.boxTotal}
+                                            </div>
+                                        </div>
 
-                            {/* Operationally useful, deliberately subordinate
-                                to the supporter name and Box N of M. */}
-                            <div style={{ fontSize: '8pt', fontWeight: 700, letterSpacing: '0.08em', marginTop: '0.2in', textTransform: 'uppercase', opacity: 0.75 }}>
-                                {box.boxType} box
-                            </div>
+                                        {/* The primary operational identifier: whose
+                                            box is this. Largest element on the sticker. */}
+                                        <div style={{
+                                            fontSize: '17pt', fontWeight: 900, lineHeight: 1.05,
+                                            marginBottom: '0.06in', wordBreak: 'break-word',
+                                        }}>
+                                            {box.supporterName}
+                                        </div>
+
+                                        {/* Everything physically in this carton. A
+                                            paired Serves-2 box lists both bundles;
+                                            identical purchases merge to "... ×2".
+                                            Bounded to two lines by the packing rules,
+                                            so nothing is ever dropped to fit. */}
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.02in' }}>
+                                            {boxContentLines(box).map((line, i) => (
+                                                <div
+                                                    key={i}
+                                                    style={{ fontSize: '9pt', fontWeight: 700, lineHeight: 1.22, wordBreak: 'break-word' }}
+                                                >
+                                                    {formatBoxContentLine(line)}
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {/* Operationally useful, deliberately
+                                            subordinate to the supporter name. */}
+                                        <div style={{
+                                            fontSize: '6.5pt', fontWeight: 700, letterSpacing: '0.08em',
+                                            marginTop: 'auto', textTransform: 'uppercase', opacity: 0.75,
+                                        }}>
+                                            {box.boxType} box
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
                     ))
                 )}
