@@ -641,10 +641,13 @@ describe('31-35. supporter', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 describe('36-40. tenant branding', () => {
     it('36. a configured tenant logo renders on the label', () => {
+        // REVISED BY OPS-6A.2: the <img> src cast is `branding.logoUrl as
+        // string`, because the render branch is now reached only via
+        // chooseBrandHeader() confirming BOTH a URL and a loaded image.
         const s = strip(read(PAGE));
         expect(s).toMatch(/branding\.logoUrl/);
         expect(s).toMatch(/<img/);
-        expect(s).toMatch(/src=\{branding\.logoUrl\}/);
+        expect(s).toMatch(/src=\{branding\.logoUrl as string\}/);
     });
 
     it('37. no logo -> the tenant BUSINESS NAME fallback', () => {
@@ -657,9 +660,18 @@ describe('36-40. tenant branding', () => {
     });
 
     it('37b. a logo that FAILS TO LOAD falls back to the name', () => {
+        // SUPERSEDED BY OPS-6A.2, and now STRICTER. The old assertion pinned
+        // `branding.logoUrl && !logoBroken`, which was the defect itself: a
+        // URL alone took the image branch, so an image that was merely still
+        // LOADING (never erroring, so onError never fired) printed a blank
+        // header. The rule is now load-proven, asserted behaviourally.
+        const { chooseBrandHeader } = require('@/lib/tenantLogo');
+        expect(chooseBrandHeader('https://cdn/logo.png', 'Freezer Chef', 'failed')).toBe('name');
+        expect(chooseBrandHeader('https://cdn/logo.png', 'Freezer Chef', 'pending')).toBe('name');
+        expect(chooseBrandHeader('https://cdn/logo.png', 'Freezer Chef', 'ok')).toBe('logo');
         const s = strip(read(PAGE));
-        expect(s).toMatch(/onError=\{\(\) => setLogoBroken\(true\)\}/);
-        expect(s).toMatch(/branding\.logoUrl && !logoBroken/);
+        expect(s).toMatch(/onError=\{\(\) => setLogoStatus\('failed'\)\}/);
+        expect(s).toMatch(/chooseBrandHeader\(branding\.logoUrl, branding\.businessName, logoStatus\)/);
     });
 
     it('38. another tenant\'s branding can never appear — no hardcoded identity', () => {

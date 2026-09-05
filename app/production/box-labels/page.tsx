@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Printer, AlertCircle, Package } from 'lucide-react';
 import {
@@ -14,6 +14,7 @@ import {
     type PhysicalBox,
 } from '@/lib/physicalBoxPacking';
 import type { BlockedBoxOrder } from '@/lib/supporterBoxManifest';
+import { chooseBrandHeader, isLogoSettling, type TenantLogoStatus } from '@/lib/tenantLogo';
 
 /**
  * OPS-6 / OPS-6A — the supporter outer-box label sheet.
@@ -58,6 +59,13 @@ import type { BlockedBoxOrder } from '@/lib/supporterBoxManifest';
  * always-mounted print DOM, so Ctrl+P cannot bypass the gate.
  */
 
+/**
+ * How long Print will wait for a still-loading tenant logo before printing
+ * the name fallback instead. Bounded on purpose: branding is cosmetic and
+ * must never hold up a kitchen.
+ */
+const LOGO_SETTLE_TIMEOUT_MS = 2500;
+
 interface BoxLabelResponse {
     boxes: PhysicalBox[];
     blocked: BlockedBoxOrder[];
@@ -86,15 +94,22 @@ export default function BoxLabelsPage() {
      * no tenant name or logo is ever hardcoded — a null here simply prints no
      * header.
      *
-     * `logoBroken` handles the case the fetch cannot: a logo_url that is
-     * configured but fails to LOAD at print time. The <img> onError flips it
-     * and the name renders instead.
+     * OPS-6A.2: knowing the URL is NOT the same as knowing the image will
+     * paint. `logoStatus` tracks the image itself — see the preload effect
+     * below and lib/tenantLogo.ts for why the previous `logoBroken` boolean
+     * could not express the state that actually broke: still loading.
      */
     const [branding, setBranding] = useState<{ logoUrl: string | null; businessName: string | null }>({
         logoUrl: null,
         businessName: null,
     });
-    const [logoBroken, setLogoBroken] = useState(false);
+    const [logoStatus, setLogoStatus] = useState<TenantLogoStatus>('idle');
+    /**
+     * Resolves once the logo has settled either way. The print handler awaits
+     * this (bounded) so a fast operator does not print the name fallback for
+     * a logo that was a few hundred milliseconds from being ready.
+     */
+    const logoSettledRef = useRef<Promise<void> | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -184,7 +199,54 @@ export default function BoxLabelsPage() {
         return () => { cancelled = true; };
     }, []);
 
-    const handlePrintAll = () => {
+    /**
+     * OPS-6A.2 — prove the logo loads BEFORE it is ever rendered.
+     *
+     * The image is fetched off-DOM here. Only once its bytes have actually
+     * arrived does `logoStatus` become 'ok' and the <img> get rendered — by
+     * which point the browser already holds it, so it paints immediately
+     * rather than being an empty box in the print capture.
+     *
+     * This is what makes the header impossible to blank: while the image is
+     * in flight the tenant NAME is on the label, and it is only replaced once
+     * there is something real to replace it with. A failure simply leaves the
+     * name there permanently.
+     *
+     * Deliberately a plain Image() and not a hidden <img> in the tree: the
+     * label's print block is display:none until @media print activates, and
+     * an image that has never been asked to paint is exactly the thing that
+     * was arriving unpainted at print time.
+     */
+    useEffect(() => {
+        const url = branding.logoUrl;
+        if (!url) {
+            setLogoStatus('idle');
+            logoSettledRef.current = null;
+            return;
+        }
+
+        let cancelled = false;
+        setLogoStatus('pending');
+
+        logoSettledRef.current = new Promise<void>((resolve) => {
+            const probe = new window.Image();
+            probe.onload = () => {
+                if (!cancelled) setLogoStatus('ok');
+                resolve();
+            };
+            probe.onerror = () => {
+                // Cosmetic only. The name fallback is already on the label and
+                // simply stays there.
+                if (!cancelled) setLogoStatus('failed');
+                resolve();
+            };
+            probe.src = url;
+        });
+
+        return () => { cancelled = true; };
+    }, [branding.logoUrl]);
+
+    const handlePrintAll = async () => {
         // FAIL CLOSED: an order whose required truth is missing blocks the
         // whole sheet. Printing the provable ones and quietly dropping the
         // rest would hand the kitchen a stack of boxes with no way to notice
@@ -198,6 +260,19 @@ export default function BoxLabelsPage() {
             return;
         }
         setIsPrinting(true);
+
+        // OPS-6A.2: give a logo that is still in flight a BOUNDED moment to
+        // settle, so an operator who clicks Print immediately does not get the
+        // name fallback for a logo that was about to be ready. Never waits
+        // forever — branding is cosmetic and fails open, so a slow or hanging
+        // image prints the name rather than blocking the kitchen.
+        if (isLogoSettling(branding.logoUrl, logoStatus) && logoSettledRef.current) {
+            await Promise.race([
+                logoSettledRef.current,
+                new Promise<void>((resolve) => setTimeout(resolve, LOGO_SETTLE_TIMEOUT_MS)),
+            ]);
+        }
+
         window.print();
         setTimeout(() => setIsPrinting(false), 1000);
     };
@@ -209,19 +284,28 @@ export default function BoxLabelsPage() {
      *
      * Never another tenant's identity, and never a hardcoded default — both
      * values come from this tenant's own authenticated branding response.
+     *
+     * OPS-6A.2: the choice lives in lib/tenantLogo.ts so it is testable. The
+     * image renders ONLY on a proven-loaded status, so a configured-but-not-
+     * yet-loaded logo shows the tenant name rather than a blank header.
      */
     const renderBrandHeader = () => {
-        if (branding.logoUrl && !logoBroken) {
+        const choice = chooseBrandHeader(branding.logoUrl, branding.businessName, logoStatus);
+
+        if (choice === 'logo') {
             return (
                 <img
-                    src={branding.logoUrl}
+                    src={branding.logoUrl as string}
                     alt={branding.businessName || ''}
-                    onError={() => setLogoBroken(true)}
+                    // Belt and braces: the preload already proved this loads,
+                    // so this only catches an image evicted between the probe
+                    // and the paint. Falling back to the name, never to blank.
+                    onError={() => setLogoStatus('failed')}
                     style={{ maxHeight: '0.62in', maxWidth: '2.6in', objectFit: 'contain', display: 'block' }}
                 />
             );
         }
-        if (branding.businessName) {
+        if (choice === 'name') {
             return (
                 <div style={{ fontSize: '12pt', fontWeight: 700, letterSpacing: '0.02em' }}>
                     {branding.businessName}

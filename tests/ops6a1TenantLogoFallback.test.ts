@@ -224,16 +224,20 @@ describe('2/4. rendering contract', () => {
     it('2. when a logo URL is present, the business-name text is NOT also rendered as the header', () => {
         const s = strip(read(PAGE));
         const fn = s.slice(s.indexOf('const renderBrandHeader'), s.indexOf('if (!boxes && batchError)'));
-        // An if/else-if/return-null chain: the name branch is only reachable
-        // when the logo branch's condition is false.
-        expect(fn).toMatch(/if \(branding\.logoUrl && !logoBroken\) \{[\s\S]*?return \(/);
-        expect(fn).toMatch(/if \(branding\.businessName\) \{[\s\S]*?return \(/);
+        // REVISED BY OPS-6A.2: the decision moved into chooseBrandHeader() so
+        // it is provable rather than grep-able. The mutual exclusivity this
+        // test protects is now guaranteed by that function returning exactly
+        // one of 'logo' | 'name' | 'none' — asserted behaviourally.
+        const { chooseBrandHeader } = require('@/lib/tenantLogo');
+        expect(chooseBrandHeader('https://cdn/logo.png', 'Freezer Chef', 'ok')).toBe('logo');
+        expect(fn).toMatch(/if \(choice === 'logo'\) \{[\s\S]*?return \(/);
+        expect(fn).toMatch(/if \(choice === 'name'\) \{[\s\S]*?return \(/);
         // The two branches are mutually exclusive returns, not both rendered.
         // `alt={branding.businessName || ''}` on the <img> itself is fine —
         // accessible alt text is not a second VISIBLE text header. What must
         // never appear in the logo branch is a second returned JSX element
         // (a <div>...) rendering the name as on-page text.
-        const logoBranch = fn.slice(fn.indexOf('if (branding.logoUrl'), fn.indexOf('if (branding.businessName'));
+        const logoBranch = fn.slice(fn.indexOf("if (choice === 'logo')"), fn.indexOf("if (choice === 'name')"));
         expect(logoBranch).not.toMatch(/<div[\s\S]*?branding\.businessName[\s\S]*?<\/div>/);
         expect((logoBranch.match(/return \(/g) || [])).toHaveLength(1);
     });
@@ -244,12 +248,19 @@ describe('2/4. rendering contract', () => {
         expect(s).not.toMatch(/Freezer Chef|My Freezer Chef/);
     });
 
-    it('4. a logo that fails to LOAD (onError) falls back to the business-name text, not to nothing', () => {
+    it('4. a logo that fails to LOAD falls back to the business-name text, not to nothing', () => {
+        // SUPERSEDED BY OPS-6A.2 and STRICTER. The old assertions pinned the
+        // `logoBroken` boolean, which could only distinguish "errored" from
+        // "not errored" — it had no way to express STILL LOADING, and that
+        // missing third state is exactly what printed a blank header. Now a
+        // tri-state, and the fallback covers both failure AND in-flight.
+        const { chooseBrandHeader } = require('@/lib/tenantLogo');
+        expect(chooseBrandHeader('https://cdn/logo.png', 'Freezer Chef', 'failed')).toBe('name');
+        expect(chooseBrandHeader('https://cdn/logo.png', 'Freezer Chef', 'pending')).toBe('name');
         const s = strip(read(PAGE));
-        expect(s).toMatch(/onError=\{\(\) => setLogoBroken\(true\)\}/);
-        expect(s).toMatch(/branding\.logoUrl && !logoBroken/);
-        // logoBroken is never reset to hide the fallback once tripped within a render.
-        expect(s).toMatch(/const \[logoBroken, setLogoBroken\] = useState\(false\);/);
+        expect(s).toMatch(/onError=\{\(\) => setLogoStatus\('failed'\)\}/);
+        expect(s).toMatch(/const \[logoStatus, setLogoStatus\] = useState<TenantLogoStatus>\('idle'\);/);
+        expect(s).not.toMatch(/logoBroken/);
     });
 
     it('4b. branding fetch failure (network/500) still leaves the fallback path reachable', () => {
