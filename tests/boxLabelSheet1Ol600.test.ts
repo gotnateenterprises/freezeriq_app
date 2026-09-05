@@ -535,7 +535,19 @@ describe('43-47. security and scope', () => {
         }
     });
 
-    it('47. Delivery is untouched — nothing there consumes the new layout', () => {
+    it('47. Delivery does not consume the STICKER-SHEET layout authority', () => {
+        // NARROWED BY PACKING-SLIP-1: this test originally also forbade
+        // `physicalBoxPacking`/`supporterBoxManifest` anywhere under Delivery.
+        // physicalBoxPacking.ts's own header always said the point of keeping
+        // packing pure was so "a server route, a client component and a
+        // FUTURE DELIVERY PHASE all consume the SAME box counts instead of
+        // each re-deriving pairing" — PACKING-SLIP-1 is that phase, fixing
+        // the packing-slip page's one-slip-per-bundle fanout to reuse the
+        // canonical box authority instead. That is the intended integration,
+        // proven not to re-derive packing by tests/packingSlip1.test.ts. What
+        // remains correctly forbidden is the OL600 SHEET geometry this phase
+        // (BOX-LABEL-SHEET-1) added — packing slips stay full US Letter
+        // pages, never sticker-sheet pagination (see tests/packingSlip1.test.ts "P3").
         const fs = require('fs');
         const path = require('path');
         const hits: string[] = [];
@@ -546,7 +558,7 @@ describe('43-47. security and scope', () => {
                 const full = path.join(dir, e.name);
                 if (e.isDirectory()) walk(full);
                 else if (/\.(ts|tsx)$/.test(e.name)
-                    && /labelSheetLayout|physicalBoxPacking|supporterBoxManifest/.test(fs.readFileSync(full, 'utf8'))) {
+                    && /labelSheetLayout/.test(fs.readFileSync(full, 'utf8'))) {
                     hits.push(full);
                 }
             }

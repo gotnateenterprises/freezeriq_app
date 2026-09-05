@@ -1,84 +1,276 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Printer, Box } from 'lucide-react';
-import { QRCodeSVG } from 'qrcode.react'; // Assuming this package is available as used in other print pages
-import Link from 'next/link';
-import Image from 'next/image';
+import { ArrowLeft, Printer, Box, AlertCircle } from 'lucide-react';
+import { type PhysicalBox } from '@/lib/physicalBoxPacking';
+import { buildSlipBundleSections, type PackingSlipMeal } from '@/lib/packingSlipContents';
+import { chooseBrandHeader, isLogoSettling, type TenantLogoStatus } from '@/lib/tenantLogo';
 
-interface Order {
-    id: string;
-    customer_name: string;
-    delivery_address: string;
-    items: any[];
-    customer?: {
-        name: string;
-        contact_name?: string;
-    }
-    campaign?: {
-        delivery_date?: string | null;
-    };
-    delivery_date?: string | null;
+/**
+ * PACKING-SLIP-1 — one printed slip per PHYSICAL BOX, not per purchased
+ * bundle.
+ *
+ * CONTRACT: docs/ai/FUNDRAISER_FULFILLMENT_CONTRACT.md §7. This page holds no
+ * packing rule, no identity rule and no tier rule of its own — every one of
+ * those questions is answered by app/api/delivery/packing-slips/route.ts (the
+ * canonical PhysicalBox[] it fetches) and lib/packingSlipContents.ts (the
+ * meal-content projection). This file is presentation only.
+ *
+ * WHAT CHANGED FROM THE PRE-FIX PAGE
+ *
+ *   - Fanout: was one slip per (item, quantity-index) — i.e. per PURCHASED
+ *     BUNDLE. Now one slip per `PhysicalBox`, exactly matching the outer-box
+ *     sticker (two paired Serves-2 bundles -> ONE slip listing both).
+ *   - Identity: was `order.customer?.contact_name || order.customer?.name ||
+ *     order.customer_name` — the mutable mutable Customer relation, which for
+ *     a fundraiser is the ORGANIZATION, not the supporter. Now
+ *     `box.supporterName`, the same frozen order-time identity the box label
+ *     already prints (fail-closed upstream: a box with no printable name
+ *     never reaches this page).
+ *   - Box N/M: did not exist. Now sourced only from `PhysicalBox.boxNumber` /
+ *     `boxTotal`.
+ *   - Branding: `businessName`/`signOff`/the review QR no longer default to
+ *     literal Freezer Chef identity — see the state initializers below.
+ *
+ * WHAT DID NOT CHANGE (DELIBERATELY)
+ *
+ *   - The thank-you note and review-prompt COPY BODIES are the pre-existing
+ *     text, unredesigned — this phase fixes the identity field they
+ *     substitute (`{businessName}`), not the surrounding customer-experience
+ *     copy. That is PACKING-SLIP-2's territory.
+ *   - The Quick Tips panel: generic food-safety advice, no identity in it.
+ *   - Full US Letter (8.5in x 11in) format, one page per slip. The OL600WX
+ *     sticker geometry from BOX-LABEL-SHEET-1 is a different physical medium
+ *     and does not apply here.
+ *   - Meal contents still read LIVE `Bundle.contents` — see the module doc in
+ *     lib/packingSlipContents.ts for why, and its known limitation.
+ *
+ * BLOCKED ORDERS: PARTIAL PRINT, NOT ALL-OR-NOTHING
+ *
+ * Unlike box-labels' small hand-picked batch, this page auto-loads a whole
+ * week's orders. Refusing to print ANY slip because ONE historical order is
+ * unpackable would be worse for the kitchen than it protects against: every
+ * provable box prints, and every blocked order is named on-screen so nothing
+ * is silently dropped.
+ */
+
+interface PackingSlipsResponse {
+    boxes: PhysicalBox[];
+    blocked: { orderId: string; reason: string }[];
+    purchasedBundleCount: number;
+    physicalBoxCount: number;
+    largeBoxCount: number;
+    smallBoxCount: number;
+    deliveryDateByOrderId: Record<string, string | null>;
+    mealsByOrderItemId: Record<string, PackingSlipMeal[]>;
 }
+
+const LOGO_SETTLE_TIMEOUT_MS = 2500;
+
+const DEFAULT_THANK_YOU_NOTE = 'Dear Friend, We just wanted to take a moment to send a giant, freezer-packed THANK YOU! Every time you choose {businessName}, you\'re doing more than just making dinnertime easier (and tastier)—you\'re supporting a small, local business with a big heart. Whether you\'re stocking your freezer for a busy week, gifting meals to someone special, or just giving yourself a well-deserved break from cooking—we’re so grateful to be part of your home.';
+const DEFAULT_REVIEW_PROMPT = 'If you enjoyed your {businessName} experience, we’d be so grateful if you left us a 5-star review. Your kind words help more families discover deliciously easy dinners—and keep our small business growing strong.';
 
 export default function PrintPackingSlipsPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const deliveryWeekStart = searchParams.get('delivery_week_start');
-    const weekParam = deliveryWeekStart ? `&delivery_week_start=${deliveryWeekStart}` : '';
-    const [orders, setOrders] = useState<Order[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [logo, setLogo] = useState<string | null>(null);
-    const [customQr, setCustomQr] = useState<string | null>(null);
-    const [businessName, setBusinessName] = useState<string>('Freezer Chef');
-    const [tagline, setTagline] = useState<string>('Deliciously Easy, home-cooked meals prepared fresh and frozen for your convenience.');
-    const [thankYouNote, setThankYouNote] = useState<string>('Dear Friend, We just wanted to take a moment to send a giant, freezer-packed THANK YOU! Every time you choose {businessName}, you\'re doing more than just making dinnertime easier (and tastier)—you\'re supporting a small, local business with a big heart. Whether you\'re stocking your freezer for a busy week, gifting meals to someone special, or just giving yourself a well-deserved break from cooking—we’re so grateful to be part of your home.');
-    const [reviewPrompt, setReviewPrompt] = useState<string>('If you enjoyed your {businessName} experience, we’d be so grateful if you left us a 5-star review on Facebook. Your kind words help more families discover deliciously easy dinners—and keep our small business growing strong.');
-    const [signOff, setSignOff] = useState<string>('The Freezer Chef Team');
+
+    const [boxes, setBoxes] = useState<PhysicalBox[] | null>(null);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [blocked, setBlocked] = useState<{ orderId: string; reason: string }[]>([]);
+    const [counts, setCounts] = useState({ purchased: 0, physical: 0, large: 0, small: 0 });
+    const [deliveryDateByOrderId, setDeliveryDateByOrderId] = useState<Record<string, string | null>>({});
+    const [mealsByOrderItemId, setMealsByOrderItemId] = useState<Record<string, PackingSlipMeal[]>>({});
+    const [isPreparingPrint, setIsPreparingPrint] = useState(false);
+
+    /**
+     * Tenant branding. No tenant name or logo is ever hardcoded — a null here
+     * simply omits that piece of the header, exactly as
+     * app/production/box-labels/page.tsx already established.
+     */
+    const [branding, setBranding] = useState<{ logoUrl: string | null; businessName: string | null }>({
+        logoUrl: null,
+        businessName: null,
+    });
+    const [logoStatus, setLogoStatus] = useState<TenantLogoStatus>('idle');
+    const logoSettledRef = useRef<Promise<void> | null>(null);
+
+    /**
+     * Optional tenant-configurable branding elements. Each is `null` (i.e.
+     * "omit this section") until this tenant's own /api/tenant/branding
+     * response says otherwise — never a hardcoded identity default. The two
+     * copy BODIES below are the exception: their pre-existing fallback text
+     * is deliberately preserved (see the module doc above), only the
+     * `{businessName}` token they substitute is fixed.
+     */
+    const [tagline, setTagline] = useState<string | null>(null);
+    const [thankYouNote, setThankYouNote] = useState<string>(DEFAULT_THANK_YOU_NOTE);
+    const [reviewPrompt, setReviewPrompt] = useState<string>(DEFAULT_REVIEW_PROMPT);
+    const [signOff, setSignOff] = useState<string | null>(null);
+    const [reviewQrUrl, setReviewQrUrl] = useState<string | null>(null);
 
     useEffect(() => {
-        const fetchData = async () => {
+        let cancelled = false;
+
+        (async () => {
             try {
-                // Fetch Orders
-                const ordersRes = await fetch(`/api/orders?status=pending,production_ready,in_production,ready_to_ship,completed&include_details=true${weekParam}`);
-                const ordersData = await ordersRes.json();
-                const ordersArray = Array.isArray(ordersData) ? ordersData : [];
-                const sorted = ordersArray.sort((a: any, b: any) =>
-                    (a.delivery_sequence || 999) - (b.delivery_sequence || 999)
-                );
-                setOrders(sorted);
+                const qs = deliveryWeekStart ? `?delivery_week_start=${encodeURIComponent(deliveryWeekStart)}` : '';
+                const res = await fetch(`/api/delivery/packing-slips${qs}`);
+                if (cancelled) return;
 
-                // Fetch Tenant Branding (Source of Truth for Logo & QR)
-                const brandingRes = await fetch('/api/tenant/branding');
-                if (brandingRes.ok) {
-                    const branding = await brandingRes.json();
-                    if (branding.logo_url) setLogo(branding.logo_url);
-                    if (branding.review_qr_url) setCustomQr(branding.review_qr_url);
-                    if (branding.business_name) setBusinessName(branding.business_name);
-                    if (branding.tagline) setTagline(branding.tagline);
-                    if (branding.thank_you_note) setThankYouNote(branding.thank_you_note);
-                    if (branding.review_prompt) setReviewPrompt(branding.review_prompt);
-                    if (branding.sign_off) setSignOff(branding.sign_off);
-                } else {
-                    // Fallback to Business API if branding fails (legacy)
-                    const bizRes = await fetch('/api/business');
-                    if (bizRes.ok) {
-                        const bizData = await bizRes.json();
-                        if (bizData.logo_url) setLogo(bizData.logo_url);
-                        if (bizData.name) setBusinessName(bizData.name);
-                    }
+                if (!res.ok) {
+                    setLoadError(
+                        res.status === 401
+                            ? 'Your session has expired, so packing slips were not opened. Please sign in again.'
+                            : 'Packing slips could not be prepared. Please return to Delivery and try again.',
+                    );
+                    setBoxes(null);
+                    return;
                 }
-            } catch (err) {
-                console.error(err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchData();
-    }, []);
 
-    if (loading) return <div className="p-12 text-center">Loading packing slips...</div>;
+                const data: PackingSlipsResponse = await res.json();
+                if (cancelled) return;
+
+                setBlocked(data.blocked || []);
+                setCounts({
+                    purchased: data.purchasedBundleCount || 0,
+                    physical: data.physicalBoxCount || 0,
+                    large: data.largeBoxCount || 0,
+                    small: data.smallBoxCount || 0,
+                });
+                setDeliveryDateByOrderId(data.deliveryDateByOrderId || {});
+                setMealsByOrderItemId(data.mealsByOrderItemId || {});
+                setBoxes(data.boxes || []);
+            } catch {
+                if (cancelled) return;
+                setLoadError('Packing slips could not be prepared (the request failed). Please return to Delivery and try again.');
+                setBoxes(null);
+            }
+        })();
+
+        // Branding is deliberately a separate, un-awaited fetch: cosmetic
+        // only, and must never block or fail the slips themselves — same
+        // reasoning as app/production/box-labels/page.tsx.
+        fetch('/api/tenant/branding')
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+                if (cancelled || !data) return;
+                setBranding({
+                    logoUrl: typeof data.logo_url === 'string' && data.logo_url ? data.logo_url : null,
+                    businessName: typeof data.business_name === 'string' && data.business_name.trim()
+                        ? data.business_name.trim()
+                        : null,
+                });
+                if (typeof data.tagline === 'string' && data.tagline.trim()) setTagline(data.tagline.trim());
+                if (typeof data.thank_you_note === 'string' && data.thank_you_note.trim()) setThankYouNote(data.thank_you_note);
+                if (typeof data.review_prompt === 'string' && data.review_prompt.trim()) setReviewPrompt(data.review_prompt);
+                if (typeof data.sign_off === 'string' && data.sign_off.trim()) setSignOff(data.sign_off.trim());
+                if (typeof data.review_qr_url === 'string' && data.review_qr_url.trim()) setReviewQrUrl(data.review_qr_url.trim());
+            })
+            .catch(() => { /* cosmetic only — never blocks printing */ });
+
+        return () => { cancelled = true; };
+    }, [deliveryWeekStart]);
+
+    /**
+     * OPS-6A.2 preload pattern, reused verbatim (see
+     * app/production/box-labels/page.tsx and lib/tenantLogo.ts for why a bare
+     * `onError`-only `<img>` cannot express "still loading").
+     */
+    useEffect(() => {
+        const url = branding.logoUrl;
+        if (!url) {
+            setLogoStatus('idle');
+            logoSettledRef.current = null;
+            return;
+        }
+
+        let cancelled = false;
+        setLogoStatus('pending');
+
+        logoSettledRef.current = new Promise<void>((resolve) => {
+            const probe = new window.Image();
+            probe.onload = () => {
+                if (!cancelled) setLogoStatus('ok');
+                resolve();
+            };
+            probe.onerror = () => {
+                if (!cancelled) setLogoStatus('failed');
+                resolve();
+            };
+            probe.src = url;
+        });
+
+        return () => { cancelled = true; };
+    }, [branding.logoUrl]);
+
+    const handlePrint = async () => {
+        setIsPreparingPrint(true);
+        // Give a logo that is still in flight a BOUNDED moment to settle —
+        // never waits forever, since branding is cosmetic and fails open.
+        if (isLogoSettling(branding.logoUrl, logoStatus) && logoSettledRef.current) {
+            await Promise.race([
+                logoSettledRef.current,
+                new Promise<void>((resolve) => setTimeout(resolve, LOGO_SETTLE_TIMEOUT_MS)),
+            ]);
+        }
+        window.print();
+        setIsPreparingPrint(false);
+    };
+
+    /**
+     * The printed header: tenant logo, else tenant name, else nothing. Never
+     * another tenant's identity, and never a hardcoded default.
+     */
+    const renderBrandHeader = () => {
+        const choice = chooseBrandHeader(branding.logoUrl, branding.businessName, logoStatus);
+
+        if (choice === 'logo') {
+            return (
+                <div className="h-28 relative w-80 mb-1">
+                    <img
+                        src={branding.logoUrl as string}
+                        alt={branding.businessName || ''}
+                        onError={() => setLogoStatus('failed')}
+                        className="h-full w-full object-contain object-center"
+                    />
+                </div>
+            );
+        }
+        if (choice === 'name') {
+            return (
+                <div className="text-3xl font-black text-slate-900 tracking-tight mb-1">
+                    {branding.businessName}
+                </div>
+            );
+        }
+        return null;
+    };
+
+    if (!boxes && loadError) {
+        return (
+            <div className="p-12 max-w-xl mx-auto text-center print:hidden">
+                <div className="flex justify-center mb-4 text-amber-500">
+                    <AlertCircle size={40} />
+                </div>
+                <h1 className="text-2xl font-black text-slate-900 dark:text-white mb-2">No packing slips to print</h1>
+                <p className="text-slate-500 font-medium mb-8">{loadError}</p>
+                <button
+                    onClick={() => router.back()}
+                    className="inline-flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors"
+                >
+                    <ArrowLeft size={18} />
+                    Back to Delivery
+                </button>
+            </div>
+        );
+    }
+
+    if (!boxes) return <div className="p-12 text-center print:hidden">Loading packing slips...</div>;
+
+    const supporterCount = new Set(boxes.map((b) => b.orderId)).size;
+    const businessNameForCopy = branding.businessName || 'us';
 
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-900 print:bg-white">
@@ -94,18 +286,52 @@ export default function PrintPackingSlipsPage() {
                     </button>
 
                     <div className="flex items-center gap-4">
+                        {/* OPS-6A / PACKING-SLIP-1: purchased bundles and physical
+                            boxes are different numbers, and the operational one is
+                            BOXES — one slip per box, not per bundle. */}
                         <div className="text-sm text-slate-500 font-medium">
-                            {orders.length} Orders • {orders.reduce((acc, o) => acc + o.items.reduce((sum: number, item: any) => sum + (item.quantity || 1), 0), 0)} Boxes
+                            {supporterCount} order{supporterCount === 1 ? '' : 's'}
+                            {' · '}
+                            {counts.purchased} bundle{counts.purchased === 1 ? '' : 's'}
+                            {' · '}
+                            {counts.physical} box{counts.physical === 1 ? '' : 'es'}
                         </div>
                         <button
-                            onClick={() => window.print()}
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-full font-bold shadow-lg hover:shadow-indigo-500/30 transition-all flex items-center gap-2"
+                            onClick={handlePrint}
+                            disabled={boxes.length === 0 || isPreparingPrint}
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-full font-bold shadow-lg hover:shadow-indigo-500/30 transition-all flex items-center gap-2 disabled:opacity-50"
                         >
                             <Printer size={20} />
                             Print Packing Slips
                         </button>
                     </div>
                 </div>
+
+                {blocked.length > 0 && (
+                    <div className="max-w-4xl mx-auto mt-4 bg-rose-50 dark:bg-rose-900/20 border-2 border-rose-300 dark:border-rose-800 rounded-xl p-5">
+                        <div className="flex items-start gap-3">
+                            <AlertCircle size={22} className="text-rose-600 shrink-0 mt-0.5" />
+                            <div>
+                                <h4 className="font-black text-rose-900 dark:text-rose-200 mb-2">
+                                    {blocked.length} order{blocked.length === 1 ? '' : 's'} could not be packed — printing everything else
+                                </h4>
+                                <ul className="space-y-1.5">
+                                    {blocked.map((b, i) => (
+                                        <li key={i} className="text-sm font-medium text-rose-800 dark:text-rose-300">
+                                            {b.reason}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {boxes.length === 0 && blocked.length === 0 && (
+                    <div className="max-w-4xl mx-auto mt-4 text-sm text-slate-500 font-medium text-center">
+                        No orders are due for packing slips right now.
+                    </div>
+                )}
             </div>
 
             {/* ... Print logic ... */}
@@ -121,56 +347,39 @@ export default function PrintPackingSlipsPage() {
                     }
                 `}} />
 
-                {orders.flatMap((order: any) => {
-                    return order.items.flatMap((item: any, itemIdx: number) => {
-                        const slips = [];
-                        for (let i = 0; i < item.quantity; i++) {
-                            slips.push({ order, item, itemIdx, copyIndex: i });
-                        }
-                        return slips;
-                    });
-                }).map((slip: any, uniqueKey: number) => {
-                    const { order, item } = slip;
-                    const bundle = item.bundle;
-                    const contents = bundle?.contents || [];
+                {boxes.map((box) => {
+                    const sections = buildSlipBundleSections(box, mealsByOrderItemId);
 
-                    // Logic: Contact Name > Organization Name > Order Customer Name
-                    const preparedForName = order.customer?.contact_name || order.customer?.name || order.customer_name;
-
-                    // Date Logic: Campaign > Order > Today
-                    let displayDate = new Date().toLocaleDateString();
-                    if (order.campaign?.delivery_date) {
-                        const d = new Date(order.campaign.delivery_date);
-                        displayDate = d.toLocaleDateString(undefined, { timeZone: 'UTC' });
-                    } else if (order.delivery_date) {
-                        const d = new Date(order.delivery_date);
-                        displayDate = d.toLocaleDateString(undefined, { timeZone: 'UTC' });
-                    }
+                    // Date Logic: Campaign > Order > Today — unchanged, now
+                    // resolved server-side per order instead of per (pre-fix)
+                    // slip. See lib/packingSlipContents.ts#resolveSlipDeliveryDate.
+                    const rawDate = deliveryDateByOrderId[box.orderId];
+                    const displayDate = rawDate
+                        ? new Date(rawDate).toLocaleDateString(undefined, { timeZone: 'UTC' })
+                        : new Date().toLocaleDateString();
 
                     return (
-                        <div key={`${order.id}-${slip.itemIdx}-${slip.copyIndex}`} className="page-break bg-white w-[8.5in] h-[11in] mx-auto p-[0.4in] relative box-border mb-8 print:mb-0 shadow-lg print:shadow-none flex flex-col">
+                        <div key={`${box.orderId}-${box.boxNumber}`} className="page-break bg-white w-[8.5in] h-[11in] mx-auto p-[0.4in] relative box-border mb-8 print:mb-0 shadow-lg print:shadow-none flex flex-col">
 
                             {/* Header: Centered Logo & Slogan */}
                             <div className="flex flex-col items-center border-b border-slate-100 pb-2 mb-2">
-                                {logo ? (
-                                    <div className="h-28 relative w-80 mb-1">
-                                        <img src={logo} alt="Logo" className="h-full w-full object-contain object-center" />
-                                    </div>
-                                ) : (
-                                    <div className="text-3xl font-black text-slate-900 tracking-tight mb-1">
-                                        {businessName}
+                                {renderBrandHeader()}
+                                {tagline && (
+                                    <div className="text-center font-medium italic text-slate-600 text-xs">
+                                        "{tagline}"
                                     </div>
                                 )}
-                                <div className="text-center font-medium italic text-slate-600 text-xs">
-                                    "{tagline}"
-                                </div>
                             </div>
 
-                            {/* Customer Info: Compact */}
+                            {/* Supporter Info + Box N of M: Compact */}
                             <div className="bg-slate-50 px-4 py-2 rounded-lg mb-2 flex justify-between items-center border border-slate-100">
                                 <div>
                                     <div className="text-[10px] uppercase font-bold text-slate-400">Prepared For</div>
-                                    <div className="text-lg font-bold text-slate-900 truncate max-w-md leading-tight">{preparedForName}</div>
+                                    <div className="text-lg font-bold text-slate-900 truncate max-w-md leading-tight">{box.supporterName}</div>
+                                </div>
+                                <div className="text-center px-4">
+                                    <div className="text-[10px] uppercase font-bold text-slate-400">Box</div>
+                                    <div className="font-mono font-bold text-base leading-tight">{box.boxNumber} of {box.boxTotal}</div>
                                 </div>
                                 <div className="text-right">
                                     <div className="text-[10px] uppercase font-bold text-slate-400">Delivery Date</div>
@@ -178,52 +387,55 @@ export default function PrintPackingSlipsPage() {
                                 </div>
                             </div>
 
-                            {/* Thank You Section (Moved Here) */}
+                            {/* Thank You Section */}
                             <div className="mb-4 text-justify">
                                 <div className="text-sm text-slate-600 leading-relaxed space-y-2">
                                     <p>
-                                        {thankYouNote.replace(/{businessName}/g, businessName)}
+                                        {thankYouNote.replace(/{businessName}/g, businessNameForCopy)}
                                     </p>
                                 </div>
                             </div>
 
-                            {/* Contents List */}
+                            {/* Contents: one section per DISTINCT bundle physically in this box */}
                             <div className="flex-1 min-h-0 overflow-visible">
-                                <h3 className="text-sm font-bold text-slate-900 mb-2 flex flex-col gap-1 uppercase tracking-wider border-b border-slate-100 pb-1">
-                                    {bundle?.name && (
-                                        <div className="text-xs text-indigo-600 font-black mb-1">
-                                            Bundle: {bundle.name}
-                                        </div>
-                                    )}
-                                    <div className="flex items-center gap-2">
-                                        <Box size={14} className="text-indigo-500" />
-                                        Box Contents
-                                    </div>
+                                <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2 uppercase tracking-wider border-b border-slate-100 pb-1">
+                                    <Box size={14} className="text-indigo-500" />
+                                    Box Contents
                                 </h3>
 
-                                {contents.length > 0 ? (
-                                    <table className="w-full text-xs">
-                                        <tbody>
-                                            {contents.map((c: any, idx: number) => (
-                                                <tr key={idx} className="border-b border-dashed border-slate-100">
-                                                    <td className="py-1 font-medium text-slate-700">
-                                                        {c.recipe?.name || 'Mystery Meal'}
-                                                    </td>
-                                                    <td className="py-1 text-right font-mono text-[10px] text-slate-400 w-16">
-                                                        Qty: {c.quantity || 1}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                ) : (
-                                    <div className="text-slate-400 italic py-2 text-xs">Contents not listed.</div>
-                                )}
+                                <div className="space-y-3">
+                                    {sections.map((section, sIdx) => (
+                                        <div key={sIdx}>
+                                            <div className="text-xs text-indigo-600 font-black mb-1">
+                                                {section.bundleName} — {section.servingTier}
+                                                {section.count > 1 ? ` ×${section.count}` : ''}
+                                            </div>
+                                            {section.meals.length > 0 ? (
+                                                <table className="w-full text-xs">
+                                                    <tbody>
+                                                        {section.meals.map((m, mIdx) => (
+                                                            <tr key={mIdx} className="border-b border-dashed border-slate-100">
+                                                                <td className="py-1 font-medium text-slate-700">
+                                                                    {m.recipeName}
+                                                                </td>
+                                                                <td className="py-1 text-right font-mono text-[10px] text-slate-400 w-16">
+                                                                    Qty: {m.quantity}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            ) : (
+                                                <div className="text-slate-400 italic py-2 text-xs">Contents not listed.</div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
 
                             {/* Footer: Quick Tips & Review */}
                             <div className="mt-auto pt-4 border-t-2 border-slate-100 space-y-4">
-                                {/* Quick Tips (Centered) */}
+                                {/* Quick Tips (Centered) — generic, no identity, unchanged */}
                                 <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
                                     <h4 className="font-bold text-indigo-700 text-sm uppercase mb-3 text-center">
                                         💡 Quick Tips: Before Freezing & Cooking
@@ -253,23 +465,25 @@ export default function PrintPackingSlipsPage() {
                                 <div className="text-center space-y-2">
                                     <p className="font-bold text-indigo-600 text-base">💬 Love your meals? Let others know!</p>
                                     <p className="text-xs text-slate-600 max-w-2xl mx-auto leading-normal">
-                                        {reviewPrompt.replace(/{businessName}/g, businessName)} <strong className="text-indigo-600 uppercase">Review Us!</strong>
+                                        {reviewPrompt.replace(/{businessName}/g, businessNameForCopy)} <strong className="text-indigo-600 uppercase">Review Us!</strong>
                                     </p>
 
-                                    <div className="flex justify-center items-center gap-1 pt-2">
-                                        {customQr ? (
-                                            <img src={customQr} alt="Review QR" className="w-16 h-16 object-contain" />
-                                        ) : (
-                                            <QRCodeSVG value="https://www.facebook.com/FreezerChef/reviews" size={64} />
-                                        )}
-                                    </div>
+                                    {reviewQrUrl && (
+                                        <div className="flex justify-center items-center gap-1 pt-2">
+                                            <img src={reviewQrUrl} alt="Review QR" className="w-16 h-16 object-contain" />
+                                        </div>
+                                    )}
 
-                                    <p className="text-[10px] text-slate-400 italic mt-1">– {signOff}</p>
+                                    {signOff && (
+                                        <p className="text-[10px] text-slate-400 italic mt-1">– {signOff}</p>
+                                    )}
 
-                                    <div className="pt-2 border-t border-slate-100 flex flex-col items-center gap-1 text-[9px] text-slate-300 font-bold uppercase tracking-widest">
-                                        <span>Real Meals. Real Easy. Really Local.</span>
-                                        <span>{businessName} © {new Date().getFullYear()}</span>
-                                    </div>
+                                    {branding.businessName && (
+                                        <div className="pt-2 border-t border-slate-100 flex flex-col items-center gap-1 text-[9px] text-slate-300 font-bold uppercase tracking-widest">
+                                            <span>Real Meals. Real Easy. Really Local.</span>
+                                            <span>{branding.businessName} © {new Date().getFullYear()}</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>

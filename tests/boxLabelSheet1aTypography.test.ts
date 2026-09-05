@@ -458,7 +458,20 @@ describe('19-26. frozen behaviour', () => {
         expect(src).toMatch(/paginateLabelSheets\(boxes \|\| \[\], startPosition\)/);
     });
 
-    it('25. Delivery is untouched', () => {
+    it('25. Delivery does not consume the STICKER-specific typography/geometry authorities', () => {
+        // NARROWED BY PACKING-SLIP-1: this test originally also forbade
+        // `physicalBoxPacking` anywhere under Delivery. That module's own
+        // header always said the point of a pure packing authority was so "a
+        // server route, a client component and a FUTURE DELIVERY PHASE all
+        // consume the SAME box counts instead of each re-deriving pairing" —
+        // PACKING-SLIP-1 is that phase, fixing the packing-slip page to reuse
+        // the canonical box authority instead of a one-slip-per-bundle
+        // fanout. That is the intended integration, not a leak, and is
+        // itself proven (never-re-derives-packing) by tests/packingSlip1.test.ts.
+        // What remains correctly forbidden is the STICKER-only concerns this
+        // phase (BOX-LABEL-SHEET-1A) added — packing slips stay full US
+        // Letter pages, never OL600 sheet geometry or sticker typography
+        // budgets (see tests/packingSlip1.test.ts "P3").
         const fs = require('fs');
         const path = require('path');
         const hits: string[] = [];
@@ -469,7 +482,7 @@ describe('19-26. frozen behaviour', () => {
                 const full = path.join(dir, e.name);
                 if (e.isDirectory()) walk(full);
                 else if (/\.(ts|tsx)$/.test(e.name)
-                    && /labelTypography|labelSheetLayout|physicalBoxPacking/.test(fs.readFileSync(full, 'utf8'))) {
+                    && /labelTypography|labelSheetLayout/.test(fs.readFileSync(full, 'utf8'))) {
                     hits.push(full);
                 }
             }
