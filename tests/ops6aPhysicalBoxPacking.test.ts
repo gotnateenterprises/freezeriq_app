@@ -985,15 +985,18 @@ describe('50-54. print', () => {
         expect(printBlock).toMatch(/Box \{box\.boxNumber\} of \{box\.boxTotal\}/);
         expect(printBlock).toMatch(/formatBoxContentLine\(line\)/);
         // Supporter name is the largest element; box type is subordinate.
-        // REVISED BY BOX-LABEL-SHEET-1: point sizes were re-proportioned for
-        // the 4 x 2.5 sticker and the box-type size is now fractional
-        // (6.5pt), so the sizes are parsed as decimals. The HIERARCHY being
-        // asserted is unchanged and is the actual guarantee.
-        const nameSize = Number((printBlock.match(/fontSize: '([\d.]+)pt', fontWeight: 900, lineHeight: 1\.05/) || [])[1]);
+        // REVISED BY BOX-LABEL-SHEET-1A: the name size is now chosen per
+        // sticker by lib/labelTypography.ts, so it is a template literal.
+        // The HIERARCHY being asserted is unchanged and is the real
+        // guarantee — now checked across EVERY tier rather than one literal.
+        expect(printBlock).toMatch(/fontSize: `\$\{type\.nameSizePt\}pt`, fontWeight: 900, lineHeight: 1\.05/);
         const typeSize = Number((printBlock.match(/fontSize: '([\d.]+)pt'[^}]*textTransform: 'uppercase'/) || [])[1]);
-        expect(nameSize).toBeGreaterThan(0);
         expect(typeSize).toBeGreaterThan(0);
-        expect(nameSize).toBeGreaterThan(typeSize);
+        const { STICKER_TYPOGRAPHY_TIERS } = require('@/lib/labelTypography');
+        for (const tier of Object.values(STICKER_TYPOGRAPHY_TIERS) as any[]) {
+            expect(tier.nameSizePt).toBeGreaterThan(tier.contentSizePt);
+            expect(tier.nameSizePt).toBeGreaterThan(typeSize);
+        }
         // No internal identifiers are PRINTED. React `key` props are stripped
         // first: a key is reconciliation metadata, never rendered text, and
         // matching it would fail this assertion on something no one can read

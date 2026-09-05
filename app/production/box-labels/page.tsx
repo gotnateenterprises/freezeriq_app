@@ -15,6 +15,7 @@ import {
 } from '@/lib/physicalBoxPacking';
 import type { BlockedBoxOrder } from '@/lib/supporterBoxManifest';
 import { chooseBrandHeader, isLogoSettling, type TenantLogoStatus } from '@/lib/tenantLogo';
+import { chooseStickerTypography } from '@/lib/labelTypography';
 import {
     OL600_SHEET,
     FIRST_SLOT,
@@ -109,8 +110,8 @@ const LOGO_SETTLE_TIMEOUT_MS = 2500;
  * 1.05in on a 2.5in-tall sticker would have dominated the supporter name,
  * which is the primary operational identifier.
  */
-const LOGO_MAX_HEIGHT_IN = '0.40in';
-const LOGO_MAX_WIDTH_IN = '1.30in';
+const LOGO_MAX_HEIGHT_IN = '0.55in';
+const LOGO_MAX_WIDTH_IN = '1.70in';
 
 /** Inner padding of one sticker, keeping content off the die-cut edge. */
 const LABEL_PADDING_IN = '0.12in';
@@ -657,6 +658,14 @@ export default function BoxLabelsPage() {
                                 box-sizing: border-box;
                                 display: flex;
                                 flex-direction: column;
+                                /* BOX-LABEL-SHEET-1A: share the leftover
+                                   height between the blocks rather than
+                                   pooling it all above the box type, which
+                                   is what produced the empty canyon. The
+                                   OUTER rectangle is untouched — this only
+                                   affects distribution inside it, so print
+                                   registration cannot move. */
+                                justify-content: space-between;
                                 padding: ${LABEL_PADDING_IN};
                             }
                             .align-slot {
@@ -723,6 +732,13 @@ export default function BoxLabelsPage() {
                                 // physical box. Nothing is rendered into it.
                                 if (!slot.label) return null;
                                 const box = slot.label;
+                                const contentLines = boxContentLines(box);
+                                // BOX-LABEL-SHEET-1A: size the two variable
+                                // elements from facts already known here —
+                                // name length and content count — so the
+                                // print result stays deterministic. No DOM
+                                // measurement, no shrink-to-fit.
+                                const type = chooseStickerTypography(box.supporterName, contentLines.length);
                                 return (
                                     <div
                                         key={slot.position}
@@ -746,9 +762,10 @@ export default function BoxLabelsPage() {
                                         </div>
 
                                         {/* The primary operational identifier: whose
-                                            box is this. Largest element on the sticker. */}
+                                            box is this, readable from several feet
+                                            away. Always the largest text here. */}
                                         <div style={{
-                                            fontSize: '17pt', fontWeight: 900, lineHeight: 1.05,
+                                            fontSize: `${type.nameSizePt}pt`, fontWeight: 900, lineHeight: 1.05,
                                             marginBottom: '0.06in', wordBreak: 'break-word',
                                         }}>
                                             {box.supporterName}
@@ -757,13 +774,13 @@ export default function BoxLabelsPage() {
                                         {/* Everything physically in this carton. A
                                             paired Serves-2 box lists both bundles;
                                             identical purchases merge to "... ×2".
-                                            Bounded to two lines by the packing rules,
-                                            so nothing is ever dropped to fit. */}
+                                            Bounded to two entries by the packing
+                                            rules, so nothing is ever dropped to fit. */}
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.02in' }}>
-                                            {boxContentLines(box).map((line, i) => (
+                                            {contentLines.map((line, i) => (
                                                 <div
                                                     key={i}
-                                                    style={{ fontSize: '9pt', fontWeight: 700, lineHeight: 1.22, wordBreak: 'break-word' }}
+                                                    style={{ fontSize: `${type.contentSizePt}pt`, fontWeight: 700, lineHeight: 1.25, wordBreak: 'break-word' }}
                                                 >
                                                     {formatBoxContentLine(line)}
                                                 </div>
@@ -771,10 +788,15 @@ export default function BoxLabelsPage() {
                                         </div>
 
                                         {/* Operationally useful, deliberately
-                                            subordinate to the supporter name. */}
+                                            subordinate to the supporter name.
+                                            BOX-LABEL-SHEET-1A: no longer pushed to
+                                            the floor with marginTop:auto — the slot
+                                            distributes its slack instead, so the
+                                            sticker reads as composed rather than as
+                                            content stranded above an empty canyon. */}
                                         <div style={{
-                                            fontSize: '6.5pt', fontWeight: 700, letterSpacing: '0.08em',
-                                            marginTop: 'auto', textTransform: 'uppercase', opacity: 0.75,
+                                            fontSize: '8pt', fontWeight: 800, letterSpacing: '0.08em',
+                                            textTransform: 'uppercase', opacity: 0.75,
                                         }}>
                                             {box.boxType} box
                                         </div>

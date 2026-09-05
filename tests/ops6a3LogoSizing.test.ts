@@ -99,16 +99,29 @@ describe('OPS-6A.3 logo sizing', () => {
         // Scoped to the STICKER, not the whole print block: the fail-closed
         // "DO NOT USE" refusal sheet also carries a 900-weight heading, and
         // matching that instead would be a false pass.
+        // REVISED BY BOX-LABEL-SHEET-1A: the name and content sizes are now
+        // chosen per sticker by lib/labelTypography.ts, so they are template
+        // literals rather than fixed strings. The hierarchy is asserted
+        // against the tier values themselves, which is stronger than parsing
+        // one hardcoded size out of the source.
         const sticker = src.slice(src.indexOf('className="label-slot"'));
-        const nameSize = Number((sticker.match(/fontSize: '([\d.]+)pt', fontWeight: 900, lineHeight: 1\.05/) || [])[1]);
-        expect(nameSize).toBeGreaterThan(0);
-        // The name outranks every other text element on the sticker.
-        const contentSize = Number((sticker.match(/fontSize: '([\d.]+)pt', fontWeight: 700, lineHeight: 1\.22/) || [])[1]);
+        expect(sticker).toMatch(/fontSize: `\$\{type\.nameSizePt\}pt`, fontWeight: 900, lineHeight: 1\.05/);
+
+        const { STICKER_TYPOGRAPHY_TIERS } = require('@/lib/labelTypography');
         const typeSize = Number((sticker.match(/fontSize: '([\d.]+)pt'[^}]*textTransform: 'uppercase'/) || [])[1]);
-        expect(nameSize).toBeGreaterThan(contentSize);
-        expect(nameSize).toBeGreaterThan(typeSize);
-        // ...and the logo cannot dominate it.
-        const nameBlockIn = nameSize * 1.05 * (1 / 72);
+        expect(typeSize).toBeGreaterThan(0);
+
+        let smallestName = Infinity;
+        for (const tier of Object.values(STICKER_TYPOGRAPHY_TIERS) as any[]) {
+            // In EVERY tier the name outranks the content lines and box type.
+            expect(tier.nameSizePt).toBeGreaterThan(tier.contentSizePt);
+            expect(tier.nameSizePt).toBeGreaterThan(typeSize);
+            smallestName = Math.min(smallestName, tier.nameSizePt);
+        }
+
+        // ...and the logo cannot dominate the name, even in the tier where
+        // the name is smallest.
+        const nameBlockIn = smallestName * 1.05 * (1 / 72);
         expect(maxH).toBeLessThan(nameBlockIn * 3);
     });
 
