@@ -66,6 +66,35 @@ import { chooseBrandHeader, isLogoSettling, type TenantLogoStatus } from '@/lib/
  */
 const LOGO_SETTLE_TIMEOUT_MS = 2500;
 
+/**
+ * OPS-6A.3 — printed tenant-logo size on the 4x6 outer-box label.
+ *
+ * The logo previously rendered at 0.62in and read as a tiny icon rather than
+ * a branded header. The owner asked for roughly 50-75% more presence, with
+ * the supporter name still the primary identifier.
+ *
+ * WHY HEIGHT IS THE LEVER THAT MATTERS
+ *
+ * The tenant's logo is square (500x500), so `contain` scaling was bound
+ * ENTIRELY by the height ceiling — the old 2.6in width ceiling was never
+ * reached and raising it alone would have changed nothing. Height goes
+ * 0.62in -> 1.05in: +69% linear, and the square renders 1.05in wide too.
+ *
+ * The width ceiling is raised as well so a future tenant with a WIDE
+ * wordmark benefits equally. 3.4in sits just inside the printable width
+ * (4in page - 0.25in padding per side = 3.5in), so a wide logo can never
+ * overflow or clip horizontally.
+ *
+ * VERTICAL BUDGET, worst case (two-line supporter name, four content lines):
+ *   header 1.21in + name 0.96in + box N/M 0.50in + contents 1.08in
+ *   + box type 0.33in  =  ~4.08in against 5.5in of printable height.
+ * Roughly 1.4in of headroom remains, so nothing is pushed off the sheet —
+ * and `.print-page` keeps `overflow: hidden`, so one box still means exactly
+ * one 4x6 sheet regardless.
+ */
+const LOGO_MAX_HEIGHT_IN = '1.05in';
+const LOGO_MAX_WIDTH_IN = '3.4in';
+
 interface BoxLabelResponse {
     boxes: PhysicalBox[];
     blocked: BlockedBoxOrder[];
@@ -301,7 +330,7 @@ export default function BoxLabelsPage() {
                     // so this only catches an image evicted between the probe
                     // and the paint. Falling back to the name, never to blank.
                     onError={() => setLogoStatus('failed')}
-                    style={{ maxHeight: '0.62in', maxWidth: '2.6in', objectFit: 'contain', display: 'block' }}
+                    style={{ maxHeight: LOGO_MAX_HEIGHT_IN, maxWidth: LOGO_MAX_WIDTH_IN, objectFit: 'contain', display: 'block' }}
                 />
             );
         }
@@ -493,7 +522,7 @@ export default function BoxLabelsPage() {
                         <div key={`${box.orderId}-${box.boxNumber}`} className="print-page">
                             {/* Tenant branding: logo, else name, else nothing.
                                 Cosmetic — never blocks the truth below it. */}
-                            <div style={{ minHeight: '0.62in', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '0.16in' }}>
+                            <div style={{ minHeight: LOGO_MAX_HEIGHT_IN, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '0.16in' }}>
                                 {renderBrandHeader()}
                             </div>
 

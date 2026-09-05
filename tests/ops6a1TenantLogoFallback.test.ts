@@ -291,7 +291,13 @@ describe('2/4. rendering contract', () => {
             printBlock.indexOf('renderBrandHeader()') - 200,
             printBlock.indexOf('renderBrandHeader()'),
         );
-        expect(headerContainer).toMatch(/minHeight:\s*'0\.62in'/);
+        // REVISED BY OPS-6A.3: the header height is now a named constant
+        // (LOGO_MAX_HEIGHT_IN) shared by the container and the <img> ceiling,
+        // so the reserved block and the image can never drift apart. The
+        // numeric bound itself is asserted against the real page budget in
+        // tests/ops6a3LogoSizing.test.ts rather than pinned as a magic value
+        // here.
+        expect(headerContainer).toMatch(/minHeight:\s*LOGO_MAX_HEIGHT_IN/);
         expect(headerContainer).toMatch(/marginBottom:/);
     });
 });
