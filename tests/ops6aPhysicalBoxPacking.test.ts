@@ -1069,9 +1069,16 @@ describe('55-62. regressions', () => {
     });
 
     it('61. no Production DB mutation on any new path', () => {
+        // NARROWED BY OPS-6B, without weakening the claim. The bare
+        // `/\.delete\(/` alternative matched `Set.prototype.delete` — ordinary
+        // JavaScript with no database anywhere near it — so the guard failed
+        // the moment a client component tracked a selection in a Set. It now
+        // requires a Prisma RECEIVER (`prisma.` or a transaction `tx.`), which
+        // is the only way any of these files could actually reach the database,
+        // and still catches every real mutation including $executeRaw.
+        const PRISMA_MUTATION = /\b(prisma|tx)\.\w+\.(create|createMany|update|updateMany|delete|deleteMany|upsert)\(|\$executeRaw/;
         for (const f of [PACKING, MANIFEST, ROUTE, PAGE, QUEUE]) {
-            expect(strip(read(f)))
-                .not.toMatch(/\.create\(|\.createMany\(|\.update\(|\.updateMany\(|\.delete\(|\.deleteMany\(|\.upsert\(|\$executeRaw/);
+            expect(strip(read(f))).not.toMatch(PRISMA_MUTATION);
         }
     });
 
@@ -1090,6 +1097,17 @@ describe('55-62. regressions', () => {
             expect(s).not.toMatch(/status:\s*['"](packed|delivered|ready_to_ship|completed)/i);
             expect(s).not.toMatch(/markPacked|markDelivered|setStatus/);
         }
+
+        // STRENGTHENED BY OPS-6B. The two assertions above still pass under the
+        // new handoff design — it writes a timestamp, not a status, and uses no
+        // such identifier — but passing by coincidence is not the same as
+        // stating the invariant. OPS-6B introduced a real way to release an
+        // order (POST /api/delivery/handoff), so the claim worth pinning is
+        // that the PRINT path is specifically not a release path.
+        const q = strip(read(QUEUE));
+        const printHandler = q.slice(q.indexOf('const queueBoxLabels'), q.indexOf('if (orders.length === 0)'));
+        expect(printHandler.length).toBeGreaterThan(100); // guard against a vacuous empty slice
+        expect(printHandler).not.toMatch(/released_to_delivery|\/api\/delivery\/handoff|sendToDelivery/);
     });
 
     it('62c. the packing authority is pure and reusable by a future Delivery phase', () => {

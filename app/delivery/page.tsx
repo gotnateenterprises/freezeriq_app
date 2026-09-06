@@ -55,9 +55,20 @@ interface PackagingItem {
     cost_per_unit?: number;
 }
 
+/**
+ * OPS-6B: every figure here is now the CANONICAL physical-carton count from
+ * lib/physicalBoxPacking.ts, served by /api/delivery/stats. The old
+ * `largeBoxesNeeded`/`smallBoxesNeeded` fields were renamed deliberately — they
+ * counted purchased BUNDLES classified by a mutable bundle tier and a
+ * bundle-name substring, which is how this card came to claim "49 labels
+ * needed" for a week whose real answer was 2 cartons.
+ */
 interface Stats {
-    largeBoxesNeeded: number;
-    smallBoxesNeeded: number;
+    largeBoxCount: number;
+    smallBoxCount: number;
+    physicalBoxCount: number;
+    purchasedBundleCount: number;
+    unpackable: number;
 }
 
 interface DeliveryLocation {
@@ -307,6 +318,12 @@ export default function DeliveryDashboard() {
     const router = useRouter();
     const [items, setItems] = useState<PackagingItem[]>([]);
     const [stats, setStats] = useState<Stats | null>(null);
+    /**
+     * OPS-6B: how many packing slips the Slips page will actually print, taken
+     * from that page's own route. One physical box = one packing slip, so this
+     * is the canonical physical-box count for the same population.
+     */
+    const [slipCount, setSlipCount] = useState<number | null>(null);
     const [locations, setLocations] = useState<DeliveryLocation[]>([]);
     const [labelTemplates, setLabelTemplates] = useState<{ id: string, name: string }[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -351,11 +368,21 @@ export default function DeliveryDashboard() {
     const refreshData = async () => {
         setIsLoading(true);
         try {
-            const [itemsRes, statsRes, routesRes, labelsRes] = await Promise.all([
+            const [itemsRes, statsRes, routesRes, labelsRes, slipsRes] = await Promise.all([
                 fetch('/api/delivery/inventory'),
                 fetch(`/api/delivery/stats?${selectedWeekStart ? `delivery_week_start=${toDateString(selectedWeekStart)}` : ''}`),
-                fetch(`/api/orders?status=pending,production_ready,in_production,ready_to_ship,completed${weekParam}`),
-                fetch('/api/delivery/labels')
+                // OPS-6B: the ACTIVE delivery queue — orders that actually
+                // crossed the explicit Send to Delivery boundary. This used to
+                // be /api/orders?status=pending,... which made an order a
+                // delivery stop the moment it was created, before it was even
+                // approved for production.
+                fetch(`/api/delivery/queue${weekSearchParam}`),
+                fetch('/api/delivery/labels'),
+                // OPS-6B: the Slips badge is the packing-slip page's OWN count,
+                // fetched from the same route that page uses, so the badge and
+                // the document can never disagree. It is not a second rule kept
+                // in sync — it is the same rule, asked once.
+                fetch(`/api/delivery/packing-slips${weekSearchParam}`)
             ]);
 
             // Inventory
@@ -374,6 +401,14 @@ export default function DeliveryDashboard() {
             // Stats
             const statsData = await statsRes.json();
             setStats(statsData);
+
+            // OPS-6B: the true packing-slip count, from the slips route itself.
+            if (slipsRes.ok) {
+                const slipsData = await slipsRes.json();
+                setSlipCount(typeof slipsData?.physicalBoxCount === 'number' ? slipsData.physicalBoxCount : null);
+            } else {
+                setSlipCount(null);
+            }
 
             // Routes
             const orders = await routesRes.json();
@@ -726,20 +761,28 @@ export default function DeliveryDashboard() {
                             <Printer size={64} />
                         </div>
                         <h3 className="font-bold text-indigo-200 text-xs uppercase tracking-wider mb-1">Print Queue</h3>
+                        {/* OPS-6B: physical CARTONS, from lib/physicalBoxPacking.ts.
+                            One carton = one outer-box label = one packing slip. */}
                         <div className="text-3xl font-black mb-4 flex items-end gap-2">
-                            {(stats?.largeBoxesNeeded || 0) + (stats?.smallBoxesNeeded || 0)}
-                            <span className="text-sm font-medium text-indigo-300 mb-1">labels needed</span>
+                            {stats?.physicalBoxCount ?? 0}
+                            <span className="text-sm font-medium text-indigo-300 mb-1">boxes to label</span>
                         </div>
 
                         <div className="space-y-2 mb-4">
                             <div className="flex justify-between text-sm">
                                 <span className="text-indigo-200">Large Boxes</span>
-                                <span className="font-bold">{stats?.largeBoxesNeeded || 0}</span>
+                                <span className="font-bold">{stats?.largeBoxCount ?? 0}</span>
                             </div>
                             <div className="flex justify-between text-sm">
                                 <span className="text-indigo-200">Small Boxes</span>
-                                <span className="font-bold">{stats?.smallBoxesNeeded || 0}</span>
+                                <span className="font-bold">{stats?.smallBoxCount ?? 0}</span>
                             </div>
+                            {(stats?.unpackable ?? 0) > 0 && (
+                                <div className="text-xs font-bold text-amber-300 pt-1">
+                                    {stats!.unpackable} bundle{stats!.unpackable === 1 ? '' : 's'} could not be packed
+                                    automatically (no provable sold serving size).
+                                </div>
+                            )}
                         </div>
 
                         <Link href={`/delivery/print-batch${weekSearchParam}`} className="block w-full bg-white text-indigo-900 font-bold py-2.5 rounded-xl text-center hover:bg-indigo-50 transition-colors shadow-sm mb-2">
@@ -751,8 +794,11 @@ export default function DeliveryDashboard() {
                             </Link>
                             <Link href={`/delivery/print-packing-slips${weekSearchParam}`} className="relative bg-white border-2 border-indigo-100 text-indigo-700 font-bold py-2 rounded-xl text-center hover:bg-indigo-50 transition-colors text-xs flex items-center justify-center gap-1 shadow-sm">
                                 Slips
+                                {/* OPS-6B: the number of slips the linked page
+                                    will actually print, from that page's own
+                                    route — not a second count kept in sync. */}
                                 <span className="absolute -top-2 -right-2 bg-amber-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm">
-                                    {(stats?.largeBoxesNeeded || 0) + (stats?.smallBoxesNeeded || 0)}
+                                    {slipCount ?? stats?.physicalBoxCount ?? 0}
                                 </span>
                             </Link>
                         </div>
@@ -762,7 +808,7 @@ export default function DeliveryDashboard() {
                     <div className="grid grid-cols-2 gap-3">
                         <BoxCounter
                             title="Large (Family)"
-                            needed={stats?.largeBoxesNeeded || 0}
+                            needed={stats?.largeBoxCount ?? 0}
                             item={largeBoxItem}
                             type="large_box"
                             onUpdate={updateStock}
@@ -783,7 +829,7 @@ export default function DeliveryDashboard() {
                         />
                         <BoxCounter
                             title="Small (Serves 2)"
-                            needed={stats?.smallBoxesNeeded || 0}
+                            needed={stats?.smallBoxCount ?? 0}
                             item={smallBoxItem}
                             type="small_box"
                             onUpdate={updateStock}

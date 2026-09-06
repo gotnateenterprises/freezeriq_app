@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { Package, Printer } from 'lucide-react';
+import { Package, Printer, Truck, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 import { useRouter } from 'next/navigation';
 import { writeBoxLabelBatch, fetchAuthenticatedBusinessId } from '@/lib/printBatchStorage';
@@ -49,6 +49,108 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
     // KB-1A: the Kitchen Board stops at ready_to_ship. Delivery completion moved to
     // the guarded delivery workflow (DD-1); the mark-delivered handler, its
     // bulk-status call to 'delivered', and the selection it drove were removed here.
+
+    /**
+     * OPS-6B — which orders the operator has picked to hand over.
+     *
+     * Part D: a batch action must never release an unrelated order, so the set
+     * is explicit and the confirmation names its exact size. Nothing is
+     * pre-selected.
+     */
+    const [selected, setSelected] = useState<Set<string>>(new Set());
+    const [sending, setSending] = useState(false);
+    /** OPS-6B: the outcome of the last handoff. Never ends in silence. */
+    const [handoffNotice, setHandoffNotice] = useState<
+        { tone: 'ok' | 'warn'; message: string; shortages?: { name: string; needed: number; available: number }[] } | null
+    >(null);
+
+    const toggleOne = (id: string) => {
+        setSelected(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    };
+    const allSelected = orders.length > 0 && selected.size === orders.length;
+    const toggleAll = () => {
+        setSelected(allSelected ? new Set() : new Set(orders.map(o => o.id)));
+    };
+
+    /**
+     * OPS-6B — SEND TO DELIVERY: the explicit release of physical custody.
+     *
+     * This is the ONLY way an order leaves the Packed & Ready lane. It is
+     * deliberately NOT wired to printing: printing a box label or a packing
+     * slip writes nothing at all (both of those routes are read-only), so no
+     * amount of printing or REPRINTING can release an order or consume
+     * packaging stock. That separation is structural, not a matter of care.
+     *
+     * The client sends order IDs and nothing else — no counts, no business id.
+     * Eligibility is re-checked server-side at mutation time, so a stale tab
+     * cannot release an order that has since moved, and the release is a
+     * compare-and-set on a NULL timestamp, so clicking twice is a no-op rather
+     * than a double consumption.
+     *
+     * It does NOT mark anything delivered. Delivery confirmation belongs to a
+     * later phase, with the recipient in the loop.
+     */
+    const sendToDelivery = async (targetOrders: Order[]) => {
+        setHandoffNotice(null);
+
+        const orderIds = targetOrders.map(o => o.id).filter(Boolean);
+        if (orderIds.length === 0) {
+            setHandoffNotice({ tone: 'warn', message: 'There are no orders selected to send to Delivery.' });
+            return;
+        }
+
+        const noun = orderIds.length === 1 ? 'order' : 'orders';
+        if (!confirm(
+            `Send ${orderIds.length} ${noun} to Delivery?\n\n`
+            + `They will leave Packed & Ready and appear in the Delivery queue.\n`
+            + `This does NOT mark them delivered.`
+        )) return;
+
+        setSending(true);
+        try {
+            const res = await fetch('/api/delivery/handoff', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ orderIds }),
+            });
+
+            if (!res.ok) {
+                const problem = await res.json().catch(() => null);
+                setHandoffNotice({
+                    tone: 'warn',
+                    message: res.status === 401
+                        ? 'Your session has expired, so nothing was sent to Delivery. Please sign in again.'
+                        : (problem?.error || 'These orders could not be sent to Delivery. Please try again.'),
+                });
+                return;
+            }
+
+            const data = await res.json();
+            const parts: string[] = [];
+            if (data.released > 0) parts.push(`${data.released} sent to Delivery`);
+            if (data.unchanged > 0) parts.push(`${data.unchanged} already sent`);
+
+            setSelected(new Set());
+            setHandoffNotice({
+                tone: (data.shortages || []).length > 0 ? 'warn' : 'ok',
+                message: parts.join(' · ') || 'Nothing changed.',
+                shortages: data.shortages || [],
+            });
+
+            onRefresh();
+        } catch {
+            setHandoffNotice({
+                tone: 'warn',
+                message: 'These orders could not be sent to Delivery (the request failed). Please try again.',
+            });
+        } finally {
+            setSending(false);
+        }
+    };
 
     /**
      * OPS-6 — queue supporter OUTER-BOX labels for these orders.
@@ -158,16 +260,33 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                         </p>
                     )}
                 </div>
-                {/* Part M: printing a whole lane must not mean clicking every
-                    supporter in turn. */}
-                <button
-                    onClick={() => queueBoxLabels(orders, 'Box Labels — Packed & Ready')}
-                    disabled={queueing || orders.length === 0}
-                    className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center gap-2"
-                >
-                    <Package size={18} />
-                    {queueing ? 'Preparing…' : 'Box Labels — All Orders'}
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                    {/* Part M: printing a whole lane must not mean clicking every
+                        supporter in turn. */}
+                    <button
+                        onClick={() => queueBoxLabels(orders, 'Box Labels — Packed & Ready')}
+                        disabled={queueing || orders.length === 0}
+                        className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center gap-2"
+                    >
+                        <Package size={18} />
+                        {queueing ? 'Preparing…' : 'Box Labels — All Orders'}
+                    </button>
+
+                    {/* OPS-6B: the deliberate handoff. Printing above never does
+                        this — only this button does. */}
+                    <button
+                        onClick={() => sendToDelivery(selected.size > 0 ? orders.filter(o => selected.has(o.id)) : orders)}
+                        disabled={sending || orders.length === 0}
+                        className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-500/20 disabled:opacity-50 flex items-center gap-2"
+                    >
+                        <Truck size={18} />
+                        {sending
+                            ? 'Sending…'
+                            : selected.size > 0
+                                ? `Send ${selected.size} to Delivery`
+                                : 'Send All to Delivery'}
+                    </button>
+                </div>
             </div>
 
             {/* OPS-6: a label click must never end in silence (the OPS-5E
@@ -178,10 +297,55 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                 </div>
             )}
 
+            {/* OPS-6B: a handoff click never ends in silence either. A packaging
+                shortage is REPORTED, not silently absorbed and not a refusal —
+                stale bookkeeping must never strand physically-packed boxes. */}
+            {handoffNotice && (
+                <div className={
+                    handoffNotice.tone === 'ok'
+                        ? 'bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-300 dark:border-emerald-800 rounded-2xl p-4 text-sm font-bold text-emerald-800 dark:text-emerald-300'
+                        : 'bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-300 dark:border-amber-800 rounded-2xl p-4 text-sm font-bold text-amber-800 dark:text-amber-300'
+                }>
+                    <div>{handoffNotice.message}</div>
+                    {(handoffNotice.shortages || []).length > 0 && (
+                        <ul className="mt-2 space-y-1 font-medium">
+                            {handoffNotice.shortages!.map((s, i) => (
+                                <li key={i} className="flex items-center gap-2">
+                                    <AlertTriangle size={14} className="shrink-0" />
+                                    Packaging short: {s.name} — needed {s.needed}, had {s.available}.
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            )}
+
+            {/* OPS-6B: select exactly what will move. Part D — no unrelated
+                order is ever released because another one was. */}
+            <div className="flex items-center gap-3 px-1">
+                <input
+                    type="checkbox"
+                    id="dq-select-all"
+                    checked={allSelected}
+                    onChange={toggleAll}
+                    className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <label htmlFor="dq-select-all" className="text-sm font-bold text-slate-500 dark:text-slate-400 cursor-pointer">
+                    {selected.size > 0 ? `${selected.size} selected` : 'Select all'}
+                </label>
+            </div>
+
             <div className="grid grid-cols-1 gap-4">
                 {orders.map(order => (
                     <div key={order.id} className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div className="flex items-start gap-4">
+                            <input
+                                type="checkbox"
+                                checked={selected.has(order.id)}
+                                onChange={() => toggleOne(order.id)}
+                                className="mt-1.5 w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                aria-label={`Select order ${order.id.slice(0, 8)}`}
+                            />
                             <div>
                                 <h4 className="font-black text-slate-900 dark:text-white text-lg">{order.customer?.name || order.customer_name || 'Unknown Customer'}</h4>
                                 <div className="text-sm text-slate-500 flex flex-col">
@@ -210,6 +374,15 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                                 title="Box labels for this order"
                             >
                                 <Printer size={20} />
+                            </button>
+                            <button
+                                onClick={() => sendToDelivery([order])}
+                                disabled={sending}
+                                className="flex items-center gap-1.5 px-3 py-2 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg font-bold text-xs transition-colors disabled:opacity-50"
+                                title="Send this order to Delivery"
+                            >
+                                <Truck size={16} />
+                                Send to Delivery
                             </button>
                         </div>
                     </div>

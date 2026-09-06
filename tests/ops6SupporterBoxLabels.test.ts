@@ -793,11 +793,19 @@ describe('33-40. regression', () => {
         }
     });
 
-    it('40. no Production DB mutation, and no schema change', () => {
+    it('40. no Production DB mutation, and no persisted box state', () => {
+        // NARROWED BY OPS-6B, identically to its sibling in
+        // tests/ops6aPhysicalBoxPacking.test.ts ('61'): the bare `/\.delete\(/`
+        // matched `Set.prototype.delete`, so this failed on ordinary JavaScript.
+        // A Prisma receiver is now required — the only way these files could
+        // reach the database at all.
+        const PRISMA_MUTATION = /\b(prisma|tx)\.\w+\.(create|createMany|update|updateMany|delete|deleteMany|upsert)\(|\$executeRaw/;
         for (const f of [MANIFEST, PACKING, ROUTE, PAGE, QUEUE]) {
-            expect(strip(read(f)))
-                .not.toMatch(/\.create\(|\.createMany\(|\.update\(|\.updateMany\(|\.delete\(|\.deleteMany\(|\.upsert\(|\$executeRaw/);
+            expect(strip(read(f))).not.toMatch(PRISMA_MUTATION);
         }
+        // Contract §7 is UNCHANGED and still enforced: box numbering stays a
+        // render-time computation. OPS-6B's new columns record a per-ORDER
+        // handoff event and match none of these.
         expect(read('prisma/schema.prisma')).not.toMatch(/box_number|box_total|boxNumber/);
     });
 
@@ -816,5 +824,14 @@ describe('33-40. regression', () => {
             expect(s).not.toMatch(/status:\s*['"](packed|delivered|ready_to_ship|completed)/i);
             expect(s).not.toMatch(/markPacked|markDelivered|setStatus/);
         }
+
+        // STRENGTHENED BY OPS-6B, identically to its sibling in
+        // tests/ops6aPhysicalBoxPacking.test.ts ('62b') — fixing one and not
+        // the other would leave the invariant half-stated. Now that an explicit
+        // release action exists, the print handler is pinned as NOT one.
+        const q = strip(read(QUEUE));
+        const printHandler = q.slice(q.indexOf('const queueBoxLabels'), q.indexOf('if (orders.length === 0)'));
+        expect(printHandler.length).toBeGreaterThan(100);
+        expect(printHandler).not.toMatch(/released_to_delivery|\/api\/delivery\/handoff|sendToDelivery/);
     });
 });

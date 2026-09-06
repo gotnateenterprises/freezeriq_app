@@ -23,10 +23,18 @@ interface LabelTemplate {
     elements: any[];
 }
 
+/**
+ * OPS-6B: canonical physical-carton counts from lib/physicalBoxPacking.ts, via
+ * /api/delivery/stats. The old largeBoxesNeeded/smallBoxesNeeded counted
+ * purchased BUNDLES classified by a mutable bundle tier — which is how this
+ * page came to lay out 49 stickers on 7 sheets for a week that needed 2.
+ */
 interface Stats {
-    largeBoxesNeeded: number;
-    smallBoxesNeeded: number;
+    largeBoxCount: number;
+    smallBoxCount: number;
+    physicalBoxCount: number;
     packaging?: {
+        tape: number;
         largeTrays: number;
         largeLids: number;
         smallTrays: number;
@@ -192,22 +200,22 @@ export default function BatchPrintPage() {
             const newErrors = [];
             const newSlots: (LabelTemplate | null)[] = [];
 
-            if (s.largeBoxesNeeded > 0) {
+            if (s.largeBoxCount > 0) {
                 if (largeBox?.defaultLabelId) {
                     const tpl = tpls.find(t => t.id === largeBox.defaultLabelId);
                     if (tpl) {
-                        newJobs.push({ template: tpl, count: s.largeBoxesNeeded, typeName: 'Large Box' });
-                        for (let k = 0; k < s.largeBoxesNeeded; k++) newSlots.push(tpl);
+                        newJobs.push({ template: tpl, count: s.largeBoxCount, typeName: 'Large Box' });
+                        for (let k = 0; k < s.largeBoxCount; k++) newSlots.push(tpl);
                     } else newErrors.push("Large Box label template not found.");
                 } else newErrors.push("No label assigned to Large Box.");
             }
 
-            if (s.smallBoxesNeeded > 0) {
+            if (s.smallBoxCount > 0) {
                 if (smallBox?.defaultLabelId) {
                     const tpl = tpls.find(t => t.id === smallBox.defaultLabelId);
                     if (tpl) {
-                        newJobs.push({ template: tpl, count: s.smallBoxesNeeded, typeName: 'Small Box' });
-                        for (let k = 0; k < s.smallBoxesNeeded; k++) newSlots.push(tpl);
+                        newJobs.push({ template: tpl, count: s.smallBoxCount, typeName: 'Small Box' });
+                        for (let k = 0; k < s.smallBoxCount; k++) newSlots.push(tpl);
                     } else newErrors.push("Small Box label template not found.");
                 } else newErrors.push("No label assigned to Small Box.");
             }
@@ -260,33 +268,35 @@ export default function BatchPrintPage() {
         // After print dialog closes (browser blocking behavior dependent, but we show confirm dialogue anyway)
         // Wait a small delay to ensure print dialog is fully dismissed if non-blocking
         setTimeout(async () => {
-            const pack = stats?.packaging;
-            const deductionMsg = pack ?
-                `This will deduct:\n` +
-                `- Sheets & Tape\n` +
-                (pack.largeTrays ? `- ${pack.largeTrays} Large Trays & Lids\n` : '') +
-                (pack.smallTrays ? `- ${pack.smallTrays} Small Containers & Lids\n` : '') +
-                (pack.gallonBags ? `- ${pack.gallonBags} Gallon Bags\n` : '') +
-                (pack.quartBags ? `- ${pack.quartBags} Quart Bags\n` : '')
-                : 'Click OK to deduct Inventory (Sheets & Tape).';
+            /**
+             * OPS-6B — printing consumes PAPER, and nothing else.
+             *
+             * This used to POST largeBoxes/smallBoxes/packaging and have the
+             * server decrement trays, lids, bags and tape from those
+             * CLIENT-SUPPLIED numbers, gated only on the confirm() below. That
+             * was wrong three times over: the numbers came from the stale box
+             * heuristic, a browser could send any number it liked, and printing
+             * is legitimately REPEATABLE — a jam, a reprint or a reload-and-
+             * reconfirm decremented the same stock again, without bound.
+             *
+             * Box-derived consumption now happens exactly once, server-computed,
+             * inside the Send to Delivery handoff, where a NULL-timestamp
+             * compare-and-set makes it impossible to apply twice. Sheets stay
+             * here, because a reprint genuinely does burn more sheets.
+             */
+            const deductionMsg = 'Click OK to deduct the label sheets used.\n'
+                + 'Boxes, trays, lids and bags are deducted once when these orders are sent to Delivery.';
 
             if (confirm(`Did the labels print successfully?\n\n${deductionMsg}\nClick Cancel if printing failed.`)) {
                 try {
-                    // Calculate totals
-                    // Tape: derived from stats (boxes)
-                    // Sheets: derived from allSlots length (printed pages)
-                    const large = stats?.largeBoxesNeeded || 0;
-                    const small = stats?.smallBoxesNeeded || 0;
+                    // Sheets: derived from allSlots length (printed pages).
                     const pages = Math.ceil(allSlots.length / 8);
 
                     const res = await fetch('/api/delivery/record-print-job', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            largeBoxes: large,
-                            smallBoxes: small,
                             sheetsUsed: pages,
-                            packaging: pack // Pass the calculated packaging stats
                         })
                     });
 

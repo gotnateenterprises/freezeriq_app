@@ -11,14 +11,41 @@ import { auth } from '@/auth';
 // tenant's stock. It also echoed the matched row's real name back in the
 // response, leaking it.
 //
-// The caller supplies only quantities — the eight partial names are hardcoded
-// below — so adding the tenant predicate needs no client change.
-//
 // NOTE for whoever touches this next: after the tenant predicate, a tenant whose
 // PackagingItem rows are named differently will now silently match nothing
 // (deductItem returns quietly when item is null). Moving this matching off
 // free-text `name` onto PackagingItem.type is a real follow-up, but it is a
 // behaviour change, not a security fix, and is deliberately NOT bundled here.
+//
+// ══════════════════════════════════════════════════════════════════════════
+// OPS-6B — THIS ROUTE NOW CONSUMES PAPER, AND NOTHING ELSE.
+// ══════════════════════════════════════════════════════════════════════════
+//
+// It used to accept `largeBoxes`, `smallBoxes` and a whole `packaging` object
+// straight from the request body and decrement tape, trays, lids and bags from
+// those numbers. Every part of that was unsound:
+//
+//   - THE NUMBERS WERE THE CLIENT'S. Nothing recomputed them server-side, so a
+//     browser could POST { largeBoxes: 9999 } and take 334 rolls of tape out of
+//     a tenant's inventory. (A failing-first test proved exactly that.)
+//   - THEY CAME FROM THE STALE BOX HEURISTIC, which counted purchased bundles
+//     classified by a mutable `Bundle.serving_tier` — the same defect that made
+//     the Delivery dashboard claim 49 boxes for a week that had 2.
+//   - PRINTING IS REPEATABLE. Jams, reprints, a second copy for the van, or
+//     simply reloading and re-confirming all decremented again, unbounded:
+//     there was no job id, no dedupe and no state consulted. Consumption bound
+//     to a repeatable act is wrong by construction.
+//   - IT DID NOT MATCH PHYSICAL REALITY. Printing a label consumes a label
+//     SHEET. It does not consume a tray, a lid, a bag, or tape.
+//
+// Box-derived consumption moved to app/api/delivery/handoff/route.ts, where it
+// is computed server-side from the frozen OrderItem.variant_size of the orders
+// actually released, and where a compare-and-set on a NULL
+// `released_to_delivery_at` makes applying it twice impossible.
+//
+// Sheets stay here on purpose. A reprint genuinely does burn more paper, so
+// this one remaining decrement is honestly non-idempotent rather than sloppily
+// so — and it is the only thing this route still touches.
 export async function POST(req: Request) {
     try {
         const session = await auth();
@@ -27,63 +54,51 @@ export async function POST(req: Request) {
         }
         const businessId = session.user.businessId;
 
-        const {
-            largeBoxes, smallBoxes, sheetsUsed,
-            packaging // { largeTrays, largeLids, ... }
-        } = await req.json();
+        // Only `sheetsUsed` is read. Any largeBoxes/smallBoxes/packaging a
+        // stale client still sends is IGNORED — deliberately not destructured,
+        // so it cannot be reintroduced by accident.
+        const { sheetsUsed } = await req.json();
 
-        // 1. Calculate Tape Usage (1 unit per 30 boxes total)
-        const totalBoxes = (largeBoxes || 0) + (smallBoxes || 0);
-        const tapeNeeded = Math.ceil(totalBoxes / 30);
+        const sheets = typeof sheetsUsed === 'number' && Number.isFinite(sheetsUsed)
+            ? Math.max(0, Math.floor(sheetsUsed))
+            : 0;
 
-        const updates: any[] = [];
         const deductedItems: any = {};
 
-        // Helper to deduct item by partial name match
+        // Deduct by partial name match, tenant-scoped, with a zero floor —
+        // app/api/production/deduct/route.ts already sets that precedent
+        // ("Prevent negative stock"); this route lacked it and negative stock
+        // was reachable.
         const deductItem = async (partialName: string, qty: number) => {
             if (qty <= 0) return;
             const item = await prisma.packagingItem.findFirst({
                 where: { business_id: businessId, name: { contains: partialName, mode: 'insensitive' } },
                 orderBy: { name: 'asc' }
             });
-            if (item) {
-                updates.push(prisma.packagingItem.update({
+            if (!item) return;
+
+            const applied = Math.min(qty, item.quantity);
+            if (applied > 0) {
+                await prisma.packagingItem.update({
                     where: { id: item.id },
-                    data: { quantity: { decrement: qty } }
-                }));
-                deductedItems[partialName] = { name: item.name, qty };
+                    data: { quantity: Math.max(0, item.quantity - applied) }
+                });
             }
+            deductedItems[partialName] = { name: item.name, qty: applied };
         };
 
-        // Standard Items
-        await deductItem('Tape', tapeNeeded);
-        await deductItem('Avery', sheetsUsed); // Labels
-
-        // New Smart Packaging
-        if (packaging) {
-            await deductItem('Large Tray', packaging.largeTrays);
-            await deductItem('Large Lid', packaging.largeLids);
-            await deductItem('Small Container', packaging.smallTrays); // "Small Container" per user request
-            await deductItem('Small Lid', packaging.smallLids);
-            await deductItem('Gallon Ziplock', packaging.gallonBags); // "Gallon Ziplock"
-            await deductItem('Quart Ziplock', packaging.quartBags); // "Quart Ziplock"
-        }
-
-        if (updates.length > 0) {
-            await prisma.$transaction(updates);
-        }
+        await deductItem('Avery', sheets); // Label sheets — the one print consumable.
 
         return NextResponse.json({
             success: true,
             deducted: {
-                tape: tapeNeeded,
-                sheets: sheetsUsed,
+                sheets,
                 details: deductedItems
             }
         });
 
     } catch (e: any) {
-        console.error("Print Job Deduction Error:", e);
-        return NextResponse.json({ error: e.message }, { status: 500 });
+        console.error("Print Job Deduction Error");
+        return NextResponse.json({ error: 'Failed to record the print job' }, { status: 500 });
     }
 }

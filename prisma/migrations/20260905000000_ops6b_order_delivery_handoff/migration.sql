@@ -1,0 +1,28 @@
+-- OPS-6B: the explicit Production → Delivery handoff marker on orders.
+--
+-- Additive only, and deliberately NOT a new OrderStatus value. `ready_to_ship`
+-- is already the Packed & Ready lane's own membership key (both PrepList and
+-- InProductionArea write it to ENTER that lane), so a status write could not
+-- drain the lane, and `ready_to_ship`'s only legal successor in the canonical
+-- transition matrix is `delivered` — which this phase explicitly must not set.
+-- A nullable event timestamp is also the shape this schema already uses for a
+-- lifecycle event that sits outside the status ladder: canceled_at/canceled_by.
+--
+-- NO BACKFILL. Historical rows get NULL, which is literally true of them: they
+-- were never handed to Delivery through an explicit action, because no such
+-- action existed until now. In particular the April/May Edgar County and Coles
+-- County orders stranded at `ready_to_ship` stay exactly where they are, remain
+-- visible in Packed & Ready, and are cleared by the owner clicking the new
+-- Send to Delivery button — which is precisely the "cleared later through the
+-- repaired UI, not by direct database remediation" outcome the fulfillment
+-- contract §10 requires. Nothing here reinterprets status or created_at.
+--
+-- NOT TOUCHED: orders.status, orders.canceled_at, orders.delivery_date, the
+-- OrderStatus enum, and every other column and table. The parked password-reset
+-- work is not part of this migration.
+--
+-- Nullable with no default, so in PostgreSQL this is a catalog-only change: no
+-- table rewrite, no row scan, no lock beyond a brief ACCESS EXCLUSIVE on the
+-- catalog entry. Safe to run against a live table. Reversible with DROP COLUMN.
+ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "released_to_delivery_at" TIMESTAMP(3);
+ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "released_to_delivery_by" TEXT;

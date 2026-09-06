@@ -5,13 +5,17 @@ import Link from 'next/link';
 import { Truck, MapPin, CheckCircle, ChevronDown, ChevronUp, AlertCircle, ArrowLeft } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import SignaturePad from '@/components/SignaturePad';
+import { summarizeItemPacking } from '@/lib/physicalBoxPacking';
 
 interface OrderItem {
+    id: string;
+    bundle_id: string | null;
     bundle: {
         name: string;
-        serving_tier: string;
     };
     quantity: number;
+    /** OPS-6B: the FROZEN sold tier — the only thing box size may depend on. */
+    variant_size: string | null;
 }
 
 interface Order {
@@ -42,18 +46,17 @@ export default function MobileDeliveryRunPage() {
     const fetchOrders = async () => {
         try {
             setLoading(true);
-            const res = await fetch(`/api/orders?status=ready_to_ship${weekParam}`);
+            // OPS-6B: the driver's run is the ACTIVE Delivery queue — orders
+            // that crossed the explicit Send to Delivery boundary. This used to
+            // read /api/orders?status=ready_to_ship and then narrow locally,
+            // which meant every packed order appeared on the driver's phone
+            // whether or not anyone had handed it over.
+            const res = await fetch(`/api/delivery/queue${weekParam.replace(/^&/, '?')}`);
             if (!res.ok) throw new Error("Failed to load delivery queue");
             const data = await res.json();
 
-            // DD-0.4: toDbOrderStatusReadCandidates('ready_to_ship') still includes
-            // 'completed' for legacy-row compatibility (Phase 5D/5F). A merely
-            // 'completed' order is cooked but not yet packed — it must not reach
-            // the delivery run. Narrow locally rather than changing the shared helper.
-            const readyToShip = data.filter((o: any) => o.status === 'ready_to_ship');
-
             // Sort by delivery sequence
-            const sorted = readyToShip.sort((a: any, b: any) =>
+            const sorted = [...data].sort((a: any, b: any) =>
                 (a.delivery_sequence || 999) - (b.delivery_sequence || 999)
             );
             setOrders(sorted);
@@ -149,15 +152,14 @@ export default function MobileDeliveryRunPage() {
                         const isSigning = signatureOrderId === order.id;
                         const customerName = order.customer_name || order.organization?.name || 'Unknown';
 
-                        // Calc boxes
-                        const largeCount = order.items.reduce((acc, item) => {
-                            const isLarge = item.bundle?.name.toLowerCase().includes('family') || item.bundle?.serving_tier?.toLowerCase() === 'family';
-                            return acc + (isLarge ? item.quantity : 0);
-                        }, 0);
-                        const smallCount = order.items.reduce((acc, item) => {
-                            const isLarge = item.bundle?.name.toLowerCase().includes('family') || item.bundle?.serving_tier?.toLowerCase() === 'family';
-                            return acc + (isLarge ? 0 : item.quantity);
-                        }, 0);
+                        // OPS-6B: canonical physical CARTONS, from the one packing
+                        // authority. This was a fifth independent heuristic —
+                        // `name.includes('family') || serving_tier === 'family'` —
+                        // that counted purchased bundles rather than boxes and
+                        // could disagree with the manifest the driver was holding.
+                        const packing = summarizeItemPacking([order] as any);
+                        const largeCount = packing.largeBoxCount;
+                        const smallCount = packing.smallBoxCount;
 
                         return (
                             <div key={order.id} className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">

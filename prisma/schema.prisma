@@ -443,6 +443,24 @@ model Order {
   // index on (business_id, submission_key) is enforced by raw SQL.
   submission_key         String?
   submission_fingerprint String?
+  // OPS-6B: the Production → Delivery handoff. An EVENT, not a lifecycle stage.
+  //
+  // Modeled the way lib/orderStatus.ts already models cancellation ("Cancellation
+  // is NOT modeled here — it is represented by canceled_at"), and shaped after the
+  // canceled_at/canceled_by pair above, so the split-brain OrderStatus enum and its
+  // eight mapping tables are untouched. A new status could not have worked anyway:
+  // ready_to_ship is ALREADY the Packed & Ready lane's membership key, so writing it
+  // is a no-op, and its only legal successor is 'delivered', which this phase forbids.
+  //
+  // NULL means "never handed to Delivery", which is true of every historical row.
+  // Never backfilled, never inferred from status, created_at or delivery_date.
+  //
+  // Written by exactly ONE route: POST /api/delivery/handoff. Printing a box label
+  // or a packing slip never writes it — those routes are read-only by construction,
+  // which is what makes "printing does not release" a structural guarantee rather
+  // than a matter of discipline.
+  released_to_delivery_at DateTime?
+  released_to_delivery_by String?
   items             OrderItem[]
   business          Business?           @relation(fields: [business_id], references: [id])
   campaign          FundraiserCampaign? @relation(fields: [campaign_id], references: [id])

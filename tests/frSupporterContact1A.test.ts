@@ -254,12 +254,23 @@ describe('FR-SUPPORTER-CONTACT-1A · historical orders are untouched', () => {
 
 // ── O#28 / Part J — NO SCHEMA CHANGE ─────────────────────────────────────────
 describe('FR-SUPPORTER-CONTACT-1A · no Prisma migration was created for this phase', () => {
-    it('28. exactly the same 22 migrations as FR-SUPPORTER-CONTACT-1 — no new one added', () => {
+    it('28. FR-SUPPORTER-CONTACT-1A itself added no migration — its own is still the last one it wrote', () => {
         const migrations = fs.readdirSync(path.join(__dirname, '..', 'prisma/migrations'))
             .filter((d) => /^\d{14}_/.test(d))
             .sort();
-        expect(migrations).toHaveLength(22);
-        expect(migrations[21]).toBe('20260828150000_fr_supporter_contact_1_order_first_last_name');
+        // This test pins THIS phase's claim: FR-SUPPORTER-CONTACT-1A changed no
+        // schema. It originally did so by asserting a total of 22, which also
+        // froze every LATER phase out of ever adding one — a stronger claim than
+        // this phase can make and not the one it meant.
+        //
+        // OPS-6B added migration 23 (Order.released_to_delivery_at/_by, the
+        // explicit Delivery handoff marker), with the owner's authorization.
+        // The approval tripwire that names every allowed migration by hand lives
+        // in tests/frAcceptance2A2Dashboard.test.ts and is the right place for
+        // that check; duplicating a total here only made two tests fail for one
+        // approved change. What this phase actually owns is the assertion below:
+        // its own migration is unchanged and nothing was inserted before it.
+        expect(migrations.indexOf('20260828150000_fr_supporter_contact_1_order_first_last_name')).toBe(21);
         // The requirement is application-boundary only, per Part J — the
         // columns stay nullable (also asserted in test #26 above).
     });

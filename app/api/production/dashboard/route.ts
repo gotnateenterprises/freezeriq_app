@@ -103,6 +103,14 @@ export async function GET() {
                 business_id: businessId,
                 // KB-1B: soft-canceled orders never appear on the Kitchen Board.
                 canceled_at: null,
+                // OPS-6B: the lane's EXIT. Before this, nothing could ever leave
+                // Packed & Ready — printing writes nothing, so orders accumulated
+                // here forever while Delivery showed them too. An order leaves
+                // only when someone deliberately clicks Send to Delivery, which
+                // is the sole writer of this column
+                // (app/api/delivery/handoff/route.ts). NULL means still in
+                // Production's custody, which is true of every historical row.
+                released_to_delivery_at: null,
                 status: { in: deliveryQueueStatuses as any },
                 NOT: { status: 'fundraiser_hold' as any }
             },

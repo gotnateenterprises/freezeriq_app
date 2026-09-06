@@ -314,7 +314,14 @@ describe('this patch changed presentation only', () => {
         //   20  FR-TAX-1 org tax status + exemption document + campaign snapshot
         //   21  FR-TAX-1B invoice tax snapshot (frozen rate/status/base)
         //   22  FR-SUPPORTER-CONTACT-1 Order.first_name/last_name (distinct purchaser identity)
-        expect(migrations).toHaveLength(22);
+        //   23  OPS-6B Order.released_to_delivery_at/_by — the explicit Production
+        //       -> Delivery handoff marker. Owner-authorized in the OPS-6B brief,
+        //       which set the preference order for how the handoff is persisted
+        //       and required "one minimal additive hunk plus a real migration";
+        //       the owner then chose the column over the two no-schema
+        //       alternatives when the trade-off was put to them directly.
+        //       Additive, nullable, no backfill — see the migration's own header.
+        expect(migrations).toHaveLength(23);
         expect(migrations[15]).toBe('20260823010000_fr_acceptance_2a2_human_followup');
         expect(migrations[16]).toBe('20260825000000_inv_d_settlement_truth');
         expect(migrations[17]).toBe('20260826000000_m18_outreach_batch_campaign_ownership');
@@ -322,6 +329,7 @@ describe('this patch changed presentation only', () => {
         expect(migrations[19]).toBe('20260828120000_fr_tax_1_org_tax_status_and_exemption_document');
         expect(migrations[20]).toBe('20260828140000_fr_tax_1b_invoice_tax_snapshot');
         expect(migrations[21]).toBe('20260828150000_fr_supporter_contact_1_order_first_last_name');
+        expect(migrations[22]).toBe('20260905000000_ops6b_order_delivery_handoff');
     });
 
     it('the acknowledgement and follow-up contracts are untouched', () => {
