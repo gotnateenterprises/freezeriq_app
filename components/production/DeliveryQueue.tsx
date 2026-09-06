@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from 'react';
-import { Package, Printer, Truck, AlertTriangle } from 'lucide-react';
+import { Package, Printer, Truck, AlertTriangle, FileText } from 'lucide-react';
 import { format } from 'date-fns';
 import { useRouter } from 'next/navigation';
-import { writeBoxLabelBatch, fetchAuthenticatedBusinessId } from '@/lib/printBatchStorage';
+import { writeBoxLabelBatch, writePackingSlipBatch, fetchAuthenticatedBusinessId } from '@/lib/printBatchStorage';
 // OPS-6A: the ONE physical packing authority. Pure (no Prisma, no I/O), so the
 // lane header can consume the exact same rule the printed labels do rather
 // than re-deriving a second, divergent box count.
@@ -74,6 +74,54 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
     const allSelected = orders.length > 0 && selected.size === orders.length;
     const toggleAll = () => {
         setSelected(allSelected ? new Set() : new Set(orders.map(o => o.id)));
+    };
+
+    /**
+     * OPS-6B.2 — PRIMARY packing slips, printed BEFORE the handoff.
+     *
+     * A packing slip is the customer-facing paper that goes INSIDE the box, so
+     * it has to be printable while the order is still in Production's hands.
+     * The normal sequence is:
+     *
+     *     Packed & Ready -> Box Labels -> Packing Slips
+     *                    -> put the slip in the box -> Send to Delivery
+     *
+     * Queuing slips is NOT a lifecycle transition and never releases anything:
+     * it writes opaque Order IDs to a per-browser batch and navigates. The
+     * server re-checks every id against genuine Packed & Ready eligibility
+     * (app/api/production/packing-slips), and that route contains no write of
+     * any kind, so printing cannot move an order.
+     *
+     * Distinct storage key from the box-label batch on purpose — the operator
+     * prints labels AND slips for the same orders, so both must coexist.
+     */
+    const queuePackingSlips = async (targetOrders: Order[], name: string) => {
+        setLabelError(null);
+
+        const orderIds = targetOrders.map(o => o.id).filter(Boolean);
+        if (orderIds.length === 0) {
+            setLabelError('There are no orders here to make packing slips for.');
+            return;
+        }
+
+        setQueueing(true);
+        try {
+            const ownerBusinessId = await fetchAuthenticatedBusinessId();
+            if (!ownerBusinessId) {
+                setLabelError('Your business could not be confirmed, so no packing slips were prepared. Please reload and sign in again.');
+                return;
+            }
+
+            const written = writePackingSlipBatch({ orderIds, businessId: ownerBusinessId, name });
+            if (!written.ok) {
+                setLabelError(written.reason);
+                return;
+            }
+
+            router.push('/delivery/print-packing-slips?source=packed-ready');
+        } finally {
+            setQueueing(false);
+        }
     };
 
     /**
@@ -272,6 +320,26 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                         {queueing ? 'Preparing…' : 'Box Labels — All Orders'}
                     </button>
 
+                    {/* OPS-6B.2: the slip that goes INSIDE the box, printed
+                        before the order is handed over. Printing releases
+                        nothing — Send to Delivery below is still the only
+                        action that does. */}
+                    <button
+                        onClick={() => queuePackingSlips(
+                            selected.size > 0 ? orders.filter(o => selected.has(o.id)) : orders,
+                            'Packing Slips — Packed & Ready',
+                        )}
+                        disabled={queueing || orders.length === 0}
+                        className="bg-slate-700 text-white px-6 py-3 rounded-xl font-bold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-500/20 disabled:opacity-50 flex items-center gap-2"
+                    >
+                        <FileText size={18} />
+                        {queueing
+                            ? 'Preparing…'
+                            : selected.size > 0
+                                ? `Packing Slips — ${selected.size}`
+                                : 'Packing Slips — All Orders'}
+                    </button>
+
                     {/* OPS-6B: the deliberate handoff. Printing above never does
                         this — only this button does. */}
                     <button
@@ -374,6 +442,14 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                                 title="Box labels for this order"
                             >
                                 <Printer size={20} />
+                            </button>
+                            <button
+                                onClick={() => queuePackingSlips([order], 'Packing Slips')}
+                                disabled={queueing}
+                                className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+                                title="Packing slips for this order"
+                            >
+                                <FileText size={20} />
                             </button>
                             <button
                                 onClick={() => sendToDelivery([order])}

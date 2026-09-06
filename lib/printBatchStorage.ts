@@ -361,3 +361,118 @@ export function clearBoxLabelBatch(): void {
 export function distinctTierCount(manifestRows: Array<{ variantSize?: string | null }>): number {
     return new Set(manifestRows.map(row => row.variantSize ?? 'unknown')).size;
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// OPS-6B.2 — the PRE-HANDOFF PACKING SLIP handoff.
+//
+// Same module, same shape and same strict tenant rule as the outer-box batch
+// above: OPS-5E's ruling is that there must be ONE storage-key authority, and
+// two modules each owning a key is how a writer and a reader drift apart.
+//
+// DISTINCT KEY on purpose. Queuing packing slips must not destroy a queued box
+// label batch — the operator's normal sequence is to print box labels and then
+// packing slips for the same orders, so both batches legitimately coexist.
+//
+// WHAT IS STORED: opaque Order IDs, and nothing else. The supporter's name is
+// required printed content but is resolved server-side from the authenticated
+// session, so nothing identifying reaches browser storage or a URL.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** The single localStorage key for the transient pre-handoff slip batch. */
+export const PACKING_SLIP_STORAGE_KEY = 'freezeriq_packingSlipBatch';
+
+export interface PackingSlipBatchPayload {
+    /** Opaque Order IDs. Never supporter data. */
+    orderIds: string[];
+    /** SERVER-AUTHENTICATED tenant (fetchAuthenticatedBusinessId). Required. */
+    businessId: string | null;
+    /** Operator-facing batch name. Never a supporter name. */
+    name?: string;
+}
+
+export type PackingSlipBatchReadResult =
+    | { ok: true; batch: PackingSlipBatchPayload }
+    | { ok: false; reason: string };
+
+/** Queues a pre-handoff packing-slip batch. Never throws. */
+export function writePackingSlipBatch(payload: PackingSlipBatchPayload): PrintBatchWriteResult {
+    if (!payload || !Array.isArray(payload.orderIds) || payload.orderIds.length === 0) {
+        return { ok: false, reason: 'There are no orders in this batch to make packing slips for.' };
+    }
+    if (!payload.businessId) {
+        return { ok: false, reason: 'Your business could not be confirmed, so no packing slips were prepared. Please reload and sign in again.' };
+    }
+
+    let serialized: string;
+    try {
+        serialized = JSON.stringify({
+            orderIds: payload.orderIds,
+            businessId: payload.businessId,
+            name: payload.name,
+        });
+    } catch {
+        return { ok: false, reason: 'This packing-slip batch could not be prepared (its data could not be saved).' };
+    }
+
+    try {
+        localStorage.setItem(PACKING_SLIP_STORAGE_KEY, serialized);
+    } catch {
+        return { ok: false, reason: 'This packing-slip batch could not be saved in your browser. Check that storage is not full or disabled, then try again.' };
+    }
+
+    return { ok: true };
+}
+
+/**
+ * Loads the queued pre-handoff batch, refusing anything it cannot prove.
+ *
+ * STRICT TENANT OWNERSHIP, identical in shape and order to readBoxLabelBatch's
+ * rule and for the same reason. Defence in depth, not the security boundary:
+ * even a forged payload only ever yields Order IDs, and the server route
+ * re-checks every one against the authenticated tenant AND against genuine
+ * Packed & Ready eligibility before returning a single field of slip content.
+ */
+export function readPackingSlipBatch(currentBusinessId?: string | null): PackingSlipBatchReadResult {
+    let raw: string | null;
+    try {
+        raw = localStorage.getItem(PACKING_SLIP_STORAGE_KEY);
+    } catch {
+        return { ok: false, reason: 'This browser would not allow the packing-slip batch to be read. Check that storage is not disabled.' };
+    }
+
+    if (!raw) {
+        return { ok: false, reason: 'No packing slips are queued. Choose orders from Packed & Ready in Production and select Print Packing Slips.' };
+    }
+
+    let parsed: any;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        return { ok: false, reason: 'The queued packing-slip batch could not be read (its saved data is damaged). Please queue the slips again.' };
+    }
+
+    if (!parsed || !Array.isArray(parsed.orderIds) || parsed.orderIds.length === 0) {
+        return { ok: false, reason: 'The queued packing-slip batch is missing its order list. Please queue the slips again.' };
+    }
+
+    if (!currentBusinessId) {
+        return { ok: false, reason: 'Your business could not be confirmed, so this packing-slip batch was not opened. Please reload and sign in again.' };
+    }
+    if (!parsed.businessId) {
+        return { ok: false, reason: 'This packing-slip batch could not prove which business it belongs to. Please return to Production and queue a new batch.' };
+    }
+    if (parsed.businessId !== currentBusinessId) {
+        return { ok: false, reason: 'This packing-slip batch belongs to a different business. Please return to Production and queue a new batch.' };
+    }
+
+    return { ok: true, batch: parsed as PackingSlipBatchPayload };
+}
+
+/** Clears the queued pre-handoff batch. Never throws. */
+export function clearPackingSlipBatch(): void {
+    try {
+        localStorage.removeItem(PACKING_SLIP_STORAGE_KEY);
+    } catch {
+        // An unclearable batch is harmless; the next write overwrites it.
+    }
+}

@@ -51,7 +51,8 @@
  * different bundles, so this module never receives a line that mixes them.
  */
 
-import { boxContentLines, type PhysicalBox } from './physicalBoxPacking';
+import { boxContentLines, buildPhysicalBoxManifest, type PhysicalBox } from './physicalBoxPacking';
+import { type BoxManifestOrder } from './supporterBoxManifest';
 
 /** One meal row on a packing slip. */
 export interface PackingSlipMeal {
@@ -223,4 +224,102 @@ export function orderBoxesByDeliverySequence(
 
         return a.boxNumber - z.boxNumber;
     });
+}
+
+/**
+ * OPS-6B.2 — the ONE Prisma select every packing-slip context fetches with.
+ *
+ * There are now two legitimate ACCESS CONTEXTS for a packing slip:
+ *
+ *   PRIMARY (pre-handoff)  Production -> Packed & Ready. The slip is printed
+ *                          and physically placed INSIDE the box before the
+ *                          order leaves Production. This is the normal path.
+ *   REPRINT (post-handoff) Delivery -> Slips, for the active Delivery
+ *                          population, to recover a lost or damaged slip.
+ *
+ * Two workflow POPULATIONS are legitimate. Two physical-box authorities are
+ * not, and neither are two renderings: a slip reprinted from Delivery must be
+ * the same piece of paper the packer put in the box. This constant and
+ * buildPackingSlipPayload below are what make that true by construction — the
+ * two routes differ ONLY in their WHERE clause.
+ */
+export const PACKING_SLIP_ORDER_SELECT = {
+    id: true,
+    first_name: true,
+    last_name: true,
+    customer_name: true,
+    delivery_date: true,
+    delivery_sequence: true,
+    campaign: { select: { delivery_date: true } },
+    items: {
+        select: {
+            id: true,
+            bundle_id: true,
+            quantity: true,
+            variant_size: true,
+            item_name: true,
+            bundle: {
+                select: {
+                    id: true,
+                    name: true,
+                    contents: {
+                        select: {
+                            quantity: true,
+                            recipe: { select: { name: true } },
+                        },
+                    },
+                },
+            },
+        },
+        // The same deterministic key lib/supporterBoxManifest.ts sorts by, so
+        // the two can never disagree about instance sequence — and therefore
+        // never about Box N/M.
+        orderBy: { id: 'asc' as const },
+    },
+} as const;
+
+export interface PackingSlipPayload {
+    boxes: PhysicalBox[];
+    blocked: { orderId: string; reason: string }[];
+    purchasedBundleCount: number;
+    physicalBoxCount: number;
+    largeBoxCount: number;
+    smallBoxCount: number;
+    deliveryDateByOrderId: Record<string, string | null>;
+    mealsByOrderItemId: Record<string, PackingSlipMeal[]>;
+}
+
+/**
+ * Turn fetched orders into the packing-slip response, identically for both
+ * access contexts.
+ *
+ * Every question this answers is delegated: cartons and Box N/M to
+ * lib/physicalBoxPacking.ts, supporter identity to lib/supporterBoxManifest.ts,
+ * the printed date to resolveSlipDeliveryDate, print order to
+ * orderBoxesByDeliverySequence. Nothing is re-derived here, which is precisely
+ * why a pre-handoff slip and its later Delivery reprint are the same document.
+ */
+export function buildPackingSlipPayload(
+    orders: readonly any[],
+): PackingSlipPayload {
+    const manifest = buildPhysicalBoxManifest(orders as unknown as BoxManifestOrder[]);
+
+    const deliverySequenceByOrderId: Record<string, number | null> = {};
+    const deliveryDateByOrderId: Record<string, string | null> = {};
+    for (const order of orders) {
+        deliverySequenceByOrderId[order.id] = order.delivery_sequence ?? null;
+        const resolved = resolveSlipDeliveryDate(order as any);
+        deliveryDateByOrderId[order.id] = resolved ? new Date(resolved).toISOString() : null;
+    }
+
+    return {
+        boxes: orderBoxesByDeliverySequence(manifest.boxes, deliverySequenceByOrderId),
+        blocked: manifest.blocked,
+        purchasedBundleCount: manifest.purchasedBundleCount,
+        physicalBoxCount: manifest.physicalBoxCount,
+        largeBoxCount: manifest.largeBoxCount,
+        smallBoxCount: manifest.smallBoxCount,
+        deliveryDateByOrderId,
+        mealsByOrderItemId: buildMealsByOrderItemId(orders as any),
+    };
 }

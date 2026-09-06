@@ -1,12 +1,9 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
-import { type BoxManifestOrder } from '@/lib/supporterBoxManifest';
-import { buildPhysicalBoxManifest } from '@/lib/physicalBoxPacking';
 import {
-    buildMealsByOrderItemId,
-    orderBoxesByDeliverySequence,
-    resolveSlipDeliveryDate,
+    PACKING_SLIP_ORDER_SELECT,
+    buildPackingSlipPayload,
 } from '@/lib/packingSlipContents';
 import { activeDeliveryOrderWhere, parseDeliveryWeek } from '@/lib/delivery/activeDeliveryPopulation';
 
@@ -91,74 +88,14 @@ export async function GET(request: Request) {
 
         const orders = await prisma.order.findMany({
             where: whereClause,
-            select: {
-                id: true,
-                first_name: true,
-                last_name: true,
-                customer_name: true,
-                delivery_date: true,
-                delivery_sequence: true,
-                campaign: { select: { delivery_date: true } },
-                items: {
-                    select: {
-                        id: true,
-                        bundle_id: true,
-                        quantity: true,
-                        variant_size: true,
-                        item_name: true,
-                        bundle: {
-                            select: {
-                                id: true,
-                                name: true,
-                                contents: {
-                                    select: {
-                                        quantity: true,
-                                        recipe: { select: { name: true } },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                    // Same deterministic key lib/supporterBoxManifest.ts sorts
-                    // by, so client and server can never disagree on sequence.
-                    orderBy: { id: 'asc' },
-                },
-            },
+            select: PACKING_SLIP_ORDER_SELECT,
             orderBy: { id: 'asc' },
         });
 
-        // The canonical physical-box authority. Identical call to box-labels
-        // — this route derives no packing rule of its own.
-        const manifest = buildPhysicalBoxManifest(orders as unknown as BoxManifestOrder[]);
-
-        const deliverySequenceByOrderId: Record<string, number | null> = {};
-        const deliveryDateByOrderId: Record<string, string | null> = {};
-        for (const order of orders) {
-            deliverySequenceByOrderId[order.id] = order.delivery_sequence;
-            const resolved = resolveSlipDeliveryDate(order as any);
-            deliveryDateByOrderId[order.id] = resolved ? new Date(resolved).toISOString() : null;
-        }
-
-        // Print order follows the delivery run, not order-id — see
-        // lib/packingSlipContents.ts. This reorders the already-finished box
-        // list only; it does not touch a single box's contents or numbering.
-        const boxes = orderBoxesByDeliverySequence(manifest.boxes, deliverySequenceByOrderId);
-
-        // The one thing a packing slip needs that a box label does not: the
-        // live meal list inside each bundle. Keyed by OrderItem id so the
-        // page can look a box's contents up without re-fetching orders.
-        const mealsByOrderItemId = buildMealsByOrderItemId(orders as any);
-
-        return NextResponse.json({
-            boxes,
-            blocked: manifest.blocked,
-            purchasedBundleCount: manifest.purchasedBundleCount,
-            physicalBoxCount: manifest.physicalBoxCount,
-            largeBoxCount: manifest.largeBoxCount,
-            smallBoxCount: manifest.smallBoxCount,
-            deliveryDateByOrderId,
-            mealsByOrderItemId,
-        });
+        // OPS-6B.2: the assembly is shared with the pre-handoff route, so a
+        // slip reprinted here is byte-for-byte the document the packer placed
+        // in the box. The two routes now differ ONLY in their WHERE clause.
+        return NextResponse.json(buildPackingSlipPayload(orders));
     } catch (e) {
         // Deliberately no error detail and no request echo in the log: this
         // handler's inputs are session-derived and its outputs are supporter

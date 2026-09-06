@@ -102,15 +102,30 @@ describe('IDENTITY', () => {
         expect(body.blocked[0].orderId).toBe('ord-1');
     });
 
-    it('I4. the route never selects a Customer relation at all', () => {
+    it('I4. no packing-slip select ever pulls in a Customer relation', () => {
         // `customer_name` (the frozen Order SCALAR, part of BoxManifestOrder's
         // own precedence — see lib/supporterBoxManifest.ts) is correct and
-        // expected here. What must never appear is the mutable Customer
-        // RELATION (`customer: { ... }`), which is the mutable-org-name defect
-        // this phase fixes.
-        const s = strip(read(ROUTE));
-        expect(s).not.toMatch(/customer:\s*\{/);
-        expect(s).toMatch(/\bcustomer_name\b/);
+        // expected. What must never appear is the mutable Customer RELATION
+        // (`customer: { ... }`), which is the mutable-org-name defect
+        // PACKING-SLIP-1 fixed.
+        //
+        // FOLLOWED BY OPS-6B.2: the select moved into the SHARED
+        // PACKING_SLIP_ORDER_SELECT so the pre-handoff and reprint contexts
+        // fetch identically. The invariant is unchanged; it is simply asserted
+        // where the select now lives — and against BOTH consuming routes, so
+        // neither can quietly add a relation of its own.
+        const shared = strip(read('lib/packingSlipContents.ts'));
+        const select = shared.slice(
+            shared.indexOf('export const PACKING_SLIP_ORDER_SELECT'),
+            shared.indexOf('export interface PackingSlipPayload'),
+        );
+        expect(select.length).toBeGreaterThan(100);
+        expect(select).toMatch(/\bcustomer_name\b/);
+        expect(select).not.toMatch(/\bcustomer:\s*\{/);
+
+        for (const f of [ROUTE, 'app/api/production/packing-slips/route.ts']) {
+            expect(strip(read(f))).not.toMatch(/\bcustomer:\s*\{/);
+        }
     });
 
     it('I5. the page no longer reads the mutable Customer identity chain', () => {

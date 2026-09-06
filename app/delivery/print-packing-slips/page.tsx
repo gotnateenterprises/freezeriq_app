@@ -6,6 +6,11 @@ import { ArrowLeft, Printer, Box, AlertCircle } from 'lucide-react';
 import { type PhysicalBox } from '@/lib/physicalBoxPacking';
 import { buildSlipBundleSections, type PackingSlipMeal } from '@/lib/packingSlipContents';
 import { chooseBrandHeader, isLogoSettling, type TenantLogoStatus } from '@/lib/tenantLogo';
+import {
+    fetchAuthenticatedBusinessId,
+    readPackingSlipBatch,
+    clearPackingSlipBatch,
+} from '@/lib/printBatchStorage';
 
 /**
  * PACKING-SLIP-1 — one printed slip per PHYSICAL BOX, not per purchased
@@ -75,6 +80,12 @@ export default function PrintPackingSlipsPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const deliveryWeekStart = searchParams.get('delivery_week_start');
+    /**
+     * OPS-6B.2: which access context this print is. `packed-ready` is the
+     * PRIMARY pre-handoff print queued from Production; anything else is the
+     * Delivery reprint of the active Delivery population.
+     */
+    const isPreHandoff = searchParams.get('source') === 'packed-ready';
 
     const [boxes, setBoxes] = useState<PhysicalBox[] | null>(null);
     const [loadError, setLoadError] = useState<string | null>(null);
@@ -115,15 +126,68 @@ export default function PrintPackingSlipsPage() {
 
         (async () => {
             try {
-                const qs = deliveryWeekStart ? `?delivery_week_start=${encodeURIComponent(deliveryWeekStart)}` : '';
-                const res = await fetch(`/api/delivery/packing-slips${qs}`);
+                /**
+                 * OPS-6B.2 — TWO ACCESS CONTEXTS, ONE PAGE.
+                 *
+                 * `?source=packed-ready` is the PRIMARY pre-handoff print: the
+                 * operator explicitly queued specific Packed & Ready orders in
+                 * Production, and the slips go INSIDE the boxes before release.
+                 * It sends opaque Order IDs to the Production route, which
+                 * re-checks Packed & Ready eligibility server-side.
+                 *
+                 * Without it, this is the Delivery REPRINT: the shared active
+                 * Delivery population for the selected week, exactly as
+                 * OPS-6B.1 established.
+                 *
+                 * The rendering below is identical either way — deliberately.
+                 * The two contexts differ only in which orders are eligible;
+                 * everything the slip SAYS comes from one shared payload
+                 * builder, so a reprint is the document the packer put in the box.
+                 *
+                 * PART H: the pre-handoff path sends NO delivery-week param.
+                 * The operator picked these orders by hand; whatever week the
+                 * Delivery dashboard is showing is unrelated client state and
+                 * must never hide a box someone is holding.
+                 */
+                let res: Response;
+
+                if (isPreHandoff) {
+                    const ownerBusinessId = await fetchAuthenticatedBusinessId();
+                    if (cancelled) return;
+                    if (!ownerBusinessId) {
+                        setLoadError('Your business could not be confirmed, so no packing slips were opened. Please reload and sign in again.');
+                        setBoxes(null);
+                        return;
+                    }
+
+                    const queued = readPackingSlipBatch(ownerBusinessId);
+                    if (!queued.ok) {
+                        // A batch that fails ownership verification is discarded,
+                        // not merely hidden, so a later reload cannot pick it up.
+                        clearPackingSlipBatch();
+                        setLoadError(queued.reason);
+                        setBoxes(null);
+                        return;
+                    }
+
+                    res = await fetch('/api/production/packing-slips', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ orderIds: queued.batch.orderIds }),
+                    });
+                } else {
+                    const qs = deliveryWeekStart ? `?delivery_week_start=${encodeURIComponent(deliveryWeekStart)}` : '';
+                    res = await fetch(`/api/delivery/packing-slips${qs}`);
+                }
                 if (cancelled) return;
 
                 if (!res.ok) {
                     setLoadError(
                         res.status === 401
                             ? 'Your session has expired, so packing slips were not opened. Please sign in again.'
-                            : 'Packing slips could not be prepared. Please return to Delivery and try again.',
+                            : isPreHandoff
+                                ? 'These packing slips could not be prepared. Please return to Production and try again.'
+                                : 'Packing slips could not be prepared. Please return to Delivery and try again.',
                     );
                     setBoxes(null);
                     return;
@@ -171,7 +235,7 @@ export default function PrintPackingSlipsPage() {
             .catch(() => { /* cosmetic only — never blocks printing */ });
 
         return () => { cancelled = true; };
-    }, [deliveryWeekStart]);
+    }, [deliveryWeekStart, isPreHandoff]);
 
     /**
      * OPS-6A.2 preload pattern, reused verbatim (see
