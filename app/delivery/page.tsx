@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { Package, MapPin, Printer, ExternalLink, Plus, RefreshCw, AlertTriangle, Truck, GripVertical, Navigation, Edit, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { writeBoxLabelBatch, fetchAuthenticatedBusinessId } from '@/lib/printBatchStorage';
 
 // --- WEEK HELPERS ---
 function getISOMonday(date: Date): Date {
@@ -200,14 +201,13 @@ const SortableItem = ({ loc, openGoogleMaps, onDeliver }: { loc: any, openGoogle
     );
 };
 
-const BoxCounter = ({ title, needed, item, type, onUpdate, onCreate, templates }: {
+const BoxCounter = ({ title, needed, item, type, onUpdate, onCreate }: {
     title: string,
     needed: number,
     item?: PackagingItem,
     type: 'large_box' | 'small_box',
     onUpdate: (id: string, delta: number, isAutoDeduct?: boolean, updates?: any) => void,
     onCreate: (type: string, name: string, qty: number) => void,
-    templates: { id: string, name: string }[]
 }) => {
     const [addQty, setAddQty] = useState<string>('');
     const [cost, setCost] = useState(item?.cost_per_unit || 0);
@@ -228,12 +228,6 @@ const BoxCounter = ({ title, needed, item, type, onUpdate, onCreate, templates }
             onCreate(type, title, qty);
         }
         setAddQty('');
-    };
-
-    const handleLabelChange = (labelId: string) => {
-        if (item) {
-            onUpdate(item.id, 0, false, { defaultLabelId: labelId });
-        }
     };
 
     const handleCostBlur = () => {
@@ -271,19 +265,6 @@ const BoxCounter = ({ title, needed, item, type, onUpdate, onCreate, templates }
                         </div>
                     )}
                 </div>
-            </div>
-
-            {/* Label Selector (Visible) */}
-            <div className="mb-3">
-                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Label Template</label>
-                <select
-                    className="w-full text-xs bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 text-slate-700 dark:text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500/20"
-                    value={item?.defaultLabelId || ''}
-                    onChange={(e) => handleLabelChange(e.target.value)}
-                >
-                    <option value="">-- No Label Assigned --</option>
-                    {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
             </div>
 
             {/* Stats Row */}
@@ -331,7 +312,9 @@ export default function DeliveryDashboard() {
      */
     const [slipCount, setSlipCount] = useState<number | null>(null);
     const [locations, setLocations] = useState<DeliveryLocation[]>([]);
-    const [labelTemplates, setLabelTemplates] = useState<{ id: string, name: string }[]>([]);
+    /** OPS-6B.3: why a reprint click did not proceed. Never ends in silence. */
+    const [labelError, setLabelError] = useState<string | null>(null);
+    const [queueingLabels, setQueueingLabels] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [originAddress, setOriginAddress] = useState('');
 
@@ -370,11 +353,73 @@ export default function DeliveryDashboard() {
     //     if (saved) setOriginAddress(saved);
     // }, []);
 
+    /**
+     * OPS-6B.3 — REPRINT the approved OL600 outer-box labels for the ACTIVE
+     * Delivery population.
+     *
+     * WHAT THIS REPLACES. The Delivery dashboard's primary "Print Labels"
+     * action opened /delivery/print-batch — a SECOND, stale label system that
+     * shared nothing with the approved one: hardcoded Avery 5821 geometry
+     * (two 4in columns with no gutter, 100 units/inch against the designer's
+     * 96), no canonical PhysicalBox anywhere in the file, and a hard
+     * dependency on a per-PackagingItem "label template" assignment that
+     * failed with "No label assigned to Large Box."
+     *
+     * NO NEW RENDERER, NO NEW GEOMETRY, NO SECOND BOX AUTHORITY. This queues
+     * opaque Order IDs through the SAME writeBoxLabelBatch the Production lane
+     * uses and navigates to the SAME /production/box-labels page, which
+     * resolves them through /api/production/box-labels ->
+     * buildPhysicalBoxManifest and paginates with OL600_SHEET. Delivery never
+     * imports label geometry — which is also why the OL600 walk-guards over
+     * app/delivery/** stay armed and green.
+     *
+     * REPRINT ONLY, AND STRUCTURALLY SO. The ids come from `locations`, which
+     * is built from /api/delivery/queue — the released-only active Delivery
+     * population (lib/delivery/activeDeliveryPopulation.ts). An unreleased
+     * order is not in that list, so it cannot enter this batch. The server
+     * re-verifies tenant ownership on every id regardless.
+     *
+     * READ-ONLY: printing a label is not a lifecycle transition. Nothing here
+     * releases an order, marks it delivered, or consumes packaging.
+     */
+    const reprintBoxLabels = async () => {
+        setLabelError(null);
+
+        const orderIds = locations.map(l => l.id).filter(Boolean);
+        if (orderIds.length === 0) {
+            setLabelError('There are no active Delivery orders to reprint box labels for.');
+            return;
+        }
+
+        setQueueingLabels(true);
+        try {
+            const ownerBusinessId = await fetchAuthenticatedBusinessId();
+            if (!ownerBusinessId) {
+                setLabelError('Your business could not be confirmed, so no labels were prepared. Please reload and sign in again.');
+                return;
+            }
+
+            const written = writeBoxLabelBatch({
+                orderIds,
+                businessId: ownerBusinessId,
+                name: 'Box Labels — Delivery Reprint',
+            });
+            if (!written.ok) {
+                setLabelError(written.reason);
+                return;
+            }
+
+            router.push('/production/box-labels');
+        } finally {
+            setQueueingLabels(false);
+        }
+    };
+
     // Fetch Data (All in one go)
     const refreshData = async () => {
         setIsLoading(true);
         try {
-            const [itemsRes, statsRes, routesRes, labelsRes, slipsRes] = await Promise.all([
+            const [itemsRes, statsRes, routesRes, slipsRes] = await Promise.all([
                 fetch('/api/delivery/inventory'),
                 fetch(`/api/delivery/stats?${selectedWeekStart ? `delivery_week_start=${toDateString(selectedWeekStart)}` : ''}`),
                 // OPS-6B: the ACTIVE delivery queue — orders that actually
@@ -383,7 +428,6 @@ export default function DeliveryDashboard() {
                 // delivery stop the moment it was created, before it was even
                 // approved for production.
                 fetch(`/api/delivery/queue${weekSearchParam}`),
-                fetch('/api/delivery/labels'),
                 // OPS-6B: the Slips badge is the packing-slip page's OWN count,
                 // fetched from the same route that page uses, so the badge and
                 // the document can never disagree. It is not a second rule kept
@@ -397,11 +441,6 @@ export default function DeliveryDashboard() {
                 setItems(itemsData);
             } else {
                 setItems([]);
-            }
-
-            // Labels
-            if (labelsRes.ok) {
-                setLabelTemplates(await labelsRes.json());
             }
 
             // Stats
@@ -803,9 +842,26 @@ export default function DeliveryDashboard() {
                             )}
                         </div>
 
-                        <Link href={`/delivery/print-batch${weekSearchParam}`} className="block w-full bg-white text-indigo-900 font-bold py-2.5 rounded-xl text-center hover:bg-indigo-50 transition-colors shadow-sm mb-2">
-                            Print Labels
-                        </Link>
+                        {/* OPS-6B.3: the APPROVED OL600 outer-box label system, as a
+                            REPRINT of what Production already produced. This used to
+                            open /delivery/print-batch — a second, stale label system
+                            on Avery 5821 geometry that required a per-PackagingItem
+                            "label template" assignment and failed with "No label
+                            assigned to Large Box." Box labels are printed in
+                            Production before packing; Delivery only ever needs to
+                            recover one. */}
+                        <button
+                            onClick={reprintBoxLabels}
+                            disabled={queueingLabels || locations.length === 0}
+                            className="block w-full bg-white text-indigo-900 font-bold py-2.5 rounded-xl text-center hover:bg-indigo-50 transition-colors shadow-sm mb-2 disabled:opacity-50"
+                        >
+                            {queueingLabels ? 'Preparing…' : 'Reprint Box Labels'}
+                        </button>
+                        {labelError && (
+                            <div className="mb-2 text-xs font-bold text-amber-200 bg-amber-900/40 border border-amber-700 rounded-lg p-2">
+                                {labelError}
+                            </div>
+                        )}
                         <div className="grid grid-cols-2 gap-2">
                             <Link href={`/delivery/print-manifest${weekSearchParam}`} className="bg-white border-2 border-indigo-100 text-indigo-700 font-bold py-2 rounded-xl text-center hover:bg-indigo-50 transition-colors text-xs flex items-center justify-center gap-1 shadow-sm">
                                 Manifest
@@ -830,7 +886,6 @@ export default function DeliveryDashboard() {
                             item={largeBoxItem}
                             type="large_box"
                             onUpdate={updateStock}
-                            templates={labelTemplates}
                             onCreate={async (type, name, qty) => {
                                 try {
                                     const res = await fetch('/api/delivery/inventory', {
@@ -851,7 +906,6 @@ export default function DeliveryDashboard() {
                             item={smallBoxItem}
                             type="small_box"
                             onUpdate={updateStock}
-                            templates={labelTemplates}
                             onCreate={async (type, name, qty) => {
                                 try {
                                     const res = await fetch('/api/delivery/inventory', {
