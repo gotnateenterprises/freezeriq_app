@@ -422,7 +422,12 @@ export default function DeliveryDashboard() {
                 .map((o: any) => ({
                     id: o.id,
                     externalId: o.external_id,
-                    customerName: o.customer_name || o.organization?.name || 'Unknown Customer',
+                    // OPS-6B.1: the server resolves this through the SAME
+                    // frozen-identity authority the packing slip uses, so the
+                    // stop and its slip can never show different names for the
+                    // same order. (`organization` was a dead fallback — the
+                    // delivery queue route has never returned that field.)
+                    customerName: o.supporterName || o.customer_name || 'Unknown Customer',
                     address: o.delivery_address || o.organization?.delivery_address || 'No Address Provided',
                     orderCount: o.items?.length || 0,
                     bundles: o.items?.map((i: any) => i.bundle?.name || 'Item'),

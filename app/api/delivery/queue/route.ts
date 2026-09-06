@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { activeDeliveryOrderWhere, parseDeliveryWeek } from '@/lib/delivery/activeDeliveryPopulation';
+import { resolveSupporterName } from '@/lib/supporterBoxManifest';
 
 /**
  * OPS-6B — the ACTIVE Delivery queue: orders Delivery actually owns.
@@ -72,6 +73,11 @@ export async function GET(req: Request) {
                 id: true,
                 external_id: true,
                 customer_name: true,
+                // OPS-6B.1: the frozen order-time purchaser identity, so the
+                // stop and its packing slip resolve the SAME name by the same
+                // rule. Selected here only to feed resolveSupporterName below.
+                first_name: true,
+                last_name: true,
                 delivery_address: true,
                 delivery_sequence: true,
                 delivery_date: true,
@@ -93,7 +99,28 @@ export async function GET(req: Request) {
             orderBy: { id: 'asc' },
         });
 
-        return NextResponse.json(orders);
+        /**
+         * OPS-6B.1 — resolve the stop's name with the SAME authority the
+         * packing slip uses.
+         *
+         * The board previously displayed `Order.customer_name` directly. That
+         * is frozen order-time truth, not the mutable Customer relation, so
+         * nothing was leaking — but the packing slip resolves identity through
+         * resolveSupporterName, which PREFERS the distinct
+         * `first_name`/`last_name` pair. Two surfaces, two precedences, one
+         * order: the same shape of defect this phase exists to remove.
+         *
+         * The canonical helper deliberately returns null for a placeholder or
+         * missing name. A stop must never disappear over that — an unnameable
+         * box still has to be delivered — so the previous display value stands
+         * as the fallback and nothing regresses.
+         */
+        const withSupporterName = orders.map((order) => ({
+            ...order,
+            supporterName: resolveSupporterName(order as any) ?? order.customer_name ?? null,
+        }));
+
+        return NextResponse.json(withSupporterName);
     } catch (e) {
         console.error('Delivery queue failed');
         return NextResponse.json({ error: 'Failed to load the delivery queue' }, { status: 500 });

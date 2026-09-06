@@ -367,6 +367,40 @@ describe('PRESERVED BEHAVIOUR', () => {
         expect(strip(read(AUTHORITY))).not.toMatch(/groupBy|campaignId|groupOrdersForDelivery/);
     });
 
+    it('R6. the stop and its packing slip resolve identity by the SAME frozen authority', async () => {
+        // Part J. The board displayed Order.customer_name directly — frozen
+        // order-time truth, NOT the mutable Customer relation, so nothing was
+        // leaking. But the slip prefers the distinct first/last pair, so the two
+        // surfaces could name the same order differently. They now agree.
+        const split = order({
+            id: 'ord-released',
+            first_name: 'Laurie', last_name: 'Hacker',
+            customer_name: 'Vesper Test',
+        });
+
+        useMock(evaluatingMock([split]));
+        const q = await callQueue();
+        useMock(evaluatingMock([split]));
+        const slips = await callSlips();
+
+        expect(q[0].supporterName).toBe('Laurie Hacker');
+        expect(slips.boxes[0].supporterName).toBe('Laurie Hacker');
+        expect(q[0].supporterName).toBe(slips.boxes[0].supporterName);
+
+        // The page renders the server-resolved name, not its own chain.
+        expect(read('app/delivery/page.tsx')).toMatch(/customerName: o\.supporterName \|\|/);
+    });
+
+    it('R7. an unnameable stop still appears — identity never removes a delivery', async () => {
+        // resolveSupporterName returns null for placeholders; a box that cannot
+        // be named still has to be delivered, so the stop survives.
+        const nameless = order({ id: 'ord-released', first_name: null, last_name: null, customer_name: 'Guest' });
+        useMock(evaluatingMock([nameless]));
+        const q = await callQueue();
+        expect(q).toHaveLength(1);
+        expect(q[0].supporterName).toBe('Guest');
+    });
+
     it('R5. no schema change was needed for this phase', () => {
         const schema = read('prisma/schema.prisma');
         // The OPS-6B columns are the only handoff schema, unchanged.
