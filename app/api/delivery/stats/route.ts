@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from '@/lib/db';
-import { toDbOrderStatusReadCandidates } from '@/lib/orderStatus';
 import { computePackagingNeed } from '@/lib/deliveryPackaging';
+import {
+    activeDeliveryOrderWhere,
+    parseDeliveryWeek,
+    undatedActiveDeliveryWhere,
+} from '@/lib/delivery/activeDeliveryPopulation';
 
 /**
  * OPS-6B — Delivery packing/packaging figures, from the CANONICAL physical-box
@@ -57,9 +61,6 @@ import { computePackagingNeed } from '@/lib/deliveryPackaging';
  * idempotent.
  */
 
-/** The escape hatches only reach back this far. */
-const ESCAPE_HATCH_DAYS = 30;
-
 export async function GET(req: NextRequest) {
     try {
         const { auth } = await import('@/auth');
@@ -67,41 +68,14 @@ export async function GET(req: NextRequest) {
         if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
         const { searchParams } = new URL(req.url);
-        const deliveryWeekStart = searchParams.get('delivery_week_start');
 
-        const activeStatuses = [
-            ...toDbOrderStatusReadCandidates('pending'),
-            ...toDbOrderStatusReadCandidates('production_ready'),
-            ...toDbOrderStatusReadCandidates('in_production'),
-            ...toDbOrderStatusReadCandidates('ready_to_ship'),
-            ...toDbOrderStatusReadCandidates('completed'),
-        ];
-
-        const whereClause: any = {
-            business_id: session.user.businessId,
-            // §12 clears here: soft-canceled orders are not packing work.
-            canceled_at: null,
-            status: { in: [...new Set(activeStatuses)] as any },
-        };
-
-        if (deliveryWeekStart) {
-            const weekStart = new Date(deliveryWeekStart);
-            if (!Number.isNaN(weekStart.getTime())) {
-                const weekEnd = new Date(weekStart);
-                weekEnd.setDate(weekEnd.getDate() + 7);
-                const hatchFloor = new Date(Date.now() - ESCAPE_HATCH_DAYS * 864e5);
-                whereClause.OR = [
-                    { delivery_date: { gte: weekStart, lt: weekEnd } },
-                    // BOTH hatches are bounded. Unbounded, the first of these
-                    // matched every dateless order the tenant ever created.
-                    { delivery_date: null, created_at: { gte: hatchFloor } },
-                    {
-                        status: { in: toDbOrderStatusReadCandidates('completed') as any },
-                        created_at: { gte: hatchFloor },
-                    },
-                ];
-            }
-        }
+        // OPS-6B.1: the SAME population as the stop list, the slips and the
+        // manifest. This route previously selected by STATUS and never
+        // consulted the handoff at all, which is why the Print Queue and the
+        // Slips badge described orders that Delivery did not own — and read the
+        // same number before and after Send to Delivery.
+        const week = parseDeliveryWeek(searchParams.get('delivery_week_start'));
+        const whereClause = activeDeliveryOrderWhere(session.user.businessId, week);
 
         // Narrow select: only what the packing arithmetic reads. No supporter
         // name, phone, email or address is fetched — a count needs none of it.
@@ -137,7 +111,16 @@ export async function GET(req: NextRequest) {
         // are walked off the frozen tier. Nothing is re-derived here.
         const need = computePackagingNeed(activeOrders as any);
 
+        // OPS-6B.1: released work that carries NO effective delivery date sits
+        // in no specific week. It is reported rather than silently omitted —
+        // hiding released orders would be the original defect pointed the other
+        // way. Only meaningful while a week is actually selected.
+        const undatedActiveCount = week
+            ? await prisma.order.count({ where: undatedActiveDeliveryWhere(session.user.businessId) })
+            : 0;
+
         return NextResponse.json({
+            undatedActiveCount,
             largeBoxCount: need.largeBoxCount,
             smallBoxCount: need.smallBoxCount,
             physicalBoxCount: need.physicalBoxCount,

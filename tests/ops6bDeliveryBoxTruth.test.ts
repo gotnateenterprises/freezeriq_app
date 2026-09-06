@@ -334,7 +334,16 @@ describe('PRINT LABELS', () => {
 // REGRESSION (9)
 // ═════════════════════════════════════════════════════════════════════════════
 describe('REGRESSION', () => {
-    it('R1. the stats population now matches the packing-slip population exactly', async () => {
+    it('R1. the stats population is BYTE-IDENTICAL to the packing-slip population', async () => {
+        // STRENGTHENED BY OPS-6B.1. This originally asserted the two where
+        // clauses were structurally SIMILAR — same canceled_at, same number of
+        // OR branches, both escape hatches bounded. That similarity was not
+        // enough: neither route filtered on the handoff, so both described a
+        // population the stop list did not share, and in Production a supporter
+        // who had never been sent to Delivery printed a packing slip.
+        //
+        // Both now build their WHERE from one authority, so the correct
+        // assertion is equality, not resemblance.
         useMock(createPrismaMock({ results: { 'order.findMany': [] } }));
         await callStats('?delivery_week_start=2026-09-07');
         const statsWhere = mock.firstCall('order.findMany')?.args?.where;
@@ -343,12 +352,10 @@ describe('REGRESSION', () => {
         await callSlips('?delivery_week_start=2026-09-07');
         const slipsWhere = mock.firstCall('order.findMany')?.args?.where;
 
+        expect(statsWhere).toEqual(slipsWhere);
         expect(statsWhere.canceled_at).toBeNull();
-        expect(slipsWhere.canceled_at).toBeNull();
-        expect(statsWhere.OR).toHaveLength(slipsWhere.OR.length);
-        // BOTH escape hatches bounded on both sides.
-        expect(statsWhere.OR[1].created_at?.gte).toBeInstanceOf(Date);
-        expect(statsWhere.OR[2].created_at?.gte).toBeInstanceOf(Date);
+        // And both now honour the handoff boundary, which is the whole point.
+        expect(statsWhere.released_to_delivery_at).toEqual({ not: null });
     });
 
     it('R2. stats rejects an unparseable week rather than silently dropping the filter', async () => {

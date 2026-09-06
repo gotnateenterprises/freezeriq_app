@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
-import { toDbOrderStatusReadCandidates } from '@/lib/orderStatus';
+import { activeDeliveryOrderWhere, parseDeliveryWeek } from '@/lib/delivery/activeDeliveryPopulation';
 
 /**
  * OPS-6B — the ACTIVE Delivery queue: orders Delivery actually owns.
@@ -59,29 +59,12 @@ export async function GET(req: Request) {
         const businessId = session.user.businessId;
 
         const { searchParams } = new URL(req.url);
-        const deliveryWeekStart = searchParams.get('delivery_week_start');
 
-        const whereClause: any = {
-            business_id: businessId,
-            canceled_at: null,
-            // THE HANDOFF BOUNDARY. This single predicate is what makes the
-            // Delivery board mean "Delivery owns this".
-            released_to_delivery_at: { not: null },
-            NOT: { status: { in: toDbOrderStatusReadCandidates('delivered') as any } },
-        };
-
-        if (deliveryWeekStart) {
-            const weekStart = new Date(deliveryWeekStart);
-            if (!Number.isNaN(weekStart.getTime())) {
-                const weekEnd = new Date(weekStart);
-                weekEnd.setDate(weekEnd.getDate() + 7);
-                const hatchFloor = new Date(Date.now() - 30 * 864e5);
-                whereClause.OR = [
-                    { delivery_date: { gte: weekStart, lt: weekEnd } },
-                    { delivery_date: null, created_at: { gte: hatchFloor } },
-                ];
-            }
-        }
+        // OPS-6B.1: membership comes from the ONE authority, never from a rule
+        // restated here. This route used to carry its own copy, and the copies
+        // drifted — see lib/delivery/activeDeliveryPopulation.ts.
+        const week = parseDeliveryWeek(searchParams.get('delivery_week_start'));
+        const whereClause = activeDeliveryOrderWhere(businessId, week);
 
         const orders = await prisma.order.findMany({
             where: whereClause,

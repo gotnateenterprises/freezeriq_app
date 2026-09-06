@@ -499,26 +499,41 @@ describe('REGRESSION', () => {
         expect(resolveSlipDeliveryDate(null)).toBeNull();
     });
 
-    it('R2. delivery_week_start reproduces the /api/orders week-window + escape-hatch semantics', async () => {
+    it('R2. delivery_week_start filters on the EFFECTIVE delivery date the slip prints', async () => {
+        // REVISED BY OPS-6B.1. This route used to reproduce /api/orders' week
+        // semantics: a window on Order.delivery_date plus a 30-day hatch for
+        // dateless rows. That hatch was the bug — no fundraiser creation path
+        // writes Order.delivery_date, so fundraiser orders are systematically
+        // dateless and matched EVERY week, then printed the CAMPAIGN date they
+        // had never been filtered on. In Production the selector read
+        // "Aug 23-29" while the slips it produced were dated 9/22.
+        //
+        // The window now uses the same Campaign > Order precedence that
+        // resolveSlipDeliveryDate prints, so filter and document agree.
         useMock(createPrismaMock({ results: { 'order.findMany': [] } }));
         await callRoute('delivery_week_start=2026-09-07');
         const where = mock.firstCall('order.findMany')?.args?.where;
         expect(Array.isArray(where.OR)).toBe(true);
-        expect(where.OR[0].delivery_date.gte.toISOString().slice(0, 10)).toBe('2026-09-07');
-        expect(where.OR[1].delivery_date).toBeNull();
+        expect(where.OR[0].campaign.delivery_date.gte.toISOString().slice(0, 10)).toBe('2026-09-07');
+        expect(where.OR[1].campaign.delivery_date).toBeNull();
+        expect(where.OR[2].campaign_id).toBeNull();
+        // The dateless-into-every-week hatch is gone.
+        expect(where.OR.some((b: any) => b.delivery_date === null && b.created_at)).toBe(false);
     });
 
-    it('R3. the status candidate list covers every fulfillable status, canonical and legacy alike', async () => {
+    it('R3. membership is the HANDOFF, not a status list', async () => {
+        // REVISED BY OPS-6B.1. Selecting by fulfillable status meant this route
+        // answered "what could be packed this week", while the Delivery stop
+        // list beside it answered "what has Delivery been given" — so an order
+        // nobody had sent to Delivery still printed a slip. One physical box is
+        // one packing slip, so the slips must be the boxes Delivery owns.
         useMock(createPrismaMock({ results: { 'order.findMany': [] } }));
         await callRoute();
-        const statuses: string[] = mock.firstCall('order.findMany')?.args?.where?.status?.in || [];
-        expect(statuses).toEqual(expect.arrayContaining([
-            'pending', 'PENDING',
-            'production_ready', 'APPROVED',
-            'in_production', 'IN_PRODUCTION',
-            'ready_to_ship',
-            'completed', 'COMPLETED',
-        ]));
+        const where = mock.firstCall('order.findMany')?.args?.where;
+        expect(where.status).toBeUndefined();
+        expect(where.released_to_delivery_at).toEqual({ not: null });
+        expect(where.canceled_at).toBeNull();
+        expect(where.NOT.status.in).toEqual(expect.arrayContaining(['delivered']));
     });
 
     it('R4. the Quick Tips panel content is unchanged', () => {

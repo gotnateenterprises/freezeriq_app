@@ -3,12 +3,12 @@ import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { type BoxManifestOrder } from '@/lib/supporterBoxManifest';
 import { buildPhysicalBoxManifest } from '@/lib/physicalBoxPacking';
-import { toDbOrderStatusReadCandidates } from '@/lib/orderStatus';
 import {
     buildMealsByOrderItemId,
     orderBoxesByDeliverySequence,
     resolveSlipDeliveryDate,
 } from '@/lib/packingSlipContents';
+import { activeDeliveryOrderWhere, parseDeliveryWeek } from '@/lib/delivery/activeDeliveryPopulation';
 
 /**
  * PACKING-SLIP-1 — the tenant-authorized packing-slip data authority.
@@ -59,9 +59,6 @@ import {
  * No writes. This route cannot advance an order's lifecycle.
  */
 
-/** Every status a fulfillable order can be in when its slip is printed. */
-const PACKING_SLIP_STATUSES = ['pending', 'production_ready', 'in_production', 'ready_to_ship', 'completed'];
-
 export async function GET(request: Request) {
     try {
         const session = await auth();
@@ -71,38 +68,26 @@ export async function GET(request: Request) {
         }
 
         const { searchParams } = new URL(request.url);
-        const deliveryWeekStart = searchParams.get('delivery_week_start');
 
-        const dbCandidates = [...new Set(PACKING_SLIP_STATUSES.flatMap((s) => toDbOrderStatusReadCandidates(s)))];
-
-        // TENANT SCOPE IS IN THE QUERY, exactly as box-labels: business_id is
-        // the authenticated session's, so another tenant's order is simply
-        // never a row here, not a row filtered out afterwards.
-        const whereClause: any = {
-            business_id: businessId,
-            canceled_at: null,
-            status: { in: dbCandidates },
-        };
-
-        // Same week-window semantics as /api/orders: the selected delivery
-        // week, plus a 30-day escape hatch for recent null-date or
-        // still-completing rows that have not been assigned a date yet.
-        if (deliveryWeekStart) {
-            const weekStart = new Date(deliveryWeekStart);
-            if (!Number.isNaN(weekStart.getTime())) {
-                const weekEnd = new Date(weekStart);
-                weekEnd.setDate(weekEnd.getDate() + 7);
-                const thirtyDaysAgo = new Date(Date.now() - 30 * 864e5);
-                whereClause.OR = [
-                    { delivery_date: { gte: weekStart, lt: weekEnd } },
-                    { delivery_date: null, created_at: { gte: thirtyDaysAgo } },
-                    {
-                        status: { in: toDbOrderStatusReadCandidates('completed') },
-                        created_at: { gte: thirtyDaysAgo },
-                    },
-                ];
-            }
-        }
+        // OPS-6B.1 — THE ACTIVE DELIVERY POPULATION, and nothing else.
+        //
+        // This route used to select by STATUS (every fulfillable status) with a
+        // 30-day dateless escape hatch, and never consulted the handoff. In
+        // Production that printed a packing slip for a supporter who had never
+        // been sent to Delivery, while the stop list beside it correctly showed
+        // one stop — and the Slips badge read the same number before and after
+        // the handoff, because the handoff was invisible to this query.
+        //
+        // One physical box is one packing slip, so the set of slips must be the
+        // set of boxes Delivery actually owns. Membership now comes from the one
+        // authority; see lib/delivery/activeDeliveryPopulation.ts.
+        //
+        // WORKFLOW CONSEQUENCE, deliberate: packing slips are printed AFTER
+        // Send to Delivery, not while packing. Box labels remain the
+        // Production-side print (app/api/production/box-labels/route.ts) and are
+        // unaffected.
+        const week = parseDeliveryWeek(searchParams.get('delivery_week_start'));
+        const whereClause = activeDeliveryOrderWhere(businessId, week);
 
         const orders = await prisma.order.findMany({
             where: whereClause,

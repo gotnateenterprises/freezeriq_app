@@ -69,6 +69,12 @@ interface Stats {
     physicalBoxCount: number;
     purchasedBundleCount: number;
     unpackable: number;
+    /**
+     * OPS-6B.1: released orders carrying no effective delivery date (no campaign
+     * date and no order date). They belong to no specific week, so a week view
+     * excludes them — and says so, rather than letting released work vanish.
+     */
+    undatedActiveCount: number;
 }
 
 interface DeliveryLocation {
@@ -781,6 +787,13 @@ export default function DeliveryDashboard() {
                                 <div className="text-xs font-bold text-amber-300 pt-1">
                                     {stats!.unpackable} bundle{stats!.unpackable === 1 ? '' : 's'} could not be packed
                                     automatically (no provable sold serving size).
+                                </div>
+                            )}
+                            {/* OPS-6B.1: never silently hide released work. */}
+                            {(stats?.undatedActiveCount ?? 0) > 0 && (
+                                <div className="text-xs font-bold text-amber-300 pt-1">
+                                    {stats!.undatedActiveCount} released order{stats!.undatedActiveCount === 1 ? '' : 's'} have
+                                    no delivery date set and are not shown in this week. Use All Weeks to see them.
                                 </div>
                             )}
                         </div>
