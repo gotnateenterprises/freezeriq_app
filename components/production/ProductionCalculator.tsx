@@ -94,7 +94,21 @@ export function ProductionCalculator() {
     const [newDate] = useState(new Date().toISOString().split('T')[0]);
     const [completedItems, setCompletedItems] = useState<Set<string>>(new Set());
     const [shoppingChecked, setShoppingChecked] = useState<Set<string>>(new Set());
-    const [showAllItems, setShowAllItems] = useState(false);
+    /**
+     * CALC-1A: DEFAULTS TO TRUE.
+     *
+     * "Nothing to buy" and "nothing required" are different facts. This flag
+     * gates a filter that removes any ingredient whose on-hand covers the gross
+     * requirement. With it defaulting to false, Ground Beef (2 lb required,
+     * 20 lb on hand) vanished from the Comfort Food plan entirely while Pork and
+     * Chicken — neither of them covered — stayed, which is exactly what the
+     * owner reported during CALC-1 acceptance. The kitchen still has to put 2 lb
+     * in the pan, so the requirement must be visible by default.
+     *
+     * The filter itself is preserved: unchecking still narrows the list to just
+     * what has to be purchased.
+     */
+    const [showAllItems, setShowAllItems] = useState(true);
     const [recipeDetails, setRecipeDetails] = useState<Record<string, any>>({});
 
     // Track if retrieval from localStorage is complete to prevent overwriting with initial empty state
@@ -726,8 +740,12 @@ export function ProductionCalculator() {
                                                             <td className={`p-3 text-right font-mono font-bold text-sm print:p-0 print:text-[10px] ${isChecked ? 'text-slate-400 dark:text-slate-500' : 'text-indigo-600 dark:text-indigo-400'}`}>
                                                                 {toFraction(Number(data.netQty))} {data.unit}
                                                                 {(data.qty > data.netQty || (data.purchaseQuantity && data.purchaseQuantity > 0)) && (
-                                                                    <div className="item-meta-print">
-                                                                        {data.qty > data.netQty && `T: ${toFraction(Number(data.qty))} `}
+                                                                    // CALC-1A: the number above is what to BUY. When stock covers
+                                                                    // part or all of it that is not the same as what the recipes
+                                                                    // REQUIRE, so the gross is spelled out with its unit rather
+                                                                    // than abbreviated to a print-only "T:".
+                                                                    <div className="item-meta-print font-normal text-slate-500 dark:text-slate-400 text-xs">
+                                                                        {data.qty > data.netQty && `Need: ${toFraction(Number(data.qty))} ${data.unit} `}
                                                                         {data.purchaseQuantity && data.purchaseQuantity > 0 && `(${(data.netQty / data.purchaseQuantity).toFixed(1)} ${data.purchaseUnit === 'Cases' ? 'cs' : (data.purchaseUnit || 'cs')})`}
                                                                     </div>
                                                                 )}
