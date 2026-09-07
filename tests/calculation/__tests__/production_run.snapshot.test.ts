@@ -280,7 +280,15 @@ describe('KitchenEngine.generateProductionRun — Edge Cases', () => {
 
 describe('KitchenEngine — Multiplier Chain Verification (LAW 2)', () => {
 
-    test('serves_2 produces exactly 0.5× the qty of serves_5', async () => {
+    test('CALC-1: the sold tier does NOT scale ingredient demand — the same bundle at serves_2 and serves_5 is identical', async () => {
+        // SUPERSEDES "serves_2 produces exactly 0.5x the qty of serves_5".
+        //
+        // KITCHEN-CALCULATION-VERIFY-1 certified from Production data that a
+        // couple-tier BundleContent points at its own PRE-HALVED "(Serves 2)"
+        // recipe row. The tier is therefore already expressed by WHICH row the
+        // bundle references; applying a further 0.5 in the engine halved the
+        // couple lane a second time. BUNDLE_SIMPLE references ONE row, so both
+        // tiers must now produce the same demand for that row.
         const engine = createEngine();
         const family = await engine.generateProductionRun(
             [{ bundle_id: BUNDLE_SIMPLE, quantity: 1, variant_size: 'serves_5' }]
@@ -292,8 +300,22 @@ describe('KitchenEngine — Multiplier Chain Verification (LAW 2)', () => {
         for (const key of Object.keys(family.rawIngredients)) {
             const familyQty = (family.rawIngredients as any)[key]?.qty || 0;
             const coupleQty = (couple.rawIngredients as any)[key]?.qty || 0;
-            expect(coupleQty).toBeCloseTo(familyQty * 0.5, 10);
+            expect(coupleQty).toBeCloseTo(familyQty, 10);
         }
+    });
+
+    test('CALC-1: one sold meal consumes ONE full stored ingredient list, whatever the yield label says', async () => {
+        // The fixture's Chicken Teriyaki stores 2.5 lb of chicken and is labelled
+        // "5 servings". One sold bundle = one physical tray = 2.5 lb. The locked
+        // snapshot used to record 0.5 lb here, which is the defect this suite
+        // failed to catch for five phases — hence this non-snapshot assertion.
+        const engine = createEngine();
+        const r = await engine.generateProductionRun(
+            [{ bundle_id: BUNDLE_SIMPLE, quantity: 1, variant_size: 'serves_5' }]
+        );
+        expect((r.rawIngredients as any)['ing-001-chicken-breast'].qty).toBeCloseTo(2.5, 10);
+        expect((r.rawIngredients as any)['ing-008-rice'].qty).toBeCloseTo(3, 10);
+        expect((r.rawIngredients as any)['ing-009-soy-sauce'].qty).toBeCloseTo(0.5, 10);
     });
 
     test('Quantity 10 produces exactly 10× the qty of quantity 1', async () => {
@@ -319,10 +341,13 @@ describe('KitchenEngine — Multiplier Chain Verification (LAW 2)', () => {
             { debug: true }
         );
 
-        // Expected: order_qty(7) × bundle_content_qty(1) × serving_multiplier(0.5) = 3.5
+        // CALC-1: final_multiplier is the PHYSICAL MEAL COUNT —
+        //   order_qty(7) x bundle_content_qty(1) = 7.
+        // serving_multiplier is still reported so an auditor can see what tier
+        // was sold (LAW 7), but it is no longer applied to ingredient demand.
         for (const t of result.debug.trace) {
             expect(t.serving_multiplier).toBe(0.5);
-            expect(t.final_multiplier).toBe(7 * 1 * 0.5);
+            expect(t.final_multiplier).toBe(7 * 1);
         }
     });
 

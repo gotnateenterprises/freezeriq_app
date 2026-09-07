@@ -20,13 +20,56 @@ No silent drift. Ever.
 
 ## LAW 2 — MULTIPLIERS STACK, NEVER REPLACE
 
-Final quantity MUST always be:
+*Amended by CALC-1 (2026-09-07) to match the storage convention certified from
+Production data by KITCHEN-CALCULATION-VERIFY-1. The previous wording —
+`Ingredient Qty × Servings per Recipe × Bundle Size Multiplier × Bundle Quantity`
+— assumed ingredients were stored PER SERVING and multiplied up. They are not.
+Following it literally understated every family order by 80% and every couple
+order by 75%.*
+
+### The storage convention
+
+`RecipeItem.quantity` on a **menu recipe** is the full ingredient amount for
+**ONE PHYSICAL MEAL PACKAGE at that recipe row's own tier**. A family row
+labelled "5 servings" storing 1 lb of beef means one family meal needs 1 lb —
+not 0.2 lb, and not 5 lb.
+
+The serving tier is expressed by **which recipe row a BundleContent references**.
+A couple bundle points at its own pre-halved "(Serves 2)" row. The tier is
+therefore already in the data and MUST NOT be applied a second time at runtime.
+
+### NORMAL MENU RECIPE
 
 ```
-Ingredient Qty × Servings per Recipe × Bundle Size Multiplier × Bundle Quantity
+meals = OrderItem.quantity × BundleContent.quantity
+
+ingredient demand += convertUnit(RecipeItem.quantity × meals,
+                                 RecipeItem.unit → Ingredient.unit)
 ```
 
-NEVER: Skip a multiplier, override a multiplier, or apply partially.
+- NO `base_yield_qty` divide. For a menu row `base_yield_qty` is descriptive
+  (cost per serving, the editor's batch calculator) — never a production divisor.
+- NO serving-tier multiplier. `getServingMultiplier` may still be called to
+  VALIDATE the sold tier and to record it for tracing, but its value must never
+  scale ingredient demand.
+
+### SUB-RECIPE (recipe-to-recipe link)
+
+`base_yield_qty` **is** the correct divisor here, and only here:
+
+```
+childYieldNeeded = convertUnit(RecipeItem.quantity × meals,
+                               RecipeItem.unit → childRecipe.base_yield_unit)
+childBatches     = childYieldNeeded / childRecipe.base_yield_qty
+```
+
+Then recurse into the child with `childBatches`.
+
+**Convert BEFORE dividing.** Dividing an amount expressed in the parent's unit
+by a yield expressed in the child's unit (teaspoons against a tablespoon yield)
+is a real, measured 3× error.
+
+NEVER: Skip a multiplier, override a multiplier, or apply one partially.
 
 ## LAW 3 — NO EARLY ROUNDING
 
@@ -76,15 +119,21 @@ System must support a DEBUG output trace per ingredient:
 ```json
 {
   "bundle": "Q1 Hearty Family",
-  "quantity": 5,
+  "orderQuantity": 5,
+  "bundleContentQuantity": 1,
+  "meals": 5,
   "recipe": "Pork Loin Meal",
-  "servings": 4,
   "ingredient": "Pork Loin",
-  "perServing": 0.5,
+  "perMeal": 2.5,
   "unit": "lb",
-  "computed": 10
+  "computed": 12.5
 }
 ```
+
+*Amended by CALC-1: the trace records `perMeal` (the stored quantity for one
+physical package) and the meal count, because that is how the data is stored.
+The engine additionally records the sold `serving_multiplier` for audit, but it
+is not a factor in `computed`.*
 
 ## SAFETY CHECKS
 

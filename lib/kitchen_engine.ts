@@ -1,5 +1,54 @@
+/**
+ * CALC-1 — THE PHYSICAL-MEAL INGREDIENT DEMAND CONTRACT.
+ *
+ * CERTIFIED BY KITCHEN-CALCULATION-VERIFY-1 against read-only Production data:
+ *
+ *   RecipeItem.quantity on a MENU recipe is the full ingredient amount for ONE
+ *   PHYSICAL MEAL PACKAGE at that recipe row's own tier. "Cheeseburger Soup"
+ *   ("5 servings") stores 1 lb of beef = one family meal; its "(Serves 2)" row
+ *   ("2 Servings") stores 0.5 lb = one couple meal. So one sold meal instance
+ *   consumes exactly ONE stored ingredient list.
+ *
+ * THE CONTRACT
+ *
+ *   meals            = OrderItem.quantity x BundleContent.quantity   (mealManifest.ts)
+ *   ingredient link  : demand[ingredient.id] += convertUnit(item.quantity x meals,
+ *                                                item.unit -> Ingredient.unit)
+ *   sub-recipe link  : childYield  = convertUnit(item.quantity x meals,
+ *                                       item.unit -> child.base_yield_unit)
+ *                      childCopies = childYield / child.base_yield_qty
+ *                      recurse with childCopies
+ *
+ *   NO serving multiplier at menu depth.  NO base_yield divide at menu depth.
+ *
+ * WHAT WAS WRONG (both defects P0, both fixed here)
+ *
+ *   1. YIELD DIVIDE. explodeRecipeSync divided the physical package count by
+ *      Recipe.base_yield_qty before scaling the stored quantities, so every
+ *      "5 servings" row was planned at 0.200 of one tray. The divide arrived in
+ *      commit e07b708 inside an unrelated CRM change; the root commit 0fb961b
+ *      had deliberately coded "1 Order = 1 Batch". 154 of 157 tenant bundle
+ *      contents sit on the servings convention, so the live planner asked for
+ *      roughly a fifth of the food.
+ *   2. SERVES-2 DOUBLE SCALE. The engine also multiplied serves_2 lines by 0.5
+ *      although all 70 couple-tier BundleContents point at PRE-HALVED
+ *      "(Serves 2)" recipe rows produced by the RecipeEditor clone. Tier is
+ *      encoded by WHICH row a BundleContent references. Applying it again in
+ *      code quartered the couple lane.
+ *
+ * WHY getServingMultiplier IS STILL CALLED. It validates the sold tier (LAW 8 —
+ * an unknown tier must fail loudly) and it is recorded in the debug trace so an
+ * auditor can still see what tier was sold. Its VALUE is never multiplied into
+ * ingredient demand. lib/serving_multipliers.ts remains the locked authority for
+ * fundraiser weights and label text and is untouched by this phase.
+ *
+ * THE UNIT OF THE RECURSION PARAMETER. explodeRecipeSync's second argument is
+ * "how many full copies of THIS recipe's stored ingredient list are needed". At
+ * depth 0 that is the physical meal count; at depth >= 1 it is the child batch
+ * count computed by the parent AFTER unit conversion. One semantic, one unit.
+ */
 import { Uuid, Recipe } from '../types';
-import { optimizeUnit, convertUnit } from './unit_converter';
+import { convertUnit } from './unit_converter';
 import { getServingMultiplier, getMultiplierTable, normalizeStrictServingTier } from './serving_multipliers';
 import { MEAL_UNIT, manifestKey, physicalMealCount, resolveManifestVariantSize } from './mealManifest';
 import {
@@ -64,27 +113,32 @@ export class KitchenEngine {
             all.forEach((r: Recipe) => this.recipeCache.set(r.id, r));
         }
 
-        const rawIngredients: Map<string, { id: string, qty: number, netQty: number, unit: string, displayName: string, usedIn: Set<string>, supplier?: string, supplierUrl?: string, portalType?: string, searchUrlPattern?: string, onHand: number, costPerUnit: number, costUnit?: string, sku?: string, purchaseCost?: number, purchaseUnit?: string, purchaseQuantity?: number }> = new Map();
-        const prepTasks: Map<string, { qty: number, id: string, unit: string, label_text?: string, allergens?: string }> = new Map();
+        const rawIngredients: Map<string, { id: string, qty: number, netQty: number, unit: string, displayName: string, usedIn: Set<string>, supplier?: string, supplierUrl?: string, portalType?: string, searchUrlPattern?: string, onHand: number, rawOnHand: number, costPerUnit: number, costUnit?: string, sku?: string, purchaseCost?: number, purchaseUnit?: string, purchaseQuantity?: number }> = new Map();
+        const prepTasks: Map<string, { qty: number, id: string, name: string, unit: string, label_text?: string, allergens?: string }> = new Map();
         const trace: CalculationTrace[] = [];
         const driftCollector = new DriftAlertCollector();
         this._driftCollectorRef = driftCollector;
 
         // 1. Explode Orders into Recipe Jobs
-        //    MULTIPLIER CHAIN (LAW 2): order.quantity × bundleContent.quantity × servingMultiplier
+        //    CALC-1 CHAIN (LAW 2): order.quantity × bundleContent.quantity
+        //    The serving multiplier is NOT part of this chain — see the file header.
         for (const order of orders) {
-            // LAW 2: Serving multiplier MUST be applied exactly once per order
+            // LAW 8 validation + LAW 7 traceability. The value is recorded, never applied.
             const servingMultiplier = getServingMultiplier(order.variant_size);
 
             const bundleRecipes = await this.db.getBundleContents(order.bundle_id);
             for (const item of bundleRecipes) {
                 const bundleContentQty = item.quantity || 1.0;
-                const multiplier = order.quantity * bundleContentQty * servingMultiplier;
+                // CALC-1: ingredient demand is driven by the PHYSICAL MEAL COUNT,
+                // taken from the single canonical authority (lib/mealManifest.ts)
+                // that already produces the assemblyTasks manifest below. One
+                // formula, one module — never a second meal-count heuristic.
+                const mealInstances = physicalMealCount(order.quantity, item.quantity);
 
                 // DRIFT ALERT: Zero effective multiplier means this recipe contributes nothing
-                if (multiplier === 0) {
+                if (mealInstances === 0) {
                     driftCollector.add(alertZeroMultiplier(
-                        order.bundle_id, item.recipe_id, multiplier, options?.debug ? trace : undefined
+                        order.bundle_id, item.recipe_id, mealInstances, options?.debug ? trace : undefined
                     ));
                 }
 
@@ -97,13 +151,14 @@ export class KitchenEngine {
                         recipe_name: recipe?.name || 'UNKNOWN',
                         order_quantity: order.quantity,
                         bundle_content_quantity: bundleContentQty,
+                        // Recorded for audit; CALC-1 does NOT apply it to demand.
                         serving_multiplier: servingMultiplier,
                         variant_size: order.variant_size || 'serves_5',
-                        final_multiplier: multiplier,
+                        final_multiplier: mealInstances,
                     });
                 }
 
-                this.explodeRecipeSync(item.recipe_id, multiplier, rawIngredients, prepTasks);
+                this.explodeRecipeSync(item.recipe_id, mealInstances, rawIngredients, prepTasks);
             }
         }
 
@@ -238,12 +293,13 @@ export class KitchenEngine {
             rawIngredients: Object.fromEntries(
                 Array.from(rawIngredients.entries()).map(([k, v]) => [k, { ...v, usedIn: Array.from(v.usedIn) }])
             ),
-            prepTasks: Object.fromEntries(
-                Array.from(prepTasks.entries()).map(([k, v]) => {
-                    const optimized = optimizeUnit(v.qty, v.unit);
-                    return [k, { ...v, qty: optimized.qty, unit: optimized.unit }];
-                })
-            ),
+            // CALC-1 / LAW 3: the canonical quantity leaves the engine at FULL
+            // PRECISION in the recipe's own base_yield_unit. optimizeUnit's
+            // parseFloat(toFixed(2)) plus its unit re-scale used to run here, and
+            // that rounded, re-based number was what /api/production/runs persisted
+            // as ProductionTask.total_qty_needed. Unit prettying is a render-layer
+            // concern; the consumers that display it already round at their edge.
+            prepTasks: Object.fromEntries(prepTasks.entries()),
             assemblyTasks
         };
 
@@ -324,9 +380,15 @@ export class KitchenEngine {
      */
     private explodeRecipeSync(
         recipeId: Uuid,
-        neededAmt: number, // Represents the "amount" of the recipe output needed
-        rawIngredients: Map<string, { id: string, qty: number, netQty: number, unit: string, displayName: string, usedIn: Set<string>, supplier?: string, supplierUrl?: string, portalType?: string, searchUrlPattern?: string, onHand: number, costPerUnit: number, costUnit?: string, sku?: string, purchaseCost?: number, purchaseUnit?: string, purchaseQuantity?: number }>,
-        prepTasks: Map<string, { qty: number, id: string, unit: string, label_text?: string, allergens?: string }>,
+        /**
+         * How many FULL COPIES of this recipe's stored ingredient list are needed.
+         * Depth 0: the physical meal count (order.quantity x BundleContent.quantity).
+         * Depth >= 1: the child batch count the parent computed after converting
+         * into this recipe's own base_yield_unit and dividing by its base_yield_qty.
+         */
+        copies: number,
+        rawIngredients: Map<string, { id: string, qty: number, netQty: number, unit: string, displayName: string, usedIn: Set<string>, supplier?: string, supplierUrl?: string, portalType?: string, searchUrlPattern?: string, onHand: number, rawOnHand: number, costPerUnit: number, costUnit?: string, sku?: string, purchaseCost?: number, purchaseUnit?: string, purchaseQuantity?: number }>,
+        prepTasks: Map<string, { qty: number, id: string, name: string, unit: string, label_text?: string, allergens?: string }>,
         depth = 0
     ) {
         if (depth > 10) return; // Prevent infinite loops
@@ -337,21 +399,32 @@ export class KitchenEngine {
             return;
         }
 
-        // SCALING FIX: 
-        // If a recipe yields 5 units (servings/oz/etc) and we need 10 units, 
-        // the ingredients (which are for a FULL yield) should be multiplied by (10 / 5) = 2.0.
-        const baseYield = Number(recipe.base_yield_qty) || 1.0;
-        const multiplier = neededAmt / baseYield;
+        // CALC-1: NO YIELD DIVIDE HERE.
+        //
+        // `copies` already means "how many full copies of this recipe's stored
+        // ingredient list are needed" — the physical meal count at depth 0, the
+        // child batch count below that. The stored list IS one whole package, so
+        // it is multiplied by `copies` directly. base_yield_qty is descriptive for
+        // a menu row (cost-per-serving, the editor's batch calculator) and is used
+        // as a divisor in exactly one place: the recipe-to-recipe link further
+        // down, and only AFTER converting into the child's own yield unit.
 
         if (recipe.type === 'prep' || recipe.type === 'menu_item' || recipe.label_text || recipe.allergens) {
-            const current = prepTasks.get(recipe.name) || { qty: 0, id: recipe.id, unit: recipe.base_yield_unit, label_text: recipe.label_text, allergens: recipe.allergens };
+            // LAW 6: keyed by the stable Recipe id, never the display name. Two
+            // recipes a tenant named the same are two different physical products;
+            // merging them combined their quantities under one id and silently
+            // dropped the other (52 duplicate-name families exist in Production).
+            const current = prepTasks.get(recipe.id) || { qty: 0, id: recipe.id, name: recipe.name, unit: recipe.base_yield_unit, label_text: recipe.label_text, allergens: recipe.allergens };
 
             if (recipe.label_text && !current.label_text) current.label_text = recipe.label_text;
             if (recipe.allergens && !current.allergens) current.allergens = recipe.allergens;
 
-            prepTasks.set(recipe.name, {
-                qty: current.qty + neededAmt, // We need this many total yield units (e.g. 10 servings)
+            prepTasks.set(recipe.id, {
+                // For a MENU row this is now the physical meal count (the couple
+                // lane is no longer halved). For a PREP row it is the batch count.
+                qty: current.qty + copies,
                 id: recipe.id,
+                name: recipe.name,
                 unit: recipe.base_yield_unit,
                 label_text: current.label_text,
                 allergens: current.allergens
@@ -359,8 +432,8 @@ export class KitchenEngine {
         }
 
         for (const item of recipe.items) {
-            // childNeededQty is now scaled based on the batch multiplier
-            const childNeededQty = item.quantity * multiplier;
+            // The stored quantity is for ONE full copy of this recipe.
+            const childNeededQty = item.quantity * copies;
 
             if (item.child_type === 'ingredient') {
                 let rawName = item.name || item.child_item_id;
@@ -379,7 +452,14 @@ export class KitchenEngine {
                     supplierUrl: item.supplier_url,
                     portalType: (item as any).portal_type,
                     searchUrlPattern: (item as any).search_url_pattern,
-                    onHand: item.stock_quantity || 0,
+                    // CALC-1: 41 of this tenant's 214 ingredients carry an imported
+                    // NEGATIVE stock_quantity. Subtracting a negative ADDS it to the
+                    // purchase requirement, which put ~56% of a real shopping list's
+                    // printed units into repaying phantom deficits. Clamp for the
+                    // calculation; keep the raw value so a UI can still warn. No
+                    // Production row is modified by this phase.
+                    onHand: Math.max(0, Number(item.stock_quantity) || 0),
+                    rawOnHand: Number(item.stock_quantity) || 0,
                     costPerUnit: item.cost_per_unit || 0,
                     costUnit: item.cost_unit,
                     sku: item.sku,
@@ -424,6 +504,7 @@ export class KitchenEngine {
                     portalType: current.portalType || (item as any).portal_type,
                     searchUrlPattern: current.searchUrlPattern || (item.search_url_pattern as any),
                     onHand: current.onHand,
+                    rawOnHand: current.rawOnHand,
                     costPerUnit: Math.max(current.costPerUnit, item.cost_per_unit || 0),
                     costUnit: current.costUnit || item.cost_unit,
                     sku: current.sku || item.sku,
@@ -433,7 +514,42 @@ export class KitchenEngine {
                 });
 
             } else if (item.child_type === 'recipe') {
-                this.explodeRecipeSync(item.child_item_id, childNeededQty, rawIngredients, prepTasks, depth + 1);
+                // CALC-1 SUB-RECIPE CONTRACT — convert, THEN divide.
+                //
+                // `childNeededQty` is expressed in the PARENT item's unit. The
+                // child's base_yield_qty is expressed in the CHILD's yield unit.
+                // Dividing one by the other without converting first treated 4 tsp
+                // as 4 tbsp against a 144-tbsp seasoning yield — a real 3x error on
+                // 17 of this tenant's 42 sub-recipe links. Convert into the child's
+                // yield unit, then divide, then recurse with a batch count.
+                const child = this.recipeCache.get(item.child_item_id);
+                if (!child) {
+                    console.warn(`Recipe not found in cache: ${item.child_item_id}`);
+                    continue;
+                }
+
+                let neededInChildYieldUnit = childNeededQty;
+                const childYieldUnit = child.base_yield_unit;
+                if (
+                    childYieldUnit && item.unit &&
+                    childYieldUnit.toLowerCase().trim() !== item.unit.toLowerCase().trim()
+                ) {
+                    try {
+                        neededInChildYieldUnit = convertUnit(childNeededQty, item.unit, childYieldUnit, child.name);
+                    } catch (convErr: any) {
+                        console.error(`[RECONCILIATION WARNING] ${convErr.message}`);
+                        this._driftCollectorRef?.add(alertUnitConversionFailure(
+                            child.name, item.unit, childYieldUnit, convErr.message
+                        ));
+                        // Fall back to the unconverted amount rather than halting the
+                        // run — the same posture the ingredient branch above takes.
+                        neededInChildYieldUnit = childNeededQty;
+                    }
+                }
+
+                const childBaseYield = Number(child.base_yield_qty) || 1.0;
+                const childCopies = neededInChildYieldUnit / childBaseYield;
+                this.explodeRecipeSync(item.child_item_id, childCopies, rawIngredients, prepTasks, depth + 1);
             }
         }
     }

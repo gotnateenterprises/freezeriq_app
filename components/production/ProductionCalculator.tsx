@@ -46,7 +46,12 @@ interface PlanResult {
         purchaseUnit?: string;
         purchaseQuantity?: number;
     }>;
-    prepTasks: Record<string, { qty: number; unit: string; id: string; label_text?: string }>;
+    /**
+     * CALC-1: keyed by RECIPE ID (LAW 6), not by recipe name — two recipes a
+     * tenant named the same are two different physical products. `name` carries
+     * the display string that used to be the key.
+     */
+    prepTasks: Record<string, { qty: number; unit: string; id: string; name: string; label_text?: string }>;
     /**
      * OPS-5A: the PHYSICAL MEAL MANIFEST — one row per (recipe, authoritative
      * tier) with a DISCRETE package count. This is what the print batch is
@@ -476,11 +481,13 @@ export function ProductionCalculator() {
                                     // now yields SEPARATE Serves-5 and Serves-2 rows instead of
                                     // one row whose tier could not be named.
                                     //
-                                    // Selection is still by recipe name, exactly as the Prep Plan
-                                    // list presents it; a recipe selected in a mixed plan simply
-                                    // contributes one batch row per tier.
+                                    // CALC-1: selection is by RECIPE ID, matching the
+                                    // id-keyed Prep Plan list; a recipe selected in a
+                                    // mixed plan contributes one batch row per tier.
+                                    // Selecting by name would have merged two
+                                    // same-named recipes into one selection.
                                     const selectedRecipes = Object.values(result?.assemblyTasks || {})
-                                        .filter((row: any) => selectedForPrint.has(row.name))
+                                        .filter((row: any) => selectedForPrint.has(row.id))
                                         .map((row: any) => ({
                                             name: row.name,
                                             id: row.id,
@@ -862,9 +869,13 @@ export function ProductionCalculator() {
                                                 allIds: string[];
                                             }> = {};
 
-                                            Object.entries(result.prepTasks).forEach(([fullName, task]) => {
+                                            Object.values(result.prepTasks).forEach((task) => {
                                                 if (!details[task.id]) return;
 
+                                                // CALC-1: the display name now lives on the value
+                                                // (the key is the recipe id). The tier is still
+                                                // read from the recipe's own name, unchanged.
+                                                const fullName = task.name;
                                                 // Identify Base Name & Tier
                                                 let baseName = fullName;
                                                 let tier = 'family';
@@ -1142,8 +1153,11 @@ export function ProductionCalculator() {
                         </div>
                         <div className="space-y-4">
                             {Object.entries(result.prepTasks)
-                                .sort((a, b) => a[0].localeCompare(b[0]))
-                                .map(([name, data]) => {
+                                // CALC-1: the key is the recipe id, so sort and
+                                // select on it while displaying data.name.
+                                .sort((a, b) => (a[1].name || '').localeCompare(b[1].name || ''))
+                                .map(([recipeId, data]) => {
+                                    const name = data.name;
                                     // OPS-5D: the physical label copy count comes from the
                                     // manifest (assemblyTasks), NEVER from prepTasks' qty --
                                     // that is ingredient demand (lib/kitchen_engine.ts: "Nothing
@@ -1161,17 +1175,17 @@ export function ProductionCalculator() {
                                     // batch surface instead, which keeps one row per tier.
                                     const isMixedTier = distinctTierCount(manifestRows as any) > 1;
                                     return (
-                                        <div key={name} className="flex justify-between items-center p-4 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 hover:border-amber-200 transition-colors cursor-pointer"
+                                        <div key={recipeId} className="flex justify-between items-center p-4 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 hover:border-amber-200 transition-colors cursor-pointer"
                                             onClick={() => {
                                                 const next = new Set(selectedForPrint);
-                                                if (next.has(name)) next.delete(name);
-                                                else next.add(name);
+                                                if (next.has(recipeId)) next.delete(recipeId);
+                                                else next.add(recipeId);
                                                 setSelectedForPrint(next);
                                             }}
                                         >
                                             <div className="flex items-center gap-3">
-                                                <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${selectedForPrint.has(name) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'}`}>
-                                                    {selectedForPrint.has(name) && <Check size={14} className="text-white" />}
+                                                <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${selectedForPrint.has(recipeId) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'}`}>
+                                                    {selectedForPrint.has(recipeId) && <Check size={14} className="text-white" />}
                                                 </div>
                                                 <span className="font-bold text-slate-700 dark:text-slate-300">{name}</span>
                                             </div>

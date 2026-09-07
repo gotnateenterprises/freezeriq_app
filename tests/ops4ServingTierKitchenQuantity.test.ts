@@ -69,8 +69,24 @@ const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\
 // ═════════════════════════════════════════════════════════════════════════════
 // CONTROLLED FIXTURE — "if one base recipe requires 5 lb chicken" (mission's
 // own business-proof numbers). One bundle unit = one recipe unit = 5 lb.
+//
+// UPDATED BY CALC-1 — FIXTURE SHAPE, NOT BUSINESS NUMBERS.
+//
+// This fixture originally had ONE recipe row that a serves_5 bundle and a
+// serves_2 bundle both pointed at, and relied on the engine halving it at
+// runtime. KITCHEN-CALCULATION-VERIFY-1 certified from read-only Production
+// data that FreezerIQ does not work that way: all 70 couple-tier
+// BundleContents point at their own PRE-HALVED "(Serves 2)" recipe row,
+// created by the RecipeEditor's "Duplicate as Serves 2" action. The engine
+// applying 0.5 on top of that halved the couple lane twice.
+//
+// The fixture now models the real shape — a family row (5 lb) and its
+// pre-halved couple sibling (2.5 lb). EVERY business assertion below keeps
+// its original number (2.5 lb, 7.5 lb, 117.5 lb); they are simply now correct
+// for the right reason: the tier lives in WHICH row the bundle references.
 // ═════════════════════════════════════════════════════════════════════════════
 const CHICKEN_BUNDLE = 'bundle-chicken-5lb';
+const CHICKEN_BUNDLE_S2 = 'bundle-chicken-2.5lb-serves2';
 const CHICKEN_RECIPE: Recipe = {
     id: 'recipe-chicken-5lb',
     name: 'Base Chicken Recipe',
@@ -86,17 +102,36 @@ const CHICKEN_RECIPE: Recipe = {
         } as any,
     ],
 };
+/** The pre-halved couple sibling — exactly what "Duplicate as Serves 2" writes. */
+const CHICKEN_RECIPE_S2: Recipe = {
+    id: 'recipe-chicken-2.5lb-serves2',
+    name: 'Base Chicken Recipe (Serves 2)',
+    type: 'menu_item',
+    base_yield_qty: 0.5,
+    base_yield_unit: 'batch',
+    items: [
+        {
+            id: 'ri-chicken-s2', parent_recipe_id: 'recipe-chicken-2.5lb-serves2',
+            child_item_id: 'ing-chicken', child_type: 'ingredient',
+            name: 'Chicken', quantity: 2.5, unit: 'lb',
+            cost_per_unit: 1, cost_unit: 'lb', stock_quantity: 0,
+        } as any,
+    ],
+};
 function chickenAdapter(): DBAdapter {
+    const byId = new Map([[CHICKEN_RECIPE.id, CHICKEN_RECIPE], [CHICKEN_RECIPE_S2.id, CHICKEN_RECIPE_S2]]);
     return {
-        async getRecipe(id) { return id === CHICKEN_RECIPE.id ? CHICKEN_RECIPE : null; },
-        async getAllRecipes() { return [CHICKEN_RECIPE]; },
+        async getRecipe(id) { return byId.get(id) || null; },
+        async getAllRecipes() { return [CHICKEN_RECIPE, CHICKEN_RECIPE_S2]; },
         async getBundleContents(bundleId) {
-            return bundleId === CHICKEN_BUNDLE
-                ? [{ recipe_id: CHICKEN_RECIPE.id, position: 1, quantity: 1 }]
-                : [];
+            if (bundleId === CHICKEN_BUNDLE) return [{ recipe_id: CHICKEN_RECIPE.id, position: 1, quantity: 1 }];
+            if (bundleId === CHICKEN_BUNDLE_S2) return [{ recipe_id: CHICKEN_RECIPE_S2.id, position: 1, quantity: 1 }];
+            return [];
         },
         async getBundleInfo(bundleId) {
-            return bundleId === CHICKEN_BUNDLE ? { serving_tier: 'family' } : null;
+            if (bundleId === CHICKEN_BUNDLE) return { serving_tier: 'family' };
+            if (bundleId === CHICKEN_BUNDLE_S2) return { serving_tier: 'serves_2' };
+            return null;
         },
     };
 }
@@ -115,9 +150,11 @@ describe('1. KitchenEngine serving-tier multiplier math (business proof)', () =>
     });
 
     it('1 x Serves 2 = 0.5 base quantity (2.5 lb)', async () => {
+        // CALC-1: the couple bundle carries its own pre-halved row (2.5 lb),
+        // which is where the 0.5 now lives. Same number, right reason.
         const engine = new KitchenEngine(chickenAdapter());
         const result = await engine.generateProductionRun([
-            { bundle_id: CHICKEN_BUNDLE, quantity: 1, variant_size: 'serves_2' },
+            { bundle_id: CHICKEN_BUNDLE_S2, quantity: 1, variant_size: 'serves_2' },
         ]);
         expect(chickenLb(result)).toBe(2.5);
     });
@@ -126,7 +163,7 @@ describe('1. KitchenEngine serving-tier multiplier math (business proof)', () =>
         const engine = new KitchenEngine(chickenAdapter());
         const result = await engine.generateProductionRun([
             { bundle_id: CHICKEN_BUNDLE, quantity: 1, variant_size: 'serves_5' },
-            { bundle_id: CHICKEN_BUNDLE, quantity: 1, variant_size: 'serves_2' },
+            { bundle_id: CHICKEN_BUNDLE_S2, quantity: 1, variant_size: 'serves_2' },
         ]);
         expect(chickenLb(result)).toBe(7.5);
         expect(chickenLb(result)).not.toBe(10);
@@ -135,9 +172,17 @@ describe('1. KitchenEngine serving-tier multiplier math (business proof)', () =>
     it('3 x Serves 2 = 1.5 base-equivalent quantities (7.5 lb) — same total as S5+S2', async () => {
         const engine = new KitchenEngine(chickenAdapter());
         const result = await engine.generateProductionRun([
-            { bundle_id: CHICKEN_BUNDLE, quantity: 3, variant_size: 'serves_2' },
+            { bundle_id: CHICKEN_BUNDLE_S2, quantity: 3, variant_size: 'serves_2' },
         ]);
         expect(chickenLb(result)).toBe(7.5);
+    });
+
+    it('CALC-1: the tier is the ROW, not the sold string — the same couple bundle sold as serves_5 still needs 2.5 lb', async () => {
+        const engine = new KitchenEngine(chickenAdapter());
+        const result = await engine.generateProductionRun([
+            { bundle_id: CHICKEN_BUNDLE_S2, quantity: 1, variant_size: 'serves_5' },
+        ]);
+        expect(chickenLb(result)).toBe(2.5);
     });
 
     it('mixed families do not cross-contaminate tiers — a second bundle/recipe stays independent', async () => {
@@ -154,26 +199,29 @@ describe('1. KitchenEngine serving-tier multiplier math (business proof)', () =>
         const adapter: DBAdapter = {
             async getRecipe(id) {
                 if (id === CHICKEN_RECIPE.id) return CHICKEN_RECIPE;
+                if (id === CHICKEN_RECIPE_S2.id) return CHICKEN_RECIPE_S2;
                 if (id === PORK_RECIPE.id) return PORK_RECIPE;
                 return null;
             },
-            async getAllRecipes() { return [CHICKEN_RECIPE, PORK_RECIPE]; },
+            async getAllRecipes() { return [CHICKEN_RECIPE, CHICKEN_RECIPE_S2, PORK_RECIPE]; },
             async getBundleContents(bundleId) {
                 if (bundleId === CHICKEN_BUNDLE) return [{ recipe_id: CHICKEN_RECIPE.id, position: 1, quantity: 1 }];
+                if (bundleId === CHICKEN_BUNDLE_S2) return [{ recipe_id: CHICKEN_RECIPE_S2.id, position: 1, quantity: 1 }];
                 if (bundleId === PORK_BUNDLE) return [{ recipe_id: PORK_RECIPE.id, position: 1, quantity: 1 }];
                 return [];
             },
             async getBundleInfo(bundleId) {
                 if (bundleId === CHICKEN_BUNDLE) return { serving_tier: 'family' };
+                if (bundleId === CHICKEN_BUNDLE_S2) return { serving_tier: 'serves_2' };
                 if (bundleId === PORK_BUNDLE) return { serving_tier: 'couple' };
                 return null;
             },
         };
         const engine = new KitchenEngine(adapter);
         const result = await engine.generateProductionRun([
-            { bundle_id: CHICKEN_BUNDLE, quantity: 20, variant_size: 'serves_5' }, // 20 x 5lb = 100lb chicken
-            { bundle_id: CHICKEN_BUNDLE, quantity: 7, variant_size: 'serves_2' },  // 7 x 2.5lb = 17.5lb chicken
-            { bundle_id: PORK_BUNDLE, quantity: 5, variant_size: 'serves_5' },     // 5 x 4lb = 20lb pork
+            { bundle_id: CHICKEN_BUNDLE, quantity: 20, variant_size: 'serves_5' },    // 20 x 5lb  = 100lb chicken
+            { bundle_id: CHICKEN_BUNDLE_S2, quantity: 7, variant_size: 'serves_2' },  // 7 x 2.5lb = 17.5lb chicken
+            { bundle_id: PORK_BUNDLE, quantity: 5, variant_size: 'serves_5' },        // 5 x 4lb   = 20lb pork
         ]);
         expect(Number(result.rawIngredients['ing-chicken'].qty)).toBe(117.5);
         expect(Number(result.rawIngredients['ing-pork'].qty)).toBe(20);

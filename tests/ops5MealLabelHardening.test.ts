@@ -530,6 +530,23 @@ const RECIPE_ROW = {
         is_sub_recipe: false, section_name: null, section_batch: null,
     }],
 };
+/**
+ * CALC-1: the pre-halved couple sibling. Production couple bundles point at
+ * their own halved row; the engine no longer applies a runtime 0.5. This
+ * suite's 2.5 lb business number is unchanged — it now comes from the data.
+ */
+const RECIPE_ROW_S2 = {
+    id: 'recipe-chicken-s2', name: 'Base Chicken (Serves 2)', type: 'menu_item',
+    base_yield_qty: 0.5, base_yield_unit: 'batch', container_type: 'tray', category_id: null,
+    label_text: null, macros: null, image_url: null, description: null, allergens: null, cook_time: null,
+    child_items: [{
+        id: 'ri-1-s2', parent_recipe_id: 'recipe-chicken-s2',
+        child_recipe_id: null, child_ingredient_id: 'ing-chicken',
+        child_ingredient: { name: 'Chicken', unit: 'lb', cost_per_unit: 1, stock_quantity: 0, supplier: null },
+        child_recipe: null, quantity: 2.5, unit: 'lb',
+        is_sub_recipe: false, section_name: null, section_batch: null,
+    }],
+};
 const B_S5 = 'bundle-s5';
 const B_S2 = 'bundle-s2';
 
@@ -541,10 +558,15 @@ jest.mock('@/auth', () => ({ auth: () => mockAuth() }));
 
 const BIZ = 'biz-ops5';
 const planMock = (bundles: { id: string; serving_tier: string }[]) => ({
-    'recipe.findMany': [RECIPE_ROW],
+    'recipe.findMany': [RECIPE_ROW, RECIPE_ROW_S2],
     'bundleContent.findMany': (args: any) =>
         [B_S5, B_S2].includes(args.where.bundle_id)
-            ? [{ bundle_id: args.where.bundle_id, recipe_id: RECIPE_ROW.id, position: 1, quantity: 1 }]
+            ? [{
+                bundle_id: args.where.bundle_id,
+                // CALC-1: the couple bundle references the pre-halved row.
+                recipe_id: args.where.bundle_id === B_S2 ? RECIPE_ROW_S2.id : RECIPE_ROW.id,
+                position: 1, quantity: 1,
+            }]
             : [],
     'bundle.findMany': (args: any) => bundles.filter(b => args.where.id.in.includes(b.id)),
 });
@@ -724,10 +746,11 @@ describe('7. privacy: no supporter PII on a meal label', () => {
 // 8. REGRESSION GUARD — the locked authorities this phase must not touch.
 // ═════════════════════════════════════════════════════════════════════════════
 describe('8. regression guard: kitchen quantity authorities untouched', () => {
-    it('lib/kitchen_engine.ts is untouched — multiplier applied once per line', () => {
+    it('SUPERSEDED BY CALC-1: the tier is resolved once per line for LAW 8 and the trace, but demand is the physical meal count', () => {
         const s = read('lib/kitchen_engine.ts');
         expect(s).toMatch(/const servingMultiplier = getServingMultiplier\(order\.variant_size\);/);
-        expect(s).toMatch(/const multiplier = order\.quantity \* bundleContentQty \* servingMultiplier;/);
+        expect(s).toMatch(/const mealInstances = physicalMealCount\(order\.quantity, item\.quantity\);/);
+        expect(s).not.toMatch(/const multiplier = order\.quantity \* bundleContentQty \* servingMultiplier;/);
     });
 
     it('lib/serving_multipliers.ts is untouched (LOCKED)', () => {

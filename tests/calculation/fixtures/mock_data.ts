@@ -2,8 +2,15 @@
  * Mock Data Fixtures for Calculation Engine Snapshot Tests
  *
  * These fixtures represent a controlled, deterministic dataset
- * that exercises the full multiplier chain:
- *   Ingredient Qty × Recipe Yield Multiplier × Bundle Content Qty × Serving Multiplier × Order Qty
+ * that exercises the full multiplier chain. CALC-1 corrected that chain to:
+ *
+ *   Ingredient Qty × BundleContent Qty × Order Qty
+ *
+ * A menu recipe's stored ingredient list is ONE PHYSICAL MEAL at that row's own
+ * tier, so base_yield_qty is NOT a divisor for menu rows and the sold serving
+ * tier is NOT a multiplier (tier is expressed by which recipe row a
+ * BundleContent references). base_yield_qty remains the divisor on
+ * recipe-to-recipe links, after converting into the child's yield unit.
  *
  * CONSTITUTION COMPLIANCE:
  *   LAW 1 — Recipes are the single source of truth for ingredient quantities

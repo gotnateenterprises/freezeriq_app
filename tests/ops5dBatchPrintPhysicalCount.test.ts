@@ -135,13 +135,19 @@ describe('the physical meal manifest for the owner\'s exact Bundle+qty', () => {
 
     it('PART J: ingredient demand (prepTasks) and physical count (assemblyTasks) are asserted TOGETHER in the same run', async () => {
         const result = await run([{ bundle_id: CLEAN_EATING_S2, quantity: 3, variant_size: 'serves_2' }]);
-        // Chicken Fajitas: 2.5 lb chicken per batch, serves_2 multiplier 0.5.
-        // Ingredient demand = 3 orders x 1 BundleContent x 0.5 multiplier x 2.5 lb = 3.75 lb.
-        expect(result.rawIngredients['ing-chicken-cf']?.qty).toBeCloseTo(3.75, 5);
-        const fajitasPrep = result.prepTasks['Chicken Fajitas'];
-        expect(fajitasPrep.qty).toBeCloseTo(1.5, 5); // 3 orders x 0.5 multiplier -- ingredient-scaled, NOT a label count
+        // CALC-1. This fixture's bundle references the FULL recipe rows (there is
+        // no pre-halved sibling here), so three sold meals need three full lists:
+        //   3 meals x 2.5 lb = 7.5 lb.
+        // Before CALC-1 the engine multiplied by 0.5 for the sold tier and then
+        // divided by base_yield, which is exactly the understatement this phase
+        // repairs. The physical package count is unchanged at 3 — it never
+        // depended on the multiplier, which is what OPS-5D proved.
+        expect(result.rawIngredients['ing-chicken-cf']?.qty).toBeCloseTo(7.5, 5);
+        const fajitasPrep = (result.prepTasks as any)[CHICKEN_FAJITAS.id];
+        expect(fajitasPrep.name).toBe('Chicken Fajitas'); // name is display data, id is identity
+        expect(fajitasPrep.qty).toBeCloseTo(3, 5);
         const fajitasManifest = manifest(result).find((r: any) => r.name === 'Chicken Fajitas');
-        expect(fajitasManifest.qty).toBe(3); // physical packages -- unaffected by the multiplier
+        expect(fajitasManifest.qty).toBe(3); // physical packages
     });
 
     it('item 8: copies do not come from the numeral in "Serves 2" -- a Serves-5 Bundle at the SAME qty gets the SAME copies', async () => {
@@ -154,13 +160,23 @@ describe('the physical meal manifest for the owner\'s exact Bundle+qty', () => {
         expect(s5Qty).toBe(3); // same order qty -> same copies, regardless of "2" vs "5" in the tier name
     });
 
-    it('item 9: copies do not come from prepTask quantity -- the two numbers genuinely differ here (3 vs 1.5)', async () => {
+    it('item 9 (REVISED BY CALC-1): the copy count is read from the manifest — and the fractional prep count that used to poison it is gone', async () => {
+        // OPS-5D's original demonstration was numeric: prepTasks said 1.5 for 3
+        // meals, which rounded to the wrong 2. CALC-1 removed the runtime 0.5, so
+        // for a MENU row the prep count is now the physical meal count and the two
+        // numbers agree. That agreement IS the repair — 1.5 was the defect.
+        //
+        // The architectural rule ("copies come from assemblyTasks, never from
+        // prepTasks") does not rest on the numbers differing; it is enforced by
+        // the source guards in this same file, which still pass. What is asserted
+        // here is that no fractional, roundable meal count can be produced.
         const result = await run([{ bundle_id: CLEAN_EATING_S2, quantity: 3, variant_size: 'serves_2' }]);
-        const prepQty = result.prepTasks['Chicken Fajitas'].qty;
+        const prepQty = (result.prepTasks as any)[CHICKEN_FAJITAS.id].qty;
         const manifestQty = manifest(result).find((r: any) => r.name === 'Chicken Fajitas').qty;
-        expect(prepQty).not.toBe(manifestQty);
-        expect(Math.round(prepQty)).toBe(2); // this IS the exact wrong value the owner observed
-        expect(manifestQty).toBe(3); // this is the correct one
+        expect(manifestQty).toBe(3);
+        expect(prepQty).toBe(3);
+        expect(Number.isInteger(prepQty)).toBe(true);
+        expect(Math.round(prepQty)).not.toBe(2); // the owner's observed wrong value can no longer arise
     });
 
     it('item 11: S5 qty 2 -> 2 copies, tier Serves 5 (Part L baseline)', async () => {

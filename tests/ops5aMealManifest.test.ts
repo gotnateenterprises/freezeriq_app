@@ -68,6 +68,27 @@ const PORK: Recipe = {
         cost_per_unit: 1, cost_unit: 'lb', stock_quantity: 0,
     } as any],
 };
+/**
+ * CALC-1 — the pre-halved couple sibling.
+ *
+ * KITCHEN-CALCULATION-VERIFY-1 certified from Production that a couple-tier
+ * BundleContent points at its OWN halved "(Serves 2)" row (all 70 of them), and
+ * that the engine applying a further 0.5 quartered the couple lane. This suite's
+ * ingredient numbers (2.5 / 7.5 / 10 / 17.5 lb) are unchanged — the halving now
+ * lives in the data, where Production puts it. The MANIFEST assertions are
+ * untouched: package counts never depended on the multiplier, which is exactly
+ * what OPS-5A proved and this phase preserves.
+ */
+const CHICKEN_S2: Recipe = {
+    id: 'rec-chicken-s2', name: 'Chicken Alfredo (Serves 2)', type: 'menu_item',
+    base_yield_qty: 0.5, base_yield_unit: 'batch',
+    items: [{
+        id: 'ri-1-s2', parent_recipe_id: 'rec-chicken-s2',
+        child_item_id: 'ing-chicken', child_type: 'ingredient',
+        name: 'Chicken', quantity: 2.5, unit: 'lb',
+        cost_per_unit: 1, cost_unit: 'lb', stock_quantity: 0,
+    } as any],
+};
 
 const B_S5 = 'bundle-s5';      // Bundle.serving_tier = serves_5, contains 1 chicken
 const B_S2 = 'bundle-s2';      // Bundle.serving_tier = serves_2, contains 1 chicken
@@ -78,13 +99,14 @@ const B_RETIERED = 'bundle-retiered'; // Bundle.serving_tier = serves_5 today
 
 const CONTENTS: Record<string, { recipe_id: string; position: number; quantity?: number | null }[]> = {
     [B_S5]: [{ recipe_id: CHICKEN.id, position: 1, quantity: 1 }],
-    [B_S2]: [{ recipe_id: CHICKEN.id, position: 1, quantity: 1 }],
+    // CALC-1: a couple bundle points at the pre-halved row (Production shape).
+    [B_S2]: [{ recipe_id: CHICKEN_S2.id, position: 1, quantity: 1 }],
     [B_DOUBLE]: [{ recipe_id: CHICKEN.id, position: 1, quantity: 2 }],
     [B_MULTI]: [
         { recipe_id: CHICKEN.id, position: 1, quantity: 1 },
         { recipe_id: PORK.id, position: 2, quantity: 1 },
     ],
-    [B_RETIERED]: [{ recipe_id: CHICKEN.id, position: 1, quantity: 1 }],
+    [B_RETIERED]: [{ recipe_id: CHICKEN_S2.id, position: 1, quantity: 1 }],
 };
 const TIERS: Record<string, string> = {
     [B_S5]: 'serves_5',
@@ -95,10 +117,10 @@ const TIERS: Record<string, string> = {
 };
 
 function adapter(): DBAdapter {
-    const byId = new Map([[CHICKEN.id, CHICKEN], [PORK.id, PORK]]);
+    const byId = new Map([[CHICKEN.id, CHICKEN], [CHICKEN_S2.id, CHICKEN_S2], [PORK.id, PORK]]);
     return {
         async getRecipe(id) { return byId.get(id) || null; },
-        async getAllRecipes() { return [CHICKEN, PORK]; },
+        async getAllRecipes() { return [CHICKEN, CHICKEN_S2, PORK]; },
         async getBundleContents(id) { return CONTENTS[id] || []; },
         async getBundleInfo(id) { return TIERS[id] ? { serving_tier: TIERS[id] } : null; },
     };
@@ -233,8 +255,25 @@ describe('3. KitchenEngine assemblyTasks IS the physical meal manifest', () => {
         expect(s2?.qty).toBe(3);
         // The pre-OPS-5A behaviour: one row of 5 with the tier unknowable.
         expect(rows.some(x => x.qty === 5)).toBe(false);
-        // Ingredients still aggregate correctly: 2x1.0 + 3x0.5 = 3.5 -> 17.5 lb
+        // Ingredients still aggregate correctly: 2 family trays (5 lb each) +
+        // 3 couple trays (2.5 lb each) = 17.5 lb. Same total as before CALC-1;
+        // the halving now comes from the pre-halved couple ROW, not a multiplier.
         expect(chickenLb(r)).toBe(17.5);
+    });
+
+    it('CALC-1 preserves the manifestKey rule directly: ONE recipe sold at TWO tiers still yields TWO rows', async () => {
+        // The tier fan-out must not depend on the two lines referencing
+        // different recipe rows — manifestKey is (recipe id + tier).
+        const r = await run([
+            { bundle_id: B_S5, quantity: 2, variant_size: 'serves_5' },
+            { bundle_id: B_S5, quantity: 3, variant_size: 'serves_2' },
+        ]);
+        const rows = manifest(r);
+        expect(rows).toHaveLength(2);
+        expect(rows.find(x => x.variantSize === 'serves_5')?.qty).toBe(2);
+        expect(rows.find(x => x.variantSize === 'serves_2')?.qty).toBe(3);
+        // Both lines reference the FAMILY row, so all 5 meals need the full list.
+        expect(chickenLb(r)).toBe(25);
     });
 
     it('PART F / D3: a sold serves_2 snapshot survives even though the Bundle now says serves_5', async () => {
@@ -258,8 +297,10 @@ describe('3. KitchenEngine assemblyTasks IS the physical meal manifest', () => {
     it('every manifest row carries recipe identity, canonical tier and a whole package count', async () => {
         const r = await run([{ bundle_id: B_S2, quantity: 3, variant_size: 'serves_2' }]);
         const row = manifest(r)[0];
-        expect(row.id).toBe(CHICKEN.id);
-        expect(row.name).toBe('Chicken Alfredo');
+        // CALC-1: the couple bundle references the pre-halved couple ROW, so the
+        // manifest names that row. Identity is still the recipe id, never a name.
+        expect(row.id).toBe(CHICKEN_S2.id);
+        expect(row.name).toBe('Chicken Alfredo (Serves 2)');
         expect(row.variantSize).toBe('serves_2');
         expect(isPrintableMealCount(row.qty)).toBe(true);
     });
@@ -292,8 +333,22 @@ const mockAuth = jest.fn();
 jest.mock('@/auth', () => ({ auth: () => mockAuth() }));
 const BIZ = 'biz-ops5a';
 
+/** CALC-1: the pre-halved couple sibling, Prisma-shaped. */
+const RECIPE_ROW_S2 = {
+    id: 'rec-chicken-s2', name: 'Chicken Alfredo (Serves 2)', type: 'menu_item',
+    base_yield_qty: 0.5, base_yield_unit: 'batch', container_type: 'tray', category_id: null,
+    label_text: null, macros: null, image_url: null, description: null, allergens: null, cook_time: null,
+    child_items: [{
+        id: 'ri-1-s2', parent_recipe_id: 'rec-chicken-s2',
+        child_recipe_id: null, child_ingredient_id: 'ing-chicken',
+        child_ingredient: { name: 'Chicken', unit: 'lb', cost_per_unit: 1, stock_quantity: 0, supplier: null },
+        child_recipe: null, quantity: 2.5, unit: 'lb',
+        is_sub_recipe: false, section_name: null, section_batch: null,
+    }],
+};
+
 const planMock = (bundles: { id: string; serving_tier: string }[]) => ({
-    'recipe.findMany': [RECIPE_ROW],
+    'recipe.findMany': [RECIPE_ROW, RECIPE_ROW_S2],
     'bundleContent.findMany': (args: any) =>
         CONTENTS[args.where.bundle_id]
             ? CONTENTS[args.where.bundle_id].map(c => ({ bundle_id: args.where.bundle_id, ...c }))
@@ -495,10 +550,14 @@ describe('7. OPS-5 protections still intact', () => {
 // 8. KITCHEN QUANTITY PRESERVATION. Part K — ingredient math is frozen.
 // ═════════════════════════════════════════════════════════════════════════════
 describe('8. ingredient math untouched', () => {
-    it('the multiplier chain line is unchanged', () => {
+    it('SUPERSEDED BY CALC-1: the chain is now the physical meal count; the tier is resolved for LAW 8 + the trace but never multiplied into demand', () => {
         const s = read('lib/kitchen_engine.ts');
+        // Still resolved (unknown tier must throw; the trace still records it).
         expect(s).toMatch(/const servingMultiplier = getServingMultiplier\(order\.variant_size\);/);
-        expect(s).toMatch(/const multiplier = order\.quantity \* bundleContentQty \* servingMultiplier;/);
+        // CALC-1: demand is driven by the canonical meal-count authority.
+        expect(s).toMatch(/const mealInstances = physicalMealCount\(order\.quantity, item\.quantity\);/);
+        // And the defective chain is gone for good.
+        expect(s).not.toMatch(/const multiplier = order\.quantity \* bundleContentQty \* servingMultiplier;/);
     });
 
     it('lib/serving_multipliers.ts is untouched (LOCKED)', () => {

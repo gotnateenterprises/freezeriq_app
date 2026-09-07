@@ -59,13 +59,36 @@ const RECIPE_ROW = {
         is_sub_recipe: false, section_name: null, section_batch: null,
     }],
 };
+/**
+ * CALC-1: the pre-halved couple sibling. KITCHEN-CALCULATION-VERIFY-1 certified
+ * that every couple-tier BundleContent in Production points at its own halved
+ * "(Serves 2)" row rather than at the family row; the engine no longer applies a
+ * runtime 0.5 on top. The business numbers in this suite (2.5 lb, 7.5 lb) are
+ * unchanged — the halving simply lives where Production puts it, in the data.
+ */
+const RECIPE_ROW_S2 = {
+    id: 'recipe-chicken-2.5lb-serves2', name: 'Base Chicken Recipe (Serves 2)', type: 'menu_item',
+    base_yield_qty: 0.5, base_yield_unit: 'batch', container_type: 'tray', category_id: null,
+    label_text: null, macros: null, image_url: null, description: null, allergens: null, cook_time: null,
+    child_items: [{
+        id: 'ri-chicken-s2', parent_recipe_id: 'recipe-chicken-2.5lb-serves2',
+        child_recipe_id: null, child_ingredient_id: 'ing-chicken',
+        child_ingredient: { name: 'Chicken', unit: 'lb', cost_per_unit: 1, stock_quantity: 0, supplier: null },
+        child_recipe: null, quantity: 2.5, unit: 'lb',
+        is_sub_recipe: false, section_name: null, section_batch: null,
+    }],
+};
+
+const BUNDLE_A_S5 = 'bundle-a-serves5'; // "Keto -- Serves 5"  -> family row (5 lb)
+const BUNDLE_B_S2 = 'bundle-b-serves2'; // "Keto -- Serves 2"  -> halved row (2.5 lb)
+
 const KNOWN_BUNDLE_IDS = new Set<string>();
 /** Only a REGISTERED bundle_id has contents -- an unknown one genuinely has none, matching real Postgres. */
-const BUNDLE_CONTENT_ROW = (bundleId: string) =>
-    KNOWN_BUNDLE_IDS.has(bundleId) ? [{ bundle_id: bundleId, recipe_id: RECIPE_ROW.id, position: 1, quantity: 1 }] : [];
-
-const BUNDLE_A_S5 = 'bundle-a-serves5'; // "Keto -- Serves 5"
-const BUNDLE_B_S2 = 'bundle-b-serves2'; // "Keto -- Serves 2"
+const BUNDLE_CONTENT_ROW = (bundleId: string) => {
+    if (!KNOWN_BUNDLE_IDS.has(bundleId)) return [];
+    const recipeId = bundleId === BUNDLE_B_S2 ? RECIPE_ROW_S2.id : RECIPE_ROW.id;
+    return [{ bundle_id: bundleId, recipe_id: recipeId, position: 1, quantity: 1 }];
+};
 KNOWN_BUNDLE_IDS.add(BUNDLE_A_S5);
 KNOWN_BUNDLE_IDS.add(BUNDLE_B_S2);
 // A genuinely nonexistent bundle_id (used in the "missing Bundle" test) is
@@ -81,7 +104,7 @@ jest.mock('@/auth', () => ({ auth: () => mockAuth() }));
 
 /** Builds the full canned-result set a real /plan request needs. */
 const planMockResults = (bundleRows: { id: string; serving_tier: string; business_id?: string }[]) => ({
-    'recipe.findMany': [RECIPE_ROW],
+    'recipe.findMany': [RECIPE_ROW, RECIPE_ROW_S2],
     'bundleContent.findMany': (args: any) => BUNDLE_CONTENT_ROW(args.where.bundle_id),
     'bundle.findMany': (args: any) => {
         const ids: string[] = args.where.id.in;
@@ -180,7 +203,14 @@ describe('3. tenant scoping and unresolvable bundles', () => {
         // The foreign bundle's real serves_2 tier must NEVER leak through --
         // the line falls to the same universal compatibility default every
         // other unresolvable-tier case in this codebase already uses.
-        expect(chickenLb(body)).toBe(5);
+        //
+        // CALC-1: the tier no longer changes ingredient quantity, so the proof
+        // moves to the channel that still carries it. servingTier reports the
+        // family default, NOT the foreign bundle's serves_2.
+        expect(body.servingTier).toBe('Serves 5');
+        // Quantity comes from the bundle's own contents (getBundleContents is
+        // not tenant-scoped — a pre-existing gap, out of CALC-1's scope).
+        expect(chickenLb(body)).toBe(2.5);
     });
 
     it('a missing (nonexistent) Bundle ID does not error and does not pick up an unrelated bundle\'s tier', async () => {
@@ -205,10 +235,18 @@ describe('3. tenant scoping and unresolvable bundles', () => {
 // 4. Sold/synced row preservation -- Part E regression. Items 8-9.
 // ═════════════════════════════════════════════════════════════════════════════
 describe('4. synced (sold) rows: OrderItem.variant_size snapshot still wins', () => {
-    it('DEFECT-REGRESSION: a synced Serves-2 line still calculates at 0.5 (2.5 lb)', async () => {
+    it('DEFECT-REGRESSION: a synced Serves-2 line preserves its sold snapshot tier', async () => {
+        // CALC-1: the sold tier is still preserved end to end — but it is now
+        // observed on the channel that carries it (servingTier), because the
+        // engine no longer multiplies ingredient demand by it. The FOOD comes
+        // from the recipe row the bundle references: this line sells the FAMILY
+        // bundle, so the kitchen makes the family recipe (5 lb). That is the
+        // physically correct answer, and the couple case is covered by
+        // BUNDLE_B_S2 in section 1.
         useMock(createPrismaMock({ results: planMockResults([]) }));
         const body = await postPlan({ syncedOrders: [{ bundle_id: BUNDLE_A_S5, quantity: 1, variant_size: 'serves_2' }] });
-        expect(chickenLb(body)).toBe(2.5);
+        expect(body.servingTier).toBe('Serves 2');
+        expect(chickenLb(body)).toBe(5);
     });
 
     it('DEFECT-REGRESSION: sold snapshot (serves_2) wins even when the SAME bundle_id\'s CURRENT tier is now serves_5 -- proves the synced branch never consults the Bundle table at all', async () => {
@@ -216,8 +254,9 @@ describe('4. synced (sold) rows: OrderItem.variant_size snapshot still wins', ()
         // variant_size claims serves_2 -- the sold snapshot must win.
         useMock(createPrismaMock({ results: planMockResults([{ id: BUNDLE_A_S5, serving_tier: 'serves_5' }]) }));
         const body = await postPlan({ syncedOrders: [{ bundle_id: BUNDLE_A_S5, quantity: 1, variant_size: 'serves_2' }] });
-        expect(chickenLb(body)).toBe(2.5);
-        expect(chickenLb(body)).not.toBe(5);
+        // CALC-1: the snapshot's victory is proven on the tier channel.
+        expect(body.servingTier).toBe('Serves 2');
+        expect(body.servingTier).not.toBe('Serves 5');
         // And the synced branch must not have queried bundle.findMany at all --
         // it never needs to, since it never re-derives from the Bundle table.
         expect(mock.calls.filter(c => c.model === 'bundle' && c.method === 'findMany')).toHaveLength(0);

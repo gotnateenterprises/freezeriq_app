@@ -361,9 +361,15 @@ describe('OPS-5D physical counts survive the handoff repair', () => {
         }
     });
 
-    it('item 12: prepTasks never supplies the copy count (1.5 would round to the wrong 2)', async () => {
+    it('item 12 (REVISED BY CALC-1): copies come from the manifest, and prepTasks can no longer produce a fractional meal count', async () => {
+        // CALC-1 removed the runtime serves_2 multiplier that made this 1.5 for
+        // three meals, and re-keyed prepTasks by recipe id (LAW 6). The copy
+        // count still comes from the manifest — that rule is unchanged.
         const result = await run([{ bundle_id: S2, quantity: 3, variant_size: 'serves_2' }]);
-        expect(result.prepTasks['Chicken Fajitas'].qty).toBeCloseTo(1.5, 5);
+        const prep = (result.prepTasks as any)['rec-cf'];
+        expect(prep.name).toBe('Chicken Fajitas');
+        expect(prep.qty).toBeCloseTo(3, 5);
+        expect(Number.isInteger(prep.qty)).toBe(true);
         expect(toBatchItems(result).find(i => i.name === 'Chicken Fajitas')!.copies).toBe(3);
     });
 });
