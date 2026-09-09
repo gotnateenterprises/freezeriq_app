@@ -22,6 +22,11 @@ export function ShareCenter({
                 </button>
             </div>
             <div className="mt-2.5 flex gap-2">
+                {/* COORD-PUBLIC-PREVIEW-1: reuses `shareUrl` itself, the same
+                    value Copy/Facebook/Native already use — never a second
+                    URL formula, so this can't drift from what a supporter
+                    actually sees. */}
+                <MiniLink href={shareUrl} label="View Supporter Page" />
                 {qrHref && <MiniLink href={qrHref} label="QR code" />}
                 {flyerHref && <MiniLink href={flyerHref} label="Flyer" />}
                 {scoreboardHref && <MiniLink href={scoreboardHref} label="Scoreboard" />}
