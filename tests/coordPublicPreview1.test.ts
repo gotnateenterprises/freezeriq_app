@@ -188,11 +188,11 @@ describe('existing coordinator actions and QR code behavior are unchanged', () =
         expect(fb).toContain('https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(getShopOrderUrl())}');
     });
 
-    it('REQUIRED 9 — the existing QR/Flyer/Scoreboard mini-links still render exactly as before', () => {
+    it('REQUIRED 9 — the existing QR/Flyer/Scoreboard mini-links still render with the same conditional wiring (labels relabeled by COORD-SHARE-CENTER-POLISH-2; that phase\'s own suite guards the exact text)', () => {
         const code = strip(R(SHARE_CENTER));
-        expect(code).toContain('{qrHref && <MiniLink href={qrHref} label="QR code" />}');
-        expect(code).toContain('{flyerHref && <MiniLink href={flyerHref} label="Flyer" />}');
-        expect(code).toContain('{scoreboardHref && <MiniLink href={scoreboardHref} label="Scoreboard" />}');
+        expect(code).toContain('{qrHref && <MiniLink href={qrHref} label="Printable QR Code" />}');
+        expect(code).toContain('{flyerHref && <MiniLink href={flyerHref} label="Printable Flyer" />}');
+        expect(code).toContain('{scoreboardHref && <MiniLink href={scoreboardHref} label="Share Scoreboard" />}');
     });
 
     it('REQUIRED 6 (Part F) — the button inherits ShareCenter\'s existing phase-gating with zero new campaign-state logic', () => {
