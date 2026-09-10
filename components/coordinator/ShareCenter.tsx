@@ -1,5 +1,7 @@
 'use client';
 
+import { ExternalLink } from 'lucide-react';
+
 export function ShareCenter({
     shareUrl, onCopy, copied,
     qrHref, flyerHref, scoreboardHref,
@@ -25,8 +27,12 @@ export function ShareCenter({
                 {/* COORD-PUBLIC-PREVIEW-1: reuses `shareUrl` itself, the same
                     value Copy/Facebook/Native already use — never a second
                     URL formula, so this can't drift from what a supporter
-                    actually sees. */}
-                <MiniLink href={shareUrl} label="View Supporter Page" />
+                    actually sees. COORD-POLISH-1: styled apart from the plain
+                    utility links below it — same indigo accent already used
+                    on Copy/AI in this file, one step lighter than Copy's
+                    solid fill so it doesn't compete with the page's actual
+                    primary actions. */}
+                <PrimaryMiniLink href={shareUrl} label="View Supporter Page" />
                 {qrHref && <MiniLink href={qrHref} label="QR code" />}
                 {flyerHref && <MiniLink href={flyerHref} label="Flyer" />}
                 {scoreboardHref && <MiniLink href={scoreboardHref} label="Scoreboard" />}
@@ -46,6 +52,20 @@ function MiniLink({ href, label }: { href: string; label: string }) {
         <a href={href} target="_blank" rel="noreferrer"
             className="flex-1 rounded-xl border border-slate-200 bg-slate-50 py-2 text-center text-xs font-semibold text-slate-700">
             {label}
+        </a>
+    );
+}
+
+/** Same shape as MiniLink, same href/target/rel authority — only the accent
+ *  differs, reusing the indigo-50/indigo-700 pairing already used on this
+ *  panel's AI button, so this reads as "the one worth noticing first"
+ *  without the solid-fill weight of the Copy button above it. */
+function PrimaryMiniLink({ href, label }: { href: string; label: string }) {
+    return (
+        <a href={href} target="_blank" rel="noreferrer"
+            className="flex-1 flex items-center justify-center gap-1 rounded-xl border border-indigo-200 bg-indigo-50 py-2 text-center text-xs font-bold text-indigo-700">
+            {label}
+            <ExternalLink size={12} strokeWidth={2.5} aria-hidden="true" />
         </a>
     );
 }

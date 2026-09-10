@@ -88,14 +88,15 @@ describe('coordinator panel renders "View Supporter Page"', () => {
         expect(code).not.toMatch(/label=["']Visit Site["']/);
     });
 
-    it('REQUIRED 6 — renders via the existing MiniLink primitive, which already opens in a new tab', () => {
+    it('REQUIRED 6 — renders as a link that opens in a new tab, same target/rel authority as every other mini-link', () => {
         const code = strip(R(SHARE_CENTER));
-        // The View Supporter Page MiniLink call itself.
+        // COORD-POLISH-1: styled apart from the plain utility links via a
+        // PrimaryMiniLink sibling (same href/target/rel contract as
+        // MiniLink, only the accent differs) — not a second URL formula.
         const line = code.split('\n').find(l => l.includes('label="View Supporter Page"'));
         expect(line).toBeDefined();
-        expect(line).toMatch(/<MiniLink\b/);
-        // MiniLink's own anchor — the shared primitive every mini-link depends on.
-        const anchorBlock = code.slice(code.indexOf('function MiniLink'), code.indexOf('function MiniLink') + 300);
+        expect(line).toMatch(/<PrimaryMiniLink\b/);
+        const anchorBlock = code.slice(code.indexOf('function PrimaryMiniLink'), code.indexOf('function PrimaryMiniLink') + 400);
         expect(anchorBlock).toContain('target="_blank"');
         expect(anchorBlock).toContain('rel="noreferrer"');
     });

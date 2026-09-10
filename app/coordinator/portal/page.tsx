@@ -1328,6 +1328,7 @@ export default function CoordinatorPortal() {
                                             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                                         />
                                     </div>
+                                    <p className="text-[11px] text-slate-400 ml-2">With permission, save their email so you can reconnect for a future fundraiser.</p>
                                 </div>
 
                                 <div className="space-y-1">

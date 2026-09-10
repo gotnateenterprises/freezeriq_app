@@ -432,9 +432,11 @@ describe('7. regression', () => {
         expect(create.args.data.email).toBe('mom@example.com');
     });
 
-    it('29. COORD-PUBLIC-PREVIEW-1\'s "View Supporter Page" MiniLink is untouched by this phase', () => {
+    it('29. COORD-PUBLIC-PREVIEW-1\'s "View Supporter Page" wiring (same shareUrl, same label) is untouched by this phase', () => {
+        // COORD-POLISH-1 restyled this link (PrimaryMiniLink, not MiniLink) but
+        // did not touch its href authority or label — that's what this guards.
         const src = read('components/coordinator/ShareCenter.tsx');
-        expect(src).toContain('<MiniLink href={shareUrl} label="View Supporter Page" />');
+        expect(src).toContain('href={shareUrl} label="View Supporter Page"');
     });
 
     it('30. SUPPORTER_ORDER_SELECT still excludes delivery_address after gaining the email key', () => {
