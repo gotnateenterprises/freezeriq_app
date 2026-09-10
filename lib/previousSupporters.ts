@@ -57,6 +57,9 @@ export interface PreviousSupporterOrderInput {
     /** The person on the order slip. Present on coordinator-entered orders. */
     customer_name: string | null;
     phone: string | null;
+    /** COORD-MANUAL-EMAIL-1B: frozen per order, populated only on
+     *  coordinator-entered orders. See the organization branch below. */
+    email: string | null;
     /** The linked Customer row, when there is one. */
     customer: {
         id: string;
@@ -206,7 +209,10 @@ export function derivePreviousSupporters(
             && (o.customer.id === input.organizationCustomerId
                 || input.organizationCustomerIds.has(o.customer.id));
 
-        const rawEmail = linkedIsOrganization ? null : o.customer?.contact_email ?? null;
+        // Mirrors the name/phone rule above: an organization-linked order's own
+        // Customer.contact_email is the org's inbox, never the supporter's, so
+        // that branch reads the frozen Order.email instead (COORD-MANUAL-EMAIL-1B).
+        const rawEmail = linkedIsOrganization ? o.email ?? null : o.customer?.contact_email ?? null;
         const email = normalizeSupporterEmail(rawEmail);
         const phone = normalizeSupporterPhone(
             o.phone ?? (linkedIsOrganization ? null : o.customer?.contact_phone ?? null),

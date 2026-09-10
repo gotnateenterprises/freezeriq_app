@@ -389,7 +389,7 @@ describe('OUTREACH-PREFERENCE-DISPLAY-1 · display agrees with send', () => {
 describe('OUTREACH-PREFERENCE-DISPLAY-1 · Previous Supporters honours the same truth', () => {
     const order = (id: string, email: string) => ({
         id, campaign_id: 'prior', canceled_at: null, customer_id: `cust-${id}`,
-        customer_name: `Person ${id}`, phone: null,
+        customer_name: `Person ${id}`, phone: null, email: null,
         customer: { id: `cust-${id}`, business_id: BIZ, contact_email: email, contact_phone: null, name: `Person ${id}` },
     });
     const base = {

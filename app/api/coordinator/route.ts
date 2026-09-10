@@ -35,6 +35,7 @@ import { customerFacingBusinessName } from '@/lib/tenantBrand';
 import { resolveMaterialBundles, groupMaterialMenus } from '@/lib/coordinatorMaterialBundles';
 import { hasInvalidOrderQuantity } from '@/lib/orderQuantity';
 import { SUPPORTER_ORDER_SELECT, toSupporterOrder } from '@/lib/coordinatorSupporterOrders';
+import { normalizeSupporterEmail } from '@/lib/previousSupporters';
 
 /**
  * Phase 7E-1C: Returns true if the campaign has been server-closed.
@@ -537,6 +538,11 @@ export async function POST(req: Request) {
             (sum: number, item: any) => sum + (item.serverPrice * item.quantity), 0
         );
 
+        // COORD-MANUAL-EMAIL-1B: goes on Order.email, never Customer.contact_email —
+        // customer_id below is the campaign's own organization, shared by every
+        // manual order, so writing here would overwrite the org's own address.
+        const normalizedEmail = normalizeSupporterEmail(email);
+
         // 3. Create Order with server-validated prices
         const order = await prisma.order.create({
             data: {
@@ -551,6 +557,7 @@ export async function POST(req: Request) {
                 customer_id: campaign.customer_id,
                 campaign_id: campaign.id,
                 phone: phone || null,
+                email: normalizedEmail || null,
                 items: {
                     create: resolvedItems.map((item: any) => ({
                         bundle_id: item.bundleId,

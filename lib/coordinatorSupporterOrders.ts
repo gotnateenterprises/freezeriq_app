@@ -18,23 +18,24 @@
  *
  * THE EMAIL LINEAGE RULE
  *
- * Supporter email is NOT a column on Order. It lives on the Customer the order
- * is linked to, and the two fundraiser order paths link different things:
+ * Supporter email comes from a different place depending which order path
+ * created the row, and the two paths never share a field:
  *
  *   public supporter order    -> a per-supporter Customer, found or created
  *                                from the address that supporter typed.
- *                                contact_email IS the supporter's.
- *   coordinator "+ Add Order" -> the ORGANISATION running the campaign
- *                                (customer_id === campaign.customer_id).
- *                                contact_email is the org's own inbox.
+ *                                contact_email IS the supporter's. Order.email
+ *                                is never written by this path.
+ *   coordinator "+ Add Order" -> Order.email directly (COORD-MANUAL-EMAIL-1B),
+ *                                frozen per order. customer_id on these orders
+ *                                points at the ORGANISATION running the
+ *                                campaign (customer_id === campaign.customer_id),
+ *                                so that row's contact_email is the org's own
+ *                                inbox — this path must never read it as a
+ *                                supporter address.
  *
  * So the join is gated on durable identity, never on a display name. An order
- * linked to the campaign's own organisation reports NO supporter email.
- * Coordinator-entered orders genuinely capture none — the POST accepts an
- * `email` field and has no column to put it in — so null is the truthful
- * answer, not a gap to paper over. Giving those orders a real email is a
- * separate, deliberate phase (COORD-ADD-ORDER-CONTACT-1); do not fabricate one
- * here.
+ * linked to the campaign's own organisation resolves its email from the order
+ * row itself; every other order resolves it from its own linked Customer.
  *
  * WHAT THIS IS NOT
  *
@@ -77,6 +78,7 @@ export const SUPPORTER_ORDER_SELECT = {
     source: true,
     status: true,
     phone: true,
+    email: true,
     customer_id: true,
     customer: { select: { contact_email: true } },
     items: {
@@ -101,6 +103,7 @@ export interface SupporterOrderRow {
     source?: string | null;
     status?: string | null;
     phone?: string | null;
+    email?: string | null;
     customer_id?: string | null;
     customer?: { contact_email?: string | null } | null;
     items?: Array<{
@@ -138,7 +141,8 @@ export interface CoordinatorSupporterOrder {
  *
  * @param campaignCustomerId FundraiserCampaign.customer_id — the organisation
  *        running the campaign. An order linked to it was entered by the
- *        coordinator and has no supporter email.
+ *        coordinator, so its email (if any) comes from Order.email rather
+ *        than the shared organisation Customer row.
  */
 export function supporterEmail(
     order: SupporterOrderRow | null | undefined,
@@ -146,7 +150,9 @@ export function supporterEmail(
 ): string | null {
     if (!order) return null;
     if (!order.customer_id) return null;
-    if (campaignCustomerId && order.customer_id === campaignCustomerId) return null;
+    if (campaignCustomerId && order.customer_id === campaignCustomerId) {
+        return order.email ?? null;
+    }
     return order.customer?.contact_email ?? null;
 }
 

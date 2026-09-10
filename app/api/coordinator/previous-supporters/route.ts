@@ -182,7 +182,7 @@ async function computeAudience(input: {
             where: { campaign_id: { in: priorCampaignIds }, canceled_at: null },
             select: {
                 id: true, campaign_id: true, canceled_at: true, customer_id: true,
-                customer_name: true, phone: true,
+                customer_name: true, phone: true, email: true,
                 customer: {
                     select: {
                         id: true, business_id: true, contact_email: true,

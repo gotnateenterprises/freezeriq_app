@@ -321,7 +321,15 @@ describe('this patch changed presentation only', () => {
         //       the owner then chose the column over the two no-schema
         //       alternatives when the trade-off was put to them directly.
         //       Additive, nullable, no backfill — see the migration's own header.
-        expect(migrations).toHaveLength(23);
+        //   24  COORD-MANUAL-EMAIL-1B Order.email — optional supporter email
+        //       captured on a coordinator-entered manual order, frozen per
+        //       order (sibling of the pre-existing `phone` column). Explicitly
+        //       authorized by the owner's COORD-MANUAL-EMAIL-1B brief after the
+        //       preceding COORD-MANUAL-EMAIL-1 investigation reported that safe
+        //       persistence required this schema addition. Nullable, no
+        //       default, no index, no unique constraint, no foreign key, no
+        //       backfill — see the migration's own header.
+        expect(migrations).toHaveLength(24);
         expect(migrations[15]).toBe('20260823010000_fr_acceptance_2a2_human_followup');
         expect(migrations[16]).toBe('20260825000000_inv_d_settlement_truth');
         expect(migrations[17]).toBe('20260826000000_m18_outreach_batch_campaign_ownership');
@@ -330,6 +338,7 @@ describe('this patch changed presentation only', () => {
         expect(migrations[20]).toBe('20260828140000_fr_tax_1b_invoice_tax_snapshot');
         expect(migrations[21]).toBe('20260828150000_fr_supporter_contact_1_order_first_last_name');
         expect(migrations[22]).toBe('20260905000000_ops6b_order_delivery_handoff');
+        expect(migrations[23]).toBe('20260909000000_coord_manual_email_1b_order_email');
     });
 
     it('the acknowledgement and follow-up contracts are untouched', () => {

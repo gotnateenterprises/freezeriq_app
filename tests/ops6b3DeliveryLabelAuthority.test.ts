@@ -258,6 +258,11 @@ describe('PRESERVATION', () => {
         // not dropped, exactly as Part D requires.
         expect(schema).toMatch(/defaultLabelId\s+String\?/);
         const migrations = readdirSync(join(ROOT, 'prisma/migrations')).filter(d => /^\d{14}_/.test(d));
-        expect(migrations[migrations.length - 1]).toBe('20260905000000_ops6b_order_delivery_handoff');
+        // This phase's own checkpoint is still the OPS-6B migration, unmodified.
+        // COORD-MANUAL-EMAIL-1B later added its own, separately-approved,
+        // unrelated migration after it — a later phase adding a migration is
+        // not a regression of THIS phase's "made no schema change" guarantee.
+        expect(migrations).toContain('20260905000000_ops6b_order_delivery_handoff');
+        expect(migrations[migrations.length - 1]).toBe('20260909000000_coord_manual_email_1b_order_email');
     });
 });

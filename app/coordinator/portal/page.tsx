@@ -21,6 +21,7 @@ import {
     DollarSign,
     User,
     Phone,
+    Mail,
     MapPin,
     AlertCircle,
     X,
@@ -1312,6 +1313,20 @@ export default function CoordinatorPortal() {
                                                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                                             />
                                         </div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Email (Optional)</label>
+                                    <div className="relative">
+                                        <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                        <input
+                                            type="email"
+                                            placeholder="supporter@email.com"
+                                            className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500/20 font-bold"
+                                            value={formData.email}
+                                            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                        />
                                     </div>
                                 </div>
 

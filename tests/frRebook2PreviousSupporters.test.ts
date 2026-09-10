@@ -48,6 +48,9 @@ function individualOrder(
         customer_id: custId,
         customer_name: over.customer_name ?? `Person ${id}`,
         phone: over.phone ?? null,
+        // Order.email is a coordinator-manual-order field only (COORD-MANUAL-EMAIL-1B);
+        // the storefront path never populates it, identity lives on `customer` below.
+        email: null,
         customer: {
             id: custId,
             business_id: over.customer?.business_id ?? BIZ,
@@ -72,6 +75,9 @@ function coordinatorEnteredOrder(
         customer_id: ORG,
         customer_name: name,
         phone,
+        // COORD-MANUAL-EMAIL-1B: defaults to null (pre-existing orders never
+        // captured one); pass `over.email` to simulate one that did.
+        email: over.email !== undefined ? over.email : null,
         customer: {
             id: ORG,
             business_id: BIZ,
