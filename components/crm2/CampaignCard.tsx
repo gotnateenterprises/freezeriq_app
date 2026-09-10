@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { StageChip } from './StageChip';
 import { BundleSelectionStatusCard } from './BundleSelectionStatusCard';
-import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
+import { coordinatorAccessPath } from '@/lib/fundraiserUrls';
 import { describeCampaignInvoice } from '@/lib/growth/campaignLifecycle';
 
 export function CampaignCard({ c, businessSlug }: { c: any; businessSlug?: string }) {
@@ -35,7 +35,7 @@ export function CampaignCard({ c, businessSlug }: { c: any; businessSlug?: strin
                     </div>
                     <div className="mt-2.5 flex flex-wrap gap-1.5">
                         {businessSlug && <Kit href={`/shop/${businessSlug}/fundraiser/${c.id}`} label="🛒 Public order page" />}
-                        {c.portal_token && <Kit href={buildCoordinatorAccessUrl(null, c.portal_token)} label="🎯 Coordinator portal" />}
+                        {c.portal_token && <Kit href={coordinatorAccessPath(c.portal_token)} label="🎯 Coordinator portal" />}
                         {c.public_token && <Kit href={`/fundraiser/${c.public_token}`} label="🏆 Scoreboard" />}
                     </div>
                 </>

@@ -85,23 +85,23 @@ function balancedParenSpan(src: string, fromIndex: number): [number, number] {
 
 describe('COORD-MANUAL-EMAIL-1C — the active render path, not just the source text', () => {
     describe('1. exactly one "Add Offline Order" implementation exists in the repo', () => {
-        it('"Save Order & Update Goal" (the exact submit-button text from the owner\'s screenshot) appears in exactly one file in the repo', () => {
+        // Implementation directories only. Test files legitimately quote these
+        // exact strings in their own assertions — including this one — so
+        // searching the whole repo makes the check fail the moment it is
+        // committed and its own text becomes tracked.
+        const IMPL_PATHSPEC = '-- "app/*.ts" "app/*.tsx" "components/*.ts" "components/*.tsx" "lib/*.ts" "lib/*.tsx"';
+        const grepFiles = (needle: string): string[] => {
             const { execSync } = require('child_process');
-            const out = execSync(
-                'git grep -l "Save Order & Update Goal" -- "*.ts" "*.tsx"',
-                { cwd: ROOT, encoding: 'utf8' },
-            ).trim();
-            const files = out.split('\n').filter(Boolean);
-            expect(files).toEqual([PORTAL_PAGE]);
+            const out = execSync(`git grep -l "${needle}" ${IMPL_PATHSPEC}`, { cwd: ROOT, encoding: 'utf8' }).trim();
+            return out.split('\n').filter(Boolean);
+        };
+
+        it('"Save Order & Update Goal" (the exact submit-button text from the owner\'s screenshot) appears in exactly one implementation file', () => {
+            expect(grepFiles('Save Order & Update Goal')).toEqual([PORTAL_PAGE]);
         });
 
         it('"Add Offline Order" appears as the modal\'s own title only in app/coordinator/portal/page.tsx (other mentions, if any, are references/comments, not a second implementation)', () => {
-            const { execSync } = require('child_process');
-            const out = execSync(
-                'git grep -l "Add Offline Order" -- "*.ts" "*.tsx"',
-                { cwd: ROOT, encoding: 'utf8' },
-            ).trim();
-            const files = out.split('\n').filter(Boolean);
+            const files = grepFiles('Add Offline Order');
             // Every file that mentions the phrase at all must ALSO be the one
             // real implementation, OR must not also contain the submit button
             // text (i.e. it's a reference, like a comment describing "the

@@ -111,7 +111,37 @@ export function buildCoordinatorAccessUrl(
     source: Request | string | null | undefined,
     portalToken: string
 ): string {
-    return `${resolveCoordinatorOrigin(source)}/coordinator/access#${encodeURIComponent(portalToken)}`;
+    return `${resolveCoordinatorOrigin(source)}${coordinatorAccessPath(portalToken)}`;
+}
+
+/**
+ * COORD-MANUAL-EMAIL-1D — the coordinator link an ADMIN clicks to open a portal
+ * in the browser they are ALREADY using. Host-relative, deliberately.
+ *
+ * The absolute builder above is pinned to the canonical platform origin in any
+ * production build, and must stay that way: the links it makes are
+ * DISTRIBUTED — the invitation email, outreach — and they outlive the session
+ * that created them, so they must never carry an ephemeral, preview-
+ * authenticated host.
+ *
+ * An admin opening a portal from the CRM is the opposite case. Vercel builds a
+ * Preview deployment exactly the way it builds Production, so `NODE_ENV` reads
+ * 'production' on both and the pin fires on Preview too — handing a tester a
+ * link to the real production site and silently ending the test. That is how
+ * three phases of Email-field work were verified against a build nobody was
+ * running.
+ *
+ * Relative is correct here by construction rather than by sniffing the
+ * environment: the CRM only renders on a PLATFORM host (middleware rewrites
+ * every other host into app/[domain], and /fundraisers is not in its bypass
+ * list), isPlatformHost() is exactly one host per environment, and the
+ * coordinator session cookie is `__Host-` prefixed and host-only — so the
+ * portal belongs on whichever platform host the admin is already on. It also
+ * renders identically on server and client, so it cannot desynchronise during
+ * hydration the way an environment-dependent absolute href would.
+ */
+export function coordinatorAccessPath(portalToken: string): string {
+    return `/coordinator/access#${encodeURIComponent(portalToken)}`;
 }
 
 export function buildFundraiserUrls(

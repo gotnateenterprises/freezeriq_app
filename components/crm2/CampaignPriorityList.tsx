@@ -33,7 +33,7 @@ import {
     type CampaignSection,
 } from '@/lib/growth/campaignSections';
 import type { CampaignPriority } from '@/lib/growth/nextAction';
-import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
+import { coordinatorAccessPath } from '@/lib/fundraiserUrls';
 import { describeCampaignInvoice, resolveCampaignInvoiceState } from '@/lib/growth/campaignLifecycle';
 
 export interface PriorityListCampaign extends CampaignForTriage {
@@ -274,7 +274,7 @@ function CampaignRow({
         menuItems.push({ key: 'public', label: 'Public order page', href: `/shop/${c.business_slug}/fundraiser/${c.id}`, newTab: true });
     }
     if (!c.is_placeholder && c.portal_token) {
-        menuItems.push({ key: 'portal', label: 'Coordinator portal', href: buildCoordinatorAccessUrl(null, c.portal_token), newTab: true });
+        menuItems.push({ key: 'portal', label: 'Coordinator portal', href: coordinatorAccessPath(c.portal_token), newTab: true });
     }
     // FR-HISTORY-1: only offer invoice creation when no invoice exists. The
     // database enforces one invoice per campaign, so offering it afterwards could
