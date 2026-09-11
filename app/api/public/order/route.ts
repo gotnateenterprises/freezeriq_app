@@ -12,6 +12,10 @@ import { validateSubmissionKey, buildSubmissionFingerprint } from '@/lib/orderId
 import { normalizeSlug, NO_SUCH_SLUG } from '@/lib/publicIdentity';
 import { purchaserDisplayName } from '@/lib/purchaserName';
 import { hasInvalidOrderQuantity } from '@/lib/orderQuantity';
+// FR-TAX-CORRECTNESS-1: supporter food tax is calculated here, server-side,
+// from the campaign's FROZEN snapshot — never from a client-supplied amount.
+import { computeSupporterOrderTax } from '@/lib/fundraiserTax';
+import { roundCents } from '@/lib/fundraiserCloseoutMath';
 
 /**
  * FR-LAUNCH-1E: sentinel used to abort the order transaction when the campaign
@@ -287,9 +291,31 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: validationErr.message }, { status: 400 });
         }
 
-        const serverTotal = resolvedItems.reduce(
+        // FR-TAX-CORRECTNESS-1: the PRE-TAX food subtotal. Server-resolved
+        // prices only — the client's numbers never reach this line.
+        const serverSubtotal = roundCents(resolvedItems.reduce(
             (sum: number, item: any) => sum + (item.serverPrice * item.quantity), 0
-        );
+        ));
+
+        // The supporter's food tax, from the campaign's frozen snapshot. A
+        // storefront (non-campaign) order passes a null snapshot and is charged
+        // nothing, so this route's non-fundraiser behaviour is untouched. A
+        // campaign with no snapshot, a TAX_EXEMPT campaign, or a campaign whose
+        // frozen rate is 0 likewise resolves to $0.00 — which is every campaign
+        // currently live in Production, so no in-flight fundraiser is repriced.
+        const orderTax = computeSupporterOrderTax({
+            subtotal: serverSubtotal,
+            snapshot: campaign
+                ? {
+                    status: (campaign as any).tax_status ?? null,
+                    ratePercent: (campaign as any).tax_rate_percent ?? null,
+                }
+                : null,
+        });
+
+        // NOTE: the supporter's amount due (subtotal + tax) is deliberately NOT
+        // stored. It is derived from the persisted row in buildSuccessResponse
+        // below, so the screen can never disagree with the database.
 
         // FR-LAUNCH-1E: fingerprint of the LOGICAL order payload. Server prices are
         // deliberately excluded — pricing stays server-authoritative, and a client
@@ -311,21 +337,34 @@ export async function POST(req: Request) {
 
         // The public success response is built identically for a first creation and
         // for a replay, so the two are byte-compatible.
-        const buildSuccessResponse = (persistedOrder: { id: string; total_amount: any }) =>
-            NextResponse.json({
+        const buildSuccessResponse = (persistedOrder: { id: string; total_amount: any; tax_amount?: any }) => {
+            // FR-TAX-CORRECTNESS-1: read back from the PERSISTED row, so the
+            // confirmation screen can never disagree with what was stored.
+            const subtotal = roundCents(Number(persistedOrder.total_amount) || 0);
+            const taxAmount = roundCents(Number(persistedOrder.tax_amount) || 0);
+
+            return NextResponse.json({
                 success: true,
                 orderId: persistedOrder.id,
                 // FR-LAUNCH-1B: response-only addition. The server-authoritative total
                 // as PERSISTED on the order row — never a client-supplied value — so a
                 // confirmation screen can show the same amount the coordinator will
                 // collect. No order-creation, pricing, or side-effect behavior changes.
-                total: Number(persistedOrder.total_amount),
+                //
+                // FR-TAX-CORRECTNESS-1: `total` remains the supporter's AMOUNT DUE,
+                // which is what this field always meant to its callers — it is now
+                // subtotal + tax rather than subtotal alone. The two components are
+                // sent alongside it so a confirmation can show the breakdown.
+                total: roundCents(subtotal + taxAmount),
+                subtotal,
+                taxAmount,
                 paymentData: {
                     paymentInstructions,
                     externalPaymentLink,
                     orgName
                 }
             });
+        };
 
         // FR-LAUNCH-1E: replay fast path. A non-authoritative optimization only —
         // the partial unique index on (business_id, submission_key) remains the
@@ -334,7 +373,7 @@ export async function POST(req: Request) {
         if (submissionKey) {
             const existing = await prisma.order.findFirst({
                 where: { business_id: businessId, submission_key: submissionKey } as any,
-                select: { id: true, total_amount: true, submission_fingerprint: true } as any,
+                select: { id: true, total_amount: true, tax_amount: true, submission_fingerprint: true } as any,
             }) as any;
 
             if (existing) {
@@ -526,7 +565,18 @@ export async function POST(req: Request) {
                         // @ts-ignore - 'storefront' was just added to enum
                         source: isCampaignOrder ? 'fundraiser' : 'storefront',
                         status: isCampaignOrder ? 'fundraiser_hold' : 'pending',
-                        total_amount: serverTotal,
+                        // FR-TAX-CORRECTNESS-1: total_amount KEEPS its historical
+                        // meaning — PRE-TAX food sales. Every existing reader
+                        // (campaign metrics, org-share basis, closeout gross,
+                        // the reconciliation gate) already interprets it that
+                        // way, and 79 Production orders were written under it.
+                        // The supporter's amount due is total_amount +
+                        // tax_amount, derived where it is actually needed.
+                        total_amount: serverSubtotal,
+                        // The frozen tax collected on this order. 0 for untaxed
+                        // and exempt orders, which is what every legacy row
+                        // already stores — so nothing about existing data moves.
+                        tax_amount: orderTax.taxAmount,
                         delivery_address: customer.address ? `${customer.address}, ${customer.city}, ${customer.state} ${customer.zip}` : customer.notes,
                         external_id: `ord_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                         // Server-resolved campaign id only — never the raw request value.
@@ -615,7 +665,7 @@ export async function POST(req: Request) {
             ) {
                 const winner = await prisma.order.findFirst({
                     where: { business_id: businessId, submission_key: submissionKey } as any,
-                    select: { id: true, total_amount: true, submission_fingerprint: true } as any,
+                    select: { id: true, total_amount: true, tax_amount: true, submission_fingerprint: true } as any,
                 }) as any;
 
                 if (winner && winner.submission_fingerprint === submissionFingerprint) {
@@ -700,7 +750,13 @@ export async function POST(req: Request) {
                         participantName: order.participant_name,
                         items: (order as any).items || [],
                         // Persisted server-authoritative total — never recomputed here.
+                        // FR-TAX-CORRECTNESS-1: both halves come from the durable
+                        // row. total_amount is the PRE-TAX subtotal and tax_amount
+                        // the frozen tax; the email sums them into the collection
+                        // figure. Recomputing tax here from the campaign snapshot
+                        // would risk disagreeing with what was actually persisted.
                         totalAmount: Number(order.total_amount),
+                        taxAmount: Number((order as any).tax_amount) || 0,
                         orderReference: order.external_id,
                         businessId,
                         // FR-COORD-123 Part H: when the campaign offers ANY way to

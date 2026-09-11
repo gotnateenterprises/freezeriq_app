@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db';
 import { decideOrgShareChange, isOrgShareRejected } from '@/lib/fundraiserOrgShare';
 import { decideBundleGoalChange, isBundleGoalRejected } from '@/lib/fundraiserMetrics';
 import { isCampaignClosed } from '@/lib/campaignBundleSelection';
+import { ACTIVE_CAMPAIGN_STATUS, decideActivationTaxSnapshot } from '@/lib/fundraiserTax';
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
@@ -109,10 +110,55 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
             ? bundleGoalDecision.goal
             : undefined;
 
+        // ── FR-TAX-CORRECTNESS-1 HARDENING: the activation tax gate ─────────
+        //
+        // This route is the ONLY way a campaign reaches 'Active' without going
+        // through a creation path that freezes a tax snapshot, so it is the one
+        // place that gap can be closed. A campaign that becomes publicly
+        // orderable with tax_status NULL collects no tax, permanently and
+        // silently, because resolveCloseoutTaxRate reads NULL as "legacy".
+        //
+        // The rule lives in lib/fundraiserTax.ts decideActivationTaxSnapshot
+        // (the single tax resolver, not a second one). It fires ONLY on a
+        // not-active -> Active transition, never on a campaign that is already
+        // Active and never on one carrying financial activity — so every live
+        // fundraiser, including Edgar County's NULL/NULL contract, is untouched.
+        let activationTaxData: { tax_status: any; tax_rate_percent: number } | null = null;
+        if (body.status === ACTIVE_CAMPAIGN_STATUS && campaign.status !== ACTIVE_CAMPAIGN_STATUS) {
+            const [taxBusiness, orderCount, invoiceCount] = await Promise.all([
+                prisma.business.findUnique({
+                    where: { id: session.user.businessId },
+                    select: { default_food_tax_percent: true },
+                }),
+                prisma.order.count({ where: { campaign_id: id } }),
+                prisma.invoice.count({ where: { campaign_id: id } }),
+            ]);
+
+            const decision = decideActivationTaxSnapshot({
+                currentStatus: campaign.status,
+                nextStatus: body.status,
+                existingTaxStatus: (campaign as any).tax_status ?? null,
+                hasFinancialActivity:
+                    orderCount > 0 || invoiceCount > 0 || Boolean((campaign as any).closed_at),
+                // The ORGANIZATION's authoritative record — the campaign's own
+                // customer, already tenant-verified above. Never a request field.
+                organizationStatus: (campaign.customer as any)?.tax_status ?? null,
+                tenantDefaultRatePercent: taxBusiness?.default_food_tax_percent as any,
+            });
+
+            if (decision.write) {
+                activationTaxData = {
+                    tax_status: decision.snapshot.status,
+                    tax_rate_percent: decision.snapshot.ratePercent,
+                };
+            }
+        }
+
         // Update
         const updated = await prisma.fundraiserCampaign.update({
             where: { id },
             data: {
+                ...(activationTaxData ?? {}),
                 ...(orgSharePercentValue !== undefined
                     ? { org_share_percent: orgSharePercentValue }
                     : {}),

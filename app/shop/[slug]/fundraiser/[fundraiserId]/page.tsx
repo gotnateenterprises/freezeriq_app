@@ -191,6 +191,10 @@ async function getData(slug: string, fundraiserId: string) {
                fc.payment_instructions, fc.external_payment_link,
                fc.bundle_goal, fc.total_sales,
                fc.status, fc.closed_at,
+               -- FR-TAX-CORRECTNESS-1: the campaign's FROZEN tax treatment, so
+               -- the supporter sees the same tax the server will charge. Not
+               -- sensitive: it is this fundraiser's own posted tax terms.
+               fc.tax_status, fc.tax_rate_percent,
                fc.bundle_selection_status, fc.bundle_selection_limit,
                c.name as organization_name,
                c.fundraiser_info as customer_fundraiser_info

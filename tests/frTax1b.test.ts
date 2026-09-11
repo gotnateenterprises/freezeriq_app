@@ -135,7 +135,7 @@ describe('4. changing the tenant default never rewrites an existing campaign sna
 
 describe('5-7. the confirmed NET taxable base', () => {
     it('5. the confirmed base is NET, recorded in code', () => {
-        expect(CONFIRMED_TAXABLE_BASE).toBe('net');
+        expect(CONFIRMED_TAXABLE_BASE).toBe('gross'); // FR-TAX-CORRECTNESS-1 superseded the NET ruling
     });
 
     it('5b. the taxable selling price is gross minus the organization share', () => {
@@ -163,21 +163,33 @@ describe('5-7. the confirmed NET taxable base', () => {
     });
 
     it('7. zero and rounding behave', () => {
+        // resolveTaxableSellingPrice still describes the NET remit correctly —
+        // it is simply no longer the TAX base. That invariant is kept.
         expect(resolveTaxableSellingPrice({ grossSales: 0, organizationAmount: 0 })).toBe(0);
-        const f = computeCloseoutFinancials({ grossSales: 0, orgSharePercent: 20, applyFoodTax: true, taxRatePercent: 1 });
+        const f = computeCloseoutFinancials({
+            grossSales: 0, orgSharePercent: 20, applyFoodTax: true, taxCollected: 0, taxRatePercent: 1,
+        });
         expect(f.taxAmount).toBe(0);
         expect(f.totalDue).toBe(0);
-        // 1% of 666.73 = 6.6673 -> 6.67 (half-up at the edge, once).
-        expect(computeCloseoutFinancials({ grossSales: 1000.05, orgSharePercent: 33.33, applyFoodTax: true, taxRatePercent: 1 }).taxAmount)
-            .toBe(6.67);
+        // FR-TAX-CORRECTNESS-1: 1% of GROSS 1000.05 = 10.0005 -> 10.00,
+        // rounded half-up once, at the order where it was collected.
+        expect(computeCloseoutFinancials({
+            grossSales: 1000.05, orgSharePercent: 33.33, applyFoodTax: true,
+            taxCollected: 10.00, taxRatePercent: 1,
+        }).taxAmount).toBe(10.00);
     });
 
-    it('the base is NET and demonstrably NOT gross', () => {
-        const f = computeCloseoutFinancials({ grossSales: 2065, orgSharePercent: 20, applyFoodTax: true, taxRatePercent: 1 });
-        expect(f.taxAmount).toBe(16.52);            // 1% of 1652
-        expect(f.taxAmount).not.toBe(20.65);        // 1% of 2065 — the superseded basis
-        // The gap is always exactly one rate-unit of the organization's share.
-        expect(roundCents(20.65 - f.taxAmount)).toBe(roundCents(413 * 0.01));
+    it('the base is GROSS and demonstrably NOT net (FR-TAX-CORRECTNESS-1)', () => {
+        // Supporters paid 1% of the $2,065 they actually spent.
+        const f = computeCloseoutFinancials({
+            grossSales: 2065, orgSharePercent: 20, applyFoodTax: true,
+            taxCollected: 20.65, taxRatePercent: 1,
+        });
+        expect(f.taxAmount).toBe(20.65);            // 1% of 2065 GROSS
+        expect(f.taxAmount).not.toBe(16.52);        // 1% of 1652 — superseded NET basis
+        // The gap is exactly one rate-unit of the organization's share, which
+        // is precisely the money the NET basis used to leave uncollected.
+        expect(roundCents(f.taxAmount - 16.52)).toBe(roundCents(413 * 0.01));
     });
 });
 
@@ -212,18 +224,29 @@ describe('8-9. tax-exempt behaviour', () => {
 describe('10-12. a taxable campaign uses its own frozen snapshot', () => {
     it('10. the frozen rate is what gets charged', () => {
         expect(resolveCloseoutTaxRate({ taxStatus: 'TAXABLE', taxRatePercent: 2.5 })).toBe(2.5);
-        const f = computeCloseoutFinancials({ grossSales: 2065, orgSharePercent: 20, applyFoodTax: true, taxRatePercent: 2.5 });
-        expect(f.taxAmount).toBe(41.30);            // 2.5% of 1652
-        expect(f.totalDue).toBe(1693.30);
+        // 2.5% of GROSS 2065 = 51.625 -> 51.63, collected at order time.
+        const f = computeCloseoutFinancials({
+            grossSales: 2065, orgSharePercent: 20, applyFoodTax: true,
+            taxCollected: 51.63, taxRatePercent: 2.5,
+        });
+        expect(f.taxAmount).toBe(51.63);
+        expect(f.totalDue).toBe(1703.63);
     });
 
     it('11. the tenant\'s CURRENT default is ignored after launch', () => {
         // Two campaigns, same gross, different frozen rates: the money differs,
-        // proving nothing re-reads a single live tenant value.
-        const a = computeCloseoutFinancials({ grossSales: 2065, orgSharePercent: 20, applyFoodTax: true, taxRatePercent: 1 });
-        const b = computeCloseoutFinancials({ grossSales: 2065, orgSharePercent: 20, applyFoodTax: true, taxRatePercent: 3 });
-        expect(a.taxAmount).toBe(16.52);
-        expect(b.taxAmount).toBe(49.56);
+        // proving nothing re-reads a single live tenant value. Under
+        // FR-TAX-CORRECTNESS-1 the rate is applied to GROSS at order time, so
+        // the collected figures are 1% and 3% of 2065.
+        const a = computeCloseoutFinancials({
+            grossSales: 2065, orgSharePercent: 20, applyFoodTax: true, taxCollected: 20.65, taxRatePercent: 1,
+        });
+        const b = computeCloseoutFinancials({
+            grossSales: 2065, orgSharePercent: 20, applyFoodTax: true, taxCollected: 61.95, taxRatePercent: 3,
+        });
+        expect(a.taxAmount).toBe(20.65);
+        expect(b.taxAmount).toBe(61.95);
+        expect(a.taxRatePercent).not.toBe(b.taxRatePercent);
     });
 
     it('12. the organization\'s CURRENT status is ignored after launch', () => {
@@ -249,10 +272,15 @@ describe('10-12. a taxable campaign uses its own frozen snapshot', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('13-16. the frozen invoice contract', () => {
-    it('13. amount due = taxable selling price + tax', () => {
-        const f = computeCloseoutFinancials({ grossSales: 2065, orgSharePercent: 20, applyFoodTax: true, taxRatePercent: 1 });
+    it('13. amount due = net food proceeds + tax collected', () => {
+        const f = computeCloseoutFinancials({
+            grossSales: 2065, orgSharePercent: 20, applyFoodTax: true,
+            taxCollected: 20.65, taxRatePercent: 1,
+        });
+        // The structural invariant is unchanged: due = remit + tax.
         expect(f.totalDue).toBe(roundCents(f.baseRemit + f.taxAmount));
-        expect(f.totalDue).toBe(1668.52);
+        // FR-TAX-CORRECTNESS-1: $1,652 food proceeds + $20.65 collected tax.
+        expect(f.totalDue).toBe(1672.65);
     });
 
     it('14. the organization share is unchanged by the tax-base move', () => {
@@ -344,19 +372,41 @@ describe('18. no Square payment implementation was introduced', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('Part K. the coordinator tracker stays a truthful SUPPORTER tally', () => {
-    it('no organization-level tax was added to supporter lines', () => {
-        const src = read('lib', 'coordinatorOrderTracker.ts');
-        expect(src).not.toMatch(/taxRate|tax_rate_percent|computeCampaignTax/);
+    // ── SUPERSEDED BY FR-TAX-CORRECTNESS-1, MIGRATED NOT DELETED ────────────
+    //
+    // Both assertions in this block rested on FR-TAX-1B's premise that the tax
+    // was the ORGANIZATION's, charged at closeout, with supporters untaxed —
+    // which made any mention of a rate in this file evidence of a bug, and made
+    // "(No Tax)" unconditionally true.
+    //
+    // The owner superseded that model: the supporter pays the tax at order
+    // time. So the tracker legitimately receives an already-resolved rate in
+    // order to label its collection column honestly. The surviving invariant —
+    // the one both assertions were really protecting — is that this file still
+    // performs NO tax computation of its own and presents no organization-level
+    // settlement figure. That is what is asserted now.
+
+    it('the tracker still computes no tax of its own — it renders a rate, it does not derive one', () => {
+        const src = stripComments(read('lib', 'coordinatorOrderTracker.ts'));
+        // No campaign column reads: the legacy firewall (resolveCloseoutTaxRate)
+        // stays the single gate, at the route, never duplicated here.
+        expect(src).not.toMatch(/tax_rate_percent|tax_status|tax_amount/);
+        expect(src).not.toMatch(/computeCampaignTax|computeSupporterOrderTax|computeFoodTax/);
+        // No arithmetic and no second rounding function.
+        expect(src).not.toMatch(/0\.01|\/\s*100|roundCents/);
     });
 
-    it('"Total Cost (No Tax)" remains truthful, because this sheet has no organization total', () => {
-        // The label describes a PER-SUPPORTER row, and supporters are still
-        // never taxed. It would only mislead if this workbook also presented an
-        // organization settlement total — it does not. Asserted structurally
-        // rather than trusting the wording: the sheet writes purchaser-level
-        // columns only, and no amount-due / balance / settlement figure.
+    it('the untaxed label is unchanged, and this sheet still shows no organization total', () => {
+        // "(No Tax)" survives verbatim for every untaxed campaign — which is
+        // every campaign in Production today — so no live coordinator's sheet
+        // changes. It is now conditional rather than unconditional.
         const src = read('lib', 'coordinatorOrderTracker.ts');
         expect(src).toContain('Total Cost (No Tax)');
+
+        // Still purchaser-level only: no settlement/balance/invoice figure.
+        // "amount due" is deliberately still forbidden here — the supporter's
+        // amount due belongs on the supporter's own receipt and in the
+        // coordinator's per-order list, not as a column on this blank sheet.
         const written = stripComments(src);
         expect(written).not.toMatch(/amount ?due|balance due|settlement|invoice total/i);
     });

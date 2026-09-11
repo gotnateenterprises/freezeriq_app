@@ -56,6 +56,10 @@
  */
 
 import { isProductionEligibleOrder } from './productionIntake';
+// FR-TAX-CORRECTNESS-1: the one derivation of what a supporter owes. Pure —
+// this module's no-prisma rule is preserved (fundraiserTax imports only
+// roundCents from fundraiserCloseoutMath, which is equally pure).
+import { supporterAmountDue } from './fundraiserTax';
 
 /**
  * The Prisma `select` every coordinator surface uses for supporter orders.
@@ -73,6 +77,8 @@ export const SUPPORTER_ORDER_SELECT = {
     customer_name: true,
     participant_name: true,
     total_amount: true,
+    // FR-TAX-CORRECTNESS-1: a coordinator collects total_amount + tax_amount.
+    tax_amount: true,
     created_at: true,
     canceled_at: true,
     source: true,
@@ -98,6 +104,7 @@ export interface SupporterOrderRow {
     customer_name?: string | null;
     participant_name?: string | null;
     total_amount?: unknown;
+    tax_amount?: unknown;
     created_at?: Date | string | null;
     canceled_at?: Date | string | null;
     source?: string | null;
@@ -129,7 +136,14 @@ export interface CoordinatorSupporterOrder {
     participant_name: string | null;
     email: string | null;
     phone: string | null;
+    /** PRE-TAX food subtotal, as stored. Never the amount the supporter owes. */
     total_amount: unknown;
+    /** FR-TAX-CORRECTNESS-1: frozen food tax on this order. 0 when untaxed. */
+    tax_amount: unknown;
+    /** What the supporter actually owes: total_amount + tax_amount. This is the
+     *  figure a coordinator collects at pickup, and the only one that should
+     *  ever be labelled "amount due" on a coordinator surface. */
+    amount_due: number;
     created_at: Date | string | null;
     canceled_at: Date | string | null;
     source: string | null;
@@ -168,6 +182,8 @@ export function toSupporterOrder(
         email: supporterEmail(order, campaignCustomerId),
         phone: order.phone ?? null,
         total_amount: order.total_amount,
+        tax_amount: order.tax_amount ?? 0,
+        amount_due: supporterAmountDue(order as { total_amount: unknown; tax_amount?: unknown }),
         created_at: order.created_at ?? null,
         canceled_at: order.canceled_at ?? null,
         source: order.source ?? null,
@@ -302,7 +318,11 @@ export function groupSupporterRows(
 
         group.orders.push(order);
         group.items.push(...order.items);
-        group.total += Number(order.total_amount ?? 0);
+        // FR-TAX-CORRECTNESS-1: this is a COLLECTION figure — what the
+        // coordinator takes from this supporter at pickup — so it is the
+        // tax-inclusive amount due, not the pre-tax food subtotal. Untaxed and
+        // legacy orders carry tax_amount = 0, so this is unchanged for them.
+        group.total += order.amount_due;
 
         // Fill in any detail the first order happened not to carry.
         group.customer_name = group.customer_name ?? order.customer_name;

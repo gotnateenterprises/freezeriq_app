@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { mintCoordinatorPortalToken } from '@/lib/coordinatorPortalToken';
+import { resolveCampaignTaxSnapshot } from '@/lib/fundraiserTax';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,6 +56,33 @@ export async function POST(req: NextRequest) {
 
         const headers = splitCsvLine(lines[0]).map(h => h.trim().toLowerCase());
         const dataLines = lines.slice(1);
+
+        // ── FR-TAX-CORRECTNESS-1: imported campaigns need a tax snapshot too ───
+        //
+        // This route is a CREATION path for FundraiserCampaign, and it was the
+        // only one that wrote neither tax column — minting rows with
+        // tax_status = NULL / tax_rate_percent = NULL. That is not a neutral
+        // state: resolveCloseoutTaxRate treats NULL as "legacy, collect
+        // nothing", so an imported campaign that later goes Active would take
+        // supporter orders with no tax, permanently, with nothing in the UI
+        // saying so.
+        //
+        // It cannot be fixed later either. Both launch paths (POST
+        // /api/campaigns and /api/opportunities/[id]/launch) CREATE a campaign;
+        // neither re-snapshots an existing one, and an imported Lead campaign
+        // reaches Active through PATCH /api/campaigns/[id], which does no tax
+        // resolution at all. So this create is the only moment the snapshot can
+        // be taken for these rows.
+        //
+        // Resolved exactly as the launch paths resolve it — same function, same
+        // inputs (the organization's recorded status, the tenant's configured
+        // default rate), so an imported campaign and a launched one for the same
+        // organization agree. Existing campaigns are untouched: this writes only
+        // to rows created below, on this request.
+        const importTaxBusiness = await prisma.business.findUnique({
+            where: { id: businessId },
+            select: { default_food_tax_percent: true },
+        });
 
         const logs: string[] = [];
         let createdOrgs = 0;
@@ -183,6 +211,15 @@ export async function POST(req: NextRequest) {
             });
 
             if (!existingCampaign) {
+                // Snapshot this organization's tax treatment at creation — see
+                // the note where importTaxBusiness is read above. Resolved per
+                // row because each row can be a different organization with its
+                // own recorded status.
+                const importTaxSnapshot = resolveCampaignTaxSnapshot({
+                    organizationStatus: (customer as any).tax_status ?? null,
+                    tenantDefaultRatePercent: importTaxBusiness?.default_food_tax_percent as any,
+                });
+
                 await prisma.fundraiserCampaign.create({
                     data: {
                         customer_id: customer.id,
@@ -190,6 +227,8 @@ export async function POST(req: NextRequest) {
                         goal_amount: goal,
                         start_date: startDate,
                         end_date: endDate,
+                        tax_status: importTaxSnapshot.status,
+                        tax_rate_percent: importTaxSnapshot.ratePercent,
                         // FR-FLOW-1R: imported campaigns get the same secure
                         // coordinator credential as wizard-created ones. Without
                         // this the row silently inherits @default(cuid()).

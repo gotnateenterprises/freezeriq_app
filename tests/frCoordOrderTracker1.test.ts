@@ -266,6 +266,10 @@ describe('14-16. no formulas exist, and no tax is invented', () => {
         const resolved = buildTrackerFamilies([...comfortFoodRows(), ...ketoRows()]);
         if (!resolved.ok) throw new Error('unexpected refusal');
         const ws = await loadTemplate();
+        // No taxRatePercent supplied — the legacy shape, and the shape of every
+        // campaign in Production today. FR-TAX-CORRECTNESS-1 made this label
+        // campaign-aware; this case pins that an untaxed campaign's sheet is
+        // unchanged, byte for byte, including the absence of any percentage.
         populateTrackerWorksheet(ws, resolved.families, { endDate: null, payee: null });
 
         expect(ws.getCell('I9').value).toBe('Total Cost (No Tax)');
@@ -277,15 +281,79 @@ describe('14-16. no formulas exist, and no tax is invented', () => {
         }
     });
 
-    it('the real fundraiser order flow never charges tax — the generator has no tax logic to match', () => {
+    it('an explicitly zero or exempt rate is also the untaxed label — 0% never prints', async () => {
+        const resolved = buildTrackerFamilies([...comfortFoodRows(), ...ketoRows()]);
+        if (!resolved.ok) throw new Error('unexpected refusal');
+
+        // TAXABLE @ 0.00% (two live campaigns) and TAX_EXEMPT both resolve to 0
+        // through resolveCloseoutTaxRate before reaching here.
+        for (const rate of [0, null, undefined]) {
+            const ws = await loadTemplate();
+            populateTrackerWorksheet(ws, resolved.families, { endDate: null, payee: null, taxRatePercent: rate });
+            expect(ws.getCell('I9').value).toBe('Total Cost (No Tax)');
+        }
+    });
+
+    it('a genuinely taxed campaign says so, because this column is what the coordinator collects', async () => {
+        const resolved = buildTrackerFamilies([...comfortFoodRows(), ...ketoRows()]);
+        if (!resolved.ok) throw new Error('unexpected refusal');
+
+        const ws = await loadTemplate();
+        populateTrackerWorksheet(ws, resolved.families, { endDate: null, payee: null, taxRatePercent: 1 });
+
+        // "(No Tax)" on a taxable campaign would instruct the coordinator to
+        // collect LESS than the supporter was actually charged — the exact
+        // failure the original label existed to prevent, sign-flipped.
+        expect(ws.getCell('I9').value).toBe('Total Cost (incl. 1% Tax)');
+        expect(ws.getCell('I9').value).not.toBe('Total Cost (No Tax)');
+    });
+
+    it('the printed rate is the campaign\'s own, formatted as a person writes it', async () => {
+        const resolved = buildTrackerFamilies([...comfortFoodRows(), ...ketoRows()]);
+        if (!resolved.ok) throw new Error('unexpected refusal');
+
+        for (const [rate, expected] of [[1, '1'], [1.25, '1.25'], [2.5, '2.5'], [6, '6']] as const) {
+            const ws = await loadTemplate();
+            populateTrackerWorksheet(ws, resolved.families, { endDate: null, payee: null, taxRatePercent: rate });
+            expect(ws.getCell('I9').value).toBe(`Total Cost (incl. ${expected}% Tax)`);
+        }
+    });
+
+    it('the tracker generator still invents no tax of its own — the order flow is the only authority', () => {
+        // SUPERSEDED IN PART by FR-TAX-CORRECTNESS-1: the order flow DOES now
+        // charge tax, from the campaign's frozen snapshot, so the old
+        // "no tax anywhere in the order route" assertion is obsolete. What
+        // still matters — and is what this test actually protects — is that the
+        // tracker generator does not compute a SECOND tax of its own.
         const orderRouteSrc = require('fs').readFileSync(
             require('path').join(process.cwd(), 'app', 'api', 'public', 'order', 'route.ts'), 'utf8'
         );
-        expect(orderRouteSrc.toLowerCase()).not.toMatch(/tax/);
+        // Tax in the order route must come from the one shared authority,
+        // never from a literal rate typed into the route.
+        expect(orderRouteSrc).toMatch(/computeSupporterOrderTax/);
+        expect(orderRouteSrc).not.toMatch(/\*\s*0\.01|0\.01\s*\*/);
+
         const trackerLibSrc = require('fs').readFileSync(
             require('path').join(process.cwd(), 'lib', 'coordinatorOrderTracker.ts'), 'utf8'
         );
-        expect(trackerLibSrc.toLowerCase().replace(/no tax/g, '')).not.toMatch(/tax_amount|tax_rate|tax_percent/);
+        // FR-TAX-CORRECTNESS-1 migrated this assertion. The tracker now RECEIVES
+        // an already-resolved rate so its header can be honest, so "the word tax
+        // must not appear" is no longer the right shape. What still has to hold —
+        // and what the original test was really protecting — is that the tracker
+        // computes no tax of its own: no rate literal, no multiplication, no
+        // second rounding, and no reading of raw campaign tax columns (the
+        // legacy firewall resolveCloseoutTaxRate stays the single gate, at the
+        // route). Comments are stripped so prose describing the rule cannot
+        // satisfy or violate it.
+        const trackerCode = trackerLibSrc
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/^\s*\/\/.*$/gm, '');
+
+        // No raw campaign column reads — the route resolves, this file renders.
+        expect(trackerCode).not.toMatch(/tax_status|tax_rate_percent|tax_amount/);
+        // No arithmetic: no percent literal, no rate multiplication or division.
+        expect(trackerCode).not.toMatch(/0\.01|\/\s*100|\*\s*rate|rate\s*\*/i);
+        expect(trackerCode).not.toMatch(/roundCents|computeSupporterOrderTax|computeFoodTax/);
     });
 });
 

@@ -27,6 +27,12 @@ export default function Leaderboard({ orders, participantLabel = 'Seller' }: Lea
             stats[name] = { name, total: 0, count: 0 };
         }
 
+        // FR-TAX-CORRECTNESS-1 REVIEWED AND DELIBERATELY LEFT PRE-TAX.
+        // total_amount is the pre-tax food subtotal, and that is the right
+        // basis for a seller ranking: sales tax is set by the jurisdiction, not
+        // earned by the participant, and including it would let two sellers who
+        // sold identical amounts rank differently. This is an attribution
+        // figure, not a collection figure — see RecentOrders for the latter.
         stats[name].total += Number(order.total_amount);
         stats[name].count += 1;
     });

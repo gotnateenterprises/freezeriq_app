@@ -149,6 +149,15 @@ function narrowTierLabel(familyName: string, tierSuffix: 'S5' | 'S2', price: num
 export interface TrackerCampaignInfo {
     endDate: Date | null;
     payee: string | null;
+    /**
+     * FR-TAX-CORRECTNESS-1: this campaign's FROZEN food-tax rate, already
+     * resolved by resolveCloseoutTaxRate at the call site — 0 for a legacy
+     * (NULL-status) campaign, 0 for TAX_EXEMPT, the frozen percent for a
+     * TAXABLE one. Passed in rather than derived here so the legacy firewall
+     * stays in exactly one function. Optional, defaulting to untaxed, so the
+     * existing callers and tests keep their current output verbatim.
+     */
+    taxRatePercent?: number | null;
 }
 
 /**
@@ -246,15 +255,31 @@ export function populateTrackerWorksheet(
     // so a coordinator computing this by hand never adds a tax that the real
     // checkout never charges.
     //
-    // FR-TAX-1B REVIEWED AND DELIBERATELY UNCHANGED. That phase made the
-    // ORGANIZATION's closeout invoice taxable, which raises the question of
-    // whether "(No Tax)" is still honest here. It is: this sheet is a
-    // per-SUPPORTER collection tally — one row per purchaser, no
-    // organization-level settlement total anywhere on it — and supporters
-    // remain untaxed. The organization's tax lives on its invoice, a
-    // different document with its own Taxable Selling Price and Tax lines.
-    // Adding organization-level tax to these supporter rows would be the
-    // actively wrong change: it would tell a coordinator to collect money
-    // from supporters that no supporter owes.
-    worksheet.getCell('I9').value = 'Total Cost (No Tax)';
+    // FR-TAX-1B reviewed this and left it unchanged, on the reasoning that the
+    // ORGANIZATION's invoice tax was a different document's concern and
+    // supporters remained untaxed. That reasoning was correct for that model.
+    //
+    // FR-TAX-CORRECTNESS-1 superseded the model: the tax is now collected from
+    // the SUPPORTER at order time, on the pre-tax food subtotal, and frozen
+    // into Order.tax_amount. On a taxable campaign "(No Tax)" is therefore no
+    // longer honest — it is an instruction to collect less than the supporter
+    // actually owes, on the one sheet whose entire purpose is telling a
+    // coordinator what to collect. That is exactly the failure the original
+    // comment was written to prevent, just with the sign flipped.
+    //
+    // An untaxed campaign — every campaign that exists today, and every
+    // TAX_EXEMPT one — keeps the original label byte-for-byte. The label only
+    // changes where a real, non-zero, frozen rate exists.
+    const trackerTaxRate = Number(campaign.taxRatePercent) || 0;
+    worksheet.getCell('I9').value = trackerTaxRate > 0
+        ? `Total Cost (incl. ${formatTrackerTaxRate(trackerTaxRate)}% Tax)`
+        : 'Total Cost (No Tax)';
+}
+
+/**
+ * Rate as a coordinator would write it: "1", not "1.00"; "1.25" kept intact.
+ * Presentation only — never used for arithmetic.
+ */
+function formatTrackerTaxRate(rate: number): string {
+    return String(Number(rate.toFixed(2)));
 }

@@ -8,7 +8,13 @@ import {
   isCanonicalServes2Tier,
 } from '@/lib/campaignBundleSelection';
 import { computeBundleUnitsFromItems, parseBundleGoal, resolveBundleGoal } from '@/lib/fundraiserMetrics';
-import { isOrgTaxStatus, parseTaxRatePercent, resolveCampaignTaxSnapshot } from '@/lib/fundraiserTax';
+import {
+    isOrgTaxStatus,
+    parseTaxRatePercent,
+    resolveCampaignTaxSnapshot,
+    decideCampaignTaxOverride,
+    isCampaignTaxOverrideRejected,
+} from '@/lib/fundraiserTax';
 import { decideOrgShareChange, isOrgShareRejected } from '@/lib/fundraiserOrgShare';
 import { evaluateCampaignHealth } from '@/lib/growth/health';
 import {
@@ -258,6 +264,18 @@ export async function POST(req: Request) {
             where: { id: businessId },
             select: { default_food_tax_percent: true },
         });
+
+        // ── FR-TAX-CORRECTNESS-1 HARDENING ──────────────────────────────────
+        // A browser cannot invent exemption. `customer` was already loaded and
+        // tenant-verified above, so its tax_status is the authoritative record
+        // this request is checked against — not anything the form asserts.
+        const taxOverrideDecision = decideCampaignTaxOverride({
+            organizationStatus: customer.tax_status as any,
+            requestedStatus: body.taxStatus,
+        });
+        if (isCampaignTaxOverrideRejected(taxOverrideDecision)) {
+            return NextResponse.json({ error: taxOverrideDecision.error }, { status: taxOverrideDecision.status });
+        }
 
         let taxOverride: { status: 'TAXABLE' | 'TAX_EXEMPT'; ratePercent?: number | string | null } | null = null;
         if (isOrgTaxStatus(body.taxStatus) && body.taxStatus !== 'UNKNOWN') {

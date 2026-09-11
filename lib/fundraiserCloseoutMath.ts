@@ -164,36 +164,53 @@ export interface CloseoutFinancials {
  * what a fundraiser is owed.
  */
 export function computeCloseoutFinancials(input: {
+    /** PRE-TAX food sales. Never tax-inclusive — see the closeout route. */
     grossSales: number;
     orgSharePercent: number;
     /**
      * The owner's closeout-time switch. It can only ever turn tax OFF — it
      * never invents a rate — so it remains a strict narrowing of whatever the
      * campaign's frozen snapshot already says.
+     *
+     * FR-TAX-CORRECTNESS-1 narrowed it further: it can no longer suppress tax
+     * that SUPPORTERS ALREADY PAID. Money collected at retail has to be
+     * remitted; letting a checkbox delete it would leave the organization
+     * quietly holding the tax.
      */
     applyFoodTax: boolean;
     /**
-     * FR-TAX-1B: the campaign's FROZEN tax treatment, snapshotted at launch.
-     * Absent (a campaign that predates FR-TAX-1, or an explicit exemption)
-     * means no tax is charged — the caller decides what to pass and is the
-     * place where the legacy-campaign rule lives.
+     * FR-TAX-CORRECTNESS-1: the tax supporters actually paid, summed from the
+     * accepted orders. THIS is the money. When omitted (legacy callers and the
+     * pre-supporter-tax world) it falls back to 0, which is what every campaign
+     * that predates this phase collected.
+     */
+    taxCollected?: number | null;
+    /**
+     * The campaign's FROZEN rate. Recorded on the invoice as the contract that
+     * was in force; it is NO LONGER used to derive the tax amount, because
+     * deriving it a second time here is exactly how a supporter could be
+     * charged 1% and an organization billed a different 1%.
      */
     taxRatePercent?: number | null;
 }): CloseoutFinancials {
     const grossSales = roundCents(input.grossSales);
     const orgSharePercent = Number(input.orgSharePercent);
 
+    // The organization's share is taken on PRE-TAX food sales only. Tax is
+    // pass-through money the organization never earns a percentage of.
     const organizationAmount = roundCents(grossSales * orgSharePercent / 100);
-    // Subtraction, not a second percentage — see ROUNDING above. This is also
-    // the taxable selling price under the confirmed NET basis, which is why
-    // the tax below multiplies it rather than gross.
+    // Subtraction, not a second percentage — see ROUNDING above.
     const baseRemit = roundCents(grossSales - organizationAmount);
 
+    const collected = roundCents(Number(input.taxCollected) || 0);
     const requestedRate = Number(input.taxRatePercent);
     const rate = Number.isFinite(requestedRate) && requestedRate > 0 ? requestedRate : 0;
-    const taxApplied = input.applyFoodTax === true && rate > 0;
+
+    // The switch may only zero out tax that was never collected.
+    const suppressed = input.applyFoodTax === false && collected <= 0;
+    const taxAmount = suppressed ? 0 : collected;
+    const taxApplied = taxAmount > 0;
     const taxRatePercent = taxApplied ? rate : 0;
-    const taxAmount = taxApplied ? roundCents(baseRemit * rate / 100) : 0;
 
     return {
         grossSales,

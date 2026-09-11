@@ -77,13 +77,24 @@ const item = (name: string, variant: string, qty: number, price: number) => ({
     variant_size: variant, item_name: name, bundle: { name },
 });
 
-/** Edgar, as it exists in Production: 4 products across 17 active orders. */
+/**
+ * Edgar, as it exists in Production: 4 products across 17 active orders.
+ *
+ * FR-TAX-CORRECTNESS-1: total_amount is the PRE-TAX food subtotal (unchanged
+ * meaning) and tax_amount is the tax supporters actually paid — 1% of each
+ * order's own subtotal, rounded at the order, exactly as the order writers
+ * persist it. Closeout SUMS these rather than deriving a rate, so the fixture
+ * has to carry them for the executed route to have any tax to bill.
+ */
 const edgarOrders = () => [
-    { id: 'o1', total_amount: 1020, items: [item('Q2 - Comfort Foods (Serves 2)', 'serves_2', 17, 60)] },
-    { id: 'o2', total_amount: 420, items: [item('Q1 - Hearty Meals (Serves 2)', 'serves_2', 7, 60)] },
-    { id: 'o3', total_amount: 375, items: [item('Q1 - Hearty Meals', 'serves_5', 3, 125)] },
-    { id: 'o4', total_amount: 250, items: [item('Q2 - Comfort Foods', 'serves_5', 2, 125)] },
+    { id: 'o1', total_amount: 1020, tax_amount: 10.20, items: [item('Q2 - Comfort Foods (Serves 2)', 'serves_2', 17, 60)] },
+    { id: 'o2', total_amount: 420, tax_amount: 4.20, items: [item('Q1 - Hearty Meals (Serves 2)', 'serves_2', 7, 60)] },
+    { id: 'o3', total_amount: 375, tax_amount: 3.75, items: [item('Q1 - Hearty Meals', 'serves_5', 3, 125)] },
+    { id: 'o4', total_amount: 250, tax_amount: 2.50, items: [item('Q2 - Comfort Foods', 'serves_5', 2, 125)] },
 ];
+
+/** The same campaign with no tax ever collected — the legacy/live shape. */
+const edgarOrdersUntaxed = () => edgarOrders().map((o) => ({ ...o, tax_amount: 0 }));
 
 const post = async (body?: any) => {
     const { POST } = await import('@/app/api/campaigns/[id]/closeout/route');
@@ -157,17 +168,18 @@ describe('closeout creates exactly one DRAFT invoice', () => {
             base_remit: 1652,
             tax_applied: true,
             tax_rate_percent: 1,
-            // FR-TAX-1B: 1% of the NET $1,652, not of the $2,065 gross.
-            tax_amount: 16.52,
-            total_due: 1668.52,
+            // FR-TAX-CORRECTNESS-1: the SUM of the tax supporters actually
+            // paid (10.20 + 4.20 + 3.75 + 2.50), not a rate re-applied here.
+            tax_amount: 20.65,
+            total_due: 1672.65,
         });
 
         const created = calls.find((c) => c.op === 'invoice.create')!.args.data;
         expect(created.status).toBe('DRAFT');
         expect(created.campaign_id).toBe(CAMPAIGN);
         expect(created.generated_at).toBeInstanceOf(Date);
-        expect(Number(created.total_amount)).toBe(1668.52);
-        expect(Number(created.tax_amount)).toBe(16.52);
+        expect(Number(created.total_amount)).toBe(1672.65);
+        expect(Number(created.tax_amount)).toBe(20.65);
         expect(Number(created.fundraiser_profit_amount)).toBe(413);
         expect(created.items.create).toHaveLength(4);
         // FR-TAX-1B: the tax contract is frozen ONTO the invoice, so the row is
@@ -183,6 +195,8 @@ describe('closeout creates exactly one DRAFT invoice', () => {
         // rate nobody chose may be applied to it now. See resolveCloseoutTaxRate.
         campaignRow.tax_status = null;
         campaignRow.tax_rate_percent = null;
+        // No snapshot means supporters were never charged tax either.
+        ordersRow = edgarOrdersUntaxed();
         const body = await (await post({ applyFoodTax: true })).json();
         expect(body.financials.tax_applied).toBe(false);
         expect(body.financials.tax_amount).toBe(0);
@@ -192,13 +206,19 @@ describe('closeout creates exactly one DRAFT invoice', () => {
     it('FR-TAX-1B: a TAX_EXEMPT campaign is charged no tax even with the switch ON', async () => {
         campaignRow.tax_status = 'TAX_EXEMPT';
         campaignRow.tax_rate_percent = 0;
+        // An exempt campaign collects $0 from every supporter.
+        ordersRow = edgarOrdersUntaxed();
         const body = await (await post({ applyFoodTax: true })).json();
         expect(body.financials.tax_applied).toBe(false);
         expect(body.financials.tax_amount).toBe(0);
         expect(body.financials.total_due).toBe(1652);
     });
 
-    it('the tax toggle OFF yields no tax and a total equal to the remit', async () => {
+    it('the tax toggle OFF yields no tax when none was collected', async () => {
+        // FR-TAX-CORRECTNESS-1: the switch narrows, it does not delete money.
+        // With no tax on the orders there is nothing to bill, so this is the
+        // untaxed/legacy campaign shape.
+        ordersRow = edgarOrdersUntaxed();
         const body = await (await post({ applyFoodTax: false })).json();
         expect(body.financials.tax_applied).toBe(false);
         expect(body.financials.tax_amount).toBe(0);
@@ -207,6 +227,14 @@ describe('closeout creates exactly one DRAFT invoice', () => {
         const created = calls.find((c) => c.op === 'invoice.create')!.args.data;
         expect(Number(created.tax_amount)).toBe(0);
         expect(Number(created.total_amount)).toBe(1652);
+    });
+
+    it('the tax toggle OFF CANNOT delete tax supporters already paid', async () => {
+        // The dangerous case: supporters were charged, so the organization is
+        // holding that money and must remit it regardless of the checkbox.
+        const body = await (await post({ applyFoodTax: false })).json();
+        expect(body.financials.tax_amount).toBe(20.65);
+        expect(body.financials.total_due).toBe(1672.65);
     });
 
     it('invoice lines carry variant_size so serves_5 and serves_2 stay distinguishable', async () => {

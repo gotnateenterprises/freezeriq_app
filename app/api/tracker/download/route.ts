@@ -23,6 +23,7 @@ import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
 import path from 'path';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 import { buildTrackerFamilies, populateTrackerWorksheet, type TrackerBundleRow } from '@/lib/coordinatorOrderTracker';
+import { resolveCloseoutTaxRate } from '@/lib/fundraiserTax';
 
 export async function GET(req: Request) {
     try {
@@ -146,6 +147,14 @@ export async function GET(req: Request) {
         populateTrackerWorksheet(worksheet, resolved.families, {
             endDate: campaign.end_date,
             payee: campaign.checks_payable,
+            // FR-TAX-CORRECTNESS-1: the "Total Cost" column is a cash-collection
+            // column, so its header has to match what supporters are actually
+            // charged. Resolved through the one legacy firewall — a NULL-status
+            // or TAX_EXEMPT campaign returns 0 and the sheet is unchanged.
+            taxRatePercent: resolveCloseoutTaxRate({
+                taxStatus: (campaign as any).tax_status,
+                taxRatePercent: (campaign as any).tax_rate_percent,
+            }),
         });
 
         // 6. Generate buffer and return

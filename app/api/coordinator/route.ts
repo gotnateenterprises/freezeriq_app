@@ -36,6 +36,8 @@ import { resolveMaterialBundles, groupMaterialMenus } from '@/lib/coordinatorMat
 import { hasInvalidOrderQuantity } from '@/lib/orderQuantity';
 import { SUPPORTER_ORDER_SELECT, toSupporterOrder } from '@/lib/coordinatorSupporterOrders';
 import { normalizeSupporterEmail } from '@/lib/previousSupporters';
+import { computeSupporterOrderTax } from '@/lib/fundraiserTax';
+import { roundCents } from '@/lib/fundraiserCloseoutMath';
 
 /**
  * Phase 7E-1C: Returns true if the campaign has been server-closed.
@@ -255,6 +257,16 @@ export async function GET(req: Request) {
 
         // Compute total_sales from active (non-canceled) orders
         // so totals always derive from filtered queries
+        //
+        // FR-TAX-CORRECTNESS-1 REVIEWED AND DELIBERATELY LEFT PRE-TAX. This is
+        // a SALES figure, not a collection figure: it drives goal progress and
+        // the "raised" display, and it is the same basis the organization's
+        // share is computed on. Collected sales tax is not money the fundraiser
+        // raised — it is money held for the taxing authority — so adding it
+        // here would inflate progress toward a goal by an amount the
+        // organization never gets. The per-order collection figure the
+        // coordinator reconciles against cash is `amount_due`, supplied by
+        // toSupporterOrder below.
         const computedTotalSales = (campaign.orders || []).reduce(
             (sum: number, o: any) => sum + Number(o.total_amount || 0), 0
         );
@@ -534,9 +546,25 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: validationErr.message }, { status: 400 });
         }
 
-        const serverTotal = resolvedItems.reduce(
+        // FR-TAX-CORRECTNESS-1: pre-tax food subtotal, from server prices only.
+        const serverSubtotal = roundCents(resolvedItems.reduce(
             (sum: number, item: any) => sum + (item.serverPrice * item.quantity), 0
-        );
+        ));
+
+        // A coordinator-entered order is the SAME sale as a supporter's own
+        // order and must carry the same tax, from the same frozen campaign
+        // snapshot. Leaving this path untaxed would under-bill the organization
+        // at closeout by exactly the tax on every paper order it collected.
+        const orderTax = computeSupporterOrderTax({
+            subtotal: serverSubtotal,
+            snapshot: {
+                status: (campaign as any).tax_status ?? null,
+                ratePercent: (campaign as any).tax_rate_percent ?? null,
+            },
+        });
+
+        // total_amount stays PRE-TAX (see lib/fundraiserTax.ts supporterAmountDue).
+        const serverTotal = serverSubtotal;
 
         // COORD-MANUAL-EMAIL-1B: goes on Order.email, never Customer.contact_email —
         // customer_id below is the campaign's own organization, shared by every
@@ -552,6 +580,9 @@ export async function POST(req: Request) {
                 participant_name: participantName,
                 status: 'fundraiser_hold',
                 total_amount: serverTotal,
+                // FR-TAX-CORRECTNESS-1: frozen alongside the total, so closeout
+                // sums what was actually charged instead of re-deriving it.
+                tax_amount: orderTax.taxAmount,
                 delivery_address: deliveryAddress,
                 business_id: businessId,
                 customer_id: campaign.customer_id,

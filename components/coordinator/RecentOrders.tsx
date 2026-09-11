@@ -59,6 +59,16 @@ export interface TrackerOrder {
     email?: string | null;
     phone?: string | null;
     total_amount?: number | string | null;
+    /**
+     * FR-TAX-CORRECTNESS-1: what this supporter actually owes — the persisted
+     * pre-tax total_amount plus the persisted tax_amount, summed server-side by
+     * toSupporterOrder(). This list is the figure a coordinator reconciles
+     * against cash in hand, so it is the one to render. total_amount stays in
+     * the shape above because it is still the pre-tax sales number other
+     * readers (goal progress, participant leaderboard, org share) legitimately
+     * use; it is simply not the collection figure.
+     */
+    amount_due?: number | string | null;
     created_at?: string | null;
     canceled_at?: string | null;
     items?: OrderLineItem[];
@@ -124,7 +134,11 @@ export function RecentOrders({
                                     )}
                                 </span>
                                 <span className="font-bold tabular-nums text-slate-900 whitespace-nowrap">
-                                    ${Number(o.total_amount ?? 0).toFixed(0)}
+                                    {/* amount_due when the server supplied it; total_amount is
+                                        the fallback for any response shaped before this field
+                                        existed. On an untaxed order the two are equal, so this
+                                        renders identically for every order that exists today. */}
+                                    ${Number(o.amount_due ?? o.total_amount ?? 0).toFixed(0)}
                                 </span>
                                 {/* Phase 7E-4: hide cancel button when campaign is closed */}
                                 {!isClosed && (

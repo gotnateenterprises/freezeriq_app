@@ -16,6 +16,9 @@ interface Customer {
     id: string;
     name: string;
     email: string;
+    /** FR-TAX-CORRECTNESS-1: the organization's recorded tax status, when the
+     *  customers API supplies it. TAX_EXEMPT forces $0 tax on this invoice. */
+    tax_status?: string | null;
 }
 
 interface Bundle {
@@ -31,6 +34,14 @@ interface InvoiceComposeModalProps {
     invoiceToEdit?: any;
     preselectedCustomerId?: string;
     prefilledItems?: Item[];
+    /**
+     * FR-TAX-CORRECTNESS-1: the tenant's configured food-tax rate as a PERCENT
+     * (1 means 1%). Deliberately has NO default rate baked in — this modal used
+     * to hardcode `subtotal * 0.01`, which billed tax-exempt organizations and
+     * asserted a rate nobody configured. Absent means 0% until a tenant records
+     * a verified rate in Settings.
+     */
+    taxRatePercent?: number | null;
 }
 
 export default function InvoiceComposeModal({
@@ -39,7 +50,8 @@ export default function InvoiceComposeModal({
     onSuccess,
     invoiceToEdit,
     preselectedCustomerId,
-    prefilledItems
+    prefilledItems,
+    taxRatePercent
 }: InvoiceComposeModalProps) {
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [bundles, setBundles] = useState<Bundle[]>([]);
@@ -94,15 +106,29 @@ export default function InvoiceComposeModal({
 
     const subtotal = items.reduce((acc, curr) => acc + curr.total, 0);
 
-    // Auto-calculate 1% tax
+    // FR-TAX-CORRECTNESS-1: the organization's own recorded status is
+    // authoritative over the checkbox. A TAX_EXEMPT organization is never
+    // charged tax here, which is the defect this replaces — the old code
+    // applied a flat 1% unless a human remembered to tick the box.
+    const selectedCustomer = customers.find((c) => c.id === selectedCustomerId);
+    const orgIsExempt = selectedCustomer?.tax_status === 'TAX_EXEMPT';
+
     useEffect(() => {
-        if (isTaxExempt) {
+        if (orgIsExempt) setIsTaxExempt(true);
+    }, [orgIsExempt]);
+
+    // Auto-calculate tax at the TENANT'S CONFIGURED rate — never a hardcoded
+    // 1%. An unconfigured tenant charges 0% rather than a rate nobody verified.
+    useEffect(() => {
+        const rate = Number(taxRatePercent);
+        const safeRate = Number.isFinite(rate) && rate > 0 ? rate : 0;
+
+        if (isTaxExempt || orgIsExempt || safeRate <= 0) {
             setTaxAmount(0);
-        } else {
-            const calculatedTax = Number((subtotal * 0.01).toFixed(2));
-            setTaxAmount(calculatedTax);
+            return;
         }
-    }, [subtotal, isTaxExempt]);
+        setTaxAmount(Number((subtotal * safeRate / 100).toFixed(2)));
+    }, [subtotal, isTaxExempt, orgIsExempt, taxRatePercent]);
 
     const fetchInitialData = async () => {
         setIsLoadingData(true);
@@ -398,7 +424,7 @@ export default function InvoiceComposeModal({
                                     className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                                 />
                                 <label htmlFor="taxExempt" className="text-sm font-bold text-slate-600 dark:text-slate-400 cursor-pointer">
-                                    Tax Exempt (Remove 1% Food Tax)
+                                    Tax Exempt (Remove Food Tax)
                                 </label>
                             </div>
 

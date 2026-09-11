@@ -105,18 +105,24 @@ describe('bundle aggregation', () => {
 });
 
 describe('organization share and remit', () => {
-    it('the owner worked example: $2,065 at 20% with tax ON', () => {
-        // FR-TAX-1B: the taxable base is now the NET after the organization's
-        // share, per the owner's confirmed ruling, and the rate arrives from
-        // the campaign's frozen snapshot rather than a product constant.
-        // 1% of $1,652 = $16.52 — NOT the $20.65 the superseded gross basis
-        // produced.
-        const f = computeCloseoutFinancials({ grossSales: 2065, orgSharePercent: 20, applyFoodTax: true, taxRatePercent: 1 });
-        expect(f.organizationAmount).toBe(413);
+    it('the owner worked example: $2,065 at 20% with tax collected', () => {
+        // FR-TAX-CORRECTNESS-1 supersedes FR-TAX-1B's NET basis. Supporters now
+        // pay the tax at order time on GROSS food sales, so closeout bills the
+        // tax that was actually COLLECTED rather than re-deriving it:
+        //   1% of $2,065 = $20.65, collected from supporters.
+        // The superseded NET basis produced $16.52 (1% of $1,652) and the
+        // pre-FR-TAX-1B gross-at-closeout basis produced the same $20.65 by a
+        // different route — this asserts the collected figure explicitly.
+        const f = computeCloseoutFinancials({
+            grossSales: 2065, orgSharePercent: 20, applyFoodTax: true,
+            taxCollected: 20.65, taxRatePercent: 1,
+        });
+        expect(f.organizationAmount).toBe(413);   // share on PRE-TAX gross
         expect(f.baseRemit).toBe(1652);
         expect(f.taxRatePercent).toBe(1);
-        expect(f.taxAmount).toBe(16.52);
-        expect(f.totalDue).toBe(1668.52);
+        expect(f.taxAmount).toBe(20.65);
+        expect(f.taxAmount).not.toBe(16.52);      // the superseded NET answer
+        expect(f.totalDue).toBe(1672.65);
     });
 
     it('no rate means no tax, even with the owner switch ON', () => {
@@ -175,20 +181,31 @@ describe('organization share and remit', () => {
 
     it('rounds to cents and still balances on an awkward share', () => {
         // 33.33% of 1000.05 is 333.3167 -> 333.32, remit must absorb the rest.
-        const f = computeCloseoutFinancials({ grossSales: 1000.05, orgSharePercent: 33.33, applyFoodTax: true, taxRatePercent: 1 });
+        // FR-TAX-CORRECTNESS-1: tax is COLLECTED at order time on gross —
+        // 1% of 1000.05 = 10.0005 -> 10.00 — and carried in, not re-derived.
+        // The share/remit rounding invariant this test exists to protect is
+        // unchanged and still asserted below.
+        const f = computeCloseoutFinancials({
+            grossSales: 1000.05, orgSharePercent: 33.33, applyFoodTax: true,
+            taxCollected: 10.00, taxRatePercent: 1,
+        });
         expect(f.organizationAmount).toBe(333.32);
         expect(f.baseRemit).toBe(666.73);
         expect(roundCents(f.organizationAmount + f.baseRemit)).toBe(1000.05);
-        // FR-TAX-1B: 1% of the NET 666.73 = 6.6673 -> 6.67.
-        expect(f.taxAmount).toBe(6.67);
-        expect(f.totalDue).toBe(673.40);
+        expect(f.taxAmount).toBe(10.00);
+        expect(f.totalDue).toBe(676.73);
     });
 
-    it('FR-TAX-1B: the five historical invoices are NOT reproduced, and are never recalculated', () => {
-        // Those invoices were computed on GROSS x 1%, the basis the owner has
-        // since superseded. This function no longer reproduces them BY DESIGN.
-        // They remain in Production untouched as historical records of what was
-        // actually billed and settled — nothing backfills or recomputes them.
+    it('FR-TAX-CORRECTNESS-1: the five historical invoices are now REPRODUCED exactly, and are still never recalculated', () => {
+        // These five Production invoices were billed on GROSS x 1%. FR-TAX-1B
+        // moved the base to NET and deliberately stopped reproducing them; the
+        // owner has since re-ruled back to a gross basis, collected from
+        // supporters. The arithmetic therefore lines up with history again —
+        // which is corroboration of the re-ruling, not a reason for it.
+        //
+        // They are STILL never recalculated: nothing backfills or rewrites a
+        // finalized invoice. This only asserts what the CURRENT formula would
+        // produce for the same inputs.
         const historical: Array<[number, number, number]> = [
             [6420, 1284, 5200.20],
             [845, 169, 684.45],
@@ -197,14 +214,14 @@ describe('organization share and remit', () => {
             [1220, 244, 988.20],
         ];
         for (const [gross, org, oldTotal] of historical) {
-            const f = computeCloseoutFinancials({ grossSales: gross, orgSharePercent: 20, applyFoodTax: true, taxRatePercent: 1 });
-            // The organization's share is unchanged — only the tax base moved.
+            const taxCollected = roundCents(gross * 0.01);   // 1% of GROSS
+            const f = computeCloseoutFinancials({
+                grossSales: gross, orgSharePercent: 20, applyFoodTax: true,
+                taxCollected, taxRatePercent: 1,
+            });
             expect(f.organizationAmount).toBe(org);
-            // Tax is now 1% of NET, so the new total is strictly lower than the
-            // historical one by exactly 1% of the organization's share.
-            expect(f.taxAmount).toBe(roundCents(f.baseRemit * 0.01));
-            expect(f.totalDue).toBeLessThan(oldTotal);
-            expect(roundCents(oldTotal - f.totalDue)).toBe(roundCents(org * 0.01));
+            expect(f.taxAmount).toBe(taxCollected);
+            expect(f.totalDue).toBe(oldTotal);
         }
     });
 
@@ -234,11 +251,18 @@ describe('the generated invoice agrees with the existing PDF', () => {
     it('the PDF balance equals the stored total due, tax ON', () => {
         const lines = aggregateBundleLines(EDGAR);
         const gross = sumLineTotals(lines);
-        const f = computeCloseoutFinancials({ grossSales: gross, orgSharePercent: 20, applyFoodTax: true, taxRatePercent: 1 });
+        // FR-TAX-CORRECTNESS-1: supporters paid 1% of GROSS at order time.
+        const taxCollected = roundCents(gross * 0.01);
+        const f = computeCloseoutFinancials({
+            grossSales: gross, orgSharePercent: 20, applyFoodTax: true,
+            taxCollected, taxRatePercent: 1,
+        });
 
+        // The invariant this test exists to protect — the printed balance and
+        // the stored total due agree — is unchanged by the re-ruling.
         expect(pdfBalance(gross, f.organizationAmount, f.taxAmount)).toBe(f.totalDue);
-        // FR-TAX-1B: 1% of the NET $1,652 = $16.52 (was $20.65 on gross).
-        expect(f.totalDue).toBe(1668.52);
+        expect(f.taxAmount).toBe(20.65);      // 1% of $2,065 gross
+        expect(f.totalDue).toBe(1672.65);
     });
 
     it('the PDF balance equals the stored total due, tax OFF', () => {

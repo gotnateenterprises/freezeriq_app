@@ -118,14 +118,28 @@ describe('the selected value reaches the closeout API', () => {
             expect(typeof parsed.applyFoodTax).toBe('boolean');
             expect(parsed.applyFoodTax).toBe(applyFoodTax);
 
-            // And the money that choice produces.
+            // And the money that choice produces. FR-TAX-CORRECTNESS-1: the
+            // switch narrows only when nothing was collected, so this models a
+            // campaign whose supporters were NOT charged — the case where the
+            // toggle still has an effect.
             const f = computeCloseoutFinancials({
                 grossSales: 2065, orgSharePercent: 20, applyFoodTax: parsed.applyFoodTax,
-                taxRatePercent: 1,
+                taxCollected: 0, taxRatePercent: 1,
             });
-            expect(f.taxApplied).toBe(applyFoodTax);
-            // FR-TAX-1B: 1% of the NET 1652 = 16.52, not 1% of gross.
-            expect(f.totalDue).toBe(applyFoodTax ? 1668.52 : 1652);
+            // No tax was collected, so no tax is billed either way.
+            expect(f.taxApplied).toBe(false);
+            expect(f.totalDue).toBe(1652);
+        }
+
+        // And the case that matters most: once supporters HAVE paid, the
+        // toggle cannot take that money back out of the invoice.
+        for (const applyFoodTax of [true, false]) {
+            const f = computeCloseoutFinancials({
+                grossSales: 2065, orgSharePercent: 20, applyFoodTax,
+                taxCollected: 20.65, taxRatePercent: 1,
+            });
+            expect(f.taxAmount).toBe(20.65);
+            expect(f.totalDue).toBe(1672.65);
         }
     });
 

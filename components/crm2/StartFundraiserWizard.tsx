@@ -183,6 +183,15 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
     const [taxStatus, setTaxStatus] = useState<'TAXABLE' | 'TAX_EXEMPT'>('TAXABLE');
     const [taxRate, setTaxRate] = useState('0');
     const [orgHasExemptionDoc, setOrgHasExemptionDoc] = useState(false);
+    // FR-TAX-CORRECTNESS-1 HARDENING: whether we actually KNOW this
+    // organization's recorded tax status. The radio above defaults to TAXABLE,
+    // which is the safe default for an organization nobody has asked — but it
+    // is NOT a safe thing to show when the lookup simply failed, because an
+    // exempt organization then looks taxable and the tenant has no way to tell
+    // the two situations apart. 'idle' means there is no linked organization to
+    // look up (a brand-new one), which is not a failure.
+    const [orgTaxLoad, setOrgTaxLoad] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
+    const [orgTaxReloadKey, setOrgTaxReloadKey] = useState(0);
     const orgShareError = shareAuthorized ? orgShareInputError(orgShare) : null;
     // CB-4: eligible families from /api/campaigns/bundle-families
     const [eligibleFamilies, setEligibleFamilies] = useState<EligibleFamily[]>([]);
@@ -227,18 +236,26 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
             } catch { /* prefill is a convenience; the server decides */ }
 
             const orgId = useExistingId;
-            if (!orgId) return;
+            if (!orgId) { if (!cancelled) setOrgTaxLoad('idle'); return; }
+            if (!cancelled) setOrgTaxLoad('loading');
             try {
                 const res = await fetch(`/api/customers/${orgId}`, { cache: 'no-store' });
                 const data = await res.json().catch(() => ({}));
-                if (cancelled || !res.ok) return;
+                if (cancelled) return;
+                // FR-TAX-CORRECTNESS-1 HARDENING: a non-ok response used to
+                // `return` here silently, leaving the form showing TAXABLE for
+                // an organization that may well be exempt. It is now surfaced.
+                if (!res.ok) { setOrgTaxLoad('error'); return; }
                 setOrgHasExemptionDoc(Boolean(data?.tax_document));
                 // UNKNOWN deliberately does NOT prefill exempt.
                 if (data?.tax_status === 'TAX_EXEMPT') setTaxStatus('TAX_EXEMPT');
-            } catch { /* same */ }
+                setOrgTaxLoad('ok');
+            } catch {
+                if (!cancelled) setOrgTaxLoad('error');
+            }
         })();
         return () => { cancelled = true; };
-    }, [useExistingId]);
+    }, [useExistingId, orgTaxReloadKey]);
 
     // Dup-check while typing (Step 1).
     // GET /api/customers?type=organization returns only fundraiser_org/organization rows
@@ -665,6 +682,23 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                                     </span>
                                 </label>
                             </div>
+                            {/* FR-TAX-CORRECTNESS-1 HARDENING: a failed lookup is
+                                shown, never hidden behind the TAXABLE default. */}
+                            {orgTaxLoad === 'error' && (
+                                <div className="mt-2 rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950 px-3 py-2 text-[12px] font-semibold text-amber-900 dark:text-amber-200">
+                                    Could not load this organization&apos;s recorded tax status. The selection above is
+                                    the default, not this organization&apos;s actual status — launching now could tax an
+                                    exempt organization.
+                                    <button
+                                        type="button"
+                                        id="wiz-tax-status-retry"
+                                        onClick={() => setOrgTaxReloadKey((k) => k + 1)}
+                                        className="ml-2 rounded-lg bg-amber-600 px-2 py-0.5 text-[11px] font-bold text-white hover:bg-amber-700 transition-colors"
+                                    >
+                                        Retry
+                                    </button>
+                                </div>
+                            )}
                             <p className="mt-1 text-[11px] font-medium normal-case tracking-normal text-slate-500 dark:text-slate-400">
                                 Frozen onto this campaign at launch. Changing the organization&apos;s status or your
                                 default rate later will not change this fundraiser.
@@ -757,6 +791,13 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                                     busy ||
                                     // INV-A: an invalid share cannot be submitted.
                                     orgShareError !== null ||
+                                    // FR-TAX-CORRECTNESS-1 HARDENING: never launch
+                                    // on a tax position we failed to verify. The
+                                    // server refuses an invented exemption on its
+                                    // own; this stops the opposite mistake — taxing
+                                    // an exempt organization because a lookup
+                                    // failed and the form silently said TAXABLE.
+                                    orgTaxLoad === 'error' ||
                                     pickedFamilyIds.size === 0 ||
                                     !Number.isInteger(selectionLimit) ||
                                     selectionLimit < 1 ||

@@ -4,6 +4,9 @@ import React, { useState, useMemo, useRef } from 'react';
 import { formatBundleCount, computeBundleUnitsFromItems, type FundraiserProgressResult } from '@/lib/fundraiserMetrics';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
 import { customerFacingBusinessName } from '@/lib/tenantBrand';
+// FR-TAX-CORRECTNESS-1: the SAME rule the server applies, so the figure shown
+// before submit and the figure persisted cannot disagree.
+import { computeSupporterOrderTax } from '@/lib/fundraiserTax';
 
 /**
  * FR-ACCEPTANCE-MOBILE-POLISH-1. Display-only formatting for the per-order
@@ -167,6 +170,22 @@ export default function FundraiserClient({
     );
 
     const orderTotal = orderLines.reduce((sum, l) => sum + l.price * l.quantity, 0);
+
+    // FR-TAX-CORRECTNESS-1: the supporter must see the tax BEFORE submitting.
+    // Display only — app/api/public/order/route.ts recomputes this server-side
+    // from the same frozen snapshot and is the authority. computeSupporterOrderTax
+    // is the shared rule, so the number shown here and the number persisted
+    // cannot drift. Every campaign currently live carries a 0% or absent
+    // snapshot, so this renders exactly as before for them.
+    const orderTax = computeSupporterOrderTax({
+        subtotal: orderTotal,
+        snapshot: {
+            status: campaign?.tax_status ?? null,
+            ratePercent: campaign?.tax_rate_percent ?? null,
+        },
+    });
+    const orderAmountDue = orderTax.total;
+    const isTaxExemptCampaign = campaign?.tax_status === 'TAX_EXEMPT';
 
     // One derived bundle total drives every progress display so the hero and the
     // confirmation can never disagree after a submission.
@@ -341,8 +360,16 @@ export default function FundraiserClient({
             // The amount shown to the buyer (and owed to the coordinator) is the
             // SERVER-persisted order total, not the browser's running figure. The
             // client total is only a fallback if an older response omits it.
+            //
+            // FR-TAX-CORRECTNESS-1: `data.total` is the supporter's AMOUNT DUE
+            // (persisted subtotal + persisted tax), so the fallback has to be
+            // the client's amount due too — orderAmountDue, not the pre-tax
+            // orderTotal, which would under-state the figure on a taxable
+            // campaign in exactly the case where the server's number is
+            // unavailable to correct it. On an untaxed campaign the two are
+            // identical, so this changes nothing for existing fundraisers.
             const serverTotal = Number(data.total);
-            const authoritativeTotal = Number.isFinite(serverTotal) ? serverTotal : orderTotal;
+            const authoritativeTotal = Number.isFinite(serverTotal) ? serverTotal : orderAmountDue;
             setThanks({
                 // Fable's orderRef format is last-6-uppercased; the API returns the
                 // internal order id (not external_id), so the same format is applied
@@ -918,7 +945,7 @@ export default function FundraiserClient({
                             {/* OrderForm card — prototype lines 554-567 */}
                             <div style={fableCard}>
                                 <b style={{ fontFamily: SERIF, fontWeight: 400, fontSize: '1rem', color: '#3b2a2f' }}>
-                                    Your order · <span>${orderTotal.toFixed(2)}</span>
+                                    Your order · <span>${orderAmountDue.toFixed(2)}</span>
                                 </b>
 
                                 {orderLines.length === 0 ? (
@@ -948,6 +975,30 @@ export default function FundraiserClient({
                                                 <button aria-label={`Remove ${line.name}`} onClick={() => removeLine(line.bundleId)} style={{ color: '#d8c3b5', background: 'none', border: 0, cursor: 'pointer', padding: '0 .2rem', fontSize: '.8rem' }}>✕</button>
                                             </div>
                                         ))}
+                                    </div>
+                                )}
+
+                                {/* FR-TAX-CORRECTNESS-1: what the supporter owes, itemised,
+                                    BEFORE they submit. Rendered only when there is something in
+                                    the order. An untaxed or legacy campaign (every one currently
+                                    live) shows a single Total row, exactly as this card did
+                                    before — the subtotal/tax rows appear only when tax applies
+                                    or the campaign is explicitly exempt, so nothing about the
+                                    existing supporter experience changes for them. */}
+                                {orderLines.length > 0 && (orderTax.taxApplied || isTaxExemptCampaign) && (
+                                    <div style={{ marginTop: '.6rem', paddingTop: '.5rem', borderTop: '1px solid #efe3dc', fontSize: '.74rem', color: '#6b564f' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '.12rem 0' }}>
+                                            <span>Subtotal</span>
+                                            <span style={{ fontVariantNumeric: 'tabular-nums' }}>${orderTax.subtotal.toFixed(2)}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '.12rem 0' }}>
+                                            <span>{orderTax.taxApplied ? `Food tax (${orderTax.ratePercent}%)` : 'Tax exempt'}</span>
+                                            <span style={{ fontVariantNumeric: 'tabular-nums' }}>${orderTax.taxAmount.toFixed(2)}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '.28rem 0 0', marginTop: '.22rem', borderTop: '1px solid #efe3dc', color: '#3b2a2f', fontWeight: 800 }}>
+                                            <span>Total due</span>
+                                            <span style={{ fontVariantNumeric: 'tabular-nums' }}>${orderAmountDue.toFixed(2)}</span>
+                                        </div>
                                     </div>
                                 )}
 

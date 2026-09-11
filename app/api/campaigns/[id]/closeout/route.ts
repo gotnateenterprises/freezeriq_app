@@ -248,6 +248,11 @@ export async function POST(
                     select: {
                         id: true,
                         total_amount: true,
+                        // FR-TAX-CORRECTNESS-1: tax the SUPPORTER already paid on
+                        // this order, frozen at order time. total_amount beside
+                        // it stays the PRE-TAX food subtotal, so the two are
+                        // summed independently below — never subtracted.
+                        tax_amount: true,
                         items: {
                             select: {
                                 bundle_id: true,
@@ -261,8 +266,22 @@ export async function POST(
                     }
                 });
 
+                // FR-TAX-CORRECTNESS-1: total_amount KEEPS its historical meaning
+                // — PRE-TAX food sales — so this line is unchanged from before
+                // the phase. That is the whole point of the corrected design:
+                // the org-share basis, the reconciliation gate and every
+                // campaign metric keep reading exactly what they always read.
                 const settlementTotal = roundCents(activeOrders.reduce(
                     (sum, o) => sum + Number(o.total_amount || 0),
+                    0
+                ));
+
+                // The tax supporters actually paid, summed from the orders
+                // themselves rather than recomputed from a rate. This is the
+                // authoritative tax for the invoice: it cannot drift from what
+                // was charged, and it is $0.00 for every legacy campaign.
+                const taxCollected = roundCents(activeOrders.reduce(
+                    (sum, o) => sum + (Number(o.tax_amount) || 0),
                     0
                 ));
 
@@ -282,6 +301,11 @@ export async function POST(
                 // 3. HARD GATE. The bundle tally must equal the order totals, or
                 //    this is not a document anyone can act on. Name the offending
                 //    orders so the data can be repaired rather than guessed at.
+                //    FR-TAX-CORRECTNESS-1: unchanged, and deliberately so.
+                //    Bundle lines are quantity x unit_price — pre-tax — and
+                //    total_amount is pre-tax, so the gate keeps comparing like
+                //    with like and retains its full ability to catch a genuine
+                //    money discrepancy. Tax is reconciled separately below.
                 const offenders = activeOrders
                     .map((o) => ({
                         orderId: o.id,
@@ -296,21 +320,26 @@ export async function POST(
                 // 4. The money. Organization share comes from the campaign's own
                 //    durable org_share_percent, never a current tenant default.
                 //
-                //    FR-TAX-1B: the tax rate likewise comes from the campaign's
-                //    OWN frozen snapshot, never the tenant's current default —
-                //    that is the whole point of snapshotting at launch. The
-                //    base is the NET after the organization's share, per the
-                //    owner's confirmed ruling (lib/fundraiserTax.ts
-                //    CONFIRMED_TAXABLE_BASE), which computeCloseoutFinancials
-                //    applies to its own baseRemit.
+                //    FR-TAX-CORRECTNESS-1 supersedes FR-TAX-1B here. Closeout no
+                //    longer RECOMPUTES tax from the campaign's rate: the tax was
+                //    already collected from supporters at order time, so the
+                //    only honest number is the sum of what they actually paid.
+                //    That also removes the last place a second 1% could be
+                //    applied on top of the first.
+                //
+                //    The campaign's frozen rate is still read, but only to
+                //    RECORD the contract on the invoice — never to derive money.
+                const closeoutTaxRate = resolveCloseoutTaxRate({
+                    taxStatus: (campaign as any).tax_status ?? null,
+                    taxRatePercent: (campaign as any).tax_rate_percent ?? null,
+                });
+
                 const financials = computeCloseoutFinancials({
                     grossSales: settlementTotal,
                     orgSharePercent: Number(campaign.org_share_percent),
                     applyFoodTax,
-                    taxRatePercent: resolveCloseoutTaxRate({
-                        taxStatus: (campaign as any).tax_status ?? null,
-                        taxRatePercent: (campaign as any).tax_rate_percent ?? null,
-                    }),
+                    taxCollected,
+                    taxRatePercent: closeoutTaxRate,
                 });
 
                 const closedAt = new Date();

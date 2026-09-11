@@ -31,6 +31,14 @@ export const PUBLIC_CAMPAIGN_FIELDS = [
     'delivery_time',
     'payment_instructions',
     'external_payment_link',
+    // FR-TAX-CORRECTNESS-1: this campaign's FROZEN tax treatment. Deliberately
+    // public — the supporter is the one being charged the tax, so the page must
+    // be able to show them the same figure the server will persist. Contrast
+    // org_share_percent below, which is tenant-internal and stays forbidden:
+    // what the organization earns is none of the supporter's business, but what
+    // the supporter pays certainly is.
+    'tax_status',
+    'tax_rate_percent',
     'organization_name',
     'customer_fundraiser_info',
 ] as const;

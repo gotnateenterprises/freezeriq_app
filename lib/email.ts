@@ -7,6 +7,11 @@ import { safeSubject } from '@/lib/emailTemplates';
 // coordinator setup form rather than duplicated here. lib/coordinatorSetup has
 // no imports of its own, so this stays a pure, dependency-free reuse.
 import { checkPaymentLink } from '@/lib/coordinatorSetup';
+// FR-TAX-CORRECTNESS-1: the one authority for "what does the supporter owe".
+// Both order emails below state a collection figure, so both must use it
+// rather than reading total_amount (the PRE-TAX subtotal) as if it were the
+// amount due.
+import { supporterAmountDue } from '@/lib/fundraiserTax';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -180,7 +185,48 @@ export async function sendOrderConfirmationEmail(
         : { from: FROM_EMAIL };
 
     const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-    const total = currency.format(Number(order.total_amount));
+
+    // ── FR-TAX-CORRECTNESS-1: the receipt must state what the supporter owes ──
+    //
+    // `order.total_amount` is, and remains, the PRE-TAX food subtotal. The tax
+    // the supporter is charged lives in `order.tax_amount`, frozen at order
+    // time. What this email is for is telling the supporter what to hand the
+    // coordinator, so it must state subtotal + tax — not the subtotal alone,
+    // which would under-state the amount due by exactly the tax on every
+    // taxable order.
+    //
+    // supporterAmountDue() is the single authority for that sum; this template
+    // does no arithmetic of its own. For an untaxed order (tax_amount = 0 —
+    // which is every order in existence today) it returns the subtotal
+    // unchanged, so the breakdown below collapses to the single "Total" row
+    // this email has always rendered. Legacy receipts are bit-identical.
+    const subtotalAmount = Number(order.total_amount) || 0;
+    const taxAmount = Number(order.tax_amount) || 0;
+    const amountDue = supporterAmountDue(order);
+    const total = currency.format(amountDue);
+
+    // Only a genuinely taxed order gets the three-row breakdown. A 0.00 tax
+    // line on a non-taxable campaign would be noise at best and, on a
+    // tax-exempt organization's receipt, actively misleading.
+    const totalsHtml = taxAmount > 0
+        ? `
+                <div style="margin-top: 15px; border-top: 1px solid #e5e7eb; padding-top: 10px; display: flex; justify-content: space-between; color: #4b5563;">
+                    <span>Subtotal</span>
+                    <span>${currency.format(subtotalAmount)}</span>
+                </div>
+                <div style="margin-top: 6px; display: flex; justify-content: space-between; color: #4b5563;">
+                    <span>Food tax</span>
+                    <span>${currency.format(taxAmount)}</span>
+                </div>
+                <div style="margin-top: 10px; border-top: 2px solid #d1d5db; padding-top: 10px; display: flex; justify-content: space-between;">
+                    <strong>Total Due</strong>
+                    <strong>${total}</strong>
+                </div>`
+        : `
+                <div style="margin-top: 15px; border-top: 2px solid #d1d5db; padding-top: 10px; display: flex; justify-content: space-between;">
+                    <strong>Total</strong>
+                    <strong>${total}</strong>
+                </div>`;
 
     // Construct Item List
     //
@@ -248,10 +294,7 @@ export async function sendOrderConfirmationEmail(
                 <div style="margin-top: 15px;">
                     ${itemsHtml}
                 </div>
-                <div style="margin-top: 15px; border-top: 2px solid #d1d5db; padding-top: 10px; display: flex; justify-content: space-between;">
-                    <strong>Total</strong>
-                    <strong>${total}</strong>
-                </div>
+                ${totalsHtml}
             </div>
 
             ${paymentHtml}
@@ -319,8 +362,21 @@ export interface FundraiserCoordinatorNotificationInput {
     supporterPhone?: string | null;
     participantName?: string | null;
     items: FundraiserCoordinatorNotificationItem[];
-    /** Persisted server-authoritative order total — never a client-supplied value. */
+    /**
+     * Persisted server-authoritative order total — never a client-supplied
+     * value. FR-TAX-CORRECTNESS-1: this is the PRE-TAX food subtotal
+     * (Order.total_amount), which is NOT by itself what the coordinator
+     * collects. Pass taxAmount alongside it.
+     */
     totalAmount: number;
+    /**
+     * FR-TAX-CORRECTNESS-1: the frozen tax collected on this order
+     * (Order.tax_amount). Optional and defaulting to 0 so every existing
+     * caller keeps its exact current output — this email's figure is a CASH
+     * COLLECTION figure, so it is subtotal + tax, and omitting the tax would
+     * tell the coordinator to collect less than the supporter was charged.
+     */
+    taxAmount?: number | null;
     /** Safe external order reference (Order.external_id), not a raw database id. */
     orderReference: string;
     /** Enables the existing tenant-aware sender (from = tenant name, replyTo = tenant contact). */
@@ -362,6 +418,7 @@ export async function sendFundraiserCoordinatorNotification(
         participantName,
         items,
         totalAmount,
+        taxAmount,
         orderReference,
         businessId,
         hasExternalPaymentLink,
@@ -370,7 +427,13 @@ export async function sendFundraiserCoordinatorNotification(
     if (!coordinatorEmail || coordinatorEmail.trim().length === 0) return false;
 
     const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-    const total = currency.format(Number(totalAmount) || 0);
+    // FR-TAX-CORRECTNESS-1: every figure in this email is money the
+    // coordinator physically collects, so it is subtotal + tax via the one
+    // authority. With taxAmount absent or 0 — every order that exists today —
+    // supporterAmountDue returns the subtotal and this email is unchanged.
+    const total = currency.format(
+        supporterAmountDue({ total_amount: totalAmount, tax_amount: taxAmount })
+    );
     const supporter = supporterName || 'A supporter';
     // FR-SUPPORTER-CONTACT-1 Part I: campaignName often already IS "{org}
     // Fundraiser" (FundraiserClient's own fallback title), which made the

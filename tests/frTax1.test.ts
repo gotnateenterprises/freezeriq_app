@@ -251,20 +251,47 @@ describe('15-17. launch prefills and snapshots the right treatment', () => {
 });
 
 describe('18-20. who may set the campaign tax treatment', () => {
-    it('18. an explicit tenant override wins over the organization default', () => {
-        const exemptOverride = resolveCampaignTaxSnapshot({
-            organizationStatus: 'TAXABLE',
-            tenantDefaultRatePercent: 1,
-            override: { status: 'TAX_EXEMPT' },
-        });
-        expect(exemptOverride).toEqual({ status: 'TAX_EXEMPT', ratePercent: 0 });
-
-        const taxableOverride = resolveCampaignTaxSnapshot({
+    // ── SUPERSEDED BY FR-TAX-CORRECTNESS-1 HARDENING, MIGRATED NOT DELETED ──
+    //
+    // FR-TAX-1 gave the launch form's override precedence over the organization
+    // record in BOTH directions. That was tolerable only because the tenant
+    // default was 0.00%, which made every mistake cost nothing. With My Freezer
+    // Chef now configured at a real rate, both directions became live defects:
+    //
+    //   - override TAX_EXEMPT on a non-exempt org  = a browser inventing an
+    //     exemption nobody documented (uncollected tax the tenant still owes).
+    //   - override TAXABLE on an exempt org        = charging real supporters
+    //     of an exempt organization, which is what the adversarial review
+    //     found a silently-failed wizard fetch would actually cause.
+    //
+    // The surviving rule — the tenant still owns their own campaign's RATE — is
+    // asserted below. Authority over exemption now belongs to the organization
+    // record alone. See tests/frTaxCorrectness1Hardening.test.ts section 1.
+    it('18. the tenant override sets the RATE, but can no longer invent or destroy exemption', () => {
+        // The organization record wins: an exempt org stays exempt no matter
+        // what the form posts.
+        expect(resolveCampaignTaxSnapshot({
             organizationStatus: 'TAX_EXEMPT',
             tenantDefaultRatePercent: 1,
             override: { status: 'TAXABLE', ratePercent: 2.5 },
-        });
-        expect(taxableOverride).toEqual({ status: 'TAXABLE', ratePercent: 2.5 });
+        })).toEqual({ status: 'TAX_EXEMPT', ratePercent: 0 });
+
+        // And an override cannot GRANT exemption to an organization that has
+        // none on record — the resolver fails safe to taxable, and the route
+        // refuses the request outright (decideCampaignTaxOverride).
+        expect(resolveCampaignTaxSnapshot({
+            organizationStatus: 'TAXABLE',
+            tenantDefaultRatePercent: 1,
+            override: { status: 'TAX_EXEMPT' },
+        })).toEqual({ status: 'TAXABLE', ratePercent: 1 });
+
+        // What the override still legitimately does: choose the rate on a
+        // taxable campaign. That is the tenant's own decision, unchanged.
+        expect(resolveCampaignTaxSnapshot({
+            organizationStatus: 'TAXABLE',
+            tenantDefaultRatePercent: 1,
+            override: { status: 'TAXABLE', ratePercent: 2.5 },
+        })).toEqual({ status: 'TAXABLE', ratePercent: 2.5 });
     });
 
     it('19. the coordinator portal never writes campaign tax fields', () => {
@@ -483,20 +510,28 @@ describe('27-28. tracker and invoice remain truthful under the confirmed NET bas
         expect(src).toMatch(/resolveMaterialBundles/);
     });
 
-    it('28. FR-TAX-1B: closeout is now wired to the campaign snapshot and the NET base', () => {
-        // Superseded by the owner's confirmed ruling. FR-TAX-1 deliberately left
-        // closeout alone while the base was open; FR-TAX-1B resolved it.
+    it('28. FR-TAX-CORRECTNESS-1: closeout carries COLLECTED tax and derives none itself', () => {
+        // FR-TAX-1B taxed the NET remit at closeout. The owner has since ruled
+        // that supporters pay the tax at order time on gross, so closeout must
+        // SUM what was collected and must not re-derive a second amount.
         const closeout = read('app', 'api', 'campaigns', '[id]', 'closeout', 'route.ts');
+        // The frozen rate is still read — to RECORD the contract on the invoice.
         expect(closeout).toMatch(/resolveCloseoutTaxRate/);
+        // ...and the money now comes from the orders themselves.
+        expect(closeout).toMatch(/taxCollected/);
+        expect(closeout).toMatch(/tax_amount: true/);
 
         const math = read('lib', 'fundraiserCloseoutMath.ts');
-        // The tax now multiplies the NET remit, never gross.
-        expect(math).toMatch(/baseRemit \* rate \/ 100/);
+        // No rate-times-base derivation survives anywhere in the money model.
+        expect(math).not.toMatch(/baseRemit \* rate \/ 100/);
+        expect(math).not.toMatch(/grossSales \* rate \/ 100/);
         expect(math).not.toMatch(/grossSales \* FOOD_TAX_RATE_PERCENT \/ 100/);
+        // The organization's share is still taken on PRE-TAX gross.
+        expect(math).toMatch(/grossSales \* orgSharePercent \/ 100/);
     });
 
     it('28b. the confirmed base is recorded in code, not left as folklore', () => {
-        expect(CONFIRMED_TAXABLE_BASE).toBe('net');
+        expect(CONFIRMED_TAXABLE_BASE).toBe('gross'); // FR-TAX-CORRECTNESS-1 superseded the NET ruling
         const src = read('lib', 'fundraiserTax.ts');
         expect(src).toMatch(/CONFIRMED_TAXABLE_BASE/);
         expect(src).toMatch(/resolveTaxableSellingPrice/);
