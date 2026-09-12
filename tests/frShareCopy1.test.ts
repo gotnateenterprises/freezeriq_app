@@ -340,20 +340,33 @@ describe('FR-SHARE-COPY-1 · coordinator name/email resolution', () => {
     });
 
     it('the assigned coordinator (FundraiserCampaignCoordinator) is resolved and tried BEFORE the inquiry-submitter fallback', () => {
+        // FR-COORD-ROUTING-DATE-1: this precedence used to be enforced by the
+        // shape of an inline if/else in the route. It is now a property of the
+        // ONE shared resolver, which the supporter-order notification path uses
+        // as well — so the route is asserted to DELEGATE, and the precedence
+        // itself is asserted behaviourally against the resolver.
         const code = strip(R(COORD_GET));
-        const assignedIdx = code.indexOf('prisma.fundraiserCampaignCoordinator.findUnique');
-        const fallbackIdx = code.indexOf('shareCoordinatorName = (campaign.customer as any)?.contact_name');
-        expect(assignedIdx).toBeGreaterThan(-1);
-        expect(fallbackIdx).toBeGreaterThan(assignedIdx);
-        // The fallback is gated on BOTH being empty — it never overwrites an
-        // assignment that resolved successfully.
-        const gate = code.slice(code.indexOf('if (!shareCoordinatorName && !shareCoordinatorEmail)'), fallbackIdx + 100);
-        expect(gate.startsWith('if (!shareCoordinatorName && !shareCoordinatorEmail)')).toBe(true);
+        expect(code).toMatch(/resolveCampaignCoordinator\(\{/);
+        expect(code).toMatch(/CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT/);
+        const { resolveCampaignCoordinator } = require('@/lib/campaignCoordinatorContact');
+        const withAssignment = resolveCampaignCoordinator({
+            assignment: { org_contact: { ended_at: null, contact: { display_name: 'Assigned', contact_points: [{ value: 'assigned@example.org' }] } } },
+            organization: { contact_name: 'Org', contact_email: 'org@example.org' },
+        });
+        expect(withAssignment.email).toBe('assigned@example.org');
+        expect(withAssignment.source).toBe('assigned');
     });
 
     it('an ended org_contact relationship is not used as the assigned coordinator', () => {
-        const code = strip(R(COORD_GET));
-        expect(code).toContain('if (assigned && !assigned.org_contact.ended_at)');
+        // Same migration: the rule moved into the shared resolver, so this
+        // asserts the behaviour rather than a vanished inline expression.
+        const { resolveCampaignCoordinator } = require('@/lib/campaignCoordinatorContact');
+        const ended = resolveCampaignCoordinator({
+            assignment: { org_contact: { ended_at: new Date('2026-01-01T00:00:00Z'), contact: { display_name: 'Ended', contact_points: [{ value: 'ended@example.org' }] } } },
+            organization: { contact_name: 'Org', contact_email: 'org@example.org' },
+        });
+        expect(ended.email).toBe('org@example.org');
+        expect(ended.assigned).toEqual({ usable: false, reason: 'relationship_ended' });
     });
 
     it('resolution is scoped to THIS campaign only', () => {

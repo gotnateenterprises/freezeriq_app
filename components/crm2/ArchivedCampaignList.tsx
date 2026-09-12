@@ -19,9 +19,9 @@
  */
 
 import Link from 'next/link';
-import { format } from 'date-fns';
 import { Archive, Loader2 } from 'lucide-react';
 import { isArchivedForDashboard } from '@/lib/growth/nextAction';
+import { formatCalendarDateShortValue } from '@/lib/calendarDate';
 
 export interface ArchivedListCampaign {
     id: string;
@@ -106,7 +106,7 @@ export function ArchivedCampaignList({
                                 <Archive size={11} aria-hidden="true" />
                                 {archivedReasonLabel(c)}
                             </span>
-                            {endValid && <span>{format(end!, 'MMM d, yyyy')}</span>}
+                            {endValid && <span>{formatCalendarDateShortValue(end!)}</span>}
                             {gross > 0 && (
                                 <span>${gross.toLocaleString(undefined, { maximumFractionDigits: 0 })} gross</span>
                             )}

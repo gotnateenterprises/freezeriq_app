@@ -35,6 +35,11 @@ import { customerFacingBusinessName } from '@/lib/tenantBrand';
 import { resolveMaterialBundles, groupMaterialMenus } from '@/lib/coordinatorMaterialBundles';
 import { hasInvalidOrderQuantity } from '@/lib/orderQuantity';
 import { SUPPORTER_ORDER_SELECT, toSupporterOrder } from '@/lib/coordinatorSupporterOrders';
+import {
+    CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT,
+    resolveCampaignCoordinator,
+    type CoordinatorAssignmentRow,
+} from '@/lib/campaignCoordinatorContact';
 import { normalizeSupporterEmail } from '@/lib/previousSupporters';
 import { computeSupporterOrderTax } from '@/lib/fundraiserTax';
 import { roundCents } from '@/lib/fundraiserCloseoutMath';
@@ -137,11 +142,15 @@ export async function GET(req: Request) {
                     select: {
                         name: true,
                         contact_name: true,
-                        // FR-COORD-123: the address the new-order notification
-                        // actually goes to (lib/email.ts — Customer.contact_email
-                        // is THE recipient). Shown to the coordinator so the
-                        // dashboard's promise names a real inbox. This is the
-                        // org's own contact, not supporter PII.
+                        // The ORGANIZATION's own on-file contact. FR-COORD-123
+                        // originally described this as "THE recipient" of the
+                        // new-order notification; FR-COORD-ROUTING-DATE-1 ended
+                        // that — the campaign's ASSIGNED coordinator now wins,
+                        // and this is only the fallback when a campaign has no
+                        // assignment. Still selected because it IS that
+                        // fallback (see resolveCampaignCoordinator below) and
+                        // because the dashboard shows the organization's
+                        // relationship contact in its own right. Not supporter PII.
                         contact_email: true,
                         business_id: true,
                         business: {
@@ -340,40 +349,27 @@ export async function GET(req: Request) {
         // when no assignment exists does this fall back to Customer.contact_name/
         // contact_email — the org's own on-file contact, already shown
         // elsewhere on this same dashboard. Never invents a name or email.
-        let shareCoordinatorName: string | null = null;
-        let shareCoordinatorEmail: string | null = null;
+        //
+        // FR-COORD-ROUTING-DATE-1: this chain used to be written out inline
+        // here, a second copy of the same rule. It now comes from the ONE
+        // shared resolver in lib/campaignCoordinatorContact.ts, which the
+        // supporter-order notification path also uses — so the dashboard can
+        // no longer name one coordinator while the notifications go to another.
+        let coordinatorAssignment: CoordinatorAssignmentRow | null = null;
         try {
-            const assigned = await prisma.fundraiserCampaignCoordinator.findUnique({
+            coordinatorAssignment = await prisma.fundraiserCampaignCoordinator.findUnique({
                 where: { campaign_id: campaign.id },
-                select: {
-                    org_contact: {
-                        select: {
-                            ended_at: true,
-                            contact: {
-                                select: {
-                                    display_name: true,
-                                    contact_points: {
-                                        where: { type: 'email', is_current: true },
-                                        select: { value: true },
-                                        orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            });
-            if (assigned && !assigned.org_contact.ended_at) {
-                shareCoordinatorName = assigned.org_contact.contact.display_name?.trim() || null;
-                shareCoordinatorEmail = assigned.org_contact.contact.contact_points[0]?.value?.trim() || null;
-            }
+                select: CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT,
+            }) as CoordinatorAssignmentRow | null;
         } catch (coordErr) {
             console.error('Assigned-coordinator resolution error (non-blocking):', coordErr);
         }
-        if (!shareCoordinatorName && !shareCoordinatorEmail) {
-            shareCoordinatorName = (campaign.customer as any)?.contact_name?.trim() || null;
-            shareCoordinatorEmail = (campaign.customer as any)?.contact_email?.trim() || null;
-        }
+        const campaignCoordinator = resolveCampaignCoordinator({
+            assignment: coordinatorAssignment,
+            organization: campaign.customer as any,
+        });
+        const shareCoordinatorName = campaignCoordinator.name;
+        const shareCoordinatorEmail = campaignCoordinator.email;
 
         // FR-SHARE-COPY-1: pickup/delivery logistics, only the facts actually
         // configured — never "TBD" or an invented value. Distinct from the

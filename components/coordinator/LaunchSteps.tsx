@@ -223,9 +223,12 @@ function ShareBtn({ label, onClick }: { label: string; onClick: () => void }) {
  * "What happens during your fundraiser?" — small, collapsed by default, and
  * every sentence matches proven behavior:
  *
- *  - the per-order email really goes to the org's Customer.contact_email
- *    (lib/email.ts sendFundraiserCoordinatorNotification), so the copy names
- *    that address when it exists and makes no email promise when it doesn't;
+ *  - the per-order email really goes to `notifyEmail`, which the portal takes
+ *    from the server's own resolved recipient — the campaign's ASSIGNED
+ *    coordinator, falling back to the organization contact only when there is
+ *    no assignment (FR-COORD-ROUTING-DATE-1, lib/campaignCoordinatorContact.ts).
+ *    So the copy names that address when it exists and makes no email promise
+ *    when it doesn't;
  *  - the tracker refreshes on a ~30-second poll (the portal's polling effect),
  *    so "updates as orders come in" is claimed at exactly that strength;
  *  - pickup-day guidance is the same order list, no new subsystem.

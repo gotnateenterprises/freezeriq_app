@@ -25,6 +25,7 @@ import { resolveBundleGoal, parseBundleGoal, DEFAULT_BUNDLE_GOAL } from '@/lib/f
 // (organization selection) and lands directly on Step 2 (Campaign), which
 // only ever sends bundleSelection.mode: 'coordinator_selects'.
 import { StartFundraiserWizard } from '@/components/crm2/StartFundraiserWizard';
+import { formatCalendarDateNumericValue } from '@/lib/calendarDate';
 
 interface BundleOption {
     id: string;
@@ -385,7 +386,7 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
                                     </div>
                                     <div className="flex items-center gap-1.5">
                                         <Calendar className="w-4 h-4 text-slate-400" />
-                                        <span>Ends: {campaign.end_date ? new Date(campaign.end_date).toLocaleDateString() : 'No date set'}</span>
+                                        <span>Ends: {formatCalendarDateNumericValue(campaign.end_date) ?? 'No date set'}</span>
                                     </div>
                                     <div className="flex items-center gap-1.5">
                                         <Package className="w-4 h-4 text-slate-400" />

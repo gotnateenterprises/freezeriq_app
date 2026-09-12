@@ -28,6 +28,11 @@ import { auth } from '@/auth';
 import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
 import { resolveTenantBrand } from '@/lib/tenantBrand';
 import { coordinatorSetupTemplate } from '@/lib/emailTemplates';
+import {
+    CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT,
+    readAssignedCoordinator,
+    type CoordinatorAssignmentRow,
+} from '@/lib/campaignCoordinatorContact';
 import { getTenantSender } from '@/lib/email';
 
 interface ResolvedInvitation {
@@ -69,42 +74,46 @@ async function resolveInvitation(
     }
 
     // THE RECIPIENT AUTHORITY. Not the request body.
+    //
+    // FR-COORD-ROUTING-DATE-1: the query shape and the "read an address off an
+    // assignment" step are now the shared ones from
+    // lib/campaignCoordinatorContact.ts, so this route and the notification
+    // path cannot drift apart on what an assignment means.
+    //
+    // The POLICY here stays deliberately STRICTER than resolveCampaignCoordinator:
+    // this route refuses rather than falling back to the organization contact.
+    // A setup email carries the coordinator's portal link — handing that to the
+    // organization's general contact because the assignment was unusable would
+    // be a quiet access grant, not a convenience.
     const coordinator = await prisma.fundraiserCampaignCoordinator.findUnique({
         where: { campaign_id: campaignId },
         select: {
             setup_email_claimed_at: true,
             setup_email_sent_at: true,
-            org_contact: {
-                select: {
-                    ended_at: true,
-                    contact: {
-                        select: {
-                            display_name: true,
-                            contact_points: {
-                                where: { type: 'email', is_current: true },
-                                select: { value: true, is_primary: true },
-                                orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
-                            },
-                        },
-                    },
-                },
-            },
+            ...CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT,
         },
     });
+
+    // Checked separately from the outcome below so TypeScript narrows
+    // `coordinator` for the setup-email timestamps read further down.
     if (!coordinator) {
         return { ok: false, status: 409, error: 'This fundraiser has no primary coordinator yet.' };
     }
-    if (coordinator.org_contact.ended_at) {
-        // The relationship was ended after launch. Mailing a setup link to
-        // somebody who is no longer a contact of this organization is exactly
-        // the kind of thing that should stop rather than "probably be fine".
-        return { ok: false, status: 409, error: 'That coordinator is no longer an active contact for this organization.' };
-    }
 
-    const email = coordinator.org_contact.contact.contact_points[0]?.value?.trim();
-    if (!email) {
+    const assigned = readAssignedCoordinator(coordinator as CoordinatorAssignmentRow);
+    if (!assigned.usable) {
+        if (assigned.reason === 'no_assignment') {
+            return { ok: false, status: 409, error: 'This fundraiser has no primary coordinator yet.' };
+        }
+        if (assigned.reason === 'relationship_ended') {
+            // The relationship was ended after launch. Mailing a setup link to
+            // somebody who is no longer a contact of this organization is exactly
+            // the kind of thing that should stop rather than "probably be fine".
+            return { ok: false, status: 409, error: 'That coordinator is no longer an active contact for this organization.' };
+        }
         return { ok: false, status: 409, error: 'The selected coordinator has no email address on file.' };
     }
+    const email = assigned.email;
 
     const business = await prisma.business.findUnique({
         where: { id: businessId },
@@ -119,7 +128,10 @@ async function resolveInvitation(
     // hid a lowercase fallback; "your organization fundraiser is ready to set
     // up" would now start a subject with a lowercase letter.
     const organizationName = campaign.customer?.name ?? 'Your organization';
-    const coordinatorName = coordinator.org_contact.contact.display_name;
+    // display_name is non-null in the schema; the shared reader trims it and
+    // returns null for a blank, so '' preserves this route's prior behaviour
+    // of passing the raw (possibly blank) name straight to the template.
+    const coordinatorName = assigned.name ?? '';
 
     const rendered = coordinatorSetupTemplate(
         coordinatorName,

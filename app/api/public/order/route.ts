@@ -15,6 +15,12 @@ import { hasInvalidOrderQuantity } from '@/lib/orderQuantity';
 // FR-TAX-CORRECTNESS-1: supporter food tax is calculated here, server-side,
 // from the campaign's FROZEN snapshot — never from a client-supplied amount.
 import { computeSupporterOrderTax } from '@/lib/fundraiserTax';
+import {
+    CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT,
+    resolveCampaignCoordinator,
+    type CampaignCoordinatorContact,
+    type CoordinatorAssignmentRow,
+} from '@/lib/campaignCoordinatorContact';
 import { roundCents } from '@/lib/fundraiserCloseoutMath';
 
 /**
@@ -145,6 +151,10 @@ export async function POST(req: Request) {
         type CampaignWithCustomer = Prisma.FundraiserCampaignGetPayload<{ include: { customer: true } }>;
         let campaign: CampaignWithCustomer | null = null;
         let orgContactEmail: string | null = null;
+        // FR-COORD-ROUTING-DATE-1: the resolved campaign coordinator (assigned
+        // first, organization contact as fallback). Kept alongside the email so
+        // the notification can be logged with WHICH authority supplied it.
+        let campaignCoordinator: CampaignCoordinatorContact | null = null;
         let paymentInstructions: string | null = null;
         let externalPaymentLink: string | null = null;
         let orgName: string | null = null;
@@ -179,9 +189,40 @@ export async function POST(req: Request) {
             externalPaymentLink = campaign.external_payment_link;
             orgName = campaign.customer?.name || null;
 
-            if (campaign.customer?.contact_email) {
-                orgContactEmail = campaign.customer.contact_email;
+            // ── FR-COORD-ROUTING-DATE-1 ─────────────────────────────────────
+            //
+            // This used to be `orgContactEmail = campaign.customer.contact_email`
+            // and nothing else, which made the ORGANIZATION's relationship
+            // contact the recipient of a CAMPAIGN's new-order notification.
+            // Cumberland's first supporter order went to the organization's
+            // on-file contact rather than to the coordinator assigned to that
+            // campaign — the person who received the setup email and was
+            // actually running the fundraiser.
+            //
+            // The assignment now wins, with the organization contact kept as
+            // the fallback for campaigns that have no assigned coordinator.
+            // Resolution is the one shared rule in lib/campaignCoordinatorContact.ts,
+            // the same rule the coordinator portal uses, so the two can no
+            // longer disagree about who "the coordinator" is.
+            //
+            // Read outside the order transaction and never blocking: a
+            // notification address must not be able to fail an order that the
+            // supporter has already paid attention to.
+            let coordinatorAssignment: CoordinatorAssignmentRow | null = null;
+            try {
+                coordinatorAssignment = await prisma.fundraiserCampaignCoordinator.findUnique({
+                    where: { campaign_id: campaign.id },
+                    select: CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT,
+                }) as CoordinatorAssignmentRow | null;
+            } catch (coordErr) {
+                console.error('[FR-COORD-ROUTING-DATE-1] coordinator assignment lookup failed:', coordErr);
             }
+
+            campaignCoordinator = resolveCampaignCoordinator({
+                assignment: coordinatorAssignment,
+                organization: campaign.customer,
+            });
+            orgContactEmail = campaignCoordinator.email;
         }
 
         // Single server-authoritative condition used for every campaign branch below.
@@ -775,6 +816,18 @@ export async function POST(req: Request) {
                             `[FR-1D] Coordinator notification not delivered for order ${order.external_id} (campaign ${campaign.id})`
                         );
                     }
+                    // FR-COORD-ROUTING-DATE-1: record WHICH authority supplied
+                    // the recipient. A misrouted notification is otherwise
+                    // invisible until somebody notices the wrong person was
+                    // told — which is exactly how the Cumberland case surfaced.
+                    // The address itself is not logged.
+                    console.info(
+                        `[FR-COORD-ROUTING-DATE-1] order ${order.external_id} (campaign ${campaign.id}) `
+                        + `notified via ${campaignCoordinator?.source ?? 'unknown'} contact`
+                        + (campaignCoordinator?.source === 'organization'
+                            ? ` (assignment unusable: ${campaignCoordinator.assigned.usable ? 'n/a' : campaignCoordinator.assigned.reason})`
+                            : '')
+                    );
                 } catch (notifyErr) {
                     console.error('[FR-1D] Coordinator notification threw unexpectedly:', notifyErr);
                 }

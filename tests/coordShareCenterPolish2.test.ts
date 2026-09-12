@@ -200,6 +200,15 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'app/api/campaigns/route.ts',
                 'app/api/campaigns/[id]/route.ts',
                 'components/crm2/StartFundraiserWizard.tsx',
+                'lib/campaignCoordinatorContact.ts',
+                'lib/calendarDate.ts',
+                'app/api/campaigns/[id]/coordinator-email/route.ts',
+                'app/coordinator/portal/page.tsx',
+                'components/coordinator/LaunchSteps.tsx',
+                'components/crm/FundraisersTab.tsx',
+                'components/crm2/CampaignCard.tsx',
+                'components/crm2/ArchivedCampaignList.tsx',
+                'components/crm2/CampaignPriorityList.tsx',
             ];
             for (const f of changed) {
                 const allowed = f === SHARE_CENTER || f.startsWith('tests/') || FR_TAX_CORRECTNESS_1.includes(f);

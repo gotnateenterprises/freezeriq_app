@@ -352,7 +352,15 @@ export interface FundraiserCoordinatorNotificationItem {
 }
 
 export interface FundraiserCoordinatorNotificationInput {
-    /** The ONLY recipient. Campaign → Customer.contact_email, tenant-validated by the caller. */
+    /**
+     * The ONLY recipient, tenant-validated by the caller.
+     *
+     * FR-COORD-ROUTING-DATE-1: this used to be documented as
+     * "Campaign → Customer.contact_email". It is now whatever
+     * resolveCampaignCoordinator returns — the campaign's ASSIGNED coordinator,
+     * falling back to the organization contact only when there is no usable
+     * assignment. Still exactly one recipient; the authority behind it changed.
+     */
     coordinatorEmail: string;
     campaignName?: string | null;
     organizationName?: string | null;

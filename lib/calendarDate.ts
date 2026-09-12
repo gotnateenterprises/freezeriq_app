@@ -49,3 +49,44 @@ export function toCalendarInputValue(value: Date): string {
     const d = String(value.getUTCDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
 }
+
+// ── FR-COORD-ROUTING-DATE-1 ─────────────────────────────────────────────────
+//
+// The formatters above take a Date. The tenant CRM receives campaign dates as
+// JSON strings ("2026-10-07T00:00:00.000Z") and was calling
+// `new Date(value).toLocaleDateString()` on them — reintroducing, on the
+// fundraiser list, the exact bug this module was written to end. A campaign
+// whose supporter deadline is October 7 was shown to the tenant as October 6
+// in every U.S. timezone.
+//
+// These are string-tolerant entry points to the SAME UTC-field rule, so the
+// CRM can be fixed by reusing this module rather than by growing another
+// private date helper. Scope is unchanged: date-only values only. Real
+// timestamps (created_at, closed_at, bundle_selection_at, uploaded_at) must
+// keep normal local formatting and none of them go through here.
+
+/** The stored calendar date, or null when the value is absent/unparseable. */
+function calendarDateFrom(value: Date | string | null | undefined): Date | null {
+    if (value === null || value === undefined || value === '') return null;
+    const d = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** "Oct 7, 2026" from a Date OR an ISO string — timezone-independent. */
+export function formatCalendarDateShortValue(value: Date | string | null | undefined): string | null {
+    const d = calendarDateFrom(value);
+    return d ? formatCalendarDateShort(d) : null;
+}
+
+/**
+ * "10/7/2026" — the numeric form, timezone-independent.
+ *
+ * Exists so call sites that already rendered `toLocaleDateString()` keep their
+ * exact visual format and change only in that they stop shifting a day. This
+ * is a display-bug fix, not a redesign of how dates look.
+ */
+export function formatCalendarDateNumericValue(value: Date | string | null | undefined): string | null {
+    const d = calendarDateFrom(value);
+    if (!d) return null;
+    return `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()}`;
+}

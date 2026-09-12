@@ -22,7 +22,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { format } from 'date-fns';
 import { MoreHorizontal, ChevronDown, ChevronUp, CheckCircle2, Loader2 } from 'lucide-react';
 import { CampaignHealthBadge } from './CampaignHealthBadge';
 import { StageChip } from './StageChip';
@@ -35,6 +34,7 @@ import {
 import type { CampaignPriority } from '@/lib/growth/nextAction';
 import { coordinatorAccessPath } from '@/lib/fundraiserUrls';
 import { describeCampaignInvoice, resolveCampaignInvoiceState } from '@/lib/growth/campaignLifecycle';
+import { formatCalendarDateShortValue } from '@/lib/calendarDate';
 
 export interface PriorityListCampaign extends CampaignForTriage {
     id: string;
@@ -355,7 +355,7 @@ function CampaignRow({
             <div className="xl:w-48 xl:flex-none space-y-1">
                 {endValid && (
                     <p className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                        {ended ? 'Ended' : 'Ends'} {format(end!, 'MMM d, yyyy')}
+                        {ended ? 'Ended' : 'Ends'} {formatCalendarDateShortValue(end!)}
                     </p>
                 )}
                 {(c.held_order_count ?? 0) > 0 && (

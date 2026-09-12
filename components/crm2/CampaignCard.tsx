@@ -4,6 +4,7 @@ import { StageChip } from './StageChip';
 import { BundleSelectionStatusCard } from './BundleSelectionStatusCard';
 import { coordinatorAccessPath } from '@/lib/fundraiserUrls';
 import { describeCampaignInvoice } from '@/lib/growth/campaignLifecycle';
+import { formatCalendarDateNumericValue } from '@/lib/calendarDate';
 
 export function CampaignCard({ c, businessSlug }: { c: any; businessSlug?: string }) {
     const closed = Boolean(c.closed_at) || ['Closed', 'Settled', 'Completed', 'Archived'].includes(c.status);
@@ -22,7 +23,7 @@ export function CampaignCard({ c, businessSlug }: { c: any; businessSlug?: strin
             </div>
             <p className="mb-2.5 mt-0.5 text-[11px] text-slate-500">
                 {closed && c.closed_at ? `Closed ${new Date(c.closed_at).toLocaleDateString()}` :
-                 c.end_date ? `Ends ${new Date(c.end_date).toLocaleDateString()}` : 'No end date'}
+                 c.end_date ? `Ends ${formatCalendarDateNumericValue(c.end_date) ?? ''}` : 'No end date'}
                 {c.bundle_goal ? ` · Goal: ${c.bundle_goal} bundles` : ''}
             </p>
 

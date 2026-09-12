@@ -374,10 +374,21 @@ describe('FR-COORD-123 · new-order notification', () => {
         email.indexOf('sendLeadNotificationEmail'),
     );
 
-    it('the recipient authority is preserved: Customer.contact_email, exactly one recipient', () => {
-        expect(block).toContain('The ONLY recipient. Campaign → Customer.contact_email');
+    it('the recipient authority: exactly one recipient, now the ASSIGNED coordinator', () => {
+        // SUPERSEDED BY FR-COORD-ROUTING-DATE-1, MIGRATED NOT DELETED.
+        // FR-COORD-123 pinned the recipient as Customer.contact_email. That was
+        // the organization's relationship contact, and on Cumberland it meant a
+        // CAMPAIGN's new-order notice went to someone other than the coordinator
+        // assigned to that campaign. The surviving invariant — EXACTLY ONE
+        // recipient, resolved server-side, never from the request — is asserted
+        // here; the authority behind it is now the shared resolver.
+        expect(block).toContain('The ONLY recipient');
         const route = strip(R('app/api/public/order/route.ts'));
-        expect(route).toContain('campaign.customer?.contact_email');
+        expect(route).toContain('resolveCampaignCoordinator({');
+        expect(route).toContain('orgContactEmail = campaignCoordinator.email');
+        expect(route).not.toContain('orgContactEmail = campaign.customer.contact_email');
+        // Still one, still gated on an address having resolved.
+        expect(route.split('sendFundraiserCoordinatorNotification(').length - 1).toBe(1);
     });
 
     it('the email carries the operational facts: who, how to reach them, what, total', () => {
@@ -424,10 +435,18 @@ describe('FR-COORD-123 · new-order notification', () => {
         expect(card).toContain('{notifyEmail ? (');
         expect(card).toContain('we&apos;ll email <strong>{notifyEmail}</strong>');
         expect(card).toContain('appears in your order list below');
+        // FR-COORD-ROUTING-DATE-1: the card must name the address the
+        // notification will ACTUALLY use. Reading Customer.contact_email here
+        // would have promised the organization contact while the mail went to
+        // the assigned coordinator — a worse lie than promising nothing.
         const portal = strip(R(PORTAL));
-        expect(portal).toContain('campaign.customer?.contact_email || null');
+        expect(portal).toContain('campaign?.share?.coordinatorEmail ?? null');
+        expect(portal).not.toContain('campaign.customer?.contact_email || null');
+        // The organization contact is still selected — it is the fallback, and
+        // the dashboard shows the relationship contact in its own right.
         const get = strip(R(COORD_GET));
         expect(get).toContain('contact_email: true');
+        expect(get).toContain('resolveCampaignCoordinator({');
     });
 });
 

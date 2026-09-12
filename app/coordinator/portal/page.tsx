@@ -747,10 +747,20 @@ export default function CoordinatorPortal() {
         ? (campaign.bundle_selection_status === 'selected' || campaign.bundle_selection_status === 'not_required')
         : bundleSelectionDone;
 
-    // Where the new-order notification actually goes (Customer.contact_email —
-    // THE recipient per lib/email.ts). Null = no email is sent, and the card's
-    // support copy says so instead of promising one.
-    const notifyEmail: string | null = campaign.customer?.contact_email || null;
+    // Where the new-order notification actually goes. Null = no email is sent,
+    // and the card's support copy says so instead of promising one.
+    //
+    // FR-COORD-ROUTING-DATE-1: this read Customer.contact_email directly and
+    // called it "THE recipient". That stopped being true when notifications
+    // started following the campaign's ASSIGNED coordinator — on a campaign
+    // like Cumberland it would have named the organization's contact while the
+    // mail went to the assigned coordinator. `share.coordinatorEmail` is the
+    // server's own resolved answer (assigned -> organization -> none), so this
+    // card now states the same address the notification will actually use.
+    // A missing value means no recipient resolved, which is exactly the case
+    // the "no email is sent" copy exists for — falling back to the org contact
+    // here would restore the very promise that was wrong.
+    const notifyEmail: string | null = campaign?.share?.coordinatorEmail ?? null;
 
     const scrollToPreviousSupporters = () =>
         document.getElementById('previous-supporters')?.scrollIntoView({ behavior: 'smooth' });

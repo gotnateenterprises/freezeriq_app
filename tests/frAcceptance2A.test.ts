@@ -413,7 +413,18 @@ describe('the coordinator email route', () => {
     });
 
     it('refuses a coordinator whose relationship has ended', () => {
-        expect(route).toMatch(/coordinator\.org_contact\.ended_at/);
+        // FR-COORD-ROUTING-DATE-1 moved the ended_at check into the shared
+        // reader (lib/campaignCoordinatorContact.ts readAssignedCoordinator), so
+        // this route and the supporter-order notification path cannot disagree
+        // about what an assignment means. The REFUSAL is unchanged: this route
+        // still stops rather than falling back to the organization contact,
+        // because a setup link handed to the wrong inbox is a quiet access
+        // grant, not a convenience.
+        expect(route).toMatch(/readAssignedCoordinator\(/);
+        expect(route).toMatch(/assigned\.reason === 'relationship_ended'/);
+        const shared = require('fs').readFileSync(
+            require('path').join(process.cwd(), 'lib', 'campaignCoordinatorContact.ts'), 'utf8');
+        expect(shared).toMatch(/if \(orgContact\.ended_at\)[\s\S]{0,140}reason: 'relationship_ended'/);
     });
 
     it('refuses when the coordinator has no email on file', () => {

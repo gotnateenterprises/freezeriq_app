@@ -225,6 +225,15 @@ describe('15-18. scope stayed presentation-only', () => {
         'app/api/campaigns/route.ts',
         'app/api/campaigns/[id]/route.ts',
         'components/crm2/StartFundraiserWizard.tsx',
+        'lib/campaignCoordinatorContact.ts',
+        'lib/calendarDate.ts',
+        'app/api/campaigns/[id]/coordinator-email/route.ts',
+        'app/coordinator/portal/page.tsx',
+        'components/coordinator/LaunchSteps.tsx',
+        'components/crm/FundraisersTab.tsx',
+        'components/crm2/CampaignCard.tsx',
+        'components/crm2/ArchivedCampaignList.tsx',
+        'components/crm2/CampaignPriorityList.tsx',
     ]);
 
     it('15/16/17/18. the working-tree diff touches only the three UI files (+ their regression tests) — no API route, schema, migration, kitchen, Delivery, packaging, payment or invoice file', () => {
