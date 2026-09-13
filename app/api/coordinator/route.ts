@@ -7,6 +7,9 @@
  *   GET  → view campaign details, privacy-filtered orders, available bundles
  *   POST → submit compiled fundraiser order on behalf of supporters
  *   PUT  → update coordinator payment settings (Venmo link, instructions)
+ *   PATCH → restore a canceled order; or mark a supporter order paid / not
+ *           paid (FR-SUPPORTER-PAYMENT-STATUS-1 — supporter -> coordinator
+ *           money only, never the organization's invoice)
  * - COORD-FULFILLMENT-1 contact scope: the GET returns supporter name, email and
  *   phone for THIS SESSION'S CAMPAIGN ONLY, matching the supporter-facing
  *   disclosure ("name, email, and phone ... shared with your fundraiser
@@ -43,12 +46,27 @@ import {
 import { normalizeSupporterEmail } from '@/lib/previousSupporters';
 import { computeSupporterOrderTax } from '@/lib/fundraiserTax';
 import { roundCents } from '@/lib/fundraiserCloseoutMath';
+import {
+    SUPPORTER_PAYMENT_EVENT_TYPES,
+    coordinatorPaymentActor,
+    explainNoopPaymentTransition,
+    isSupporterPaymentAction,
+    paymentOwnershipWhere,
+    paymentTransitionData,
+    paymentTransitionWhere,
+    type SupporterPaymentAction,
+} from '@/lib/supporterPayment';
 
 /**
  * Phase 7E-1C: Returns true if the campaign has been server-closed.
  * Checks both the authoritative closed_at timestamp (set by the closeout
  * action in 7E-2) and the status string for forward-compatibility.
- * Used by POST, DELETE, and PATCH to block mutations on closed campaigns.
+ * Used by POST, DELETE, and PATCH restore to block mutations on closed campaigns.
+ *
+ * FR-SUPPORTER-PAYMENT-STATUS-1: deliberately NOT applied to the PATCH payment
+ * marks. Those change nothing closeout counts, and supporters routinely pay at
+ * pickup — which is after closeout — so gating them here would disable the
+ * feature on the one day a coordinator most needs it.
  */
 function isCampaignClosed(campaign: any): boolean {
     return Boolean(campaign.closed_at) || campaign.status === 'Closed';
@@ -710,7 +728,10 @@ export async function DELETE(req: Request) {
             where: {
                 id: orderId,
                 campaign_id: campaign.id,   // Campaign isolation
-                source: 'fundraiser',        // Coordinator-entered only
+                // Every CAMPAIGN order — the public supporter route and the
+                // coordinator's + Add Order route both write 'fundraiser'. (This
+                // said 'Coordinator-entered only', which was never true.)
+                source: 'fundraiser',
                 canceled_at: null            // Not already canceled
             },
             data: {
@@ -735,9 +756,124 @@ export async function DELETE(req: Request) {
 }
 
 /**
- * PATCH — Restore a previously canceled coordinator order
+ * FR-SUPPORTER-PAYMENT-STATUS-1 — record that a supporter paid their
+ * coordinator (mark_paid), or take that record back (mark_unpaid).
  *
- * SAFETY GUARDS:
+ * WHAT IT CAN CHANGE: Order.paid_at and Order.paid_by. Nothing else. The data
+ * object comes from lib/supporterPayment.ts paymentTransitionData, whose exact
+ * key set is pinned by tests — amounts, tax, items, status and the invoice link
+ * are unreachable from here.
+ *
+ * WHAT IT NEVER TOUCHES: the organization's invoice to My Freezer Chef, the
+ * campaign's sales total, closeout, organization share, tax. Those read none of
+ * these columns.
+ *
+ * AUTHORITY: the coordinator session (campaignId is never taken from the
+ * request), then an atomic conditional update whose WHERE carries the order id,
+ * that campaign, `source: 'fundraiser'`, not-canceled and the current paid
+ * state. An order in another campaign matches nothing and is answered exactly
+ * like one that does not exist.
+ *
+ * AUDIT: exactly one CoordinatorActionEvent per real transition, written in the
+ * same transaction as the update — so a mark without its event, or an event
+ * without its mark, cannot exist. A repeat tap changes nothing and logs nothing.
+ *
+ * No closed-campaign gate, on purpose: see isCampaignClosed.
+ */
+async function markSupporterPayment(
+    action: SupporterPaymentAction,
+    rawOrderId: unknown,
+    campaignId: string,
+    sessionId: string,
+): Promise<NextResponse> {
+    const orderId = typeof rawOrderId === 'string' ? rawOrderId.trim() : '';
+    if (!orderId) {
+        return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+    }
+
+    const scope = { orderId, campaignId };
+    const now = new Date();
+    const actor = coordinatorPaymentActor(sessionId);
+
+    // Who was ASSIGNED to run this campaign when the mark was made — context
+    // for a tenant reading the event later. It is deliberately recorded as the
+    // assignment, not as "who clicked": a coordinator session identifies no
+    // person, so claiming more would be an identity the system cannot prove.
+    // Never allowed to block the mark itself.
+    let assignedCoordinatorName: string | null = null;
+    try {
+        const assignment = await prisma.fundraiserCampaignCoordinator.findUnique({
+            where: { campaign_id: campaignId },
+            select: CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT,
+        }) as CoordinatorAssignmentRow | null;
+        assignedCoordinatorName = resolveCampaignCoordinator({ assignment, organization: null }).name;
+    } catch (lookupErr) {
+        console.error('[FR-SUPPORTER-PAYMENT-STATUS-1] coordinator context lookup failed (non-blocking):', lookupErr);
+    }
+
+    const changed = await prisma.$transaction(async (tx) => {
+        const updated = await tx.order.updateMany({
+            where: paymentTransitionWhere(action, scope),
+            data: paymentTransitionData(action, { now, actor }),
+        });
+        if (updated.count !== 1) return false;
+
+        await tx.coordinatorActionEvent.create({
+            data: {
+                campaign_id: campaignId,
+                action_type: SUPPORTER_PAYMENT_EVENT_TYPES[action],
+                source: null,
+                metadata: {
+                    actorType: 'coordinator',
+                    actorId: null,
+                    sessionId,
+                    channel: 'coordinator_portal',
+                    orderId,
+                    assignedCoordinatorName,
+                    ...(action === 'mark_paid' ? { paidAt: now.toISOString() } : {}),
+                },
+            },
+        });
+        return true;
+    });
+
+    if (changed) {
+        return NextResponse.json({
+            success: true,
+            changed: true,
+            paid_at: action === 'mark_paid' ? now.toISOString() : null,
+        });
+    }
+
+    // Zero rows. Explain it without ever widening the ownership scope.
+    const row = await prisma.order.findFirst({
+        where: paymentOwnershipWhere(scope),
+        select: { paid_at: true },
+    });
+    const outcome = explainNoopPaymentTransition(action, row);
+
+    if (outcome === 'already_in_state') {
+        // A repeat tap or a second device. The coordinator's intent is already
+        // true; say so, and report the state that actually stands.
+        return NextResponse.json({ success: true, changed: false, paid_at: row?.paid_at ?? null });
+    }
+    if (outcome === 'conflict') {
+        return NextResponse.json(
+            { error: 'This order was just updated. Refresh and try again.' },
+            { status: 409 },
+        );
+    }
+    return NextResponse.json(
+        { error: 'Order not found, canceled, or not part of this fundraiser.' },
+        { status: 404 },
+    );
+}
+
+/**
+ * PATCH — Restore a previously canceled coordinator order, or (see
+ * markSupporterPayment above) mark a supporter order paid / not paid.
+ *
+ * RESTORE SAFETY GUARDS:
  * - Order must belong to this campaign (campaign isolation)
  * - Order must currently be canceled (canceled_at IS NOT NULL)
  * - Uses atomic updateMany with WHERE guards
@@ -751,6 +887,13 @@ export async function PATCH(req: Request) {
         const campaignId = guard.campaignId;
         const body = await req.json();
         const { action, orderId } = body;
+
+        // FR-SUPPORTER-PAYMENT-STATUS-1: payment marks branch off here, BEFORE
+        // the restore path and its closed-campaign gate — see isCampaignClosed.
+        // They share this route's session guard and nothing else.
+        if (isSupporterPaymentAction(action)) {
+            return await markSupporterPayment(action, orderId, campaignId, guard.sessionId);
+        }
 
         if (action !== 'restore' || !orderId) {
             return NextResponse.json({ error: "Invalid request" }, { status: 400 });
@@ -777,12 +920,13 @@ export async function PATCH(req: Request) {
         }
 
         // 2. Atomic restore: only succeeds if order is canceled AND belongs to campaign
-        //    source guard mirrors DELETE — only coordinator-entered orders are restorable
+        //    source guard mirrors DELETE — every campaign order (both order routes
+        //    write 'fundraiser'), not only coordinator-entered ones as this once said
         const result = await prisma.order.updateMany({
             where: {
                 id: orderId,
                 campaign_id: campaign.id,
-                source: 'fundraiser',           // Only coordinator-entered orders
+                source: 'fundraiser',           // Every campaign order (see DELETE)
                 NOT: { canceled_at: null }
             },
             data: {

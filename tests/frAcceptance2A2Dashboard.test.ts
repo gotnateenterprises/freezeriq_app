@@ -329,7 +329,16 @@ describe('this patch changed presentation only', () => {
         //       persistence required this schema addition. Nullable, no
         //       default, no index, no unique constraint, no foreign key, no
         //       backfill — see the migration's own header.
-        expect(migrations).toHaveLength(24);
+        //   25  FR-SUPPORTER-PAYMENT-STATUS-1 Order.paid_at / Order.paid_by — the
+        //       coordinator's record that a SUPPORTER paid them (never the
+        //       organization's invoice to My Freezer Chef). Specified by the
+        //       owner's FR-SUPPORTER-PAYMENT-STATUS-1 brief ("PART 3 — MINIMUM
+        //       SCHEMA: paid_at DateTime?, paid_by String?") after the read-only
+        //       FR-SUPPORTER-PAYMENT-STATUS-AUDIT-1 proved no existing column could
+        //       be reused honestly. Additive, nullable, no default, no backfill,
+        //       IF NOT EXISTS. Applying it to Production is gated on owner review
+        //       and must precede the code that selects these columns.
+        expect(migrations).toHaveLength(25);
         expect(migrations[15]).toBe('20260823010000_fr_acceptance_2a2_human_followup');
         expect(migrations[16]).toBe('20260825000000_inv_d_settlement_truth');
         expect(migrations[17]).toBe('20260826000000_m18_outreach_batch_campaign_ownership');
@@ -339,6 +348,7 @@ describe('this patch changed presentation only', () => {
         expect(migrations[21]).toBe('20260828150000_fr_supporter_contact_1_order_first_last_name');
         expect(migrations[22]).toBe('20260905000000_ops6b_order_delivery_handoff');
         expect(migrations[23]).toBe('20260909000000_coord_manual_email_1b_order_email');
+        expect(migrations[24]).toBe('20260912000000_fr_supporter_payment_status_1_order_paid');
     });
 
     it('the acknowledgement and follow-up contracts are untouched', () => {

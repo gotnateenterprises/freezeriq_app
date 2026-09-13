@@ -83,7 +83,14 @@ describe('1. schema and migration', () => {
         const idx = dirs.indexOf('20260909000000_coord_manual_email_1b_order_email');
         expect(idx).toBeGreaterThan(-1);
         expect(dirs[idx - 1]).toBe('20260905000000_ops6b_order_delivery_handoff');
-        expect(idx).toBe(dirs.length - 1);
+        // This originally asserted the migration was the LAST one, which was true
+        // when written and stops being true the moment any later phase adds a
+        // migration. The invariant it protects is ledger ORDER, so every
+        // migration after this one is now named explicitly rather than the check
+        // being dropped: an unapproved migration here still fails.
+        expect(dirs.slice(idx + 1)).toEqual([
+            '20260912000000_fr_supporter_payment_status_1_order_paid',
+        ]);
     });
 });
 

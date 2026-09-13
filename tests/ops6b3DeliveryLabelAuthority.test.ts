@@ -262,7 +262,16 @@ describe('PRESERVATION', () => {
         // COORD-MANUAL-EMAIL-1B later added its own, separately-approved,
         // unrelated migration after it — a later phase adding a migration is
         // not a regression of THIS phase's "made no schema change" guarantee.
+        // FR-SUPPORTER-PAYMENT-STATUS-1 then added another (Order.paid_at /
+        // paid_by). Every migration after OPS-6B is named explicitly, so an
+        // unapproved one still fails here.
         expect(migrations).toContain('20260905000000_ops6b_order_delivery_handoff');
-        expect(migrations[migrations.length - 1]).toBe('20260909000000_coord_manual_email_1b_order_email');
+        // readdirSync order is not guaranteed; the ledger is chronological by name.
+        const ledger = [...migrations].sort();
+        const afterOps6b = ledger.slice(ledger.indexOf('20260905000000_ops6b_order_delivery_handoff') + 1);
+        expect(afterOps6b).toEqual([
+            '20260909000000_coord_manual_email_1b_order_email',
+            '20260912000000_fr_supporter_payment_status_1_order_paid',
+        ]);
     });
 });

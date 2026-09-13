@@ -234,6 +234,13 @@ describe('15-18. scope stayed presentation-only', () => {
         'components/crm2/CampaignCard.tsx',
         'components/crm2/ArchivedCampaignList.tsx',
         'components/crm2/CampaignPriorityList.tsx',
+        // FR-SUPPORTER-PAYMENT-STATUS-1 — a later, separately-authorized phase
+        // adding the coordinator's supporter-payment mark. Its schema hunk lives
+        // in prisma/schema.prisma (already excluded above as parked dirt) and its
+        // one approved migration is named explicitly — see the migration test.
+        'lib/supporterPayment.ts',
+        'app/coordinator/portal/pickup-tracker/page.tsx',
+        'prisma/migrations/20260912000000_fr_supporter_payment_status_1_order_paid/',
     ]);
 
     it('15/16/17/18. the working-tree diff touches only the three UI files (+ their regression tests) — no API route, schema, migration, kitchen, Delivery, packaging, payment or invoice file', () => {
@@ -276,6 +283,11 @@ describe('15-18. scope stayed presentation-only', () => {
 
     it('no migration directory was created by this phase', () => {
         const out = execSync('git status --porcelain --untracked-files=all', { cwd: ROOT, encoding: 'utf8' });
-        expect(out).not.toMatch(/prisma\/migrations\//);
+        // This runs against LIVE git status, so a later phase's uncommitted
+        // migration would trip it. FR-SUPPORTER-PAYMENT-STATUS-1's single approved
+        // migration is exempted BY EXACT PATH; any other migration still fails.
+        const approvedLater = ['prisma/migrations/20260912000000_fr_supporter_payment_status_1_order_paid/migration.sql'];
+        const remaining = out.split('\n').filter((l) => !approvedLater.some((a) => l.includes(a))).join('\n');
+        expect(remaining).not.toMatch(/prisma\/migrations\//);
     });
 });

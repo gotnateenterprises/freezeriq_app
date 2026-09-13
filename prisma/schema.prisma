@@ -468,6 +468,26 @@ model Order {
   // than a matter of discipline.
   released_to_delivery_at DateTime?
   released_to_delivery_by String?
+  // FR-SUPPORTER-PAYMENT-STATUS-1: the SUPPORTER -> COORDINATOR payment, as the
+  // coordinator recorded it. An EVENT pair in exactly the shape of the cancel and
+  // Delivery-handoff pairs above — not a lifecycle stage, so OrderStatus is
+  // untouched. (Those pairs are deliberately not named column-for-column here:
+  // other suites count their declarations in this file.)
+  //
+  // NULL means "the coordinator has not marked this paid". It does NOT mean
+  // "unpaid": no order that existed before this column carries any evidence
+  // either way, so the coordinator surfaces say "Payment not marked", never
+  // "Unpaid". Never backfilled, never inferred.
+  //
+  // Deliberately NOT payment_processor / processor_payment_id (retail processor
+  // identity), NOT status (production lifecycle) and NOT Invoice.paid_at (the
+  // ORGANIZATION paying My Freezer Chef). Closeout, sales totals, org share, tax
+  // and invoices read none of this; it is operational metadata only.
+  //
+  // Written by exactly ONE route: PATCH /api/coordinator (mark_paid /
+  // mark_unpaid), resolved from the coordinator session.
+  paid_at           DateTime?
+  paid_by           String?
   items             OrderItem[]
   business          Business?           @relation(fields: [business_id], references: [id])
   campaign          FundraiserCampaign? @relation(fields: [campaign_id], references: [id])

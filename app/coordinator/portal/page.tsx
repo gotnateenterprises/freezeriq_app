@@ -72,6 +72,9 @@ export default function CoordinatorPortal() {
     const [isCanceling, setIsCanceling] = useState(false);
     const [restoreOrderId, setRestoreOrderId] = useState<string | null>(null);
     const [isRestoring, setIsRestoring] = useState(false);
+    // FR-SUPPORTER-PAYMENT-STATUS-1: the one order whose payment mark is being
+    // saved. One at a time, so a fast double tap cannot race itself.
+    const [paymentPendingId, setPaymentPendingId] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
     const [campaignAssets, setCampaignAssets] = useState<CampaignAsset[]>([]);
     const [promoScripts, setPromoScripts] = useState<PromoScriptsResponse | null>(null);
@@ -290,6 +293,37 @@ export default function CoordinatorPortal() {
             toast.error('Network error. Please try again.');
         } finally {
             setIsRestoring(false);
+        }
+    };
+
+    // ── Supporter Payment Mark Handler (FR-SUPPORTER-PAYMENT-STATUS-1) ──
+    //
+    // Supporter -> coordinator money only. The server resolves the campaign from
+    // the session and writes nothing but paid_at / paid_by; this handler sends an
+    // action and an order id and trusts the refetch for the result, rather than
+    // guessing the new state locally.
+    const handleSupporterPayment = async (orderId: string, action: 'mark_paid' | 'mark_unpaid') => {
+        if (paymentPendingId) return;
+        setPaymentPendingId(orderId);
+        try {
+            const res = await fetch('/api/coordinator', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action, orderId }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                toast.error(data.error || 'Could not update payment. Please try again.');
+                // A 409 means the order changed underneath us — show the truth.
+                if (res.status === 409) fetchCampaign();
+                return;
+            }
+            toast.success(action === 'mark_paid' ? 'Marked paid' : 'Paid mark removed');
+            fetchCampaign();
+        } catch {
+            toast.error('Network error. Please try again.');
+        } finally {
+            setPaymentPendingId(null);
         }
     };
 
@@ -991,6 +1025,9 @@ export default function CoordinatorPortal() {
                     <RecentOrders
                         orders={activeOrders}
                         onCancel={(id) => setCancelOrderId(id)}
+                        onMarkPaid={(id) => handleSupporterPayment(id, 'mark_paid')}
+                        onMarkUnpaid={(id) => handleSupporterPayment(id, 'mark_unpaid')}
+                        paymentPendingId={paymentPendingId}
                         onViewAll={() => setShowAllOrders(!showAllOrders)}
                         limit={showAllOrders ? 999 : 3}
                         hasExternalPaymentLink={hasPaymentInfo}
@@ -1039,6 +1076,9 @@ export default function CoordinatorPortal() {
                     <RecentOrders
                         orders={activeOrders}
                         onCancel={(id) => setCancelOrderId(id)}
+                        onMarkPaid={(id) => handleSupporterPayment(id, 'mark_paid')}
+                        onMarkUnpaid={(id) => handleSupporterPayment(id, 'mark_unpaid')}
+                        paymentPendingId={paymentPendingId}
                         onViewAll={() => setShowAllOrders(!showAllOrders)}
                         limit={showAllOrders ? 999 : 3}
                         hasExternalPaymentLink={hasPaymentInfo}
@@ -1095,6 +1135,9 @@ export default function CoordinatorPortal() {
                     <RecentOrders
                         orders={activeOrders}
                         onCancel={(id) => setCancelOrderId(id)}
+                        onMarkPaid={(id) => handleSupporterPayment(id, 'mark_paid')}
+                        onMarkUnpaid={(id) => handleSupporterPayment(id, 'mark_unpaid')}
+                        paymentPendingId={paymentPendingId}
                         onViewAll={() => setShowAllOrders(!showAllOrders)}
                         limit={showAllOrders ? 999 : 3}
                         isClosed={isClosed}

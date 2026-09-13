@@ -60,6 +60,9 @@ import { isProductionEligibleOrder } from './productionIntake';
 // this module's no-prisma rule is preserved (fundraiserTax imports only
 // roundCents from fundraiserCloseoutMath, which is equally pure).
 import { supporterAmountDue } from './fundraiserTax';
+// FR-SUPPORTER-PAYMENT-STATUS-1: the one rule for what a recorded payment
+// means and how a supporter's orders summarize. Equally pure.
+import { summarizeGroupPayment, type GroupPaymentSummary } from './supporterPayment';
 
 /**
  * The Prisma `select` every coordinator surface uses for supporter orders.
@@ -79,6 +82,11 @@ export const SUPPORTER_ORDER_SELECT = {
     total_amount: true,
     // FR-TAX-CORRECTNESS-1: a coordinator collects total_amount + tax_amount.
     tax_amount: true,
+    // FR-SUPPORTER-PAYMENT-STATUS-1: when the coordinator marked this order
+    // paid, or NULL. paid_by is deliberately NOT selected: it carries the
+    // coordinator session id, which a client has no use for and should not
+    // receive. The actor stays server-side and in CoordinatorActionEvent.
+    paid_at: true,
     created_at: true,
     canceled_at: true,
     source: true,
@@ -105,6 +113,7 @@ export interface SupporterOrderRow {
     participant_name?: string | null;
     total_amount?: unknown;
     tax_amount?: unknown;
+    paid_at?: Date | string | null;
     created_at?: Date | string | null;
     canceled_at?: Date | string | null;
     source?: string | null;
@@ -129,7 +138,8 @@ export interface SupporterOrderItem {
 }
 
 /** What a coordinator surface may render. Note what is absent: no address, no
- *  customer object, no customer_id, no campaign id, no processor id. */
+ *  customer object, no customer_id, no campaign id, no processor id, and no
+ *  paid_by (the session that marked a payment stays server-side). */
 export interface CoordinatorSupporterOrder {
     id: string;
     customer_name: string | null;
@@ -144,6 +154,13 @@ export interface CoordinatorSupporterOrder {
      *  figure a coordinator collects at pickup, and the only one that should
      *  ever be labelled "amount due" on a coordinator surface. */
     amount_due: number;
+    /**
+     * FR-SUPPORTER-PAYMENT-STATUS-1: when the COORDINATOR marked this order
+     * paid (supporter -> coordinator), or null. Null means "not marked", never
+     * "unpaid" — see lib/supporterPayment.ts. Unrelated to the organization's
+     * invoice to My Freezer Chef.
+     */
+    paid_at: Date | string | null;
     created_at: Date | string | null;
     canceled_at: Date | string | null;
     source: string | null;
@@ -184,6 +201,7 @@ export function toSupporterOrder(
         total_amount: order.total_amount,
         tax_amount: order.tax_amount ?? 0,
         amount_due: supporterAmountDue(order as { total_amount: unknown; tax_amount?: unknown }),
+        paid_at: order.paid_at ?? null,
         created_at: order.created_at ?? null,
         canceled_at: order.canceled_at ?? null,
         source: order.source ?? null,
@@ -223,8 +241,11 @@ export function toSupporterOrder(
  * still a supporter who is owed their food, and historical fundraiser orders
  * that predate the hold mechanism are legitimately fulfilled work.
  *
- * This is NOT a per-supporter payment status. FreezerIQ has no authoritative
- * supporter paid/unpaid state, and this must never be rendered as one.
+ * This is NOT a per-supporter payment status, and must never be rendered as
+ * one. Eligibility is about whether the FOOD exists (the organization's invoice
+ * was settled); whether a SUPPORTER paid their coordinator is a separate,
+ * coordinator-recorded fact — Order.paid_at, FR-SUPPORTER-PAYMENT-STATUS-1 —
+ * and neither implies the other.
  */
 export function isPickupEligibleOrder(
     order: { status?: string | null; source?: string | null; canceled_at?: Date | string | null } | null | undefined,
@@ -271,6 +292,13 @@ export interface SupporterGroup {
     total: number;
     /** Earliest order timestamp in the group. */
     firstOrderedAt: Date | string | null;
+    /**
+     * FR-SUPPORTER-PAYMENT-STATUS-1: across this supporter's orders, how many
+     * the coordinator has marked paid. A group is only "paid" when EVERY order
+     * in it is — a supporter with two orders and one mark is "1 of 2", never a
+     * "Paid" that is true of only part of the food on the pickup table.
+     */
+    payment: GroupPaymentSummary;
 }
 
 /**
@@ -311,6 +339,8 @@ export function groupSupporterRows(
                 items: [],
                 total: 0,
                 firstOrderedAt: order.created_at ?? null,
+                // Filled in once every order is in — see the end of this function.
+                payment: summarizeGroupPayment([]),
             };
             byKey.set(key, group);
             groups.push(group);
@@ -334,6 +364,12 @@ export function groupSupporterRows(
         if (at && (!group.firstOrderedAt || new Date(at as any) < new Date(group.firstOrderedAt as any))) {
             group.firstOrderedAt = at;
         }
+    }
+
+    // Summarized after grouping, so a supporter's LATER order can never leave an
+    // earlier "all paid" answer standing.
+    for (const group of groups) {
+        group.payment = summarizeGroupPayment(group.orders);
     }
 
     return groups;

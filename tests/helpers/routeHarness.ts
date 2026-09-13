@@ -75,6 +75,12 @@ const MODELS = [
     // a false green on exactly the ingredient-quantity assertions these
     // tests exist to make.
     'bundleContent',
+    // FR-SUPPORTER-PAYMENT-STATUS-1: PATCH /api/coordinator writes one audit
+    // event per payment mark inside the same transaction as the update. Without
+    // this entry the create throws, the transaction rejects, and the handler
+    // returns 500 — which would make every "a mark writes exactly one event"
+    // assertion fail for the wrong reason, or pass for the wrong one.
+    'coordinatorActionEvent',
 ];
 
 const METHODS = [

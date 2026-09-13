@@ -24,6 +24,19 @@
  * tests/coordFulfillment1.test.ts against the real GET handler.
  */
 
+import { useEffect, useState } from 'react';
+// FR-SUPPORTER-PAYMENT-STATUS-1: pure, client-safe — the one definition of what
+// a recorded payment means and how it is worded.
+import {
+    PAYMENT_NOT_MARKED_LABEL,
+    PAYMENT_PAID_LABEL,
+    formatPaidDate,
+    supporterPaymentState,
+} from '@/lib/supporterPayment';
+
+/** How long "Tap again to undo" waits for the confirming tap. */
+const UNDO_CONFIRM_WINDOW_MS = 4000;
+
 /** Mirrors lib/email.ts's private formatVariantLabel (not imported — that
  *  module is server-oriented and this component is 'use client'; the
  *  transformation is a one-line string format with nothing to drift). */
@@ -69,6 +82,12 @@ export interface TrackerOrder {
      * use; it is simply not the collection figure.
      */
     amount_due?: number | string | null;
+    /**
+     * FR-SUPPORTER-PAYMENT-STATUS-1: when the coordinator marked this order
+     * paid, or null. Null is rendered "Payment not marked" — never "Unpaid",
+     * because no order carries evidence that a supporter did NOT pay.
+     */
+    paid_at?: string | null;
     created_at?: string | null;
     canceled_at?: string | null;
     items?: OrderLineItem[];
@@ -86,25 +105,49 @@ export function RecentOrders({
     onViewAll,
     limit = 3,
     isClosed = false,
-    /** COORD-LIVE-TRACKER-1: a single, campaign-level, truthful collection
-     *  note — never a per-order status, because no per-order payment field
-     *  exists to state one truthfully (Order carries no "paid" concept; see
-     *  OrderStatus in prisma/schema.prisma, which is fulfillment lifecycle
-     *  only). Mirrors the exact same hasExternalPaymentLink framing
+    /** COORD-LIVE-TRACKER-1: a single, campaign-level collection note.
+     *  Mirrors the exact same hasExternalPaymentLink framing
      *  lib/email.ts's sendFundraiserCoordinatorNotification already uses,
-     *  not a new definition of it. Omit the prop to render no note at all. */
+     *  not a new definition of it. Omit the prop to render no note at all.
+     *
+     *  FR-SUPPORTER-PAYMENT-STATUS-1: this note once said a per-order status
+     *  could not exist because Order carried no "paid" concept. Order.paid_at
+     *  now records the COORDINATOR'S OWN mark, which each row shows below. This
+     *  campaign-level note still stands beside it, because a link click is not
+     *  a confirmed payment and FreezerIQ still verifies none on its own. */
     hasExternalPaymentLink,
+    /** FR-SUPPORTER-PAYMENT-STATUS-1: record that this supporter paid. When
+     *  omitted, the row still SHOWS the recorded state but offers no action. */
+    onMarkPaid,
+    /** FR-SUPPORTER-PAYMENT-STATUS-1: take a paid mark back ("Undo paid"). */
+    onMarkUnpaid,
+    /** The order whose payment change is in flight — its button is disabled. */
+    paymentPendingId = null,
 }: {
     orders: TrackerOrder[];
     onCancel: (id: string) => void;
     onViewAll?: () => void;
     limit?: number;
-    /** Phase 7E-4: when true, hides cancel button so closed campaigns are read-only */
+    /** Phase 7E-4: when true, hides cancel button so closed campaigns are read-only.
+     *  Payment marks are deliberately NOT hidden by it — supporters pay at pickup,
+     *  which is after closeout. */
     isClosed?: boolean;
     hasExternalPaymentLink?: boolean;
+    onMarkPaid?: (id: string) => void;
+    onMarkUnpaid?: (id: string) => void;
+    paymentPendingId?: string | null;
 }) {
     const active = (orders || []).filter((o: any) => !o.canceled_at);
     const shown = active.slice(0, limit);
+
+    // Reversal is the destructive direction, so it takes a second tap — inline,
+    // no modal. Marking paid takes one: that is the common, recoverable action.
+    const [confirmUndoId, setConfirmUndoId] = useState<string | null>(null);
+    useEffect(() => {
+        if (!confirmUndoId) return;
+        const t = setTimeout(() => setConfirmUndoId(null), UNDO_CONFIRM_WINDOW_MS);
+        return () => clearTimeout(t);
+    }, [confirmUndoId]);
     return (
         <section className="bg-white border border-slate-200 rounded-2xl p-4">
             <h3 className="text-base font-black text-slate-900 mb-1">Recent orders</h3>
@@ -185,6 +228,60 @@ export function RecentOrders({
                                     )}
                                 </div>
                             )}
+                            {/* FR-SUPPORTER-PAYMENT-STATUS-1: the coordinator's own
+                                record of supporter payment. "Payment not marked" is
+                                a statement about the RECORD, not about the money —
+                                nothing here ever claims a supporter has not paid. */}
+                            {(() => {
+                                const paid = supporterPaymentState(o) === 'paid';
+                                const paidDate = paid ? formatPaidDate(o.paid_at) : null;
+                                const pending = paymentPendingId === o.id;
+                                const confirming = confirmUndoId === o.id;
+                                return (
+                                    <div className="flex min-h-[32px] items-center justify-between gap-2 pl-0.5">
+                                        {paid ? (
+                                            <span className="text-[12px] font-bold text-emerald-700" data-payment-state="paid">
+                                                ✓ {PAYMENT_PAID_LABEL}{paidDate ? ` · ${paidDate}` : ''}
+                                            </span>
+                                        ) : (
+                                            <span className="text-[12px] font-medium text-slate-500" data-payment-state="not_marked">
+                                                {PAYMENT_NOT_MARKED_LABEL}
+                                            </span>
+                                        )}
+
+                                        {!paid && onMarkPaid && (
+                                            <button
+                                                type="button"
+                                                disabled={pending}
+                                                onClick={() => onMarkPaid(o.id)}
+                                                className="rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-[12px] font-bold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
+                                                {pending ? 'Saving…' : 'Mark paid'}
+                                            </button>
+                                        )}
+
+                                        {paid && onMarkUnpaid && (
+                                            <button
+                                                type="button"
+                                                disabled={pending}
+                                                onClick={() => {
+                                                    if (!confirming) {
+                                                        setConfirmUndoId(o.id);
+                                                        return;
+                                                    }
+                                                    setConfirmUndoId(null);
+                                                    onMarkUnpaid(o.id);
+                                                }}
+                                                className={confirming
+                                                    ? 'rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-[12px] font-bold text-amber-800 disabled:opacity-50'
+                                                    : 'px-2 py-1.5 text-[11px] font-medium text-slate-400 hover:text-slate-600 disabled:opacity-50'}
+                                            >
+                                                {pending ? 'Saving…' : confirming ? 'Tap again to undo' : 'Undo paid'}
+                                            </button>
+                                        )}
+                                    </div>
+                                );
+                            })()}
                         </div>
                     );
                 })}

@@ -210,8 +210,22 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'components/crm2/ArchivedCampaignList.tsx',
                 'components/crm2/CampaignPriorityList.tsx',
             ];
+            // FR-SUPPORTER-PAYMENT-STATUS-1 — a later, separately-authorized phase
+            // (the coordinator's supporter-payment mark). Listed on its own rather
+            // than folded into the array above, which is named for a different
+            // phase. Its one approved migration is named by exact directory.
+            const FR_SUPPORTER_PAYMENT_STATUS_1 = [
+                'lib/supporterPayment.ts',
+                'lib/coordinatorSupporterOrders.ts',
+                'app/api/coordinator/route.ts',
+                'components/coordinator/RecentOrders.tsx',
+                'app/coordinator/portal/page.tsx',
+                'app/coordinator/portal/pickup-tracker/page.tsx',
+                'prisma/migrations/20260912000000_fr_supporter_payment_status_1_order_paid/',
+            ];
             for (const f of changed) {
-                const allowed = f === SHARE_CENTER || f.startsWith('tests/') || FR_TAX_CORRECTNESS_1.includes(f);
+                const allowed = f === SHARE_CENTER || f.startsWith('tests/')
+                    || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f);
                 expect(allowed).toBe(true);
             }
             const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -220,7 +234,7 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 // fundraiser money path, so its files are exempt from THIS
                 // phase's "presentation only" assertion. Everything else is
                 // still held to it.
-                if (FR_TAX_CORRECTNESS_1.includes(f)) continue;
+                if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f)) continue;
                 expect(f).not.toMatch(forbidden);
             }
         });
@@ -228,7 +242,11 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
         it('no migration directory was created by this phase', () => {
             const { execSync } = require('child_process');
             const out = execSync('git status --porcelain --untracked-files=all', { cwd: ROOT, encoding: 'utf8' });
-            expect(out).not.toMatch(/prisma\/migrations\//);
+            // Live git status: exempt FR-SUPPORTER-PAYMENT-STATUS-1's single approved
+            // migration BY EXACT PATH. Any other migration still fails this check.
+            const approvedLater = ['prisma/migrations/20260912000000_fr_supporter_payment_status_1_order_paid/migration.sql'];
+            const remaining = out.split('\n').filter((l: string) => !approvedLater.some((a) => l.includes(a))).join('\n');
+            expect(remaining).not.toMatch(/prisma\/migrations\//);
         });
     });
 });

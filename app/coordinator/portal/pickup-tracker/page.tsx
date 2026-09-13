@@ -15,12 +15,20 @@
  * The checkbox is PAPER ONLY. Nothing about it is persisted; there is no
  * per-supporter picked-up state in FreezerIQ, and this phase deliberately does
  * not invent one.
+ *
+ * FR-SUPPORTER-PAYMENT-STATUS-1: the PAYMENT column is different — it prints
+ * what the coordinator recorded in FreezerIQ (Order.paid_at). It is read-only
+ * here; marking happens in the portal's order list. When nothing is marked it
+ * prints an empty box, so a volunteer can still tick it by hand at the table.
+ * It never prints "UNPAID": no order carries evidence that a supporter did not
+ * pay, only whether the coordinator has recorded that they did.
  */
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Printer } from 'lucide-react';
 import { formatServingTier } from '@/lib/coordinatorSupporterOrders';
+import type { GroupPaymentSummary } from '@/lib/supporterPayment';
 
 interface ManifestItem {
     quantity: number;
@@ -37,6 +45,9 @@ interface ManifestGroup {
     items: ManifestItem[];
     total: number;
     firstOrderedAt: string | null;
+    /** FR-SUPPORTER-PAYMENT-STATUS-1. Optional so a response cached from before
+     *  this field existed renders as "not marked" instead of failing. */
+    payment?: GroupPaymentSummary;
 }
 
 interface Manifest {
@@ -161,6 +172,12 @@ export default function PickupTrackerPage() {
                             <strong>Payment:</strong> {campaign.payment_instructions}
                         </p>
                     )}
+                    {/* FR-SUPPORTER-PAYMENT-STATUS-1: says what the column means,
+                        so nobody reads an empty box as "this person did not pay". */}
+                    <p className="mt-1 text-[11px] text-slate-600">
+                        <strong>✓ Paid</strong> = marked paid in your FreezerIQ order list. An empty box
+                        means payment has not been marked yet.
+                    </p>
                     <p className="mt-1 text-[11px] text-slate-500">
                         Contains supporter contact information — handle securely.
                     </p>
@@ -204,9 +221,27 @@ export default function PickupTrackerPage() {
                                     </ul>
                                 </div>
 
-                                <span className="shrink-0 text-[13px] font-bold tabular-nums text-slate-900">
-                                    ${Number(g.total || 0).toFixed(2)}
-                                </span>
+                                <div className="flex shrink-0 flex-col items-end gap-1">
+                                    <span className="text-[13px] font-bold tabular-nums text-slate-900">
+                                        ${Number(g.total || 0).toFixed(2)}
+                                    </span>
+                                    {/* FR-SUPPORTER-PAYMENT-STATUS-1: what the coordinator
+                                        recorded. Blank box when not marked — tickable by hand. */}
+                                    {g.payment?.state === 'paid' ? (
+                                        <span className="text-[12px] font-black uppercase tracking-wide text-slate-900" data-payment-state="paid">
+                                            ✓ Paid
+                                        </span>
+                                    ) : g.payment?.state === 'partly_marked' ? (
+                                        <span className="text-[12px] font-black uppercase tracking-wide text-slate-900" data-payment-state="partly_marked">
+                                            Paid {g.payment.paidCount} of {g.payment.orderCount}
+                                        </span>
+                                    ) : (
+                                        <span className="flex items-center gap-1.5 text-[12px] font-bold uppercase tracking-wide text-slate-700" data-payment-state="not_marked">
+                                            Paid
+                                            <span aria-hidden className="inline-block h-5 w-5 border-2 border-slate-900" />
+                                        </span>
+                                    )}
+                                </div>
                             </li>
                         ))}
                     </ul>
