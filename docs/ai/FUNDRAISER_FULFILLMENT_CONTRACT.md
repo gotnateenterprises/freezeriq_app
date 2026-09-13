@@ -412,6 +412,7 @@ what changed stays visible.
 | `lib/orderStatus.ts` §11 note | Same stale closeout attribution | Same correction. |
 | `CLAUDE.md`, `docs/ai/UI_REDESIGN_SPEC.md` | Lock `app/api/coordinator/[token]/route.ts` and `app/coordinator/[token]/page.tsx` | Both were renamed away; the live surfaces are `app/api/coordinator/route.ts` and `app/coordinator/portal/page.tsx`. |
 | `docs/FUNDRAISER_ARCHITECTURE.md` | Supporters pay externally then receive a magic link | Contradicts the shipped self-serve order path. |
+| §4.5 of this document (QB-INVOICE-1A amendment — in effect; owner-accepted September 13, 2026) | "the Square and QBO importers keep their existing compatibility behaviour" | The QBO importer is RETIRED. It turned the newest QuickBooks invoices — unpaid ones included — into `production_ready` Orders, which contradicts HARD RULE 1. No QuickBooks record creates, releases or changes an Order. A QuickBooks connection, its health, or any QuickBooks invoice or payment state never releases fundraiser food: release remains `Invoice.status = 'PAID'` (§5). The Square importer is unchanged by this amendment. |
 
 ---
 

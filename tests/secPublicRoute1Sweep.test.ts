@@ -212,15 +212,12 @@ const PUBLIC_ALLOWLIST: Record<string, string> = {
     'GET app/api/auth/square/callback/route.ts': 'OAuth callback; businessId from an httpOnly state cookie, not the query',
     'GET app/api/auth/stripe/callback/route.ts': 'OAuth callback; signed state verified server-side',
     'GET app/api/auth/meta/callback/route.ts': 'OAuth callback bound to the session business',
-    'GET app/api/integrations/auth/qbo/callback/route.ts': 'OAuth callback bound to the session business',
     'POST app/api/customer/auth/logout/route.ts': 'deletes the caller own cookie; can affect nobody else',
     'POST app/api/public/customer/auth/logout/route.ts': 'deletes the caller own cookie; can affect nobody else',
 
     // ── Redirects to a third-party consent screen. No DB, no data.
     'GET app/api/auth/instagram/route.ts': 'redirect to Instagram consent; callback is authenticated',
     'GET app/api/auth/meta/route.ts': 'redirect to Meta consent; callback is authenticated',
-    'GET app/api/auth/qbo/route.ts': 'redirect to Intuit consent; callback is authenticated',
-    'GET app/api/integrations/auth/qbo/login/route.ts': 'redirect to Intuit consent; callback is authenticated',
 
     // ── Meta webhook POSTs. DEFERRED, not accepted as safe: these need HMAC
     //    signature verification, a different mechanism from session auth, and
@@ -245,7 +242,13 @@ const PUBLIC_ALLOWLIST: Record<string, string> = {
     'GET app/api/stripe/callback/route.ts': 'retired stub',
     'POST app/api/integrations/square/route.ts': 'deliberately retired to 410',
     'GET app/api/integrations/square/route.ts': 'deliberately retired to 410',
-    'POST app/api/integrations/sync/qbo/route.ts': 'returns 501',
+    // QB-INVOICE-1A. The legacy QuickBooks pair under /api/auth/* is retired to
+    // 410 rather than deleted, because a deleted file would be served by the
+    // app/api/auth/[...nextauth] catch-all. The dead /api/integrations/auth/qbo
+    // pair and /api/integrations/sync/qbo were deleted outright (no catch-all
+    // covers those paths), so their entries are gone.
+    'GET app/api/auth/qbo/route.ts': 'deliberately retired to 410; the file keeps the NextAuth catch-all off the path',
+    'GET app/api/auth/qbo/callback/route.ts': 'deliberately retired to 410; the file keeps the NextAuth catch-all off the path',
 };
 
 interface Handler { key: string; file: string; verb: string; guard: string | null; }

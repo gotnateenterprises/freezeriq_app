@@ -72,12 +72,18 @@
 | `TWILIO_AUTH_TOKEN` | Platform | Twilio auth |
 | `TWILIO_PHONE_NUMBER` | Platform | Sending phone number |
 
-### QuickBooks
+### QuickBooks (QB-INVOICE-1A)
 | Variable | Owner | Purpose |
 |----------|-------|---------|
-| `QBO_CLIENT_ID` | Platform | OAuth client ID |
-| `QBO_CLIENT_SECRET` | Platform | OAuth client secret |
-| `QBO_REDIRECT_URI` | Platform | OAuth callback |
+| `QBO_CLIENT_ID` | Platform | Intuit app OAuth client ID (Development keys locally; Production keys only once approved) |
+| `QBO_CLIENT_SECRET` | Platform | Intuit app OAuth client secret — never logged, never in a URL |
+| `QBO_ENVIRONMENT` | Platform | `sandbox` or `production`. Must be `sandbox` in local development and `production` on Vercel Production; any mismatch disables the connector |
+| `QBO_REDIRECT_URI` | Platform | Exact callback. Local: `http://localhost:3000/api/integrations/quickbooks/callback`. Production: `https://www.freezeriqapp.com/api/integrations/quickbooks/callback`. Any other value disables the connector |
+| `QBO_PRODUCTION_ENABLED` | Platform | Must be exactly `true` for Production to connect at all. Unset in QB-INVOICE-1A |
+| `INTEGRATION_TOKEN_KEY` | Platform | Dedicated AES-256-GCM key material for integration credentials at rest: 32+ characters, no commas or newlines (a key containing either is refused). No fallback to any other secret |
+| `INTEGRATION_TOKEN_KEY_PREVIOUS` | Platform | Optional, comma-separated retired keys, read-only; at most 4 are read (any beyond that are ignored). Replacing `INTEGRATION_TOKEN_KEY` without listing the old key here makes every stored QuickBooks connection unreadable. Rows move to the new key only when their access_token column is rewritten (connect/reconnect, successful refresh, any disconnect/revoked/expired tombstone); idle connections, transient refresh failures and already-disconnected rows do not. Follow the procedure in `docs/ai/QUICKBOOKS_INTEGRATION.md` ("Encryption-key rotation") |
+
+The QuickBooks connector is **always disabled on Vercel Preview** (`VERCEL_ENV=preview`), because Preview shares the Production database. Never add `QBO_*` variables to the Preview environment. See `lib/quickbooks/config.ts`.
 
 ## Rules
 1. Missing secrets must fail loudly in production paths

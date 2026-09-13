@@ -37,8 +37,12 @@
  */
 
 export interface OAuthState {
-    /** Provider this attempt belongs to; a token is not valid at another's callback. */
-    provider: 'stripe' | 'square';
+    /**
+     * Provider this attempt belongs to; a token is not valid at another's callback.
+     * 'quickbooks' (QB-INVOICE-1A) signs its own, much shorter expiry — see
+     * QUICKBOOKS_STATE_TTL_SECONDS in lib/quickbooks/config.ts.
+     */
+    provider: 'stripe' | 'square' | 'quickbooks';
     /** The EFFECTIVE tenant the initiating user was authorised to act for. */
     businessId: string;
     /** The user who initiated the attempt. */

@@ -215,21 +215,32 @@ Domain:
 - accounting
 
 Purpose:
-- accounting sync/export
+- accounting: FreezerIQ-created invoices in the tenant's own QuickBooks company (QB-INVOICE-1B onward)
 
 Expected ownership:
 - platform app credentials plus tenant/company OAuth connection
 
-Current likely status:
-- broken
+Current status (QB-INVOICE-1A):
+- legacy importer and both legacy OAuth pairs retired (the importer turned unpaid QuickBooks invoices into kitchen Orders)
+- new connector: sandbox OAuth foundation only — connect, callback, disconnect (with Intuit revocation), status (live read-only CompanyInfo)
+- no invoice, customer or payment sync exists
+- Preview: always disabled. Production: disabled until `QBO_PRODUCTION_ENABLED=true` and Intuit production keys are approved
+- live sandbox proof (connect, disconnect, reconnect, encryption at rest) passed; owner-accepted September 13, 2026
+- V1 rule: one tenant ↔ at most one QuickBooks company, and one company ↔ at most one tenant (`realm_in_use`)
+
+Code:
+- `lib/quickbooks/config.ts` environment guard, `lib/quickbooks/intuitClient.ts` Intuit REST, `lib/quickbooks/connection.ts` storage/refresh/health, `lib/integrationTokenCrypto.ts` encryption at rest
+- routes under `app/api/integrations/quickbooks/`; tenant ADMIN only
+- provider key `quickbooks` (the legacy `qbo` key is dead); OAuth scope `com.intuit.quickbooks.accounting` only
 
 Verification criteria:
 - Intuit app created
 - client credentials present
 - redirect URI configured
-- OAuth flow succeeds
-- token storage works
-- sync target behavior known
+- OAuth flow succeeds against the sandbox
+- tokens and realm stored encrypted, bound to the tenant
+- refresh rotation survives concurrent requests
+- disconnect revokes at Intuit
 
 ---
 
@@ -331,7 +342,7 @@ Verification criteria:
 ### Tenant-connected integrations
 - tenant Stripe/Connect accounts
 - Square tenant tokens
-- QBO tenant company connections
+- QuickBooks tenant company connections (provider `quickbooks`, encrypted)
 - social accounts
 - tenant-specific calendars if implemented that way
 

@@ -119,7 +119,7 @@ Each webhook path must belong to exactly one domain: platform billing, tenant co
 | `RESEND_API_KEY` | Transactional email |
 | `OPENAI_API_KEY` | AI features |
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_PHONE_NUMBER` | SMS |
-| `QBO_CLIENT_ID` / `QBO_CLIENT_SECRET` / `QBO_REDIRECT_URI` | QuickBooks OAuth |
+| `QBO_CLIENT_ID` / `QBO_CLIENT_SECRET` / `QBO_ENVIRONMENT` / `QBO_REDIRECT_URI` / `QBO_PRODUCTION_ENABLED` / `INTEGRATION_TOKEN_KEY` | QuickBooks OAuth + credential encryption (see ENVIRONMENT.md) |
 
 ### Env Rules
 1. Missing secrets must fail loudly in production paths
@@ -153,7 +153,7 @@ Use **only** these labels:
 | Stripe Platform Billing | SaaS billing | Platform | `broken` / `configured-not-verified` |
 | Stripe Connect | Tenant commerce | Tenant | `planned` / `stubbed` |
 | Square | Tenant commerce | Tenant | `stubbed` / `configured-not-verified` |
-| QuickBooks Online | Accounting | Platform+Tenant | `broken` |
+| QuickBooks Online | Accounting | Platform+Tenant | `sandbox foundation` (QB-INVOICE-1A: legacy importer retired; secure connector, no sync) |
 | Twilio | SMS | Platform | `broken` |
 | OpenAI | AI features | Platform | `broken` / `planned` |
 | Google Calendar | Scheduling | Platform/Tenant | `stubbed` / `configured-not-verified` |

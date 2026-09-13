@@ -24,7 +24,7 @@ export function SyncOrdersButton() {
                     alert("Sync Successful!");
                 } else {
                     const errorList = data.results?.errors?.join('\n• ') || 'Unknown error';
-                    alert(`Sync completed with issues:\n• ${errorList}\n\nSquare orders may have still updated if only QuickBooks failed.`);
+                    alert(`Sync completed with issues:\n• ${errorList}`);
                 }
             } else {
                 alert('Connection error. Please try again.');

@@ -15,9 +15,11 @@ export async function GET() {
             select: { provider: true }
         });
 
+        // QuickBooks is deliberately absent: a row's existence is not a healthy
+        // connection. Its truthful, ADMIN-only status lives at
+        // /api/integrations/quickbooks/status (QB-INVOICE-1A).
         const status = {
             square: integrations.some(i => i.provider === 'square'),
-            qbo: integrations.some(i => i.provider === 'qbo'),
             meta: integrations.some(i => i.provider === 'meta'),
             instagram: integrations.some(i => i.provider === 'instagram'),
             stripe: integrations.some(i => i.provider === 'stripe')

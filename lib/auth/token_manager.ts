@@ -4,7 +4,11 @@ export class TokenManager {
     private provider: string;
     private businessId: string;
 
-    constructor(provider: 'square' | 'qbo' | 'meta' | 'instagram', businessId: string) {
+    // 'qbo' was removed in QB-INVOICE-1A: this class stores plaintext, and
+    // QuickBooks credentials now go through lib/quickbooks/connection.ts, which
+    // encrypts them. Keeping the literal out of the union makes a plaintext
+    // QuickBooks write a compile error.
+    constructor(provider: 'square' | 'meta' | 'instagram', businessId: string) {
         this.provider = provider;
         this.businessId = businessId;
     }

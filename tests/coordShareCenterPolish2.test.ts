@@ -223,9 +223,50 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'app/coordinator/portal/pickup-tracker/page.tsx',
                 'prisma/migrations/20260912000000_fr_supporter_payment_status_1_order_paid/',
             ];
+            // QB-INVOICE-1A — a later, separately-authorized phase: legacy QuickBooks
+            // quarantine + the secure sandbox OAuth connector. It legitimately touches
+            // app/api/ (the retired qbo routes, the new quickbooks routes, sync/orders)
+            // and removes two npm packages. Entries ending in '/' are directories, which
+            // is how `git status --porcelain` reports a new untracked folder. No
+            // migration: the connector reuses the existing integrations table.
+            const QB_INVOICE_1A = [
+                'app/api/auth/qbo/route.ts',
+                'app/api/auth/qbo/callback/route.ts',
+                'app/api/integrations/auth/qbo/login/route.ts',
+                'app/api/integrations/auth/qbo/callback/route.ts',
+                'app/api/integrations/sync/qbo/route.ts',
+                'app/api/integrations/disconnect/route.ts',
+                'app/api/integrations/status/route.ts',
+                'app/api/integrations/quickbooks/',
+                'app/api/sync/orders/route.ts',
+                'app/settings/page.tsx',
+                'components/SyncOrdersButton.tsx',
+                'components/settings/QuickBooksConnectionCard.tsx',
+                'lib/auth/oauthState.ts',
+                'lib/auth/token_manager.ts',
+                'lib/integrationTokenCrypto.ts',
+                'lib/quickbooks/',
+                'lib/qbo.ts',
+                'lib/ingestion/qbo_poller.ts',
+                'lib/ingestion/clients/qbo_client.ts',
+                'lib/mock_data.ts',
+                'types/integrations.ts',
+                'types/intuit-oauth.d.ts',
+                'types/node-quickbooks.d.ts',
+                'simulate_qbo.bat',
+                'test_qbo_import.js',
+                'package.json',
+                'package-lock.json',
+                'docs/ai/ENVIRONMENT.md',
+                'docs/ai/INTEGRATIONS.md',
+                'docs/ai/Brain.md',
+                'docs/ai/FUNDRAISER_FULFILLMENT_CONTRACT.md',
+                'docs/ai/QUICKBOOKS_INTEGRATION.md',
+            ];
+            const inQbInvoice1a = (f: string) => QB_INVOICE_1A.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
             for (const f of changed) {
                 const allowed = f === SHARE_CENTER || f.startsWith('tests/')
-                    || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f);
+                    || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f);
                 expect(allowed).toBe(true);
             }
             const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -234,7 +275,7 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 // fundraiser money path, so its files are exempt from THIS
                 // phase's "presentation only" assertion. Everything else is
                 // still held to it.
-                if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f)) continue;
+                if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f)) continue;
                 expect(f).not.toMatch(forbidden);
             }
         });

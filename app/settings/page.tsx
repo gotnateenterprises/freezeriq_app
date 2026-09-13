@@ -32,6 +32,7 @@ import CustomerImporter from '@/components/CustomerImporter';
 import FundraiserImporter from '@/components/FundraiserImporter';
 import { Database as DatabaseIcon } from 'lucide-react';
 import FundraiserTaxSettings from '@/components/settings/FundraiserTaxSettings';
+import QuickBooksConnectionCard from '@/components/settings/QuickBooksConnectionCard';
 
 function AccountSecuritySection() {
     const [currentPassword, setCurrentPassword] = useState('');
@@ -481,7 +482,7 @@ function CustomerImportTrigger() {
 
 export default function SettingsPage() {
     const { data: session } = useSession();
-    const [integrationStatus, setIntegrationStatus] = useState({ square: false, qbo: false, meta: false, instagram: false, stripe: false });
+    const [integrationStatus, setIntegrationStatus] = useState({ square: false, meta: false, instagram: false, stripe: false });
     const [isBackingUp, setIsBackingUp] = useState(false);
     const [backupStatus, setBackupStatus] = useState<{ success: boolean; message: string } | null>(null);
     const [isConfirmingClear, setIsConfirmingClear] = useState(false);
@@ -495,7 +496,7 @@ export default function SettingsPage() {
             .catch(console.error);
     }, []);
 
-    const disconnectIntegration = async (provider: 'square' | 'qbo' | 'meta' | 'instagram' | 'stripe') => {
+    const disconnectIntegration = async (provider: 'square' | 'meta' | 'instagram' | 'stripe') => {
         if (!confirm(`Are you sure you want to delete the ${provider} connection?`)) return;
         try {
             const res = await fetch('/api/integrations/disconnect', {
@@ -602,13 +603,10 @@ export default function SettingsPage() {
                                 connectUrl="/api/auth/square"
                                 onDisconnect={() => disconnectIntegration('square')}
                             />
-                            <IntegrationItem
-                                name="QuickBooks"
-                                logo="QB"
-                                isConnected={integrationStatus.qbo}
-                                connectUrl="/api/auth/qbo"
-                                onDisconnect={() => disconnectIntegration('qbo')}
-                            />
+                            {/* QB-INVOICE-1A: tenant admins only (the routes enforce it too), and never while viewing as another tenant. */}
+                            {session?.user?.role === 'ADMIN' && !(session?.user as any)?.isViewingAsTenant && (
+                                <QuickBooksConnectionCard />
+                            )}
                             <IntegrationItem
                                 name="Stripe Payments"
                                 logo="ST"

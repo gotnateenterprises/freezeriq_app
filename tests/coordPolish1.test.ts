@@ -193,6 +193,48 @@ describe('15-18. scope stayed presentation-only', () => {
     // added its own dedicated test file. Extending this allowlist is the
     // deliberate acknowledgment of that later, in-scope change, not a
     // loosening of what THIS phase's own diff was.
+    // QB-INVOICE-1A — a later, separately-authorized phase: legacy QuickBooks
+    // quarantine + the secure sandbox OAuth connector. It legitimately touches
+    // app/api/ (the retired qbo routes, the new quickbooks routes, sync/orders)
+    // and removes two npm packages. Entries ending in '/' are directories, which
+    // is how `git status --porcelain` reports a new untracked folder. No
+    // migration: the connector reuses the existing integrations table.
+    const QB_INVOICE_1A = [
+        'app/api/auth/qbo/route.ts',
+        'app/api/auth/qbo/callback/route.ts',
+        'app/api/integrations/auth/qbo/login/route.ts',
+        'app/api/integrations/auth/qbo/callback/route.ts',
+        'app/api/integrations/sync/qbo/route.ts',
+        'app/api/integrations/disconnect/route.ts',
+        'app/api/integrations/status/route.ts',
+        'app/api/integrations/quickbooks/',
+        'app/api/sync/orders/route.ts',
+        'app/settings/page.tsx',
+        'components/SyncOrdersButton.tsx',
+        'components/settings/QuickBooksConnectionCard.tsx',
+        'lib/auth/oauthState.ts',
+        'lib/auth/token_manager.ts',
+        'lib/integrationTokenCrypto.ts',
+        'lib/quickbooks/',
+        'lib/qbo.ts',
+        'lib/ingestion/qbo_poller.ts',
+        'lib/ingestion/clients/qbo_client.ts',
+        'lib/mock_data.ts',
+        'types/integrations.ts',
+        'types/intuit-oauth.d.ts',
+        'types/node-quickbooks.d.ts',
+        'simulate_qbo.bat',
+        'test_qbo_import.js',
+        'package.json',
+        'package-lock.json',
+        'docs/ai/ENVIRONMENT.md',
+        'docs/ai/INTEGRATIONS.md',
+        'docs/ai/Brain.md',
+        'docs/ai/FUNDRAISER_FULFILLMENT_CONTRACT.md',
+        'docs/ai/QUICKBOOKS_INTEGRATION.md',
+    ];
+    const inQbInvoice1a = (f: string) => QB_INVOICE_1A.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
+
     const ALLOWED = new Set([
         'components/coordinator/ShareCenter.tsx',
         'components/coordinator/QuietLinks.tsx',
@@ -268,7 +310,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // The real protection is the forbidden-path regex below, which is
             // unchanged — this only stops the check from going stale on every
             // subsequent phase that touches a regression suite.
-            expect(ALLOWED.has(f) || f.startsWith('tests/')).toBe(true);
+            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f)).toBe(true);
         }
         // And explicitly: no path under these directories appears at all.
         const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -276,7 +318,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // FR-TAX-CORRECTNESS-1 is separately authorized to edit the
             // fundraiser money path — exempt from THIS phase's
             // "presentation only" assertion; everything else still held to it.
-            if (ALLOWED.has(f)) continue;
+            if (ALLOWED.has(f) || inQbInvoice1a(f)) continue;
             expect(f).not.toMatch(forbidden);
         }
     });

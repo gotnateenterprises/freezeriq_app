@@ -1,11 +1,23 @@
 
 import { NextResponse } from 'next/server';
 import { IngestionDBAdapter } from '@/lib/ingestion_db';
-import { QBOPoller } from '@/lib/ingestion/qbo_poller';
 import { SquareOrderHandler } from '@/lib/ingestion/square_handler';
 import Stripe from 'stripe';
 
-
+/**
+ * Sync Orders — Square only.
+ *
+ * QB-INVOICE-1A retired the QuickBooks step that used to run first here. It
+ * pulled the 50 newest QuickBooks invoices, paid or not, and turned each one
+ * into a `production_ready` kitchen Order. That contradicts HARD RULE 1 of
+ * docs/ai/FUNDRAISER_FULFILLMENT_CONTRACT.md (only a PAID FreezerIQ invoice
+ * releases fundraiser food), and once FreezerIQ starts creating invoices in
+ * QuickBooks it would have imported them straight back as kitchen work.
+ *
+ * QuickBooks is now a separate, ADMIN-only connector under
+ * app/api/integrations/quickbooks/*. Nothing on this route reads QuickBooks,
+ * and no QuickBooks record can become an Order through it.
+ */
 export async function POST() {
     const { auth } = await import('@/auth');
     const session = await auth();
@@ -30,21 +42,10 @@ export async function POST() {
     }
 
     const db = new IngestionDBAdapter(businessId);
-    const qbo = new QBOPoller(db, businessId);
     const square = new SquareOrderHandler(db, businessId);
-    const results = { qbo: 'skipped', square: 'skipped', errors: [] as string[] };
+    const results = { square: 'skipped', errors: [] as string[] };
 
-    // 1. Process QBO
-    try {
-        await qbo.syncInvoices();
-        results.qbo = 'success';
-    } catch (e: any) {
-        console.error("QBO Sync Failed (Detail):", e);
-        results.qbo = 'failed';
-        results.errors.push(`QuickBooks: ${e.message || 'Connection Error'}`);
-    }
-
-    // 2. Process Square
+    // Process Square
     try {
         await square.syncOrders();
         results.square = 'success';

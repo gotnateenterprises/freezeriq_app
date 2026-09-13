@@ -13,7 +13,10 @@ export async function POST(req: Request) {
 
         const { provider } = await req.json();
 
-        const allowedProviders = ['square', 'qbo', 'meta', 'stripe'];
+        // QuickBooks is NOT disconnectable here: deleting its row would skip the
+        // Intuit token revocation and the ADMIN gate. It has its own route,
+        // /api/integrations/quickbooks/disconnect (QB-INVOICE-1A).
+        const allowedProviders = ['square', 'meta', 'stripe'];
         if (!provider || !allowedProviders.includes(provider)) {
             return NextResponse.json({ error: "Invalid provider" }, { status: 400 });
         }
