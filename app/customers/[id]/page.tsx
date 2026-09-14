@@ -10,6 +10,7 @@ import ActivityFeed from '@/components/crm/ActivityFeed';
 import CustomerOverview from '@/components/crm/CustomerOverview';
 import FundraisersTab from '@/components/crm/FundraisersTab';
 import AddOrderModal from '@/components/AddOrderModal';
+import QuickBooksCustomerLinkCard from '@/components/crm/QuickBooksCustomerLinkCard';
 import { STATUS_COLORS, STATUS_LABELS, type CustomerStatus } from '@/lib/statusConstants';
 
 export default function CustomerProfilePage({ params }: { params: Promise<{ id: string }> }) {
@@ -329,11 +330,15 @@ export default function CustomerProfilePage({ params }: { params: Promise<{ id: 
 
             {/* TAB CONTENT */}
             {activeTab === 'overview' && (
-                <CustomerOverview
-                    customer={customer}
-                    onUpdateCustomer={handleUpdateProfile}
-                    onEditProfile={() => setIsEditingProfile(true)}
-                />
+                <>
+                    <CustomerOverview
+                        customer={customer}
+                        onUpdateCustomer={handleUpdateProfile}
+                        onEditProfile={() => setIsEditingProfile(true)}
+                    />
+                    {/* QB-INVOICE-1B: tenant admins only; renders nothing when QuickBooks is unavailable. */}
+                    <QuickBooksCustomerLinkCard customerId={customer.id} />
+                </>
             )}
 
             {activeTab === 'orders' && (

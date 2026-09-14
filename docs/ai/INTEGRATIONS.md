@@ -227,6 +227,7 @@ Current status (QB-INVOICE-1A):
 - Preview: always disabled. Production: disabled until `QBO_PRODUCTION_ENABLED=true` and Intuit production keys are approved
 - live sandbox proof (connect, disconnect, reconnect, encryption at rest) passed; owner-accepted September 13, 2026
 - V1 rule: one tenant ↔ at most one QuickBooks company, and one company ↔ at most one tenant (`realm_in_use`)
+- QB-INVOICE-1B (owner sandbox acceptance passed September 14, 2026; isolated branch, not merged or deployed; migration not applied to Production or Preview): ADMIN-confirmed QuickBooks customer mapping per organization, bound to the connection generation (Forget ends the generation, keeps it as history, and deletes customer links); invoice-link schema foundation only — at most one QuickBooks invoice link per invoice for its lifetime — and no QuickBooks invoice is created or sent (see QUICKBOOKS_INTEGRATION.md §11)
 
 Code:
 - `lib/quickbooks/config.ts` environment guard, `lib/quickbooks/intuitClient.ts` Intuit REST, `lib/quickbooks/connection.ts` storage/refresh/health, `lib/integrationTokenCrypto.ts` encryption at rest

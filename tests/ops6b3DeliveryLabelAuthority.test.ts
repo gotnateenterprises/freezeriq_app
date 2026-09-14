@@ -272,6 +272,8 @@ describe('PRESERVATION', () => {
         expect(afterOps6b).toEqual([
             '20260909000000_coord_manual_email_1b_order_email',
             '20260912000000_fr_supporter_payment_status_1_order_paid',
+            // QB-INVOICE-1B (owner-authorized, additive): QuickBooks links foundation.
+            '20260913120000_qb_invoice_1b_quickbooks_links',
         ]);
     });
 });

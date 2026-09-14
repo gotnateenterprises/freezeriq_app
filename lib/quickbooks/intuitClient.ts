@@ -8,6 +8,9 @@
  * outright is what lets this file guarantee the properties below.
  *
  *   - ONE scope: com.intuit.quickbooks.accounting. Never payments, never openid.
+ *   - Accounting API calls: CompanyInfo (read), and — QB-INVOICE-1B — Customer
+ *     query/read and a DisplayName-only Customer create. Nothing here creates,
+ *     sends or reads an invoice or a payment.
  *   - Credentials travel only in the Authorization header or a POST body — never
  *     in a URL, where they would land in access logs.
  *   - No error message, thrown value or log line ever contains a token, the
@@ -53,7 +56,11 @@ export type IntuitErrorKind =
     /** The request never completed (DNS, TLS, timeout). */
     | 'network'
     /** A success status with a body that is not what Intuit documents. */
-    | 'malformed';
+    | 'malformed'
+    /** QB-INVOICE-1B: Fault 6240 — the DisplayName is already used by a customer, vendor or employee. */
+    | 'duplicate_name'
+    /** QB-INVOICE-1B: Intuit validated and refused the request (a 4xx Fault); nothing was created. */
+    | 'rejected';
 
 export class IntuitError extends Error {
     readonly kind: IntuitErrorKind;
@@ -288,4 +295,199 @@ export async function fetchCompanyInfo(
     const name = typeof info.CompanyName === 'string' ? info.CompanyName.slice(0, 200) : null;
     const country = typeof info.Country === 'string' ? info.Country.slice(0, 8) : null;
     return { companyName: name, country, intuitTid: tid };
+}
+
+// ── QB-INVOICE-1B: Customer lookup, read and minimal create ──────────────────
+//
+// Facts relied on (Intuit Accounting API docs, verified 2026-09-13):
+//   - query string comparisons are NOT case-sensitive, so "exact" is enforced here,
+//     byte for byte, after Intuit answers;
+//   - a query returns only ACTIVE name-list entities unless it filters on Active,
+//     and whether `Active IN (true,false)` combines with another filter is not
+//     documented — so the inactive half is a second query with `Active = false`;
+//   - an apostrophe in a literal is escaped with a backslash;
+//   - DisplayName must not contain ':', tab or newline, and is unique across
+//     customers, vendors and employees (Fault 6240 otherwise);
+//   - a nonexistent id answers Fault 610; a 200 can still carry a Fault;
+//   - `requestid` (max 50 chars) makes a POST idempotent: a repeat returns the
+//     original response instead of creating again.
+// Only Id, DisplayName, Active and the sub-customer/project flags are kept from a
+// customer record; email, phone, address and balance are dropped on arrival.
+
+/** A QuickBooks customer, reduced to what mapping needs. */
+export interface QuickBooksCustomerSummary {
+    id: string;
+    displayName: string;
+    active: boolean;
+    /** A sub-customer (Job) or a Project — never linkable as an organization. */
+    subCustomer: boolean;
+}
+
+/** Longest organization name FreezerIQ will propose or look up (a conservative ceiling; Intuit publishes none). */
+export const QUICKBOOKS_DISPLAY_NAME_MAX = 100;
+
+export type DisplayNameProblem = 'empty' | 'too_long' | 'surrounding_whitespace' | 'forbidden_character';
+
+/**
+ * Why a name cannot be used as a QuickBooks DisplayName verbatim, or null.
+ * FreezerIQ never alters a name to make it fit — the admin changes it instead.
+ * Forbidden: Intuit's ':' tab and newline; also carriage return, other control
+ * characters, and backslash (its escaping inside a query literal is undocumented).
+ */
+export function displayNameProblem(name: unknown): DisplayNameProblem | null {
+    if (typeof name !== 'string' || name.length === 0) return 'empty';
+    if (name.length > QUICKBOOKS_DISPLAY_NAME_MAX) return 'too_long';
+    if (name.trim() !== name) return 'surrounding_whitespace';
+    if (/[:\\\u0000-\u001f\u007f]/.test(name)) return 'forbidden_character';
+    return null;
+}
+
+const CUSTOMER_ID = /^[0-9]{1,32}$/;
+const REQUEST_ID = /^[A-Za-z0-9-]{1,50}$/;
+
+/** Fault codes from a response body — top level or inside QueryResponse — or null when there is no Fault. */
+function faultCodes(body: any): string[] | null {
+    const fault = body?.Fault ?? body?.fault ?? body?.QueryResponse?.Fault;
+    if (!fault) return null;
+    const errors = Array.isArray(fault.Error) ? fault.Error : [];
+    return errors.map((e: any) => String(e?.code ?? '')).filter(Boolean);
+}
+
+function parseCustomer(raw: any): QuickBooksCustomerSummary | null {
+    if (!raw || typeof raw !== 'object') return null;
+    if (typeof raw.Id !== 'string' || !CUSTOMER_ID.test(raw.Id)) return null;
+    if (typeof raw.DisplayName !== 'string' || raw.DisplayName.length === 0 || raw.DisplayName.length > 500) return null;
+    if (typeof raw.Active !== 'boolean') return null;
+    return { id: raw.Id, displayName: raw.DisplayName, active: raw.Active, subCustomer: raw.Job === true || raw.IsProject === true };
+}
+
+async function accountingRequest(
+    config: QuickBooksConfig,
+    accessToken: string,
+    realmId: string,
+    pathAndQuery: string,
+    init: RequestInit,
+    fetchImpl: FetchLike,
+): Promise<{ res: Response; body: any; tid?: string }> {
+    if (!isValidRealmId(realmId)) throw new IntuitError('malformed');
+    const res = await send(fetchImpl, `${config.apiBase}/v3/company/${encodeURIComponent(realmId)}${pathAndQuery}`, {
+        ...init,
+        headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}`, ...(init.headers as Record<string, string> | undefined) },
+    });
+    const tid = intuitTid(res);
+    if (res.status === 401 || res.status === 403) throw new IntuitError('unauthorized', { status: res.status, intuitTid: tid });
+    return { res, body: await readJson(res), tid };
+}
+
+async function queryCustomers(
+    config: QuickBooksConfig, accessToken: string, realmId: string, where: string, fetchImpl: FetchLike,
+): Promise<QuickBooksCustomerSummary[]> {
+    const query = `select * from Customer where ${where} maxresults 20`;
+    const { res, body, tid } = await accountingRequest(config, accessToken, realmId,
+        `/query?query=${encodeURIComponent(query)}&minorversion=${QUICKBOOKS_MINOR_VERSION}`, { method: 'GET' }, fetchImpl);
+    const codes = faultCodes(body);
+    if (!res.ok || codes) throw new IntuitError(res.ok ? 'http' : res.status >= 500 ? 'http' : 'rejected', { status: res.status, intuitTid: tid });
+    const qr = body?.QueryResponse;
+    if (!qr || typeof qr !== 'object') throw new IntuitError('malformed', { status: res.status, intuitTid: tid });
+    if (qr.Customer === undefined) return []; // an empty result omits the entity key
+    if (!Array.isArray(qr.Customer)) throw new IntuitError('malformed', { status: res.status, intuitTid: tid });
+    const out: QuickBooksCustomerSummary[] = [];
+    for (const raw of qr.Customer) {
+        const c = parseCustomer(raw);
+        if (!c) throw new IntuitError('malformed', { status: res.status, intuitTid: tid }); // fail closed, never skip
+        out.push(c);
+    }
+    return out;
+}
+
+/**
+ * Every QuickBooks customer — active AND inactive — whose DisplayName Intuit
+ * considers equal to `displayName`. Intuit's comparison ignores letter case, so
+ * the caller decides what is EXACT (byte-for-byte) and what merely differs in case.
+ * Read-only. Never matches on email or any other field.
+ */
+export async function findCustomersByDisplayName(
+    config: QuickBooksConfig,
+    accessToken: string,
+    realmId: string,
+    displayName: string,
+    fetchImpl: FetchLike = fetch,
+): Promise<QuickBooksCustomerSummary[]> {
+    if (displayNameProblem(displayName)) throw new IntuitError('rejected');
+    const literal = `'${displayName.replace(/'/g, "\\'")}'`;
+    const active = await queryCustomers(config, accessToken, realmId, `DisplayName = ${literal}`, fetchImpl);
+    const inactive = await queryCustomers(config, accessToken, realmId, `DisplayName = ${literal} and Active = false`, fetchImpl);
+    const byId = new Map<string, QuickBooksCustomerSummary>();
+    for (const c of [...active, ...inactive]) byId.set(c.id, c);
+    return [...byId.values()];
+}
+
+/**
+ * INACTIVE QuickBooks customers whose DisplayName Intuit considers equal to `displayName` — used only
+ * to find the "<organization name> (deleted)" customer QuickBooks leaves behind when it makes a
+ * customer inactive (verified in the Intuit sandbox, 2026-09-14; owner ruling B). One read-only query;
+ * the caller compares byte for byte. The literal may run past the 100 characters FreezerIQ allows for a
+ * NEW customer name, because QuickBooks added the suffix.
+ */
+export async function findInactiveCustomersByDisplayName(
+    config: QuickBooksConfig,
+    accessToken: string,
+    realmId: string,
+    displayName: string,
+    fetchImpl: FetchLike = fetch,
+): Promise<QuickBooksCustomerSummary[]> {
+    const problem = displayNameProblem(displayName);
+    if ((problem && problem !== 'too_long') || displayName.length > 500) throw new IntuitError('rejected');
+    const literal = `'${displayName.replace(/'/g, "\\'")}'`;
+    return queryCustomers(config, accessToken, realmId, `DisplayName = ${literal} and Active = false`, fetchImpl);
+}
+
+/** One QuickBooks customer by id, or null when Intuit reports it does not exist (Fault 610). Read-only. */
+export async function readCustomer(
+    config: QuickBooksConfig,
+    accessToken: string,
+    realmId: string,
+    customerId: string,
+    fetchImpl: FetchLike = fetch,
+): Promise<QuickBooksCustomerSummary | null> {
+    if (!CUSTOMER_ID.test(customerId)) throw new IntuitError('rejected');
+    const { res, body, tid } = await accountingRequest(config, accessToken, realmId,
+        `/customer/${customerId}?minorversion=${QUICKBOOKS_MINOR_VERSION}`, { method: 'GET' }, fetchImpl);
+    const codes = faultCodes(body);
+    if (codes?.includes('610')) return null;
+    if (!res.ok || codes) throw new IntuitError(res.status >= 500 || res.ok ? 'http' : 'rejected', { status: res.status, intuitTid: tid });
+    const c = parseCustomer(body?.Customer);
+    if (!c || c.id !== customerId) throw new IntuitError('malformed', { status: res.status, intuitTid: tid });
+    return c;
+}
+
+/**
+ * Creates a QuickBooks customer with a DisplayName and NOTHING else — no email,
+ * phone, address or notes. `requestId` makes a repeated request return the first
+ * response rather than create again.
+ *
+ * Outcomes: the created customer; IntuitError 'duplicate_name' (Fault 6240, nothing
+ * created); 'rejected' (another 4xx Fault, nothing created). 'network', 'http' with a
+ * 5xx status, and 'malformed' are AMBIGUOUS — the customer may exist.
+ */
+export async function createCustomer(
+    config: QuickBooksConfig,
+    accessToken: string,
+    realmId: string,
+    displayName: string,
+    requestId: string,
+    fetchImpl: FetchLike = fetch,
+): Promise<QuickBooksCustomerSummary> {
+    if (displayNameProblem(displayName) || !REQUEST_ID.test(requestId)) throw new IntuitError('rejected');
+    const { res, body, tid } = await accountingRequest(config, accessToken, realmId,
+        `/customer?minorversion=${QUICKBOOKS_MINOR_VERSION}&requestid=${encodeURIComponent(requestId)}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ DisplayName: displayName }) },
+        fetchImpl);
+    const codes = faultCodes(body);
+    if (codes?.includes('6240')) throw new IntuitError('duplicate_name', { status: res.status, intuitTid: tid });
+    if (res.status >= 500) throw new IntuitError('http', { status: res.status, intuitTid: tid });
+    if (!res.ok || codes) throw new IntuitError(res.ok ? 'malformed' : 'rejected', { status: res.status, intuitTid: tid });
+    const c = parseCustomer(body?.Customer);
+    if (!c) throw new IntuitError('malformed', { status: res.status, intuitTid: tid });
+    return c;
 }

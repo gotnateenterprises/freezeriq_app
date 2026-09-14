@@ -338,7 +338,14 @@ describe('this patch changed presentation only', () => {
         //       be reused honestly. Additive, nullable, no default, no backfill,
         //       IF NOT EXISTS. Applying it to Production is gated on owner review
         //       and must precede the code that selects these columns.
-        expect(migrations).toHaveLength(25);
+        //   26  QB-INVOICE-1B QuickBooks connection identity, customer links and the
+        //       invoice-link foundation. Required by the owner's QB-INVOICE-1B brief
+        //       ("QuickBooks Customer Mapping + Invoice Linkage Foundation"), with the
+        //       owner's connection-id ruling. Additive: three new tables, one enum and
+        //       one unique index on invoices (business_id, id); no existing column or
+        //       row changes, no backfill. Applying it to Production is gated on owner
+        //       review and must precede the code that queries the new tables.
+        expect(migrations).toHaveLength(26);
         expect(migrations[15]).toBe('20260823010000_fr_acceptance_2a2_human_followup');
         expect(migrations[16]).toBe('20260825000000_inv_d_settlement_truth');
         expect(migrations[17]).toBe('20260826000000_m18_outreach_batch_campaign_ownership');
@@ -349,6 +356,7 @@ describe('this patch changed presentation only', () => {
         expect(migrations[22]).toBe('20260905000000_ops6b_order_delivery_handoff');
         expect(migrations[23]).toBe('20260909000000_coord_manual_email_1b_order_email');
         expect(migrations[24]).toBe('20260912000000_fr_supporter_payment_status_1_order_paid');
+        expect(migrations[25]).toBe('20260913120000_qb_invoice_1b_quickbooks_links');
     });
 
     it('the acknowledgement and follow-up contracts are untouched', () => {

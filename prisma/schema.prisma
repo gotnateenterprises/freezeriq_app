@@ -105,6 +105,9 @@ model Business {
   funnel_opportunities    FundraiserOpportunity[]  @relation("BusinessFunnelOpportunities")
   // FR-TAX-1
   org_tax_documents       OrganizationTaxDocument[]
+  // QB-INVOICE-1B
+  quickbooks_invoice_links QuickBooksInvoiceLink[]
+  quickbooks_connections   QuickBooksConnection[]
 
   @@map("businesses")
 }
@@ -128,6 +131,11 @@ model Integration {
   updated_at    DateTime  @default(now())
   business_id   String
   business      Business  @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  // QB-INVOICE-1B: relations only — no column is added to this table.
+  // The LIVE connection generation of a provider='quickbooks' row (Forget detaches it).
+  quickbooks_connection     QuickBooksConnection?
+  // Customer links, which Forget (deleting this row) deletes.
+  quickbooks_customer_links QuickBooksCustomerLink[]
 
   @@id([business_id, provider])
   @@map("integrations")
@@ -399,6 +407,8 @@ model Customer {
   // FR-FUNNEL-1: acquisition-funnel history for this organization.
   funnel_inquiries        FundraiserInquiry[]             @relation("OrgFunnelInquiries")
   funnel_opportunities    FundraiserOpportunity[]         @relation("OrgFunnelOpportunities")
+  // QB-INVOICE-1B: the organization's QuickBooks customer, for the current connection.
+  quickbooks_customer_link QuickBooksCustomerLink?        @relation("CustomerQuickBooksLink")
 
   // FR-RETENTION-1: composite parent key so tenant-scoped children can reference
   // (business_id, customer_id) and have Postgres enforce same-tenant ownership.
@@ -1014,7 +1024,13 @@ model Invoice {
   order                     Order?
   business                  Business      @relation(fields: [business_id], references: [id], onDelete: Cascade)
   customer                  Customer      @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  // QB-INVOICE-1B: QuickBooks invoice links (created by QB-INVOICE-1C, never by 1B).
+  quickbooks_invoice_links  QuickBooksInvoiceLink[]
 
+  // QB-INVOICE-1B: composite parent key so quickbooks_invoice_links can reference
+  // (business_id, invoice_id) and Postgres enforces same-tenant ownership. It
+  // cannot fail on existing rows — `id` is already unique — and changes no query.
+  @@unique([business_id, id])
   @@map("invoices")
 }
 
@@ -2498,4 +2514,151 @@ model FundraiserCampaignCoordinator {
   @@unique([customer_id, campaign_id])
   @@index([customer_id, org_contact_id])
   @@map("fundraiser_campaign_coordinators")
+}
+
+// ── QB-INVOICE-1B · QuickBooks connection generations, customer links, invoice links ──
+//
+// A QuickBooks customer or invoice id means something only inside ONE QuickBooks
+// company. Owner rulings (2026-09-13): links are bound to a connection GENERATION, not
+// to a realm fingerprint, and nothing realm-derived is stored.
+//
+//   · A generation is one lifetime of the tenant's provider='quickbooks' integrations
+//     row. Token refresh, disconnect and reconnecting the SAME company keep it.
+//   · Forget deletes that integrations row: Postgres ends the generation (its live_*
+//     pair is set NULL) but KEEPS the record, and deletes every customer link. The
+//     next connect starts a NEW generation, even for the same company, and customers
+//     must be relinked.
+//   · Generation records are immutable, non-secret audit history. Invoice links
+//     reference them with RESTRICT, so historical invoice links stay referentially
+//     auditable after Forget.
+//   · A FreezerIQ invoice may hold at most ONE QuickBooks invoice link in its lifetime.
+
+/// QB-INVOICE-1B — one QuickBooks connection GENERATION. Historical generations referenced by
+/// invoice history survive Disconnect and Forget for accounting/audit continuity, subject to the
+/// applicable data-retention and deletion policy. Never updated or deleted by application code.
+/// Nothing secret or realm-derived.
+model QuickBooksConnection {
+  /// Random and non-secret. Recorded by lib/quickbooks/connectionGenerations.ts the first
+  /// time a connected tenant needs it.
+  id               String    @id @default(uuid())
+  business_id      String
+  /// (business_id, 'quickbooks') while this generation is the tenant's live connection.
+  /// Forget deletes the integrations row and Postgres sets BOTH to NULL: the generation
+  /// has ended. Nothing ever sets them again. CHECK: both NULL, or equal to
+  /// (business_id, 'quickbooks').
+  live_business_id String?
+  live_provider    String?
+  /// Evidence captured when the generation was recorded. Non-secret; never updated.
+  /// 'sandbox' | 'production' (CHECK).
+  environment      String
+  /// The company name QuickBooks reported (CompanyInfo) at that moment — display
+  /// evidence for audits, not an identifier.
+  company_name     String?
+  /// The FreezerIQ admin whose authorization of the company was in force, and when it
+  /// was verified (QB-INVOICE-1A's connection audit).
+  authorized_by    String?
+  authorized_at    DateTime?
+  created_at       DateTime  @default(now())
+
+  business       Business                 @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  /// SetNull: Forget ends the generation without erasing it.
+  integration    Integration?             @relation(fields: [live_business_id, live_provider], references: [business_id, provider], onDelete: SetNull, onUpdate: NoAction)
+  customer_links QuickBooksCustomerLink[]
+  invoice_links  QuickBooksInvoiceLink[]
+
+  /// At most one LIVE generation per tenant (ended generations have NULLs, which never clash).
+  @@unique([live_business_id, live_provider])
+  /// FK target for customer links: only a LIVE generation has these three values.
+  @@unique([live_business_id, live_provider, id])
+  /// FK target for invoice links: a generation of the link's own tenant, live or ended.
+  @@unique([business_id, id])
+  @@map("quickbooks_connections")
+}
+
+/// How a customer link was established. Both require an explicit ADMIN confirmation.
+enum QuickBooksCustomerLinkSource {
+  /// An existing QuickBooks customer whose DisplayName exactly equals the organization name.
+  existing
+  /// A QuickBooks customer FreezerIQ created, with DisplayName only.
+  created
+}
+
+/// QB-INVOICE-1B — a FreezerIQ organization (Customer) linked to one QuickBooks
+/// customer inside the tenant's LIVE connection generation. Mapping data only:
+/// no name, email, address or balance is copied here.
+model QuickBooksCustomerLink {
+  id              String                       @id @default(uuid())
+  business_id     String
+  customer_id     String
+  connection_id   String
+  /// Always 'quickbooks' (CHECK). Completes the composite FK to integrations, so Forget —
+  /// which deletes that row — deletes every customer link (owner ruling).
+  provider        String                       @default("quickbooks")
+  qbo_customer_id String
+  source          QuickBooksCustomerLinkSource
+  /// The FreezerIQ user who confirmed the link.
+  linked_by       String?
+  linked_at       DateTime                     @default(now())
+
+  /// onUpdate NoAction: a link never follows its organization to another tenant. While a link exists,
+  /// changing the organization's business_id (including a hard tenant delete's SET NULL) is refused;
+  /// forget the QuickBooks connection first. No product flow deletes a tenant.
+  customer    Customer             @relation("CustomerQuickBooksLink", fields: [business_id, customer_id], references: [business_id, id], onDelete: Cascade, onUpdate: NoAction)
+  /// Forget deletes the integrations row, and with it every customer link (owner ruling).
+  integration Integration          @relation(fields: [business_id, provider], references: [business_id, provider], onDelete: Cascade, onUpdate: NoAction)
+  /// Only the tenant's LIVE generation: an ended generation's live_* pair is NULL, so no link can
+  /// reference it. (The Forget that ends a generation deletes its links in the same statement.)
+  connection  QuickBooksConnection @relation(fields: [business_id, provider, connection_id], references: [live_business_id, live_provider, id], onDelete: Cascade, onUpdate: NoAction, map: "quickbooks_customer_links_live_connection_fkey")
+
+  /// One QuickBooks customer per organization.
+  @@unique([business_id, customer_id])
+  /// One organization per QuickBooks customer inside a generation.
+  @@unique([connection_id, qbo_customer_id])
+  @@map("quickbooks_customer_links")
+}
+
+/// QB-INVOICE-1B — FOUNDATION ONLY: nothing in 1B creates a row. QB-INVOICE-1C will link a
+/// FreezerIQ invoice to the QuickBooks invoice it creates.
+///
+/// Identifiers and audit metadata only: no amount, tax, status or payment field. FreezerIQ's
+/// Invoice stays authoritative for all of them, and writing a link never touches the invoice.
+///
+/// Owner rulings (2026-09-13):
+///   · LIFETIME: a FreezerIQ invoice has at most ONE QuickBooks invoice link, ever
+///     (UNIQUE invoice_id). Disconnect, Forget, a new generation or reconnecting the same
+///     company never makes it eligible for a second one; moving it to other books would
+///     need a future explicit repair workflow.
+///   · HISTORY: a link references its generation with RESTRICT. Forget never deletes
+///     generations, so the link and the generation's evidence stay auditable.
+///   · A QuickBooks invoice id is unique within a generation. Across generations there is
+///     deliberately no company key (no realm fingerprint): V1 records a QuickBooks invoice
+///     id ONLY from FreezerIQ's own create response or its idempotent (requestid) replay,
+///     never from a search or manual match, which makes cross-generation duplication
+///     impossible by construction. Linking pre-existing QuickBooks invoices would need a
+///     new owner-approved design.
+model QuickBooksInvoiceLink {
+  id             String    @id @default(uuid())
+  business_id    String
+  /// At most one QuickBooks invoice link per FreezerIQ invoice, for its whole lifetime.
+  invoice_id     String    @unique
+  /// The generation this link was made under. Never changes.
+  connection_id  String
+  /// Idempotency key for the future QuickBooks create request, reserved before it is sent
+  /// so a retry can never create a second QuickBooks invoice.
+  request_id     String    @unique
+  /// Recorded once, when QuickBooks confirms the invoice. NULL = reserved, not confirmed.
+  qbo_invoice_id String?
+  qbo_linked_at  DateTime?
+  created_by     String?
+  created_at     DateTime  @default(now())
+
+  business   Business             @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  /// NoAction: an invoice that has a QuickBooks counterpart cannot be deleted on its own.
+  invoice    Invoice              @relation(fields: [business_id, invoice_id], references: [business_id, id], onDelete: NoAction, onUpdate: NoAction)
+  /// Restrict: while an invoice link references a generation, the database refuses to delete it.
+  connection QuickBooksConnection @relation(fields: [business_id, connection_id], references: [business_id, id], onDelete: Restrict, onUpdate: NoAction)
+
+  /// One FreezerIQ invoice per QuickBooks invoice inside a generation.
+  @@unique([connection_id, qbo_invoice_id])
+  @@map("quickbooks_invoice_links")
 }

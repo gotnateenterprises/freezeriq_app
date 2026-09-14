@@ -239,6 +239,22 @@ export interface FakeIntuitOptions {
     companyInfoFaultOn200?: boolean;
     /** When true, a refresh returns the SAME refresh token (Intuit's within-24h behaviour). */
     stableRefreshToken?: boolean;
+    /**
+     * QB-INVOICE-1B: serves Accounting API paths other than CompanyInfo (customer
+     * query/read/create) for the company the bearer token was issued for. The fake
+     * checks the token and its company first, exactly like CompanyInfo.
+     */
+    accounting?: (req: AccountingRequest) => Response | undefined | Promise<Response | undefined>;
+}
+
+export interface AccountingRequest {
+    method: string;
+    /** Path after /v3/company/{realm}, e.g. "/query" or "/customer/58". */
+    path: string;
+    url: URL;
+    realm: string;
+    body: string;
+    json: (status: number, body: any) => Response;
 }
 
 export function fakeIntuit(opts: FakeIntuitOptions = {}) {
@@ -326,6 +342,17 @@ export function fakeIntuit(opts: FakeIntuitOptions = {}) {
         }
 
         const base = QUICKBOOKS_API_BASE.sandbox + '/v3/company/';
+        if (url.startsWith(base) && opts.accounting && !url.includes('/companyinfo/')) {
+            const token = (call.headers.get('authorization') ?? '').replace(/^Bearer /, '');
+            const tokenRealm = accessRealm.get(token);
+            if (!tokenRealm) return json(401, { Fault: { Error: [{ code: '3200' }], type: 'AuthenticationFault' } });
+            const u = new URL(url);
+            const m = /^\/v3\/company\/(\d+)(\/.*)$/.exec(u.pathname);
+            // A token only reaches the company it was authorised for.
+            if (!m || m[1] !== tokenRealm) return json(403, { Fault: { Error: [{ code: '3100' }], type: 'AuthorizationFault' } });
+            const handled = await opts.accounting({ method: call.method, path: m[2], url: u, realm: m[1], body: call.body, json });
+            return handled ?? json(404, {});
+        }
         if (url.startsWith(base)) {
             const token = (call.headers.get('authorization') ?? '').replace(/^Bearer /, '');
             if (opts.companyInfoStatus && opts.companyInfoStatus !== 200) return json(opts.companyInfoStatus, { Fault: {} });

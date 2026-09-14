@@ -622,8 +622,11 @@ describe('FR-REBOOK-2 · staged scope', () => {
         const names = execSync('git --literal-pathspecs diff --name-only HEAD -- prisma/', { encoding: 'utf8' });
         const migrations = names.split('\n').filter((l) => l.includes('migration.sql'));
         expect(migrations.length).toBeLessThanOrEqual(1);
+        // A LATER, separately-authorized phase with its own reviewed migration may be the
+        // uncommitted one in a working tree or a staged index; it is named exactly.
+        const approved = ['20260826000000_m18_outreach_batch_campaign_ownership', '20260913120000_qb_invoice_1b_quickbooks_links'];
         for (const m of migrations) {
-            expect(m).toContain('20260826000000_m18_outreach_batch_campaign_ownership');
+            expect(approved.some((a) => m.includes(a))).toBe(true);
         }
     });
 });

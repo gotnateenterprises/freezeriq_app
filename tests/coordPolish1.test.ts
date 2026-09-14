@@ -235,6 +235,18 @@ describe('15-18. scope stayed presentation-only', () => {
     ];
     const inQbInvoice1a = (f: string) => QB_INVOICE_1A.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
 
+    // QB-INVOICE-1B — QuickBooks customer mapping + invoice-link schema foundation,
+    // a later, separately-authorized phase. New files under lib/quickbooks/ and
+    // app/api/integrations/quickbooks/ are covered by the QB-INVOICE-1A prefixes; its
+    // schema hunk lives in prisma/schema.prisma (excluded above) and its one migration
+    // is named exactly.
+    const QB_INVOICE_1B = [
+        'app/customers/[id]/page.tsx',
+        'components/crm/QuickBooksCustomerLinkCard.tsx',
+        'prisma/migrations/20260913120000_qb_invoice_1b_quickbooks_links/',
+    ];
+    const inQbInvoice1b = (f: string) => QB_INVOICE_1B.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
+
     const ALLOWED = new Set([
         'components/coordinator/ShareCenter.tsx',
         'components/coordinator/QuietLinks.tsx',
@@ -310,7 +322,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // The real protection is the forbidden-path regex below, which is
             // unchanged — this only stops the check from going stale on every
             // subsequent phase that touches a regression suite.
-            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f)).toBe(true);
+            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f)).toBe(true);
         }
         // And explicitly: no path under these directories appears at all.
         const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -318,7 +330,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // FR-TAX-CORRECTNESS-1 is separately authorized to edit the
             // fundraiser money path — exempt from THIS phase's
             // "presentation only" assertion; everything else still held to it.
-            if (ALLOWED.has(f) || inQbInvoice1a(f)) continue;
+            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f)) continue;
             expect(f).not.toMatch(forbidden);
         }
     });
@@ -328,7 +340,11 @@ describe('15-18. scope stayed presentation-only', () => {
         // This runs against LIVE git status, so a later phase's uncommitted
         // migration would trip it. FR-SUPPORTER-PAYMENT-STATUS-1's single approved
         // migration is exempted BY EXACT PATH; any other migration still fails.
-        const approvedLater = ['prisma/migrations/20260912000000_fr_supporter_payment_status_1_order_paid/migration.sql'];
+        const approvedLater = [
+            'prisma/migrations/20260912000000_fr_supporter_payment_status_1_order_paid/migration.sql',
+            // QB-INVOICE-1B's single approved migration, by exact path.
+            'prisma/migrations/20260913120000_qb_invoice_1b_quickbooks_links/',
+        ];
         const remaining = out.split('\n').filter((l) => !approvedLater.some((a) => l.includes(a))).join('\n');
         expect(remaining).not.toMatch(/prisma\/migrations\//);
     });

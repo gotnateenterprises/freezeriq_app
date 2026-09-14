@@ -90,6 +90,9 @@ describe('1. schema and migration', () => {
         // being dropped: an unapproved migration here still fails.
         expect(dirs.slice(idx + 1)).toEqual([
             '20260912000000_fr_supporter_payment_status_1_order_paid',
+            // QB-INVOICE-1B: QuickBooks connection identity + customer links + invoice-link
+            // foundation. Additive; authorized by the owner's QB-INVOICE-1B brief.
+            '20260913120000_qb_invoice_1b_quickbooks_links',
         ]);
     });
 });

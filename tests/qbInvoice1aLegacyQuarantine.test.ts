@@ -151,18 +151,41 @@ describe('QB-INVOICE-1A · no QuickBooks invoice can become a FreezerIQ Order', 
         expect(offenders).toEqual([]);
     });
 
-    it('the new connector cannot create orders, customers or invoices', () => {
-        for (const f of SOURCE.filter((p) => p.startsWith('lib/quickbooks/') || p.startsWith('app/api/integrations/quickbooks/'))) {
+    it('the new connector cannot write orders, customers, invoices or campaigns — and never touches a QuickBooks invoice or payment', () => {
+        // QB-INVOICE-1B narrowed this from "no access at all": customer mapping READS the
+        // organization (id and name) and the invoice-link foundation READS an invoice's
+        // id for ownership. Writing any of these FreezerIQ records stays forbidden.
+        const connector = SOURCE.filter((p) => p.startsWith('lib/quickbooks/') || p.startsWith('app/api/integrations/quickbooks/'));
+        const reads: string[] = [];
+        for (const f of connector) {
             const code = strip(R(f));
-            expect({ f, hit: /\.(order|orderItem|customer|invoice|fundraiserCampaign)\s*\.|\/v3\/company\/[^'"`]*\/(invoice|customer|payment)/i.test(code) }).toEqual({ f, hit: false });
+            const write = /\.(order|orderItem|customer|invoice|invoiceItem|fundraiserCampaign)\s*\.\s*(create|createMany|update|updateMany|upsert|delete|deleteMany)\b/.test(code);
+            const qboMoney = /\/v3\/company\/[^'"`]*\/(invoice|payment|bill|estimate|salesreceipt|creditmemo|refundreceipt)/i.test(code)
+                || /['"`]\/(invoice|payment|bill|estimate|salesreceipt|creditmemo|refundreceipt)\b/i.test(code);
+            expect({ f, write, qboMoney }).toEqual({ f, write: false, qboMoney: false });
+            for (const m of code.matchAll(/\.(order|orderItem|customer|invoice|invoiceItem|fundraiserCampaign)\s*\.\s*(\w+)/g)) reads.push(`${f}: ${m[1]}.${m[2]}`);
         }
+        expect(reads.sort()).toEqual([
+            'lib/quickbooks/customerLinks.ts: customer.findFirst',
+            'lib/quickbooks/invoiceLinks.ts: invoice.findFirst',
+        ]);
     });
 
-    it('the only Accounting API path the connector builds is CompanyInfo', () => {
+    it('the Accounting API surface is exactly CompanyInfo + Customer query/read/create (QB-INVOICE-1B)', () => {
         const client = strip(R('lib/quickbooks/intuitClient.ts'));
         const paths = client.match(/\/v3\/company\/[^`'"]+/g) ?? [];
-        expect(paths).toEqual(['/v3/company/${realm}/companyinfo/${realm}?minorversion=${QUICKBOOKS_MINOR_VERSION}']);
-        expect(client).not.toMatch(/method:\s*'(POST|PUT|PATCH|DELETE)'[\s\S]{0,200}v3\/company/);
+        expect(paths).toEqual([
+            '/v3/company/${realm}/companyinfo/${realm}?minorversion=${QUICKBOOKS_MINOR_VERSION}',
+            '/v3/company/${encodeURIComponent(realmId)}${pathAndQuery}',
+        ]);
+        // Every path handed to the shared Accounting request builder:
+        const entityPaths = [...client.matchAll(/await accountingRequest\([^`]*`([^`]+)`/g)].map((m) => m[1].split('?')[0]);
+        expect(entityPaths.sort()).toEqual(['/customer', '/customer/${customerId}', '/query']);
+        // The only query ever built selects customers; the only write is a customer create.
+        expect(client.match(/select \* from (\w+)/g)).toEqual(['select * from Customer']);
+        expect(client.match(/method:\s*'(POST|PUT|PATCH|DELETE)'/g)).toEqual(["method: 'POST'", "method: 'POST'", "method: 'POST'"]); // token, revoke, customer create
+        expect(client).not.toMatch(/method:\s*'(PUT|PATCH|DELETE)'/);
+        expect(client).not.toMatch(/sparse|operation=(update|delete)|SyncToken/i);
     });
 });
 
@@ -217,7 +240,8 @@ describe('QB-INVOICE-1A · legacy routes are quarantined deliberately (Part 5)',
 
     it('the only QuickBooks connect link anywhere is the new ADMIN-gated route', () => {
         const links = SOURCE.flatMap((f) => (strip(R(f)).match(/['"`]\/api\/[^'"`]*(qbo|quickbooks)[^'"`]*['"`]/gi) ?? []).map((m) => `${f}: ${m}`));
-        expect(links.filter((l) => !/\/api\/integrations\/quickbooks\/(connect|callback|disconnect|status)/.test(l))).toEqual([]);
+        // QB-INVOICE-1B adds the ADMIN-gated organization mapping route (customers), not a connect link.
+        expect(links.filter((l) => !/\/api\/integrations\/quickbooks\/(connect|callback|disconnect|status|customers)/.test(l))).toEqual([]);
     });
 });
 

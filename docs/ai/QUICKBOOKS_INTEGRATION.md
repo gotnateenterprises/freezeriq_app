@@ -1,6 +1,7 @@
 # FreezerIQ — QuickBooks Online Integration
 
 **Status:** QB-INVOICE-1A **ACCEPTED / CLOSED** by the owner on September 13, 2026, after a successful live Intuit sandbox proof (§4). Sandbox OAuth foundation only: no QuickBooks customers, invoices or payment sync, and Production stays disabled.
+**QB-INVOICE-1B:** customer mapping + invoice-link schema foundation, with the owner's acceptance fix (one QuickBooks invoice link per invoice for life; retained connection generations) — owner Intuit sandbox acceptance PASSED on September 14, 2026 (§11.8); on the isolated branch `worktree-qb-invoice-1b`, not merged and not deployed, and its migration is not applied to Production or Preview; see §11. It creates and sends no QuickBooks invoice.
 **Scope of this document:** the connector's architecture and safety properties, the environment rules, the evidence behind them, and the compliance and readiness gaps that remain before Intuit production credentials may be requested.
 
 This is an engineering record, not a legal opinion. Nothing here claims compliance with Intuit's terms beyond the technical evidence listed. Items marked **OWNER** or **COUNSEL** need a human decision.
@@ -23,7 +24,7 @@ Library: `lib/quickbooks/config.ts` (environment guard), `access.ts` (role gate)
 
 Rows in `integrations` (no migration): `provider='quickbooks'` — the tenant's connection; `provider='quickbooks_oauth_attempt'` — the tenant's one open connect attempt (a SHA-256 digest of its nonce and an expiry; deleted when completed).
 
-**Deliberately absent:** customer mapping, QuickBooks customer or invoice creation, invoice schema linkage, Send via QuickBooks, payment flags, tax read-back, Record Payment `quickbooks`, webhooks, reconciliation, food release. A QuickBooks connection never releases fundraiser food (Fundraiser Fulfillment Contract HARD RULE 1, §14 amendment).
+**Deliberately absent in 1A** (customer mapping and the invoice-link schema arrive in QB-INVOICE-1B, §11): customer mapping, QuickBooks customer or invoice creation, invoice schema linkage, Send via QuickBooks, payment flags, tax read-back, Record Payment `quickbooks`, webhooks, reconciliation, food release. A QuickBooks connection never releases fundraiser food (Fundraiser Fulfillment Contract HARD RULE 1, §14 amendment).
 
 ### Retired legacy code
 
@@ -183,11 +184,11 @@ The current `/legal/privacy` page (about 160 words; its "Last Updated" renders t
 
 Exact technical data flows the disclosure must describe:
 - **What is accessed:** QuickBooks Online Accounting API under `com.intuit.quickbooks.accounting`. In QB-INVOICE-1A the only data read is CompanyInfo (company name and country, used for display and health checks). Later phases will create customers and invoices.
-- **What is stored:** encrypted OAuth access and refresh tokens, the encrypted QuickBooks company (realm) id, token expiry times, and the FreezerIQ user id of the admin who connected or disconnected, with timestamps. The company name is not stored.
+- **What is stored:** encrypted OAuth access and refresh tokens, the encrypted QuickBooks company (realm) id, token expiry times, and the FreezerIQ user id of the admin who connected or disconnected, with timestamps. QB-INVOICE-1A stores no company name. From QB-INVOICE-1B (§11), each connection generation also stores the environment, the company name QuickBooks reported, and the authorizing admin's user id and time; link tables store QuickBooks customer and invoice ids.
 - **Where:** FreezerIQ's database (Supabase, US) accessed by FreezerIQ's application servers (Vercel, US).
 - **Why:** to let the tenant's administrator connect their own QuickBooks company to FreezerIQ.
 - **Consent:** the tenant administrator authorizes on Intuit's consent screen; they can disconnect at any time in FreezerIQ Settings or inside QuickBooks.
-- **Retention and deletion:** on disconnect, tokens are revoked at Intuit and deleted from storage; a disconnect record (reason, time, encrypted company id) remains until the administrator chooses "Forget company". State what happens in backups.
+- **Retention and deletion:** on disconnect, tokens are revoked at Intuit and deleted from storage; a disconnect record (reason, time, encrypted company id) remains until the administrator chooses "Forget company". From QB-INVOICE-1B, Forget also deletes customer links, and Historical QuickBooks connection generations referenced by invoice history survive Disconnect and Forget for accounting/audit continuity, subject to the applicable data-retention and deletion policy. (Technically, Forget ends every generation without deleting its record.) State what happens in backups.
 - **Required statements:** that FreezerIQ does not process data on Intuit's behalf; the independent-controller position (§12.4); privacy rights and a real contact address; FreezerIQ's legal entity name and address; a stable "last updated" date.
 - **EULA:** replace app-store boilerplate with terms for the FreezerIQ web service before App Assessment; Intuit reviews the EULA URL.
 - Both pages must stay **public** (not behind a login); Intuit's production App Details require the EULA and privacy policy URLs.
@@ -245,3 +246,243 @@ Exact technical data flows the disclosure must describe:
 | FreezerIQ QuickBooks connector (`lib/quickbooks/*`, `lib/integrationTokenCrypto.ts`) | — | FreezerIQ's own code | yes | — | — | — |
 
 The connector is an independent implementation of Intuit's published HTTP endpoints. No Intuit or node-quickbooks source was copied (repository and history scan found no Intuit copyright headers or Apache license text outside `package-lock.json`). Apache-2.0 §4 obligations therefore do not attach to FreezerIQ's code. If Intuit code is ever copied, its LICENSE, NOTICE (none exists today) and copyright headers must be preserved and modified files marked. Apache-2.0 §6 grants no trademark rights: use of "Intuit" and "QuickBooks" rests on Intuit's developer terms and naming guidelines, not on any code license. Intuit's official button graphics are Intuit assets and must not be redistributed outside the app.
+
+---
+
+## 11. QB-INVOICE-1B — customer mapping and invoice-link foundation
+
+**Status:** owner Intuit sandbox acceptance **PASSED** on September 14, 2026 (§11.8). Isolated branch `worktree-qb-invoice-1b` (from `f8073eb`), **not merged, not deployed**. Its migration has been applied to disposable local databases and, with owner authorization, to the owner's local development database (§11.9) — **not** to Production or Preview. It does **not** create or send QuickBooks invoices. The owner's acceptance fix (September 13, 2026) is included: the invoice-link lifetime rule, retained connection generations, and the V1 recording contract (§11.2, §11.5).
+
+### 11.1 What it adds
+
+| Surface | Path | Who |
+|---|---|---|
+| Organization's QuickBooks customer — state | `GET /api/integrations/quickbooks/customers/[customerId]` | tenant ADMIN |
+| Link an exact match / create a customer | `POST` same path, `{"action":"link","confirmation"}` or `{"action":"create","confirmation","attemptId"}` (application/json only) | tenant ADMIN |
+| Card on the organization page (Overview tab) | `components/crm/QuickBooksCustomerLinkCard.tsx` | renders only for an ADMIN, and nothing when QuickBooks is disabled |
+
+Library: `lib/quickbooks/customerLinks.ts` (mapping service), `lib/quickbooks/connectionGenerations.ts` (connection generations and the generation lock), `lib/quickbooks/customerLinkView.ts` (card wording), `lib/quickbooks/invoiceLinks.ts` (invoice-link primitives — **no caller in 1B**), and three Customer functions in `lib/quickbooks/intuitClient.ts`.
+
+Tables (migration `20260913120000_qb_invoice_1b_quickbooks_links`, additive): `quickbooks_connections` (generations), `quickbooks_customer_links`, `quickbooks_invoice_links`, plus a unique index `invoices (business_id, id)`.
+
+### 11.2 Connection generations (owner rulings, September 13, 2026)
+
+A QuickBooks customer or invoice id means something only inside one QuickBooks company. Links are therefore bound to a **connection generation**: one lifetime of the tenant's `integrations(business_id, 'quickbooks')` row, recorded in `quickbooks_connections` the first time a connected tenant opens the mapping. **No realm fingerprint is stored** (owner ruling); nothing derived from the realm or a token leaves the encrypted `integrations` columns.
+
+| Event | Generation | Customer links | Invoice links |
+|---|---|---|---|
+| Token refresh | unchanged | kept | kept |
+| Disconnect | unchanged, still live | kept (unusable while disconnected) | kept |
+| Reconnect the **same** company after Disconnect | unchanged | kept, usable again | kept |
+| Reconnect a **different** company without Forget | refused by QB-INVOICE-1A (`realm_mismatch`) | — | — |
+| **Forget** | **ended**: Postgres sets `live_business_id`/`live_provider` to NULL; the record is **kept** | **deleted** by Postgres | kept unchanged, still referencing the ended generation |
+| Connect after Forget — any company, the same one included | a **new** generation | none: every organization needs a new ADMIN confirmation | earlier links stay history; their invoices can never be linked again |
+
+**Evidence on each generation** (non-secret, written once): environment (`sandbox`/`production`), the company name QuickBooks reported when the generation was recorded, the FreezerIQ admin whose authorization was in force and when (QB-INVOICE-1A's audit), and the creation time. At most one generation per tenant is live (unique index; a NULL-safe CHECK keeps the live pair consistent). No code updates or deletes a generation (scope test), and Postgres refuses to delete one directly while an invoice link references it (`ON DELETE RESTRICT`).
+
+**Retention:** Historical QuickBooks connection generations referenced by invoice history survive Disconnect and Forget for accounting/audit continuity, subject to the applicable data-retention and deletion policy. Technically, Forget ends every generation without deleting its record, whether or not invoice history references it; this describes behaviour, not a retention period.
+
+**Race safety.** Every write bound to a generation — recording one, writing a customer link, reserving an invoice link — runs in a transaction that holds `FOR SHARE` on the tenant's integrations row (refresh, Disconnect, reconnect and Forget all write that row, so they wait; proven on real Postgres) and re-reads the stored connection under that lock: it must still be connected to the same company as the access token the request used. Realm ids are compared in memory only. In addition:
+- a customer link's foreign key references the generation's **live** key `(live_business_id, live_provider, id)`, so the database itself refuses a link to an ended generation;
+- a refreshed access token that reaches a different company is never used, and a generation is never recorded against a company other than the token's;
+- a create dialog whose generation ended while it re-evaluated sends no create to QuickBooks.
+
+**Not enforced by the database:** immutability of a generation's evidence columns and of an invoice link's identity columns rests on code and scope tests, not a trigger (the repository has no trigger precedent). A trigger can be added later if the owner wants database-level immutability.
+
+### 11.3 Customer mapping rules (owner-locked) and how they are enforced
+
+| Rule | Enforcement |
+|---|---|
+| A valid stored link wins | a stored link is read by id; if QuickBooks reports an active, top-level customer, the name search never runs |
+| Otherwise exact DisplayName, inactive included | two queries (default active + `Active = false`); Intuit's `=` ignores case, so exactness is checked byte for byte in code |
+| Never email, never fuzzy | the query names only DisplayName; the organization is read for id and name only |
+| Case-only difference | reported as "resolution required"; never linked, never offered for creation |
+| Explicit ADMIN confirmation | every action carries an opaque confirmation bound to generation + organization + organization name + candidate + existing link; any change makes it stale (409) and returns the new state |
+| Inactive, deleted, merged or missing customer | a **stored link** to such a customer is terminal in V1 (owner rule, sandbox acceptance 2026-09-14): "relink required", no name lookup, **no Create and no Link** — the stored link takes precedence, is never replaced or deleted, and is resolved in QuickBooks (a future explicit relink workflow may be designed separately); with no stored link, an exact inactive match — or an inactive customer named exactly "<name> (deleted)" (owner ruling B, 2026-09-14; no other suffix, no fuzzy match, never linked) — blocks linking and creating |
+| Sub-customer or project | not linkable as an organization |
+| Never rename or update a QuickBooks customer | the client has no update path (no sparse update, no SyncToken) |
+| Minimal create | `POST /customer` body is exactly `{"DisplayName": <organization name>}` |
+| Name QuickBooks cannot take verbatim | leading/trailing space, `:`, tab, newline, backslash, control characters or more than 100 characters → reported; FreezerIQ never alters the name |
+| Vendor/employee already holds the name | QuickBooks Fault 6240 with no customer of that name → `rejected / name_in_use` |
+| One QuickBooks customer per organization; one organization per customer within a generation | unique indexes; racing requests leave one row |
+| A forgotten company's mapping is never reused | Forget deletes every customer link; a link can only reference the live generation (foreign key); the old confirmation is stale |
+| Tenant from the session; company from the verified connection | route input names neither; organization ownership re-checked; composite foreign keys keep a link inside its tenant |
+
+The responses and the card show organization and QuickBooks display names only — never a token, realm id, generation id or raw QuickBooks id.
+
+### 11.4 Idempotency and ambiguous results
+
+- **Double-submit:** `attemptId` is fresh per confirmation dialog, and the Intuit `requestid` is derived from it. Two submissions of one dialog that both reach QuickBooks get Intuit's original answer, so only one customer is created.
+- **Two dialogs racing:** the second create hits QuickBooks' DisplayName uniqueness (6240) and is shown the new state. It is never auto-linked.
+- **Response lost after QuickBooks processed the create:** outcome `unknown` (202), and nothing is linked. The next look shows an exact match, which still needs a link confirmation.
+- **A repeated confirmation after its twin already linked:** answered `linked`, but only when the stored link is exactly what that confirmation described.
+- **Recording a generation** is idempotent: concurrent first views leave one generation.
+
+### 11.5 Invoice-link foundation (no behaviour in 1B)
+
+`quickbooks_invoice_links` stores identifiers and audit metadata only: `invoice_id`, `connection_id` (the generation), `request_id` (reserved before any future QuickBooks request), `qbo_invoice_id` (recorded once), `qbo_linked_at`, `created_by`, `created_at`. It has no amount, tax, status or payment column. The primitives read the invoice's id alone and never write the invoice, so they cannot change `status`, `total_amount` or `paid_at`, or release food.
+
+**Lifetime rule (owner ruling).** A FreezerIQ invoice has at most **one** QuickBooks invoice link in its whole lifetime: `UNIQUE (invoice_id)`, across every generation. Disconnect, Forget, a new generation or reconnecting the same company never makes the invoice eligible for a second link. The service answers `already_linked` without writing, and the database refuses a direct insert. Moving an invoice to other books would need a future, explicit repair workflow (not designed).
+
+**History.** A link references its generation `(business_id, connection_id)` with `ON DELETE RESTRICT`, and Forget never deletes generations. After Forget, `getQuickBooksInvoiceLink` still returns the link with its generation's evidence and `live: false`. A QuickBooks id is still recorded on its own generation if the tenant forgot the connection while the create was in flight.
+
+**Constraints:**
+- unique `invoice_id`, and unique `(connection_id, qbo_invoice_id)` — one FreezerIQ invoice per QuickBooks invoice inside a generation;
+- a NULL-safe CHECK that `qbo_invoice_id` and `qbo_linked_at` are set together;
+- `ON DELETE NO ACTION` to invoices: an invoice with a QuickBooks counterpart cannot be deleted on its own. The existing tenant invoice DELETE route would then fail — **a QB-INVOICE-1C decision**.
+
+**Company-level uniqueness across generations is deliberately not a database key.** Without a realm fingerprint the database cannot know whether two generations are the same company, so `(connection_id, qbo_invoice_id)` is the strongest honest key. **V1 recording contract for QB-INVOICE-1C (owner ruling):**
+1. reserve under the live generation, passing the realm of the access token that will send the create (verified under the lock);
+2. send the create with the reservation's `request_id` as Intuit's `requestid`, using a token for that same company;
+3. record **only** the `Id` from that create response or its `requestid` replay — never an id from a query or search, typed by a person, or matched.
+
+Every recorded id is then created by exactly one reservation, so one QuickBooks invoice can never be attached to two FreezerIQ invoices in any generation. No invoice query, search or read exists in 1B, and no route or UI accepts a QuickBooks invoice id (scope tests). **Any future feature that links pre-existing QuickBooks invoices requires a new owner-approved cross-generation uniqueness design.**
+
+**Hard tenant delete (no product flow does this), verified on real Postgres:**
+- While an organization has a QuickBooks customer link, the delete is refused: the link's organization FK is `ON UPDATE NO ACTION` against the SET NULL a tenant delete performs.
+- After Forget, the delete succeeds and removes the tenant's generations, invoices and invoice links together.
+- `fundraiser_organization_contacts` already makes the same class of delete fail.
+
+### 11.6 Intuit API calls introduced
+
+| Call | Purpose |
+|---|---|
+| `GET /v3/company/{realm}/query?query=select * from Customer where DisplayName = '…' maxresults 20` | exact-name lookup, active |
+| same, `… and Active = false …` | exact-name lookup, inactive |
+| same, `… DisplayName = '<name> (deleted)' and Active = false …` | only when nothing matches exactly: an inactive customer with exactly that name blocks Create (owner ruling B) |
+| `GET /v3/company/{realm}/customer/{id}` | validate a stored link (Fault 610 = missing) |
+| `POST /v3/company/{realm}/customer?requestid=…` with `{"DisplayName"}` | create, only after an explicit confirmation |
+| `GET /v3/company/{realm}/companyinfo/{realm}` (QB-INVOICE-1A's read-only call) | once per generation, to record the company name as audit evidence |
+
+All calls use `minorversion=75`, and a Fault is honoured even on HTTP 200. **No invoice, payment, send or webhook call exists.** The OAuth scope is unchanged: `com.intuit.quickbooks.accounting`.
+
+**Intuit behaviour that is NOT verified from official docs and must be checked in the sandbox (§11.8):**
+- ~~whether a deleted/merged customer's API `DisplayName` gains a ` (deleted)` suffix~~ — **verified in the sandbox (2026-09-14):** "Make inactive" deactivated the customer and renamed it "<name> (deleted)". An exact-name search therefore no longer finds it, which is why a stored link to it is terminal (§11.3);
+- whether an inactive customer's name still blocks creating a new customer with that name (after the rename, likely not — unverified);
+- whether DisplayName uniqueness ignores case;
+- how long a `requestid` is remembered.
+
+The code fails closed for each.
+
+### 11.7 Migration and release procedure
+
+The migration is additive:
+- no column on an existing table changes;
+- no row is written, and nothing is backfilled — existing Production records get no generation, link or guess;
+- the only change to an existing table is a unique index that cannot fail.
+
+**Validated on disposable local databases only (after the acceptance fix):**
+- a fresh database took all 26 migrations and reported status up to date, with the delete rules as designed: generation ← integrations SET NULL; customer links ← integrations CASCADE; customer links → live generation; invoice links → generation RESTRICT;
+- migrations → schema drift is identical to `f8073eb`'s pre-existing drift, and no drift line names a 1B object;
+- a `pg_dump` copy of the local data was brought to `f8073eb` and then migrated: every row of eight existing tables was unchanged, and the new tables were empty;
+- re-running the SQL only reports "already exists" on the eight plain constraints;
+- the down SQL restores the exact prior state, and redeploying afterwards is clean;
+- the real-Postgres suite (`tests/qbInvoice1bRealDb.test.ts`) passed on the fresh database: acceptance steps 1–10, the generation lock, the CHECKs, and the tenant-delete behaviour;
+- re-run on the final candidate at closeout (September 14, 2026, after the Acceptance C fix and owner ruling B): all 26 migrations from zero; every installed constraint compared with its exact expected definition; a copy restored from the pre-1B local backup, with synthetic invoices added, kept all 63 existing tables byte-identical through the migration; after the rollback its schema dump was identical to the pre-1B schema, and redeploying was clean; the real-Postgres suite passed 10/10 on both databases.
+
+**Preview shares the Production database, and `npm run build` never migrates.** Procedure, each step only with explicit owner authorization:
+1. Owner review and sandbox acceptance (passed September 14, 2026); commit on the isolated branch `worktree-qb-invoice-1b`. Merging into the release branch is a separate owner-authorized step.
+2. Before the code is promoted, apply the migration to the Production database with `prisma migrate deploy`, run by the owner (or with explicit authorization) against the Production URL. It is safe before the code, because nothing existing reads the new tables. Confirm `_prisma_migrations` lists `20260913120000_qb_invoice_1b_quickbooks_links` as finished.
+3. Deploy. Even if the code reached Preview or Production first, the new routes answer `disabled` before touching the database there (QuickBooks is disabled in both), and the card renders nothing.
+4. Rollback of code alone needs nothing: old code ignores the new tables. Reversing the migration destroys generations and links, so it is only for a database where no QuickBooks invoice link exists and only with an owner decision:
+
+```sql
+BEGIN;
+DROP TABLE "quickbooks_invoice_links";
+DROP TABLE "quickbooks_customer_links";
+DROP TABLE "quickbooks_connections";
+DROP TYPE "QuickBooksCustomerLinkSource";
+DROP INDEX "invoices_business_id_id_key";
+DELETE FROM "_prisma_migrations" WHERE migration_name = '20260913120000_qb_invoice_1b_quickbooks_links';
+COMMIT;
+```
+
+### 11.8 Owner sandbox acceptance runbook (performed September 14, 2026 — PASSED)
+
+Sandbox company only. **Never the real Freezer Chef company.**
+
+**Result (September 14, 2026):** steps 1–6 were performed with the owner against the sandbox company and PASSED — an exact existing customer was linked (`existing`); a case-only name difference was blocked; an inactive linked customer showed a terminal **Relink required** with only Check again, and reactivating that same customer made the stored link valid again with no relink; one FreezerIQ-created customer (`created`, DisplayName only) was linked. Step 5 first exposed a defect — Create was offered for the inactive linked customer — which was fixed and retested before continuing, and owner ruling B was added (§11.3). Step 7 (Disconnect → Forget → reconnect) was not performed live; the real-Postgres suite proves it (§11.7). Step 8: the " (deleted)" rename is recorded in §11.6. No QuickBooks invoice was created, and no Production or Preview database was touched.
+
+1. Apply the migration to your **local** development database only, following §11.9 exactly.
+2. Start the local dev server from the 1B worktree, sign in as a local tenant ADMIN, and confirm Settings shows QuickBooks **Connected** (sandbox).
+3. In the Intuit sandbox company, note one existing customer's exact display name (e.g. one of the sample customers). In local FreezerIQ, open an organization whose name matches it **exactly**. The organization card shows "QuickBooks has a customer named exactly …". Confirm the link, then check the card shows **Linked**.
+4. Open an organization whose name differs from that customer only in letter case: the card must say "resolution required", with no link or create button.
+5. Make that sandbox customer **inactive** in QuickBooks (it becomes "<name> (deleted)"), then **Check again** on the linked organization: the card must show **Relink required** with **no Create and no Link** — only Check again. Reactivate it afterwards only when told to.
+6. Optionally create **one** clearly identified test customer: create a local organization named e.g. `QB1B Sandbox Test Org`, click **Create QuickBooks customer**, confirm the exact name, and check that the sandbox company now has one customer with that name, no email, and a link on the card.
+7. Disconnect, then Forget, then connect the same sandbox company again: the card must show the organization as **unlinked** (never Linked) until you confirm again.
+8. Record any difference from §11.6's unverified facts (the " (deleted)" suffix, and whether inactive names block creation).
+
+### 11.9 Local database procedure (performed with owner authorization, September 14, 2026)
+
+Target: the owner's local Postgres database `freezer_iq` on `127.0.0.1:5432` — nothing else. Before QB-INVOICE-1B it had 22 of `f8073eb`'s 25 migrations; missing were `20260905000000_ops6b_order_delivery_handoff`, `20260909000000_coord_manual_email_1b_order_email` and `20260912000000_fr_supporter_payment_status_1_order_paid`. It has had all 26 since September 14, 2026 (a pre-migration backup is kept outside the repository).
+
+The 1B worktree has no `.env` files, so Prisma reads only the two variables set below. **Never use `.env.local`**: it targets the Production database, which Preview shares. Run everything in one PowerShell session.
+
+**Step 0 — bind the session to the local database and refuse anything else.** No command here prints a credential.
+
+```powershell
+$checkout = '<path to the QB-INVOICE-1B checkout>'
+$primary = '<path to the primary checkout that holds .env.development.local>'
+cd $checkout
+$line = (Select-String -Path (Join-Path $primary '.env.development.local') -Pattern '^DATABASE_URL=' | Select-Object -First 1).Line
+$env:DATABASE_URL = ($line -replace '^DATABASE_URL=', '').Trim('"')
+$env:DIRECT_URL = $env:DATABASE_URL
+$u = [Uri]$env:DATABASE_URL
+if (@('127.0.0.1', 'localhost') -notcontains $u.Host -or $u.AbsolutePath -ne '/freezer_iq') { Remove-Item Env:DATABASE_URL, Env:DIRECT_URL; throw 'STOP: not the local freezer_iq database' }
+$pgUri = $env:DATABASE_URL.Split('?')[0]
+$bin = 'C:\Program Files\PostgreSQL\16\bin'
+"target: host=$($u.Host) port=$($u.Port) database=$($u.AbsolutePath.TrimStart('/'))"
+```
+
+It must print `target: host=127.0.0.1 port=5432 database=freezer_iq`. On any other output, stop.
+
+**Step 1 — backup, then read the current state (read-only).**
+
+```powershell
+& "$bin\pg_dump.exe" -Fc -f "$env:USERPROFILE\freezer_iq_before_qb1b.dump" $pgUri
+& "$bin\psql.exe" -X -d $pgUri -c "BEGIN READ ONLY; SELECT COUNT(*) AS applied FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL; COMMIT;"
+```
+
+Expected: `applied = 22`.
+
+**Step 2 — bring the database to the `f8073eb` baseline** with `f8073eb`'s own schema and migrations, not the 1B ones:
+
+```powershell
+$base = Join-Path $env:TEMP 'freezeriq_f8073eb_prisma'
+Remove-Item -Recurse -Force $base, "$base.zip" -ErrorAction SilentlyContinue
+git -C $checkout archive --format=zip -o "$base.zip" f8073eb40745c1199613d37625b4214bfdc7567f prisma
+Expand-Archive "$base.zip" -DestinationPath $base
+npx prisma migrate status --schema "$base\prisma\schema.prisma"
+npx prisma migrate deploy --schema "$base\prisma\schema.prisma"
+```
+
+`migrate status` must list exactly the three missing migrations above. After `deploy`, `applied` (the Step 1 query) must be 25.
+
+**Step 3 — apply QB-INVOICE-1B.**
+
+```powershell
+npx prisma migrate status
+npx prisma migrate deploy
+```
+
+`migrate status` must list exactly one pending migration: `20260913120000_qb_invoice_1b_quickbooks_links`. After `deploy`, check:
+
+```powershell
+& "$bin\psql.exe" -X -d $pgUri -c "BEGIN READ ONLY; SELECT COUNT(*) AS applied FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL; SELECT (SELECT COUNT(*) FROM quickbooks_connections) AS generations, (SELECT COUNT(*) FROM quickbooks_customer_links) AS customer_links, (SELECT COUNT(*) FROM quickbooks_invoice_links) AS invoice_links; COMMIT;"
+npx prisma migrate status
+```
+
+Expected: `applied = 26`, `0 | 0 | 0`, and "Database schema is up to date!". The existing sandbox connection gets its first generation only when an organization's QuickBooks card is first opened.
+
+**Step 4 — prove no Production or Preview database was touched, and clean up.**
+- Every command ran with the variables Step 0 verified as `127.0.0.1/freezer_iq`. Production and Preview use the Supabase pooler host (`aws-1-us-east-1.pooler.supabase.com`), which this procedure never reads.
+- A read-only Production gate (Production `_prisma_migrations` must **not** list `20260913120000_qb_invoice_1b_quickbooks_links`, and no `quickbooks_%` table exists) confirms it independently.
+
+```powershell
+Remove-Item Env:DATABASE_URL, Env:DIRECT_URL
+Remove-Item -Recurse -Force $base, "$base.zip"
+```
+
+**Undo (local only):** restore `$env:USERPROFILE\freezer_iq_before_qb1b.dump` with `pg_restore --clean`, or, before any link exists, run the §11.7 down SQL against `$pgUri`.
+
+---
