@@ -180,8 +180,12 @@ export function RecentOrders({
                                     {/* amount_due when the server supplied it; total_amount is
                                         the fallback for any response shaped before this field
                                         existed. On an untaxed order the two are equal, so this
-                                        renders identically for every order that exists today. */}
-                                    ${Number(o.amount_due ?? o.total_amount ?? 0).toFixed(0)}
+                                        renders identically for every order that exists today.
+                                        COORD-MONEY-DISPLAY-1: always to the cent. A taxable order
+                                        owes e.g. $121.20, and whole dollars ("$121") misstated what
+                                        the coordinator collects. Same format as the printed pickup
+                                        tracker. Display only: the amount itself is unchanged. */}
+                                    ${Number(o.amount_due ?? o.total_amount ?? 0).toFixed(2)}
                                 </span>
                                 {/* Phase 7E-4: hide cancel button when campaign is closed */}
                                 {!isClosed && (
