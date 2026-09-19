@@ -17,7 +17,8 @@ import {
     Trash2,
     Tag,
     Info,
-    RotateCcw
+    RotateCcw,
+    Link2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Link from 'next/link';
@@ -25,6 +26,8 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import InvoiceComposeModal from '@/components/crm/InvoiceComposeModal';
 import EmailComposeModal from '@/components/crm/EmailComposeModal';
+import QuickBooksInvoiceSendDialog from '@/components/invoices/QuickBooksInvoiceSendDialog';
+import { invoiceRowAction } from '@/lib/quickbooks/invoiceSendView';
 import UpgradeRequired from '@/components/UpgradeRequired';
 import { sumOutstandingInvoices } from '@/lib/invoiceSendTruth';
 import {
@@ -76,6 +79,9 @@ interface Invoice {
         unit_price: number;
         total: number;
     }[];
+    // QB-INVOICE-1C: present once "Send via QuickBooks" has started for this invoice. QuickBooks' own
+    // invoice number appears once QuickBooks created it.
+    quickbooks_invoice_send?: { status: string; qbo_doc_number: string | null; delivery_error_type?: string | null } | null;
 }
 
 /**
@@ -141,6 +147,10 @@ function InvoicesContent() {
     //    dialog so the two can never be confused for one another.
     const [undoingInvoice, setUndoingInvoice] = useState<Invoice | null>(null);
     const [undoSubmitting, setUndoSubmitting] = useState(false);
+    // ── QB-INVOICE-1C: the "Send via QuickBooks" dialog. Tenant admins acting as themselves only
+    //    (the QuickBooks routes enforce the same rule).
+    const [quickBooksInvoice, setQuickBooksInvoice] = useState<Invoice | null>(null);
+    const mayUseQuickBooks = session?.user?.role === 'ADMIN' && !(session?.user as any)?.isViewingAsTenant;
 
     const userPlan = (session?.user as any)?.plan;
     const isSuperAdmin = (session?.user as any)?.isSuperAdmin;
@@ -875,6 +885,15 @@ function InvoicesContent() {
                 </div>
             )}
 
+            {quickBooksInvoice && mayUseQuickBooks && (
+                <QuickBooksInvoiceSendDialog
+                    invoiceId={quickBooksInvoice.id}
+                    label={`${quickBooksInvoice.customer?.name ?? ''} · #${quickBooksInvoice.id.slice(0, 8).toUpperCase()}`}
+                    onClose={() => setQuickBooksInvoice(null)}
+                    onChanged={fetchInvoices}
+                />
+            )}
+
             {isComposeOpen && (
                 <InvoiceComposeModal
                     isOpen={isComposeOpen}
@@ -1058,11 +1077,41 @@ function InvoicesContent() {
                                                 )}
                                             </div>
                                         )}
+                                        {/* QB-INVOICE-1C: QuickBooks' own number, once it exists. Not a payment claim. */}
+                                        {inv.quickbooks_invoice_send && (
+                                            <div className="mt-1.5 text-[11px] font-medium text-slate-400">
+                                                QuickBooks{inv.quickbooks_invoice_send.qbo_doc_number ? ` #${inv.quickbooks_invoice_send.qbo_doc_number}` : ''}
+                                                {inv.quickbooks_invoice_send.status === 'sent' ? ' · emailed'
+                                                    : inv.quickbooks_invoice_send.status === 'needs_review' ? ' · needs review' : ' · in progress'}
+                                            </div>
+                                        )}
                                     </td>
                                     <td className="px-6 py-5 text-sm text-slate-500 font-medium">
                                         {new Date(inv.created_at).toLocaleDateString()}
                                     </td>
                                     <td className="px-6 py-5 text-right">
+                                        <div className="flex items-center justify-end gap-2">
+                                        {/* QB-INVOICE-1C: one visible action that says what it will do — the icon
+                                            alone meant "review and send", "resume", "view" and "delivery problem"
+                                            at once. Fundraiser invoices only; tenant admins acting as themselves. */}
+                                        {mayUseQuickBooks && inv.campaign_id && (() => {
+                                            const action = invoiceRowAction(inv.quickbooks_invoice_send);
+                                            const tone = action.tone === 'warn'
+                                                ? 'border-amber-200 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:text-amber-400 dark:hover:bg-amber-900/20'
+                                                : action.tone === 'ok'
+                                                    ? 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700'
+                                                    : 'border-indigo-200 text-indigo-600 hover:bg-indigo-50 dark:border-indigo-900/40 dark:text-indigo-400 dark:hover:bg-indigo-900/20';
+                                            return (
+                                                <button
+                                                    onClick={() => setQuickBooksInvoice(inv)}
+                                                    className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-all shadow-sm ${tone}`}
+                                                    title={action.label}
+                                                >
+                                                    <Link2 className="w-3.5 h-3.5 shrink-0" />
+                                                    <span>{action.label}</span>
+                                                </button>
+                                            );
+                                        })()}
                                         <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                             {/* INV-D: offered only for invoices that are
                                                 actually settleable. `!== 'PAID'` also
@@ -1096,6 +1145,8 @@ function InvoicesContent() {
                                             >
                                                 <Download className="w-4 h-4" />
                                             </button>
+                                            {/* QB-INVOICE-1C: an invoice QuickBooks holds is emailed only by QuickBooks (the route refuses too). */}
+                                            {!inv.quickbooks_invoice_send && (
                                             <button
                                                 onClick={() => handleEmailInvoice(inv)}
                                                 disabled={emailingId === inv.id}
@@ -1108,6 +1159,7 @@ function InvoicesContent() {
                                                     <Mail className="w-4 h-4" />
                                                 )}
                                             </button>
+                                            )}
                                             <button
                                                 onClick={() => handleEditInvoice(inv)}
                                                 className="p-2 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-amber-600 transition-all shadow-sm"
@@ -1115,6 +1167,8 @@ function InvoicesContent() {
                                             >
                                                 <Edit className="w-4 h-4" />
                                             </button>
+                                            {/* QB-INVOICE-1C: an invoice QuickBooks holds cannot be deleted (the route and database refuse too). */}
+                                            {!inv.quickbooks_invoice_send && (
                                             <button
                                                 onClick={() => handleDeleteInvoice(inv)}
                                                 className="p-2 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition-all shadow-sm"
@@ -1122,6 +1176,8 @@ function InvoicesContent() {
                                             >
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
+                                            )}
+                                        </div>
                                         </div>
                                     </td>
                                 </tr>

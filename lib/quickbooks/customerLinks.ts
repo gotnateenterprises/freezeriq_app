@@ -48,15 +48,8 @@
 import { createHash } from 'crypto';
 import { prisma } from '@/lib/db';
 import { QUICKBOOKS_PROVIDER, type QuickBooksConfig } from '@/lib/quickbooks/config';
+import { QuickBooksConnectionError, type Deps } from '@/lib/quickbooks/connection';
 import {
-    getQuickBooksAccess,
-    loadQuickBooksConnection,
-    QuickBooksConnectionError,
-    type Deps,
-    type QuickBooksAccess,
-} from '@/lib/quickbooks/connection';
-import {
-    ensureLiveGeneration,
     findLiveGenerationId,
     withLiveConnection,
     type GenerationDb,
@@ -65,7 +58,6 @@ import {
 import {
     createCustomer,
     displayNameProblem,
-    fetchCompanyInfo,
     findCustomersByDisplayName,
     findInactiveCustomersByDisplayName,
     IntuitError,
@@ -73,6 +65,14 @@ import {
     type DisplayNameProblem,
     type QuickBooksCustomerSummary,
 } from '@/lib/quickbooks/intuitClient';
+import {
+    ConnectionChangedError,
+    connectionProblem,
+    isConnectionProblem as isProblem,
+    liveConnection,
+    withAccess,
+    type LiveConnection,
+} from '@/lib/quickbooks/liveConnection';
 
 export type CustomerLinkDb = Pick<
     typeof prisma,
@@ -161,99 +161,11 @@ function resolve(deps: CustomerLinkDeps) {
     };
 }
 type Resolved = ReturnType<typeof resolve>;
-const connectorDeps = (d: Resolved): Deps => ({ db: d.db as any, fetchImpl: d.fetchImpl, env: d.env, now: d.now, sleep: d.sleep });
 const generationDeps = (d: Resolved): GenerationDeps => ({ db: d.db as unknown as GenerationDb, env: d.env });
 
 // ── Connection generation ───────────────────────────────────────────────────
-
-/** A refreshed access token reached a different company: a Forget and reconnect landed mid-request. */
-class ConnectionChangedError extends Error {
-    constructor() {
-        super('QuickBooks connection changed during the request');
-        Object.setPrototypeOf(this, ConnectionChangedError.prototype); // ES5 target
-        this.name = 'ConnectionChangedError';
-    }
-}
-
-interface LiveConnection {
-    /** The live generation of the company `access` reaches. */
-    connectionId: string;
-    access: QuickBooksAccess;
-}
-
-type ConnectionProblem = Extract<CustomerLinkStatus, { state: 'not_connected' | 'reconnect_required' | 'unavailable' }>;
-
-/**
- * A usable access token AND the live generation of the company it reaches, or why not.
- * The generation is read — or recorded, the first time — under the generation lock,
- * which re-checks that the stored connection still reaches the token's company, so one
- * generation can never be paired with another company.
- */
-async function liveConnection(businessId: string, config: QuickBooksConfig, d: Resolved): Promise<LiveConnection | ConnectionProblem> {
-    const stored = await loadQuickBooksConnection(businessId, connectorDeps(d));
-    if (stored.kind === 'none') return { state: 'not_connected' };
-    if (stored.kind === 'unreadable') return { state: 'reconnect_required' };
-    if (stored.kind === 'disconnected') return stored.reason === 'admin_disconnect' ? { state: 'not_connected' } : { state: 'reconnect_required' };
-
-    let access: QuickBooksAccess;
-    try {
-        access = await getQuickBooksAccess({ businessId, config }, connectorDeps(d));
-    } catch (e) {
-        return connectionProblem(e);
-    }
-    const holder = { access };
-    let connectionId: string | null;
-    try {
-        connectionId = await ensureLiveGeneration({
-            businessId,
-            realmId: access.realmId,
-            environment: config.environment,
-            readCompanyName: async () => (await withAccess(businessId, config, holder, d,
-                (a) => fetchCompanyInfo(config, a.accessToken, a.realmId, d.fetchImpl))).companyName,
-        }, generationDeps(d));
-    } catch (e) {
-        if (e instanceof QuickBooksConnectionError) return connectionProblem(e);
-        if (e instanceof IntuitError || e instanceof ConnectionChangedError) {
-            console.warn(`[quickbooks] connection generation unavailable: ${e instanceof IntuitError ? e.kind : 'connection_changed'}`);
-            return { state: 'unavailable' };
-        }
-        throw e;
-    }
-    // null: no longer connected to that company (a Disconnect or Forget landed in between).
-    if (!connectionId) return { state: 'unavailable' };
-    return { connectionId, access: holder.access };
-}
-
-function connectionProblem(e: unknown): ConnectionProblem {
-    if (e instanceof QuickBooksConnectionError) {
-        if (e.kind === 'not_connected' || e.kind === 'disconnected') return { state: 'not_connected' };
-        if (e.kind === 'refresh_failed' || e.kind === 'refresh_contended') return { state: 'unavailable' };
-        return { state: 'reconnect_required' };
-    }
-    return { state: 'unavailable' };
-}
-
-const isProblem = (x: LiveConnection | ConnectionProblem): x is ConnectionProblem => 'state' in x;
-
-/**
- * Runs an Accounting call, refreshing once if QuickBooks refuses a token it had not
- * expired. The refreshed token must reach the SAME company; after a Forget and a
- * reconnect it would not, and the call is abandoned.
- */
-async function withAccess<T>(
-    businessId: string, config: QuickBooksConfig, holder: { access: QuickBooksAccess }, d: Resolved,
-    call: (access: QuickBooksAccess) => Promise<T>,
-): Promise<T> {
-    try {
-        return await call(holder.access);
-    } catch (e) {
-        if (!(e instanceof IntuitError) || e.kind !== 'unauthorized') throw e;
-        const again = await getQuickBooksAccess({ businessId, config, rejectedAccessToken: holder.access.accessToken }, connectorDeps(d));
-        if (again.realmId !== holder.access.realmId) throw new ConnectionChangedError();
-        holder.access = again;
-        return call(again);
-    }
-}
+// liveConnection / withAccess / connectionProblem / ConnectionChangedError live in
+// lib/quickbooks/liveConnection.ts (moved unchanged in QB-INVOICE-1C, shared with invoices).
 
 // ── Status ──────────────────────────────────────────────────────────────────
 

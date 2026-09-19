@@ -11,6 +11,7 @@ import {
     isClientSettableInvoiceStatus,
     isGenericEditLockedStatus,
 } from '@/lib/invoiceFulfillment';
+import { hasQuickBooksInvoice, lockedFinancialEdit, QUICKBOOKS_INVOICE_LOCK_MESSAGES, QUICKBOOKS_LINK_SELECT } from '@/lib/quickbooks/invoiceLock';
 
 // ---------------------------------------------------------------------------
 // Local helper — round money to two decimal places consistently.
@@ -157,7 +158,10 @@ export async function GET() {
                 customer: {
                     select: { name: true, contact_email: true, delivery_address: true }
                 },
-                items: true
+                items: true,
+                // QB-INVOICE-1C: where a "Send via QuickBooks" lifecycle stands, QuickBooks' own number, and
+                //    whether QuickBooks reported a delivery problem — the three facts the row's action reads.
+                quickbooks_invoice_send: { select: { status: true, qbo_doc_number: true, delivery_error_type: true } },
             },
             orderBy: { created_at: 'desc' }
         });
@@ -416,6 +420,14 @@ export async function PUT(request: Request) {
                 //    edit can preserve them instead of resetting them. See below.
                 status: true,
                 payment_method: true,
+                // ── QB-INVOICE-1C: whether QuickBooks holds a copy of this invoice, and the financial facts an
+                //    edit may not change once it does (the lines included).
+                customer_id: true,
+                tax_rate_percent: true,
+                taxable_base_amount: true,
+                tax_status: true,
+                items: { select: { description: true, quantity: true, unit_price: true, total: true } },
+                ...QUICKBOOKS_LINK_SELECT,
             },
         });
         const campaignId: string | null = persisted?.campaign_id ?? null;
@@ -444,6 +456,23 @@ export async function PUT(request: Request) {
                 ? 'This invoice is recorded as paid. Its payment record cannot be changed by editing the invoice.'
                 : 'This invoice is still a draft. Send it to change its status.';
             return NextResponse.json({ error: reason }, { status: 409 });
+        }
+
+        // ── QB-INVOICE-1C: once QuickBooks holds a copy of this invoice, an edit may not make the two
+        //    disagree. Its organization and status stay as they are (money is already frozen for a
+        //    fundraiser invoice, and only fundraiser invoices are sent through QuickBooks). Due date and
+        //    payment method remain editable, as for any fundraiser invoice.
+        if (persisted && hasQuickBooksInvoice(persisted)) {
+            const statusChange = status !== undefined && status !== null && status !== persisted.status;
+            const customerChange = customer_id !== undefined && customer_id !== null && customer_id !== persisted.customer_id;
+            if (statusChange || customerChange || persisted.campaign_id === null) {
+                return NextResponse.json({ error: QUICKBOOKS_INVOICE_LOCK_MESSAGES.edit }, { status: 409 });
+            }
+            // The money QuickBooks copied is refused outright rather than silently preserved: an edit that asks to
+            // change a line, an amount, the organization share or the tax is answered 409 and nothing is written.
+            if (lockedFinancialEdit(persisted, body)) {
+                return NextResponse.json({ error: QUICKBOOKS_INVOICE_LOCK_MESSAGES.money }, { status: 409 });
+            }
         }
 
         // ── INV-C: a generated fundraiser invoice's totals are not editable here.
@@ -706,11 +735,16 @@ export async function DELETE(request: Request) {
             // @ts-ignore
             const invoice = await tx.invoice.findUnique({
                 where: { id, business_id: businessId },
-                include: { order: true }
+                include: { order: true, ...QUICKBOOKS_LINK_SELECT }
             });
 
             if (!invoice) {
                 throw new Error('Invoice not found');
+            }
+
+            // QB-INVOICE-1C: an invoice QuickBooks holds a copy of is never deleted (the database refuses too).
+            if (hasQuickBooksInvoice(invoice)) {
+                throw new Error('QuickBooks invoice exists');
             }
 
             // Delete linked order and its items if exists
@@ -733,6 +767,11 @@ export async function DELETE(request: Request) {
 
         return NextResponse.json({ success: true });
     } catch (error: any) {
+        // QB-INVOICE-1C: also P2003 — a QuickBooks link or send lifecycle created in between still references it.
+        if (error?.message === 'QuickBooks invoice exists'
+            || (error?.code === 'P2003' && String(error?.meta?.field_name ?? '').includes('quickbooks_'))) {
+            return NextResponse.json({ error: QUICKBOOKS_INVOICE_LOCK_MESSAGES.delete }, { status: 409 });
+        }
         console.error('Invoice Delete Error:', error.message);
         return NextResponse.json({
             error: error.message === 'Invoice not found' ? 'Invoice not found' : 'Failed to delete invoice'

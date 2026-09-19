@@ -624,7 +624,7 @@ describe('FR-REBOOK-2 · staged scope', () => {
         expect(migrations.length).toBeLessThanOrEqual(1);
         // A LATER, separately-authorized phase with its own reviewed migration may be the
         // uncommitted one in a working tree or a staged index; it is named exactly.
-        const approved = ['20260826000000_m18_outreach_batch_campaign_ownership', '20260913120000_qb_invoice_1b_quickbooks_links'];
+        const approved = ['20260826000000_m18_outreach_batch_campaign_ownership', '20260913120000_qb_invoice_1b_quickbooks_links', '20260915170000_qb_invoice_1c_invoice_send'];
         for (const m of migrations) {
             expect(approved.some((a) => m.includes(a))).toBe(true);
         }

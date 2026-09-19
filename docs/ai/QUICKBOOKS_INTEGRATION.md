@@ -2,6 +2,7 @@
 
 **Status:** QB-INVOICE-1A **ACCEPTED / CLOSED** by the owner on September 13, 2026, after a successful live Intuit sandbox proof (§4). Sandbox OAuth foundation only: no QuickBooks customers, invoices or payment sync, and Production stays disabled.
 **QB-INVOICE-1B:** customer mapping + invoice-link schema foundation, with the owner's acceptance fix (one QuickBooks invoice link per invoice for life; retained connection generations) — owner Intuit sandbox acceptance PASSED on September 14, 2026 (§11.8); on the isolated branch `worktree-qb-invoice-1b`, not merged and not deployed, and its migration is not applied to Production or Preview; see §11. It creates and sends no QuickBooks invoice.
+**QB-INVOICE-1C:** "Send via QuickBooks" — tenant invoice settings and a verified create → recipients → payment options → send lifecycle — implemented on the isolated branch `qb-invoice-1c`, uncommitted, awaiting owner review and Intuit sandbox acceptance; see §12. No payments, webhooks or PAID behaviour (QB-INVOICE-1D).
 **Scope of this document:** the connector's architecture and safety properties, the environment rules, the evidence behind them, and the compliance and readiness gaps that remain before Intuit production credentials may be requested.
 
 This is an engineering record, not a legal opinion. Nothing here claims compliance with Intuit's terms beyond the technical evidence listed. Items marked **OWNER** or **COUNSEL** need a human decision.
@@ -484,5 +485,156 @@ Remove-Item -Recurse -Force $base, "$base.zip"
 ```
 
 **Undo (local only):** restore `$env:USERPROFILE\freezer_iq_before_qb1b.dump` with `pg_restore --clean`, or, before any link exists, run the §11.7 down SQL against `$pgUri`.
+
+---
+
+## 12. QB-INVOICE-1C — Send via QuickBooks
+
+**Status:** implemented on the isolated branch `qb-invoice-1c` (from `7d17fc8`), uncommitted, awaiting owner review and Intuit **sandbox** acceptance (§12.12). Not deployed; the migration is not applied to Production, Preview or the owner's local database. QuickBooks stays disabled in Preview and in Production (§2) — nothing here changes that.
+
+### 12.1 What it adds
+
+| Surface | Path | Who |
+|---|---|---|
+| Invoice settings (read / save / create one helper item) | `GET` / `PUT` / `POST {action:'create_item'}` `/api/integrations/quickbooks/invoice-settings` | tenant ADMIN |
+| Send via QuickBooks (state / send / resume / check delivery / send again) | `GET` / `POST {action:'send'|'resume'|'check_delivery'|'resend'}` `/api/integrations/quickbooks/invoices/[invoiceId]` | tenant ADMIN |
+| Settings card | `components/settings/QuickBooksInvoiceSettingsCard.tsx` (below the connection card, same ADMIN gate) | ADMIN only |
+| Review / status dialog | `components/invoices/QuickBooksInvoiceSendDialog.tsx`, opened from the "QuickBooks" row action of a fundraiser invoice on `/invoices` | ADMIN only, not View As |
+
+Library (`lib/quickbooks/`): `invoicePayload.ts` (the invoice to create, pure), `invoiceContract.ts` (read-back contract, pure), `invoiceSettings.ts` (tenant mapping), `invoiceSend.ts` (the lifecycle), `invoiceRecipients.ts`, `invoiceLock.ts` (what a QuickBooks invoice locks elsewhere), `invoiceSendView.ts` and `invoiceSettingsView.ts` (wording, pure), `liveConnection.ts` (moved unchanged out of `customerLinks.ts`); invoice and setup calls in `intuitClient.ts` (§12.8).
+
+Schema (one additive migration, `20260915170000_qb_invoice_1c_invoice_send`): `quickbooks_invoice_settings`, `quickbooks_invoice_sends`, enum `QuickBooksInvoiceSendStatus`, and a unique index on `quickbooks_invoice_links (business_id, invoice_id)` (cannot fail: `invoice_id` is already unique). The invoice link's `request_id` is now **derived** from the invoice (`qbinv-` + 40 hex of SHA-256), so every attempt in the invoice's lifetime uses the same Intuit `requestid`.
+
+Nothing happens at fundraiser close. A QuickBooks invoice is created only by the explicit "Send via QuickBooks" click.
+
+### 12.2 The QuickBooks invoice (owner-locked content)
+
+FreezerIQ owns every number; QuickBooks only holds them. **QuickBooks `TotalAmt` must equal `Invoice.total_amount` to the cent**, or nothing is sent.
+
+- **Bundle lines** — one per stored invoice line, PRE-tax: description = bundle name + size ("Family Friendly — Serves 5"; a name that already states its size is kept), the stored quantity and unit price, the tenant's one generic sales item, `TaxCodeRef NON`. Never one QuickBooks item per bundle.
+- **Organization share** — one visible NEGATIVE line "Organization fundraiser share — 20%" at minus the exact stored share, on the tenant's share item. Never applied to tax.
+- **Supporter tax** — one ordinary NON line "Sales tax collected from supporters — 1%" carrying the exact frozen `Invoice.tax_amount`, on the tenant's tax item. Omitted when zero. Never QuickBooks sales tax (`TxnTaxDetail`), never rebuilt from a rate. A `TAX_EXEMPT` invoice carries the memo "Tax exempt — documentation on file." (and may not carry tax).
+- **Header** — the organization's linked QuickBooks customer, the tenant-local date (`Business.timezone`), the tenant's term (QuickBooks derives DueDate), a private note naming the FreezerIQ invoice. No DocNumber: QuickBooks assigns it and FreezerIQ stores it; the QuickBooks `Id` (on the link) is authoritative.
+- **Hard gate** — refused unless every line's quantity × price is a whole cent equal to its total, and bundles − share + tax equals the total. The owner's rounding fixture (7 × $62.50 + 2 × $60.00 = $557.50; share $111.50; tax $5.59 frozen per order at 1%) plans and reads back as **$451.59**.
+
+### 12.3 Tenant mapping (owner rules)
+
+Only the tenant's OWN QuickBooks objects, filtered by purpose on the server and re-verified from QuickBooks before every send (items can be re-pointed in QuickBooks at any time):
+
+| Role | Item | Account it must post to |
+|---|---|---|
+| Fundraiser sales | active Service / NonInventory | Income: SalesOfProductIncome, ServiceFeeIncome or OtherPrimaryIncome |
+| Organization share | active Service / NonInventory | Income: **DiscountsRefundsGiven** (contra-revenue) only |
+| Supporter tax | active Service / NonInventory | Other Current Liability, **not** QuickBooks' own GlobalTaxPayable (QuickBooks refuses it, Fault 6430) |
+| Payment terms | active **STANDARD** term | QuickBooks derives DueDate = invoice date + due days |
+
+- **Share as an expense/commission is not offered.** The sandbox accepted it, but Intuit documents neither an expense account on an item's IncomeAccountRef nor on a DiscountAccountRef, and the owner ruled that undocumented mappings are not offered as guaranteed functionality. Carried forward for an owner decision.
+- **Company settings that block sending** (each re-read before a send): not a US company; a company-wide sales-form **CC** or **BCC** (QuickBooks would copy it onto every invoice unreviewed); custom transaction numbers (QuickBooks would not number the invoice); multicurrency or a non-USD home currency. Notices only: online payments inactive; company copy emails.
+- **Online payment options** (card, ACH) may be chosen only while the company has online payments active, and are applied only after the invoice's amounts and recipients are verified. PayPal and Affirm are never enabled.
+- **Helper items.** "Create one in QuickBooks…" creates exactly ONE non-taxable Service item with a fixed name ("FreezerIQ Fundraiser Sales", "Organization Fundraiser Share", "Sales Tax Collected from Supporters") on an eligible account, only with a confirmation bound to that role, account and name, under a requestid. FreezerIQ never creates an account.
+- **Opaque keys.** Every option reaches the browser as a 32-hex key derived from the live generation; no raw QuickBooks id, realm, connection id or token is ever returned.
+- **Bound to the live generation.** Forget deletes the settings (CASCADE); a new generation starts unconfigured.
+- **Recipients.** Suggested primary recipient: the campaign's assigned coordinator, else the organization's contact on file (`lib/campaignCoordinatorContact.ts`); the tenant reviews and may override it. Optional CCs (up to five, comma-separated, 100 characters — QuickBooks keeps "a@x, b@y" exactly, verified in the accounting spike), prefilled from the settings' optional default CC. Never a BCC.
+
+### 12.4 Lifecycle, idempotency and concurrency
+
+`quickbooks_invoice_sends.status`: `reserved → created → recipients_set → payment_options_set → sent`, or `needs_review`.
+
+1. **Gate** (§12.3 plus: live connection for the expected company, the organization linked to an active non-sub customer, invoice still DRAFT and reconciling). The GET returns a **review token** — a hash of the exact create body, the read-back expectation and the payment options. A click whose token no longer matches (money, lines, customer, mapping, date or options changed) is `stale` and sends nothing.
+2. **Reserve** the invoice's one link (QB-INVOICE-1B) and create the lifecycle row, which stores the REVIEW: mapping ids, invoice date, recipients, payment options, and a hash binding them.
+3. **Create** unsent (no recipient, `EmailStatus NotSet`, all four payment flags explicitly false) with the derived requestid; record the returned `Id` on the link immediately. A lost answer is replayed once at once with the same requestid, then only by a later attempt within 10 minutes of the first; after that the lifecycle stops for review.
+4. **Recipients** update (all four flags restated false) → read back.
+5. **Payment options** update (tenant flags, recipients restated) → read back; skipped when none.
+6. **Send** → read back → **mark SENT**.
+
+- **The review is the authorization.** Resume and "send again" rebuild the create body and expectation from the STORED review plus the CURRENT FreezerIQ invoice, re-verify the stored mapping in QuickBooks, and refuse on any difference — so a later settings change neither breaks nor silently alters an invoice already in QuickBooks.
+- **Lease.** A compare-and-set lease (`lease_id`, 2 minutes) lets one request drive a lifecycle; a double click answers `in_progress`. Every QuickBooks write is preceded by a lease-renewing write, so a request whose lease expired cannot reach QuickBooks.
+- **Never a second QuickBooks invoice:** UNIQUE `invoice_id` on the link and on the lifecycle, the derived requestid, the record-once link. No QuickBooks invoice is ever searched for or matched.
+- **Paused vs stopped.** QuickBooks unreachable, throttled, a stale SyncToken, or an unconfirmed update/send keep the status with a problem code; **Resume** continues from the last verified step after reading QuickBooks again. A failed read-back, a refused create or update, a missing invoice, or an unexpected send stop the lifecycle in `needs_review`: nothing further is sent, the FreezerIQ invoice is not marked SENT, the same QuickBooks invoice is kept, and no repair action exists in V1 (§12.9).
+
+### 12.5 Read-back contract (`invoiceContract.ts`)
+
+Every read-back must show, in integer cents: the same `Id` and a present, unchanged DocNumber; customer, USD, invoice date, term and derived due date; the memo when required; only item lines plus QuickBooks' subtotal line; per line the item, the **posting account (`ItemAccountRef`)**, description, quantity, whole-cent unit price and amount, `NON`; bundles = pre-tax sales, tax line = frozen tax, share line = −share; no QuickBooks tax (TotalTax 0, no tax lines, no tax code); TotalAmt = FreezerIQ total; Balance = total (unpaid); lines sum to TotalAmt. Then per stage:
+
+| Stage | Delivery checks |
+|---|---|
+| `created` | NotSet, no DeliveryInfo, no e-invoice status, no BillEmail / CC / BCC, all four flags `false` (an absent flag is not false) |
+| `recipients` | unsent; BillEmail and CC exactly as reviewed; no BCC; all four flags still `false` |
+| `payment_options` | unsent; recipients exact; flags exactly the tenant's options |
+| `sent` | recipients exact; flags exactly the tenant's options; EmailSent; DeliveryInfo type Email with a time no earlier than the request (2-minute clock tolerance). A DeliveryErrorType is reported, not a failure |
+
+### 12.6 QuickBooks auto-send and the explicit Send
+
+- **Branch B (auto-send).** If the read-back after the payment-options update shows `EmailSent`, QuickBooks emailed the invoice itself (its documented autosend condition includes card/ACH enabled on the invoice). FreezerIQ does NOT call Send: it verifies the `sent` contract (recipients, money, DeliveryInfo) and records it as the send with `auto_sent = true`.
+- **Branch A.** Still `NotSet` → verify `payment_options` → `POST /invoice/{id}/send` (no body, no `sendTo`) → verify the response AND a fresh read-back as `sent` → mark SENT.
+- `EmailSent` seen anywhere else is accepted only with evidence: after FreezerIQ's own Send request (answer lost), or with card/ACH applied (a delayed auto-send). Otherwise it is `unexpected_email_status` → needs review.
+- A refused or throttled Send sent nothing; the SAME invoice is sent on Resume.
+
+### 12.7 SENT, delivery follow-up, resend and immutability
+
+- **SENT** means QuickBooks reports it emailed the invoice — not delivered, not paid. The lifecycle `sent` row and the FreezerIQ invoice `DRAFT → SENT` are written in ONE transaction, conditional on DRAFT; if the invoice left DRAFT meanwhile, both roll back and the lifecycle stops for review with the send evidence kept. This is the only FreezerIQ invoice write QuickBooks code makes; it never writes PAID, payment facts, orders or fulfillment.
+- **Check delivery** reads the invoice and records `DeliveryErrorType` (e.g. Undeliverable). It never changes the FreezerIQ invoice — PAID stays PAID.
+- **Send again** (same QuickBooks invoice): only while the FreezerIQ invoice is still SENT (never PAID) and the QuickBooks invoice still matches what was sent (for example, not paid or edited in QuickBooks). Corrected recipients are written with all four flags restated, verified, then Send is verified. A CC already on the QuickBooks invoice cannot be removed in V1 (an update that omits it keeps it).
+- **Locks elsewhere** (`invoiceLock.ts`), from the moment the link is reserved: `DELETE /api/tenant/invoices` answers 409 (the database refuses too: link and lifecycle reference the invoice); the generic `PUT` refuses a status or organization change (money on a fundraiser invoice is already frozen; due date and payment method stay editable); the FreezerIQ invoice email route answers 409 so the organization receives one invoice under one number. The invoices list hides Email and Delete for such invoices and shows "QuickBooks #DocNumber · emailed / in progress / needs review". Recording a payment (INV-D) is unchanged.
+
+### 12.8 Intuit API calls introduced
+
+| Call | Purpose |
+|---|---|
+| `GET /preferences` | company CC/BCC presence, online payments, custom numbering, currency |
+| `GET /query?query=select * from Account maxresults 1000` (and `Item`, `Term maxresults 200`) | settings options |
+| `GET /account/{id}`, `/item/{id}`, `/term/{id}` | re-verify a mapping before each send |
+| `POST /item?requestid=…` `{Name, Type:Service, Taxable:false, IncomeAccountRef}` | confirmed helper item only |
+| `POST /invoice?requestid=qbinv-…` | the unsent create |
+| `GET /invoice/{id}` | every read-back, by the id FreezerIQ's own create returned |
+| `POST /invoice?requestid=qbupd-…` sparse `{Id, SyncToken, BillEmail, BillEmailCc?, 4 flags}` | recipients / payment options |
+| `POST /invoice/{id}/send` (octet-stream, no body) | the explicit send |
+
+All with `minorversion=75`; a Fault is honoured on HTTP 200; Fault codes are kept, Intuit's messages never. No payment, void, delete, query-by-invoice, webhook or Payments-scope call exists. The OAuth scope is unchanged.
+
+### 12.9 Not in QB-INVOICE-1C
+
+No payment webhook, polling, automatic PAID, Payments API, card/ACH handling in FreezerIQ, or fulfillment release (QB-INVOICE-1D and later). No void / repair workflow for a stopped lifecycle or for correcting an invoice after it is in QuickBooks. No expense/commission share mapping. No non-US, non-USD or custom-numbering companies. No linking of pre-existing QuickBooks invoices.
+
+### 12.10 Tests and evidence (September 15, 2026, local)
+
+- New suites: `qbInvoice1cPayload`, `qbInvoice1cContract`, `qbInvoice1cIntuitClient`, `qbInvoice1cSettings`, `qbInvoice1cSendLifecycle`, `qbInvoice1cRoutes`, `qbInvoice1cInvoiceLocks`, `qbInvoice1cViews`, `qbInvoice1cScope` — all passing over doubles as strict as the sandbox (`tests/helpers/quickbooksInvoiceFakes.ts`: omitted flags re-default true, ItemAccountRef follows the item, requestid replay, 5010/610/2380, autosend, lost responses, tampering).
+- `qbInvoice1cRealDb` (opt-in `QB1C_DB_URL`) and `qbInvoice1bRealDb` passed 17/17 on a fresh disposable local database that took all 27 migrations; the 1C foreign keys and 14 CHECK constraints were confirmed from `pg_constraint`, and migrations → schema drift contains no 1C object (the 35 unrelated pre-existing drift statements are unchanged). The disposable database was dropped.
+- Updated for 1C: `qbInvoice1aLegacyQuarantine`, `qbInvoice1bScope`, `qbInvoice1bInvoiceLinks` (derived request id), and the migration ledgers (`frAcceptance2A2Dashboard`, `coordManualEmail1b`, `ops6b3DeliveryLabelAuthority`, `frRebook2PreviousSupporters`, `coordPolish1`, `coordShareCenterPolish2`).
+- Full Jest: the only failures are the 6 suites / 5 tests that fail identically on a clean `7d17fc8` checkout.
+
+### 12.11 Migration and release procedure
+
+Additive: two new tables, one enum, one unique index on the 1B link table; no existing column or row changes; nothing backfilled. Existing code never reads the new tables, so the migration is safe BEFORE the code — and must precede it, because the new invoices list query selects the lifecycle. Each step only with explicit owner authorization: owner review → sandbox acceptance (§12.12) → commit on `qb-invoice-1c` → Production migration (`prisma migrate deploy` against the direct session URL, confirm `20260915170000_qb_invoice_1c_invoice_send` finished) → release. QuickBooks remains disabled in Preview and Production until a separate, owner-approved enablement. Reversal (only while `quickbooks_invoice_sends` and `quickbooks_invoice_settings` are empty, with an owner decision):
+
+```sql
+BEGIN;
+DROP TABLE "quickbooks_invoice_sends";
+DROP TABLE "quickbooks_invoice_settings";
+DROP TYPE "QuickBooksInvoiceSendStatus";
+DROP INDEX "quickbooks_invoice_links_business_id_invoice_id_key";
+DELETE FROM "_prisma_migrations" WHERE migration_name = '20260915170000_qb_invoice_1c_invoice_send';
+COMMIT;
+```
+
+Rolling back the CODE after invoices were sent through QuickBooks is not neutral: older code would again allow deleting, re-pointing or emailing those invoices. Keep the locks deployed once any lifecycle row exists.
+
+### 12.12 Owner sandbox acceptance runbook (PREPARED — not yet performed)
+
+**Sandbox company only (Sandbox Company US). Never the real Freezer Chef company.** Use only artificial data: names prefixed `FreezerIQ 1C Acceptance -`, and recipient/CC addresses at `example.com` (they cannot be delivered, which exercises the delivery follow-up). Do not touch the two accepted 1B sandbox customers or the spike artifacts. The sandbox has no online payments, so Branch B (auto-send) cannot occur there — it is proven by tests only and must be re-checked in the first payments-enabled acceptance, which needs its own owner approval.
+
+1. **Local database.** Apply the 1C migration to the local `freezer_iq` database only, with §11.9's Step 0 guard and a fresh `pg_dump` backup first; `migrate status` must list exactly `20260915170000_qb_invoice_1c_invoice_send` as pending; afterwards `applied = 27` and both new tables empty.
+2. **Start** the local dev server from the `qb-invoice-1c` worktree (sandbox keys, localhost redirect); sign in as a local tenant ADMIN; Settings shows QuickBooks **Connected** (Sandbox).
+3. **Mapping.** In Settings → QuickBooks invoice settings: confirm no blocker (if a company CC/BCC is set in the sandbox, the card must block — remove it in QuickBooks and Check again). Create or choose: a sales item on a sales income account, a share item on Discounts/Refunds Given, a tax item on a non-system liability account, and Net 15. Confirm the expense (commission) item and GlobalTaxPayable accounts are NOT offered. Save → "Ready to send invoices through QuickBooks".
+4. **Customer.** Create a local organization `FreezerIQ 1C Acceptance - Test Org` with an `@example.com` contact email, and link or create its QuickBooks customer with the 1B card.
+5. **Invoice.** Close out an artificial local campaign for that organization so a DRAFT fundraiser invoice exists (ideally the $451.59 rounding shape). Open **/invoices** → QuickBooks. Review: lines, −share, tax, total, dates, suggested recipient. Nothing exists in QuickBooks yet (check the sandbox).
+6. **Stale review.** Leave the dialog open, change the invoice's settings (e.g. pick another term), then click Send: it must say the invoice changed and send nothing. Restore the settings and reopen.
+7. **Send** to `acceptance-coordinator@example.com` with CC `acceptance-district@example.com, acceptance-treasurer@example.com`. Expect "Sent via QuickBooks — invoice <DocNumber>".
+8. **Verify in QuickBooks:** one invoice, that DocNumber, customer, Net 15 due date, four lines (two bundles NON, −share, tax), TotalAmt equal to FreezerIQ's total, no sales tax, BillEmail and CC exactly as entered, online payment options off, "Sent" email status. In FreezerIQ the invoice shows SENT and "QuickBooks #… · emailed"; Email and Delete are gone from its row.
+9. **No duplicates.** Click Send again / reopen: the dialog shows the sent state; the sandbox still has ONE invoice.
+10. **Delivery follow-up.** Wait 2–3 minutes, click **Check delivery**: expect "delivery problem (Undeliverable)". Record whether QuickBooks reports it. The FreezerIQ invoice status must not change.
+11. **Send again** to `acceptance-fixed@example.com` (same CCs): the same QuickBooks invoice gets the new recipient and a new delivery time; send count 2; still one invoice. Record whether DeliveryTime updates and whether DeliveryErrorType clears.
+12. **Locks.** Via the API or UI: delete the invoice (409), change its organization or status by editing (409), email it through FreezerIQ (409).
+13. **Stop.** Do not record a payment in QuickBooks, do not enable online payments, and do not connect any real company. Report differences from §12.4–§12.7 before QB-INVOICE-1D is considered.
 
 ---

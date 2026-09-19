@@ -34,6 +34,7 @@ import {
     isLiveEmailConfigured,
     type ProviderSendOutcome,
 } from '@/lib/invoiceSendTruth';
+import { hasQuickBooksInvoice, QUICKBOOKS_INVOICE_LOCK_MESSAGES, QUICKBOOKS_LINK_SELECT } from '@/lib/quickbooks/invoiceLock';
 
 export async function POST(
     req: Request,
@@ -60,6 +61,8 @@ export async function POST(
                 campaign_id: true,
                 total_amount: true,
                 customer: { select: { name: true, contact_email: true } },
+                // QB-INVOICE-1C: an invoice QuickBooks holds a copy of is sent only through QuickBooks.
+                ...QUICKBOOKS_LINK_SELECT,
             },
         });
 
@@ -67,6 +70,12 @@ export async function POST(
             // Same answer for "not yours" as for "does not exist" — a tenant
             // must not be able to probe for another tenant's invoice ids.
             return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
+        }
+
+        // ── QB-INVOICE-1C: one invoice, one number. Once QuickBooks holds a copy, a FreezerIQ email
+        //    (with FreezerIQ's own number) is refused before anything is sent or written.
+        if (hasQuickBooksInvoice(invoice)) {
+            return NextResponse.json({ error: QUICKBOOKS_INVOICE_LOCK_MESSAGES.email }, { status: 409 });
         }
 
         // ── Recipient authority: the invoice's own customer, resolved server-side.

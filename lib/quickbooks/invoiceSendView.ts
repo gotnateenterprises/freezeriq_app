@@ -1,0 +1,196 @@
+/**
+ * QB-INVOICE-1C — wording and view logic for the "Send via QuickBooks" dialog. Pure and client-safe (types only
+ * from the server module), so every sentence a tenant reads — and every button the dialog offers — is tested.
+ *
+ * The dialog says plainly what each state means: a QuickBooks invoice is created unsent and checked before
+ * QuickBooks emails it; SENT means QuickBooks reports it emailed the invoice, not that it was delivered or paid;
+ * a stopped send keeps the same QuickBooks invoice and never creates another.
+ */
+
+import type { InvoiceSendStep, InvoiceSendView, SendBlocker, SendProblem } from '@/lib/quickbooks/invoiceSend';
+import { SETTINGS_BLOCKER_TEXT, SETTINGS_PROBLEM_TEXT } from '@/lib/quickbooks/invoiceSettingsView';
+
+export type InvoiceSendPayload = InvoiceSendView | { state: 'disabled' } | { state: 'error' };
+
+const OWN_BLOCKER_TEXT: Record<Exclude<SendBlocker, keyof typeof SETTINGS_BLOCKER_TEXT | keyof typeof SETTINGS_PROBLEM_TEXT>, string> = {
+    not_connected: 'QuickBooks is not connected. Connect it in Settings → Integrations.',
+    reconnect_required: 'QuickBooks needs to be reconnected in Settings → Integrations.',
+    quickbooks_unavailable: 'QuickBooks could not be reached. Nothing was sent — try again in a moment.',
+    invoice_not_campaign: 'Only fundraiser invoices created at closeout can be sent through QuickBooks.',
+    invoice_not_draft: 'Only a draft invoice can be sent through QuickBooks.',
+    invoice_not_sent: 'Only an invoice that is still marked Sent can be sent again. A paid invoice is never re-sent.',
+    not_sent_via_quickbooks: 'This invoice has not been sent through QuickBooks.',
+    customer_not_linked: 'Link this organization to its QuickBooks customer first (open the organization and use its QuickBooks card).',
+    customer_link_invalid: 'The organization’s QuickBooks customer is inactive, missing or a sub-customer. Check the organization’s QuickBooks card.',
+    timezone_invalid: 'Your business time zone is not set, so the invoice date cannot be determined.',
+    linked_to_another_connection: 'This invoice belongs to an earlier QuickBooks connection. It needs an administrator’s review.',
+    changed_since_review: 'The invoice changed after it was sent through QuickBooks. FreezerIQ will not send it again.',
+    qbo_invoice_changed: 'The QuickBooks invoice no longer matches what FreezerIQ sent — for example it was edited or paid in QuickBooks. FreezerIQ will not send it again.',
+    update_rejected: 'QuickBooks refused the new recipient. Check the address and try again.',
+    lifecycle_unreadable: 'This invoice’s QuickBooks record could not be read. It needs an administrator’s review.',
+    settings_missing: 'Set up the QuickBooks invoice settings first (Settings → Integrations).',
+    not_campaign_invoice: 'Only fundraiser invoices created at closeout can be sent through QuickBooks.',
+    no_lines: 'This invoice has no lines to send.',
+    too_many_lines: 'This invoice has more lines than FreezerIQ sends to QuickBooks.',
+    total_not_positive: 'This invoice’s total is not above zero, so it cannot be sent.',
+    money_invalid: 'One of this invoice’s amounts could not be read exactly, so nothing was sent.',
+    line_does_not_reconcile: 'A line’s quantity times price does not equal its total to the cent, so nothing was sent.',
+    invoice_does_not_reconcile: 'The lines, organization share and tax do not add up to the invoice total to the cent, so nothing was sent.',
+    tax_status_conflict: 'The organization is tax exempt but the invoice carries tax, so nothing was sent.',
+    share_item_not_configured: 'This invoice has an organization share. Choose the organization share item in the QuickBooks invoice settings first.',
+    tax_item_not_configured: 'This invoice carries supporter sales tax. Choose the supporter sales tax item in the QuickBooks invoice settings first.',
+    description_invalid: 'A line description is empty or too long for QuickBooks.',
+    date_invalid: 'The invoice date or due date could not be determined.',
+};
+
+export function blockerText(blocker: SendBlocker): string {
+    return (OWN_BLOCKER_TEXT as Record<string, string>)[blocker]
+        ?? (SETTINGS_BLOCKER_TEXT as Record<string, string>)[blocker]
+        ?? (SETTINGS_PROBLEM_TEXT as Record<string, string>)[blocker]
+        ?? 'This invoice cannot be sent through QuickBooks right now.';
+}
+
+export const PROBLEM_TEXT: Record<SendProblem, string> = {
+    quickbooks_unavailable: 'QuickBooks could not be reached. Resume to continue from the last verified step.',
+    connection_changed: 'The QuickBooks connection changed during the send. It needs an administrator’s review.',
+    stale_object: 'The QuickBooks invoice was changed at the same moment. Resume to read it again and continue.',
+    create_rejected: 'QuickBooks refused to create the invoice. Nothing was created. It needs an administrator’s review.',
+    create_outcome_unknown: 'QuickBooks did not confirm whether it created the invoice. Resume to ask again with the same request — it can never create a second invoice.',
+    create_record_conflict: 'QuickBooks answered with an invoice FreezerIQ cannot record. It needs an administrator’s review.',
+    update_rejected: 'QuickBooks refused the recipient or payment options. Nothing was sent. It needs an administrator’s review.',
+    update_outcome_unknown: 'QuickBooks did not confirm an update. Resume to read the invoice again and continue.',
+    send_rejected: 'QuickBooks refused to email the invoice. Nothing was sent. Resume to try again with the same invoice.',
+    send_outcome_unknown: 'QuickBooks did not confirm the email. Resume to read the invoice again — it is never sent twice by FreezerIQ without checking.',
+    qbo_invoice_missing: 'The QuickBooks invoice can no longer be found. It needs an administrator’s review.',
+    qbo_invoice_changed: 'The QuickBooks invoice no longer matches what FreezerIQ sent.',
+    invoice_status_changed: 'QuickBooks emailed the invoice, but the FreezerIQ invoice was no longer a draft. It needs an administrator’s review.',
+    unexpected_email_status: 'QuickBooks reports the invoice was emailed at a step where FreezerIQ did not send it. Nothing more was sent. It needs an administrator’s review.',
+    unexpected_state: 'The send stopped in an unexpected state. It needs an administrator’s review.',
+    verification_failed_created: 'The new QuickBooks invoice did not match FreezerIQ exactly, so nothing was sent. The same QuickBooks invoice is kept for review.',
+    verification_failed_recipients: 'The QuickBooks invoice’s recipients did not match what you reviewed, so nothing was sent. It needs an administrator’s review.',
+    verification_failed_payment_options: 'The QuickBooks invoice did not match after its payment options were set, so nothing was sent. It needs an administrator’s review.',
+    verification_failed_sent: 'QuickBooks’ record of the email did not match what FreezerIQ expected. It needs an administrator’s review.',
+};
+
+export const STEP_TEXT: Record<InvoiceSendStep, string> = {
+    reserved: 'Creating the QuickBooks invoice',
+    created: 'QuickBooks invoice created and verified; adding recipients',
+    recipients_set: 'Recipients verified; setting payment options',
+    payment_options_set: 'Verified; asking QuickBooks to email the invoice',
+};
+
+export const SENT_MEANING = 'Sent means QuickBooks reports it emailed the invoice. It does not mean the email was delivered, and it does not mean the invoice was paid.';
+export const SEND_EXPLAINER = 'FreezerIQ creates this invoice in QuickBooks unsent, checks every line and total against FreezerIQ, adds the recipients, and only then asks QuickBooks to email it. If anything does not match, nothing is sent and the same QuickBooks invoice is kept for review.';
+
+export const INVALID_TEXT: Record<string, string> = {
+    recipient: 'Enter one valid email address for the recipient.',
+    cc: 'Enter valid CC addresses separated by commas (up to five, 100 characters in all, not the recipient), or leave it empty. A CC already on the QuickBooks invoice cannot be removed.',
+    review_token: 'Review the invoice again before sending.',
+};
+
+export const RECIPIENT_SOURCE_TEXT: Record<'assigned' | 'organization' | 'none', string> = {
+    assigned: 'Suggested: the campaign’s assigned coordinator.',
+    organization: 'Suggested: the organization’s contact on file (no usable coordinator email is assigned to this campaign).',
+    none: 'No coordinator or organization email is on file. Enter who should receive this invoice.',
+};
+
+/**
+ * The re-send is the ONLY thing that records a problem on an invoice that is already sent (every other step parks
+ * the lifecycle instead), and these two problems are known to be the re-send's own interruption: QuickBooks refused
+ * the corrected recipient, or did not confirm it. FreezerIQ never reached the send in either case, and a recipient
+ * update carries no money — so the plain reassurance below is provable. Every other problem keeps its own wording,
+ * including `qbo_invoice_changed`, which means the QuickBooks invoice itself no longer matches what was sent.
+ */
+export const RESEND_INTERRUPTED_TEXT = 'The re-send did not complete. Nothing was emailed again. Your QuickBooks invoice is unchanged financially.';
+export const RESEND_INTERRUPTION_DETAIL: Partial<Record<SendProblem, string>> = {
+    update_rejected: 'QuickBooks refused the corrected recipient, so the re-send stopped before sending.',
+    update_outcome_unknown: 'QuickBooks did not confirm the corrected recipient, so the re-send stopped before sending.',
+};
+
+/** What the invoice row's QuickBooks action says, from the three facts the invoice list carries. */
+export interface InvoiceRowSendState {
+    status: string;
+    qbo_doc_number: string | null;
+    delivery_error_type?: string | null;
+}
+
+export interface InvoiceRowAction {
+    label: string;
+    tone: 'neutral' | 'ok' | 'warn';
+}
+
+/**
+ * One visible, state-aware action per invoice row, instead of an icon that meant five different things:
+ * nothing started yet → review and send; a lifecycle that stopped part-way → resume the SAME invoice;
+ * one stopped FOR REVIEW → review it, because that state deliberately offers no resume; sent → view
+ * QuickBooks' own number; sent but QuickBooks reported a delivery problem → deal with that first.
+ */
+export function invoiceRowAction(send: InvoiceRowSendState | null | undefined): InvoiceRowAction {
+    if (!send) return { label: 'Review & send', tone: 'neutral' };
+    if (send.status === 'needs_review') return { label: 'Review QuickBooks send', tone: 'warn' };
+    if (send.status !== 'sent') return { label: 'Resume QuickBooks send', tone: 'warn' };
+    if (send.delivery_error_type) return { label: 'Review delivery issue', tone: 'warn' };
+    return { label: send.qbo_doc_number ? `View QuickBooks invoice #${send.qbo_doc_number}` : 'View QuickBooks invoice', tone: 'ok' };
+}
+
+export interface SendDialogView {
+    title: string;
+    tone: 'neutral' | 'ok' | 'warn' | 'bad';
+    messages: string[];
+    canSend: boolean;
+    canResume: boolean;
+    canCheckDelivery: boolean;
+    canResend: boolean;
+}
+
+const base: SendDialogView = { title: '', tone: 'neutral', messages: [], canSend: false, canResume: false, canCheckDelivery: false, canResend: false };
+
+export function sendDialogView(payload: InvoiceSendPayload | null): SendDialogView {
+    if (payload === null) return { ...base, title: 'Checking QuickBooks…' };
+    switch (payload.state) {
+        case 'disabled': return { ...base, title: 'QuickBooks is not available', messages: ['QuickBooks is not available in this environment.'] };
+        case 'error': return { ...base, title: 'Could not load', tone: 'bad', messages: ['FreezerIQ could not load this invoice’s QuickBooks state. Try again.'] };
+        case 'blocked': return { ...base, title: 'Cannot send through QuickBooks yet', tone: 'warn', messages: payload.blockers.map(blockerText) };
+        case 'ready': return { ...base, title: 'Review and send via QuickBooks', messages: [SEND_EXPLAINER, SENT_MEANING], canSend: true };
+        case 'in_progress':
+            return {
+                ...base,
+                title: payload.busy ? 'Sending through QuickBooks…' : 'Send through QuickBooks paused',
+                tone: payload.problem ? 'warn' : 'neutral',
+                messages: [STEP_TEXT[payload.step], ...(payload.problem ? [PROBLEM_TEXT[payload.problem]] : [])],
+                canResume: !payload.busy,
+            };
+        case 'needs_review':
+            return {
+                ...base,
+                title: 'Stopped — needs review',
+                tone: 'bad',
+                messages: [payload.problem ? PROBLEM_TEXT[payload.problem] : PROBLEM_TEXT.unexpected_state,
+                    'Nothing further is sent, the FreezerIQ invoice is not marked Sent, and no second QuickBooks invoice will be created.'],
+            };
+        case 'sent': {
+            const messages = [
+                payload.autoSent
+                    ? 'QuickBooks emailed this invoice when its verified online payment options were applied. FreezerIQ recorded that as the send and did not send it again.'
+                    : 'QuickBooks emailed this invoice.',
+                SENT_MEANING,
+            ];
+            if (payload.deliveryErrorType) messages.push(`QuickBooks reports a delivery problem (${payload.deliveryErrorType}). Correct the recipient and send the same invoice again.`);
+            if (payload.lastProblem) {
+                const interrupted = RESEND_INTERRUPTION_DETAIL[payload.lastProblem];
+                messages.push(interrupted
+                    ? `${RESEND_INTERRUPTED_TEXT} ${interrupted}`
+                    : `The last attempt to send it again did not complete: ${PROBLEM_TEXT[payload.lastProblem]}`);
+            }
+            return {
+                ...base,
+                title: payload.docNumber ? `Sent via QuickBooks — invoice ${payload.docNumber}` : 'Sent via QuickBooks',
+                tone: payload.deliveryErrorType ? 'warn' : 'ok',
+                messages,
+                canCheckDelivery: !payload.busy,
+                canResend: !payload.busy && payload.invoiceStatus === 'SENT',
+            };
+        }
+        default: return { ...base, title: 'Could not load', tone: 'bad' };
+    }
+}

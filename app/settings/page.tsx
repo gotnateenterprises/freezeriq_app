@@ -33,6 +33,7 @@ import FundraiserImporter from '@/components/FundraiserImporter';
 import { Database as DatabaseIcon } from 'lucide-react';
 import FundraiserTaxSettings from '@/components/settings/FundraiserTaxSettings';
 import QuickBooksConnectionCard from '@/components/settings/QuickBooksConnectionCard';
+import QuickBooksInvoiceSettingsCard from '@/components/settings/QuickBooksInvoiceSettingsCard';
 
 function AccountSecuritySection() {
     const [currentPassword, setCurrentPassword] = useState('');
@@ -606,6 +607,10 @@ export default function SettingsPage() {
                             {/* QB-INVOICE-1A: tenant admins only (the routes enforce it too), and never while viewing as another tenant. */}
                             {session?.user?.role === 'ADMIN' && !(session?.user as any)?.isViewingAsTenant && (
                                 <QuickBooksConnectionCard />
+                            )}
+                            {/* QB-INVOICE-1C: which of the tenant's own QuickBooks items and terms invoices use. Same gate. */}
+                            {session?.user?.role === 'ADMIN' && !(session?.user as any)?.isViewingAsTenant && (
+                                <QuickBooksInvoiceSettingsCard />
                             )}
                             <IntegrationItem
                                 name="Stripe Payments"

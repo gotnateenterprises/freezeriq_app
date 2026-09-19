@@ -34,24 +34,36 @@ const QB_FILES = [
     'components/settings/QuickBooksConnectionCard.tsx',
 ];
 
+// QB-INVOICE-1C (owner brief "QuickBooks Invoice Create + Verify + Send") deliberately added QuickBooks invoice
+// behaviour. The 1B guarantees below still hold for everything 1B built; where 1C legitimately crosses a 1B line,
+// the exact crossing is named here and its own boundaries are pinned in tests/qbInvoice1cScope.test.ts.
+const QB_INVOICE_1C_INVOICE_UI = [
+    'components/settings/QuickBooksInvoiceSettingsCard.tsx',
+    'lib/quickbooks/invoiceSendView.ts',
+    'lib/quickbooks/invoiceSettingsView.ts',
+];
+
 describe('QB-INVOICE-1B · no QuickBooks invoice behaviour exists', () => {
-    it('no source file builds a QuickBooks invoice, payment or send request', () => {
+    it('no source file builds a QuickBooks payment request, and only the Intuit client builds invoice or send requests (QB-INVOICE-1C)', () => {
         const offenders = SOURCE.filter((f) => {
             const code = strip(R(f));
-            return /\/v3\/company\/[^'"`]*\/(invoice|payment|salesreceipt|estimate|creditmemo)/i.test(code)
-                || (f.startsWith('lib/quickbooks/') && /['"`]\/(invoice|payment|salesreceipt|estimate|creditmemo)\b|\/send\b|sendInvoice|createInvoice|Invoice"\s*:/i.test(code));
+            const money = /\/v3\/company\/[^'"`]*\/(payment|salesreceipt|estimate|creditmemo)/i.test(code)
+                || (f.startsWith('lib/quickbooks/') && /['"`]\/(payment|salesreceipt|estimate|creditmemo)\b/i.test(code));
+            const invoice = /\/v3\/company\/[^'"`]*\/invoice/i.test(code)
+                || (f.startsWith('lib/quickbooks/') && /['"`]\/invoice\b|\/send\b|sendInvoice|createInvoice|Invoice"\s*:/i.test(code));
+            return money || (invoice && f !== 'lib/quickbooks/intuitClient.ts');
         });
         expect(offenders).toEqual([]);
     });
 
-    it('the invoice-link primitives are reachable from no route, page, component or other library', () => {
+    it('the invoice-link primitives are reachable only from the QB-INVOICE-1C send lifecycle — no route, page or component', () => {
         const users = SOURCE.filter((f) => f !== 'lib/quickbooks/invoiceLinks.ts'
             && /reserveQuickBooksInvoiceLink|recordQuickBooksInvoiceId|getQuickBooksInvoiceLink|quickBooksInvoiceLink\b|lib\/quickbooks\/invoiceLinks/.test(R(f)));
-        expect(users).toEqual([]);
+        expect(users).toEqual(['lib/quickbooks/invoiceSend.ts']);
     });
 
-    it('no QuickBooks UI offers to send, invoice or collect payment', () => {
-        for (const f of [...QB_FILES.filter((p) => p.endsWith('.tsx') || p.includes('View')), 'app/customers/[id]/page.tsx']) {
+    it('no 1A/1B QuickBooks UI offers to send, invoice or collect payment', () => {
+        for (const f of [...QB_FILES.filter((p) => (p.endsWith('.tsx') || p.includes('View')) && !QB_INVOICE_1C_INVOICE_UI.includes(p)), 'app/customers/[id]/page.tsx']) {
             const text = R(f);
             expect({ f, hit: /send via quickbooks|create quickbooks invoice|quickbooks invoice|pay now|record payment/i.test(strip(text)) && f !== 'app/customers/[id]/page.tsx' })
                 .toEqual({ f, hit: false });
@@ -75,21 +87,28 @@ describe('QB-INVOICE-1B · least privilege and data minimisation', () => {
         expect(SOURCE.filter((f) => /com\.intuit\.quickbooks\.payment/.test(strip(R(f))))).toEqual([]);
     });
 
-    it('no QuickBooks webhook: the QuickBooks routes are exactly the five known handlers', () => {
+    it('no QuickBooks webhook: the QuickBooks routes are exactly the five known handlers plus the two QB-INVOICE-1C routes', () => {
         const routes = walk('app/api/integrations/quickbooks').filter((f) => f.endsWith('route.ts')).sort();
         expect(routes).toEqual([
             'app/api/integrations/quickbooks/callback/route.ts',
             'app/api/integrations/quickbooks/connect/route.ts',
             'app/api/integrations/quickbooks/customers/[customerId]/route.ts',
             'app/api/integrations/quickbooks/disconnect/route.ts',
+            'app/api/integrations/quickbooks/invoice-settings/route.ts',
+            'app/api/integrations/quickbooks/invoices/[invoiceId]/route.ts',
             'app/api/integrations/quickbooks/status/route.ts',
         ]);
         expect(QB_FILES.filter((f) => /webhook|verifier|intuit-signature/i.test(strip(R(f))))).toEqual([]);
     });
 
     it('matching never uses email or any contact detail, and the organization is read for id and name only', () => {
-        for (const f of ['lib/quickbooks/customerLinks.ts', 'lib/quickbooks/intuitClient.ts']) {
-            expect({ f, hit: /email|PrimaryEmailAddr|contact_|phone|address/i.test(strip(R(f))) }).toEqual({ f, hit: false });
+        // QB-INVOICE-1C's invoice section of the Intuit client names invoice RECIPIENTS; customer lookup, read and
+        // create — everything customer MATCHING uses — stay free of any contact detail.
+        const client = R('lib/quickbooks/intuitClient.ts');
+        const customerSection = client.slice(client.indexOf('// ── QB-INVOICE-1B: Customer lookup'), client.indexOf('// ── QB-INVOICE-1C'));
+        expect(customerSection.length).toBeGreaterThan(1000);
+        for (const [f, text] of [['lib/quickbooks/customerLinks.ts', R('lib/quickbooks/customerLinks.ts')], ['lib/quickbooks/intuitClient.ts (customer section)', customerSection]]) {
+            expect({ f, hit: /email|PrimaryEmailAddr|contact_|phone|address/i.test(strip(text)) }).toEqual({ f, hit: false });
         }
         expect(strip(R('lib/quickbooks/customerLinks.ts'))).toMatch(/customer\.findFirst\(\{ where: \{ id: customerId, business_id: businessId \}, select: \{ id: true, name: true \} \}\)/);
     });
@@ -103,24 +122,27 @@ describe('QB-INVOICE-1B · least privilege and data minimisation', () => {
         }
     });
 
-    it('the Intuit client exports exactly the 1A calls plus Customer lookup, read and minimal create', () => {
+    it('the Intuit client exports exactly the 1A calls plus Customer lookup, read and minimal create — and the QB-INVOICE-1C invoice and setup calls', () => {
         const fns = Object.entries(intuitClient).filter(([, v]) => typeof v === 'function').map(([k]) => k).sort();
         expect(fns).toEqual([
-            'IntuitError', 'buildAuthorizationUrl', 'createCustomer', 'displayNameProblem', 'exchangeAuthorizationCode',
-            'fetchCompanyInfo', 'findCustomersByDisplayName', 'findInactiveCustomersByDisplayName', 'isValidRealmId', 'readCustomer', 'refreshAccessToken', 'revokeToken',
+            'IntuitError', 'assertUnsentInvoiceCreateBody', 'buildAuthorizationUrl', 'createCustomer', 'createQuickBooksInvoice', 'createQuickBooksServiceItem',
+            'displayNameProblem', 'exchangeAuthorizationCode', 'fetchCompanyInfo', 'findCustomersByDisplayName', 'findInactiveCustomersByDisplayName', 'isValidRealmId',
+            'listQuickBooksAccounts', 'listQuickBooksItems', 'listQuickBooksTerms', 'parseQuickBooksInvoice', 'readCustomer', 'readQuickBooksAccount', 'readQuickBooksInvoice',
+            'readQuickBooksItem', 'readQuickBooksPreferences', 'readQuickBooksTerm', 'refreshAccessToken', 'revokeToken', 'sendQuickBooksInvoice', 'updateQuickBooksInvoiceDelivery',
         ]);
     });
 
     it('the QuickBooks invoice-link model holds no money, tax, status or payment column', () => {
         const block = /model QuickBooksInvoiceLink \{[\s\S]*?\n\}/.exec(R('prisma/schema.prisma'))![0];
-        const fields = [...block.matchAll(/^\s{2}([a-z_]+)\s+\S/gm)].map((m) => m[1]).filter((f) => !['business', 'invoice', 'connection'].includes(f));
+        // QB-INVOICE-1C adds only the `send` back-relation (and a composite unique key) — no column.
+        const fields = [...block.matchAll(/^\s{2}([a-z_]+)\s+\S/gm)].map((m) => m[1]).filter((f) => !['business', 'invoice', 'connection', 'send'].includes(f));
         expect(fields.sort()).toEqual(['business_id', 'connection_id', 'created_at', 'created_by', 'id', 'invoice_id', 'qbo_invoice_id', 'qbo_linked_at', 'request_id']);
     });
 
     it('a connection generation holds non-secret evidence only — no token, realm id or anything derived from one', () => {
         const block = /model QuickBooksConnection \{[\s\S]*?\n\}/.exec(R('prisma/schema.prisma'))![0];
         const fields = [...block.matchAll(/^\s{2}([a-z_]+)\s+\S/gm)].map((m) => m[1])
-            .filter((f) => !['business', 'integration', 'customer_links', 'invoice_links'].includes(f));
+            .filter((f) => !['business', 'integration', 'customer_links', 'invoice_links', 'invoice_settings'].includes(f)); // invoice_settings: QB-INVOICE-1C back-relation
         expect(fields.sort()).toEqual(['authorized_at', 'authorized_by', 'business_id', 'company_name', 'created_at', 'environment', 'id', 'live_business_id', 'live_provider']);
         expect(strip(block)).not.toMatch(/realm|token|secret|fingerprint|hash/i);
     });
@@ -135,9 +157,11 @@ describe('QB-INVOICE-1B · history is never rewritten, and the V1 recording cont
         expect(writes).toEqual([{ f: 'lib/quickbooks/invoiceLinks.ts', data: 'qbo_invoice_id: input.qboInvoiceId, qbo_linked_at: input.now ?? new Date()' }]);
     });
 
-    it('a QuickBooks invoice id can only come from a create response: nothing queries, searches or reads QuickBooks invoices, and no route or UI accepts one', () => {
-        // The Intuit client's exact export list (above) contains no invoice call at all.
-        expect(SOURCE.filter((f) => /from\s+Invoice\b|\/invoice\//i.test(strip(R(f)).replace(/import[^;]*;/g, '')) && f.startsWith('lib/quickbooks/'))).toEqual([]);
+    it('a QuickBooks invoice id can only come from a create response: nothing queries or searches QuickBooks invoices, and no route or UI accepts one', () => {
+        // QB-INVOICE-1C reads an invoice ONLY by the id FreezerIQ's own create recorded, and only the Intuit client
+        // builds that path; no source anywhere selects from Invoice.
+        expect(SOURCE.filter((f) => /from\s+Invoice\b/i.test(strip(R(f)).replace(/import[^;]*;/g, '')))).toEqual([]);
+        expect(SOURCE.filter((f) => /\/invoice\//i.test(strip(R(f)).replace(/import[^;]*;/g, '')) && f.startsWith('lib/quickbooks/'))).toEqual(['lib/quickbooks/intuitClient.ts']);
         expect(SOURCE.filter((f) => (f.startsWith('app/') || f.startsWith('components/')) && /qbo_?invoice_?id|qboInvoiceId/i.test(R(f)))).toEqual([]);
         // recordQuickBooksInvoiceId is referenced by nothing outside its own module (see the reachability test above),
         // and its module documents the contract it must be called under.
@@ -151,10 +175,11 @@ describe('QB-INVOICE-1B · history is never rewritten, and the V1 recording cont
 describe('QB-INVOICE-1B · the migration is additive', () => {
     const MIGRATION = 'prisma/migrations/20260913120000_qb_invoice_1b_quickbooks_links/migration.sql';
 
-    it('is the only migration after f8073eb’s 25, and changes no existing column or row', () => {
+    it('is the 26th migration, after f8073eb’s 25 (followed only by QB-INVOICE-1C’s), and changes no existing column or row', () => {
         const dirs = readdirSync(join(ROOT, 'prisma/migrations')).filter((d) => /^\d{14}_/.test(d)).sort();
-        expect(dirs).toHaveLength(26);
-        expect(dirs[dirs.length - 1]).toBe('20260913120000_qb_invoice_1b_quickbooks_links');
+        expect(dirs).toHaveLength(27);
+        expect(dirs[25]).toBe('20260913120000_qb_invoice_1b_quickbooks_links');
+        expect(dirs[26]).toBe('20260915170000_qb_invoice_1c_invoice_send');
         const sql = R(MIGRATION).split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
         expect(sql).not.toMatch(/\bDROP\b|\bRENAME\b|ALTER\s+COLUMN|\bUPDATE\s+"|\bDELETE\s+FROM|\bINSERT\s+INTO|\bTRUNCATE\b/i);
         // Every ALTER TABLE adds a constraint to a NEW table; the only statement on an existing table is one unique index.

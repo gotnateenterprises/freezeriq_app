@@ -9,8 +9,11 @@
  *
  *   - ONE scope: com.intuit.quickbooks.accounting. Never payments, never openid.
  *   - Accounting API calls: CompanyInfo (read), and — QB-INVOICE-1B — Customer
- *     query/read and a DisplayName-only Customer create. Nothing here creates,
- *     sends or reads an invoice or a payment.
+ *     query/read and a DisplayName-only Customer create; and — QB-INVOICE-1C —
+ *     Preferences/Account/Item/Term reads, a confirmed Service-item create, and
+ *     one invoice's create (always unsent), read by its own id, recipient/payment-
+ *     option update and explicit send. Nothing here reads, creates or records a
+ *     payment, and nothing queries or searches invoices.
  *   - Credentials travel only in the Authorization header or a POST body — never
  *     in a URL, where they would land in access logs.
  *   - No error message, thrown value or log line ever contains a token, the
@@ -60,14 +63,23 @@ export type IntuitErrorKind =
     /** QB-INVOICE-1B: Fault 6240 — the DisplayName is already used by a customer, vendor or employee. */
     | 'duplicate_name'
     /** QB-INVOICE-1B: Intuit validated and refused the request (a 4xx Fault); nothing was created. */
-    | 'rejected';
+    | 'rejected'
+    /** QB-INVOICE-1C: Fault 610 — the object does not exist (or is not visible to this company). */
+    | 'not_found'
+    /** QB-INVOICE-1C: Fault 5010 — the SyncToken is stale; someone changed the object in between. Nothing was written. */
+    | 'stale_object';
 
 export class IntuitError extends Error {
     readonly kind: IntuitErrorKind;
     readonly status?: number;
     readonly intuitTid?: string;
+    /**
+     * QB-INVOICE-1C: Intuit's numeric Fault codes (e.g. "6000", "2380"), when the response carried
+     * a Fault. Codes only — never Intuit's message or detail text, which can echo request data.
+     */
+    readonly faultCodes?: string[];
 
-    constructor(kind: IntuitErrorKind, detail: { status?: number; intuitTid?: string } = {}) {
+    constructor(kind: IntuitErrorKind, detail: { status?: number; intuitTid?: string; faultCodes?: string[] } = {}) {
         // The message is built from the reason code only — never from a body.
         super(`Intuit request failed: ${kind}${detail.status ? ` (HTTP ${detail.status})` : ''}`);
         // tsconfig targets ES5, where extending Error loses the prototype chain and
@@ -77,6 +89,7 @@ export class IntuitError extends Error {
         this.kind = kind;
         this.status = detail.status;
         this.intuitTid = detail.intuitTid;
+        if (detail.faultCodes && detail.faultCodes.length) this.faultCodes = detail.faultCodes.filter((c) => /^[0-9A-Za-z-]{1,16}$/.test(c)).slice(0, 8);
     }
 }
 
@@ -490,4 +503,458 @@ export async function createCustomer(
     const c = parseCustomer(body?.Customer);
     if (!c) throw new IntuitError('malformed', { status: res.status, intuitTid: tid });
     return c;
+}
+
+// ── QB-INVOICE-1C: invoice create / read / update / send, and the setup reads ──────────────
+//
+// Facts relied on (Intuit Accounting API docs and the 1C sandbox spikes, 2026-09-15):
+//   - a POST carrying `requestid` is idempotent: a repeat returns the original response;
+//   - a SPARSE update applies only the fields sent — EXCEPT the four online-payment flags, which
+//     QuickBooks re-defaults to the company setting whenever an update omits them (verified: even a
+//     memo-only update flipped false -> true). So every invoice update built here restates all four,
+//     and `updateQuickBooksInvoiceDelivery` cannot be called without them;
+//   - `POST /invoice/{id}/send` with Content-Type application/octet-stream and no body sends to the
+//     invoice's BillEmail (+ BillEmailCc), sets EmailStatus=EmailSent and fills DeliveryInfo; a
+//     DeliveryErrorType can appear asynchronously a minute or two later;
+//   - QuickBooks auto-emails an API-created US invoice only when card or ACH payment is enabled ON THE
+//     INVOICE (both documented rule sets agree), which is why a create built here carries all four flags
+//     explicitly false, EmailStatus NotSet and no recipient at all — enforced below, not by callers;
+//   - HTTP 200 can still carry a Fault.
+// Nothing here queries or searches QuickBooks invoices: an invoice is read only by the id FreezerIQ's
+// own create returned (docs/ai/QUICKBOOKS_INTEGRATION.md §11.5 recording contract). Parsed results keep
+// an allowlist of fields; nothing is logged.
+
+const OBJECT_ID = /^[0-9]{1,32}$/;
+const MAX_EMAIL_FIELD = 100;
+const numOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const strOrNull = (v: unknown, max = 4000): string | null => (typeof v === 'string' ? v.slice(0, max) : null);
+const boolOrNull = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : null);
+const refValue = (v: any): string | null => (v && typeof v === 'object' && typeof v.value === 'string' && v.value.length <= 64 ? v.value : null);
+const emailOf = (v: any): string | null => (v && typeof v === 'object' && typeof v.Address === 'string' && v.Address.length > 0 ? v.Address.slice(0, 256) : null);
+
+/** Throws the IntuitError a failed Accounting response deserves. Writes pass `write` so a 200-with-Fault is AMBIGUOUS, not a refusal. */
+function throwFailure(res: Response, body: any, tid: string | undefined, write: boolean): never {
+    const codes = faultCodes(body) ?? [];
+    const detail = { status: res.status, intuitTid: tid, faultCodes: codes };
+    if (codes.includes('610')) throw new IntuitError('not_found', detail);
+    if (codes.includes('5010')) throw new IntuitError('stale_object', detail);
+    if (codes.includes('6240')) throw new IntuitError('duplicate_name', detail);
+    if (res.status >= 500) throw new IntuitError('http', detail);
+    if (res.ok) throw new IntuitError(write ? 'malformed' : 'http', detail);
+    throw new IntuitError('rejected', detail);
+}
+
+async function accountingJson(
+    config: QuickBooksConfig, accessToken: string, realmId: string, pathAndQuery: string, init: RequestInit, fetchImpl: FetchLike,
+): Promise<{ body: any; status: number; tid?: string }> {
+    const write = (init.method ?? 'GET').toUpperCase() !== 'GET';
+    const { res, body, tid } = await accountingRequest(config, accessToken, realmId, pathAndQuery, init, fetchImpl);
+    if (!res.ok || faultCodes(body)) throwFailure(res, body, tid, write);
+    if (!body || typeof body !== 'object') throw new IntuitError('malformed', { status: res.status, intuitTid: tid });
+    return { body, status: res.status, tid };
+}
+
+const mv = `minorversion=${QUICKBOOKS_MINOR_VERSION}`;
+
+async function queryEntities(
+    config: QuickBooksConfig, accessToken: string, realmId: string, query: string, entity: string, fetchImpl: FetchLike,
+): Promise<any[]> {
+    const { body, status, tid } = await accountingJson(config, accessToken, realmId, `/query?query=${encodeURIComponent(query)}&${mv}`, { method: 'GET' }, fetchImpl);
+    const qr = body.QueryResponse;
+    if (!qr || typeof qr !== 'object') throw new IntuitError('malformed', { status, intuitTid: tid });
+    if (qr[entity] === undefined) return [];
+    if (!Array.isArray(qr[entity])) throw new IntuitError('malformed', { status, intuitTid: tid });
+    return qr[entity];
+}
+
+async function readEntity(
+    config: QuickBooksConfig, accessToken: string, realmId: string, entityPath: string, id: string, entity: string, fetchImpl: FetchLike,
+): Promise<any | null> {
+    if (!OBJECT_ID.test(id)) throw new IntuitError('rejected');
+    try {
+        const { body, status, tid } = await accountingJson(config, accessToken, realmId, `/${entityPath}/${id}?${mv}`, { method: 'GET' }, fetchImpl);
+        if (!body[entity] || typeof body[entity] !== 'object') throw new IntuitError('malformed', { status, intuitTid: tid });
+        return body[entity];
+    } catch (e) {
+        if (e instanceof IntuitError && e.kind === 'not_found') return null;
+        throw e;
+    }
+}
+
+// ── setup reads (tenant mapping) ──
+
+export interface QuickBooksAccountSummary {
+    id: string;
+    name: string;
+    accountType: string;
+    accountSubType: string | null;
+    active: boolean;
+}
+
+export interface QuickBooksItemSummary {
+    id: string;
+    name: string;
+    /** Service | NonInventory | Inventory | Group | Category … */
+    type: string;
+    active: boolean;
+    /** The account an invoice line with this item posts to. */
+    incomeAccountId: string | null;
+}
+
+export interface QuickBooksTermSummary {
+    id: string;
+    name: string;
+    /** STANDARD (due N days after the invoice date) or DATE_DRIVEN. */
+    type: string | null;
+    dueDays: number | null;
+    active: boolean;
+}
+
+/** The company settings the 1C gates read. Addresses are reduced to presence; nothing else is kept. */
+export interface QuickBooksSalesPreferences {
+    /** A company-wide CC address exists; QuickBooks copies it onto any invoice whose own CC is blank. */
+    defaultCcPresent: boolean;
+    defaultBccPresent: boolean;
+    /** QuickBooks emails the company a copy of every customer email. */
+    emailCopyToCompany: boolean;
+    /** Preferences.SalesFormsPrefs.ETransactionPaymentEnabled — online payments are active for the company. */
+    onlinePaymentsEnabled: boolean;
+    /** Custom transaction numbers: QuickBooks then leaves DocNumber blank unless one is supplied. */
+    customTxnNumbers: boolean;
+    homeCurrency: string | null;
+    multiCurrencyEnabled: boolean;
+}
+
+function parseAccount(raw: any): QuickBooksAccountSummary | null {
+    if (!raw || typeof raw.Id !== 'string' || !OBJECT_ID.test(raw.Id) || typeof raw.Name !== 'string' || typeof raw.AccountType !== 'string') return null;
+    return { id: raw.Id, name: raw.Name.slice(0, 200), accountType: raw.AccountType.slice(0, 64), accountSubType: strOrNull(raw.AccountSubType, 64), active: raw.Active === true };
+}
+
+function parseItem(raw: any): QuickBooksItemSummary | null {
+    if (!raw || typeof raw.Id !== 'string' || !OBJECT_ID.test(raw.Id) || typeof raw.Name !== 'string' || typeof raw.Type !== 'string') return null;
+    return { id: raw.Id, name: raw.Name.slice(0, 200), type: raw.Type.slice(0, 32), active: raw.Active === true, incomeAccountId: refValue(raw.IncomeAccountRef) };
+}
+
+function parseTerm(raw: any): QuickBooksTermSummary | null {
+    if (!raw || typeof raw.Id !== 'string' || !OBJECT_ID.test(raw.Id) || typeof raw.Name !== 'string') return null;
+    return { id: raw.Id, name: raw.Name.slice(0, 200), type: strOrNull(raw.Type, 32), dueDays: numOrNull(raw.DueDays), active: raw.Active === true };
+}
+
+function parseAll<T>(rows: any[], parse: (r: any) => T | null): T[] {
+    return rows.map((r) => {
+        const p = parse(r);
+        if (!p) throw new IntuitError('malformed'); // fail closed, never skip
+        return p;
+    });
+}
+
+export async function readQuickBooksPreferences(config: QuickBooksConfig, accessToken: string, realmId: string, fetchImpl: FetchLike = fetch): Promise<QuickBooksSalesPreferences> {
+    const { body, status, tid } = await accountingJson(config, accessToken, realmId, `/preferences?${mv}`, { method: 'GET' }, fetchImpl);
+    const p = body.Preferences;
+    if (!p || typeof p !== 'object') throw new IntuitError('malformed', { status, intuitTid: tid });
+    const sf = p.SalesFormsPrefs ?? {};
+    const cp = p.CurrencyPrefs ?? {};
+    return {
+        defaultCcPresent: !!emailOf(sf.SalesEmailCc),
+        defaultBccPresent: !!emailOf(sf.SalesEmailBcc),
+        emailCopyToCompany: sf.EmailCopyToCompany === true,
+        onlinePaymentsEnabled: sf.ETransactionPaymentEnabled === true,
+        customTxnNumbers: sf.CustomTxnNumbers === true,
+        homeCurrency: refValue(cp.HomeCurrency),
+        multiCurrencyEnabled: cp.MultiCurrencyEnabled === true,
+    };
+}
+
+/** Active accounts (QuickBooks' default query returns active name-list entities only). */
+export async function listQuickBooksAccounts(config: QuickBooksConfig, accessToken: string, realmId: string, fetchImpl: FetchLike = fetch): Promise<QuickBooksAccountSummary[]> {
+    return parseAll(await queryEntities(config, accessToken, realmId, 'select * from Account maxresults 1000', 'Account', fetchImpl), parseAccount);
+}
+
+/** Active items. */
+export async function listQuickBooksItems(config: QuickBooksConfig, accessToken: string, realmId: string, fetchImpl: FetchLike = fetch): Promise<QuickBooksItemSummary[]> {
+    return parseAll(await queryEntities(config, accessToken, realmId, 'select * from Item maxresults 1000', 'Item', fetchImpl), parseItem);
+}
+
+/** Active payment terms. */
+export async function listQuickBooksTerms(config: QuickBooksConfig, accessToken: string, realmId: string, fetchImpl: FetchLike = fetch): Promise<QuickBooksTermSummary[]> {
+    return parseAll(await queryEntities(config, accessToken, realmId, 'select * from Term maxresults 200', 'Term', fetchImpl), parseTerm);
+}
+
+export async function readQuickBooksAccount(config: QuickBooksConfig, accessToken: string, realmId: string, accountId: string, fetchImpl: FetchLike = fetch): Promise<QuickBooksAccountSummary | null> {
+    const raw = await readEntity(config, accessToken, realmId, 'account', accountId, 'Account', fetchImpl);
+    if (raw === null) return null;
+    const a = parseAccount(raw);
+    if (!a || a.id !== accountId) throw new IntuitError('malformed');
+    return a;
+}
+
+export async function readQuickBooksItem(config: QuickBooksConfig, accessToken: string, realmId: string, itemId: string, fetchImpl: FetchLike = fetch): Promise<QuickBooksItemSummary | null> {
+    const raw = await readEntity(config, accessToken, realmId, 'item', itemId, 'Item', fetchImpl);
+    if (raw === null) return null;
+    const i = parseItem(raw);
+    if (!i || i.id !== itemId) throw new IntuitError('malformed');
+    return i;
+}
+
+export async function readQuickBooksTerm(config: QuickBooksConfig, accessToken: string, realmId: string, termId: string, fetchImpl: FetchLike = fetch): Promise<QuickBooksTermSummary | null> {
+    const raw = await readEntity(config, accessToken, realmId, 'term', termId, 'Term', fetchImpl);
+    if (raw === null) return null;
+    const t = parseTerm(raw);
+    if (!t || t.id !== termId) throw new IntuitError('malformed');
+    return t;
+}
+
+/**
+ * Creates a non-taxable Service item that posts to `incomeAccountId` — called ONLY after an explicit
+ * tenant confirmation (lib/quickbooks/invoiceSettings.ts). Outcomes as createCustomer: 'duplicate_name'
+ * and 'rejected' created nothing; 'network' / 5xx 'http' / 'malformed' are AMBIGUOUS.
+ */
+export async function createQuickBooksServiceItem(
+    config: QuickBooksConfig, accessToken: string, realmId: string,
+    input: { name: string; incomeAccountId: string }, requestId: string, fetchImpl: FetchLike = fetch,
+): Promise<QuickBooksItemSummary> {
+    if (displayNameProblem(input.name) || !OBJECT_ID.test(input.incomeAccountId) || !REQUEST_ID.test(requestId)) throw new IntuitError('rejected');
+    const { body, status, tid } = await accountingJson(config, accessToken, realmId, `/item?${mv}&requestid=${encodeURIComponent(requestId)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ Name: input.name, Type: 'Service', Taxable: false, IncomeAccountRef: { value: input.incomeAccountId } }),
+    }, fetchImpl);
+    const item = parseItem(body.Item);
+    if (!item) throw new IntuitError('malformed', { status, intuitTid: tid });
+    return item;
+}
+
+// ── invoices ──
+
+export interface QuickBooksPaymentFlags {
+    card: boolean;
+    ach: boolean;
+    paypal: boolean;
+    affirm: boolean;
+}
+
+export const PAYMENT_FLAGS_OFF: Readonly<QuickBooksPaymentFlags> = Object.freeze({ card: false, ach: false, paypal: false, affirm: false });
+
+export interface QuickBooksInvoiceLineSnapshot {
+    detailType: string;
+    amount: number | null;
+    description: string | null;
+    itemId: string | null;
+    /** The account the line actually posts to, as QuickBooks reports it. */
+    itemAccountId: string | null;
+    qty: number | null;
+    unitPrice: number | null;
+    taxCode: string | null;
+}
+
+/** An allowlisted view of a QuickBooks invoice — everything the read-back contracts check, nothing else. */
+export interface QuickBooksInvoiceSnapshot {
+    id: string;
+    syncToken: string;
+    docNumber: string | null;
+    txnDate: string | null;
+    dueDate: string | null;
+    customerId: string | null;
+    currency: string | null;
+    termId: string | null;
+    billEmail: string | null;
+    billEmailCc: string | null;
+    billEmailBcc: string | null;
+    emailStatus: string | null;
+    delivery: { type: string | null; time: string | null; errorType: string | null } | null;
+    eInvoiceStatus: string | null;
+    totalAmt: number | null;
+    balance: number | null;
+    totalTax: number | null;
+    taxLineCount: number;
+    txnTaxCodeId: string | null;
+    payment: { card: boolean | null; ach: boolean | null; paypal: boolean | null; affirm: boolean | null };
+    customerMemo: string | null;
+    lines: QuickBooksInvoiceLineSnapshot[];
+}
+
+export function parseQuickBooksInvoice(raw: any): QuickBooksInvoiceSnapshot | null {
+    if (!raw || typeof raw !== 'object' || typeof raw.Id !== 'string' || !OBJECT_ID.test(raw.Id) || typeof raw.SyncToken !== 'string') return null;
+    if (raw.Line !== undefined && !Array.isArray(raw.Line)) return null;
+    const di = raw.DeliveryInfo;
+    const tt = raw.TxnTaxDetail;
+    return {
+        id: raw.Id,
+        syncToken: raw.SyncToken.slice(0, 32),
+        docNumber: strOrNull(raw.DocNumber, 32),
+        txnDate: strOrNull(raw.TxnDate, 32),
+        dueDate: strOrNull(raw.DueDate, 32),
+        customerId: refValue(raw.CustomerRef),
+        currency: refValue(raw.CurrencyRef),
+        termId: refValue(raw.SalesTermRef),
+        billEmail: emailOf(raw.BillEmail),
+        billEmailCc: emailOf(raw.BillEmailCc),
+        billEmailBcc: emailOf(raw.BillEmailBcc),
+        emailStatus: strOrNull(raw.EmailStatus, 32),
+        delivery: di && typeof di === 'object' ? { type: strOrNull(di.DeliveryType, 32), time: strOrNull(di.DeliveryTime, 64), errorType: strOrNull(di.DeliveryErrorType, 64) } : null,
+        eInvoiceStatus: strOrNull(raw.EInvoiceStatus, 32),
+        totalAmt: numOrNull(raw.TotalAmt),
+        balance: numOrNull(raw.Balance),
+        totalTax: tt && typeof tt === 'object' ? numOrNull(tt.TotalTax) : null,
+        taxLineCount: tt && Array.isArray(tt.TaxLine) ? tt.TaxLine.length : 0,
+        txnTaxCodeId: tt && typeof tt === 'object' ? refValue(tt.TxnTaxCodeRef) : null,
+        payment: {
+            card: boolOrNull(raw.AllowOnlineCreditCardPayment),
+            ach: boolOrNull(raw.AllowOnlineACHPayment),
+            paypal: boolOrNull(raw.AllowOnlinePayPalPayment),
+            affirm: boolOrNull(raw.AllowOnlineAffirmPayment),
+        },
+        customerMemo: raw.CustomerMemo && typeof raw.CustomerMemo === 'object' ? strOrNull(raw.CustomerMemo.value, 1000) : null,
+        lines: (raw.Line ?? []).map((l: any) => ({
+            detailType: typeof l?.DetailType === 'string' ? l.DetailType.slice(0, 64) : 'Unknown',
+            amount: numOrNull(l?.Amount),
+            description: strOrNull(l?.Description),
+            itemId: refValue(l?.SalesItemLineDetail?.ItemRef),
+            itemAccountId: refValue(l?.SalesItemLineDetail?.ItemAccountRef),
+            qty: numOrNull(l?.SalesItemLineDetail?.Qty),
+            unitPrice: numOrNull(l?.SalesItemLineDetail?.UnitPrice),
+            taxCode: refValue(l?.SalesItemLineDetail?.TaxCodeRef),
+        })),
+    };
+}
+
+/** The ONLY invoice create body this module sends: no recipient, EmailStatus NotSet, every online-payment flag false. */
+export interface QuickBooksInvoiceCreateBody {
+    CustomerRef: { value: string };
+    TxnDate: string;
+    SalesTermRef: { value: string };
+    PrivateNote: string;
+    CustomerMemo?: { value: string };
+    EmailStatus: 'NotSet';
+    AllowOnlineCreditCardPayment: false;
+    AllowOnlineACHPayment: false;
+    AllowOnlinePayPalPayment: false;
+    AllowOnlineAffirmPayment: false;
+    Line: Array<{
+        DetailType: 'SalesItemLineDetail';
+        Amount: number;
+        Description: string;
+        SalesItemLineDetail: { ItemRef: { value: string }; Qty: number; UnitPrice: number; TaxCodeRef: { value: 'NON' } };
+    }>;
+}
+
+const CREATE_KEYS = ['CustomerRef', 'TxnDate', 'SalesTermRef', 'PrivateNote', 'CustomerMemo', 'EmailStatus',
+    'AllowOnlineCreditCardPayment', 'AllowOnlineACHPayment', 'AllowOnlinePayPalPayment', 'AllowOnlineAffirmPayment', 'Line'];
+const PAYMENT_FLAG_FIELDS = ['AllowOnlineCreditCardPayment', 'AllowOnlineACHPayment', 'AllowOnlinePayPalPayment', 'AllowOnlineAffirmPayment'];
+
+/**
+ * Defence in depth for the send-safety rule: refuses — before any request — a create body that names a
+ * recipient, a DocNumber, native tax, a discount, a non-NotSet EmailStatus, any payment flag that is not
+ * explicitly false, or a line that is not a NON-taxable item line.
+ */
+export function assertUnsentInvoiceCreateBody(body: QuickBooksInvoiceCreateBody): void {
+    const b = body as any;
+    const bad = (why: string): never => { throw new IntuitError('rejected', { faultCodes: [`local-${why}`] }); };
+    if (!b || typeof b !== 'object') bad('body');
+    for (const k of Object.keys(b)) if (CREATE_KEYS.indexOf(k) === -1) bad('field');
+    if (b.EmailStatus !== 'NotSet') bad('email-status');
+    for (const f of PAYMENT_FLAG_FIELDS) if (b[f] !== false) bad('payment-flag');
+    if (!OBJECT_ID.test(b.CustomerRef?.value ?? '') || !OBJECT_ID.test(b.SalesTermRef?.value ?? '') || !/^\d{4}-\d{2}-\d{2}$/.test(b.TxnDate ?? '')) bad('header');
+    if (!Array.isArray(b.Line) || b.Line.length === 0) bad('lines');
+    for (const l of b.Line) {
+        if (l?.DetailType !== 'SalesItemLineDetail' || Object.keys(l).some((k) => ['DetailType', 'Amount', 'Description', 'SalesItemLineDetail'].indexOf(k) === -1)) bad('line-type');
+        const d = l.SalesItemLineDetail;
+        if (!d || Object.keys(d).some((k) => ['ItemRef', 'Qty', 'UnitPrice', 'TaxCodeRef'].indexOf(k) === -1)) bad('line-detail');
+        if (d.TaxCodeRef?.value !== 'NON' || !OBJECT_ID.test(d.ItemRef?.value ?? '')) bad('line-tax-code');
+        if (![l.Amount, d.Qty, d.UnitPrice].every((n) => typeof n === 'number' && Number.isFinite(n))) bad('line-money');
+        if (typeof l.Description !== 'string' || l.Description.length === 0 || l.Description.length > 4000) bad('line-description');
+    }
+    if (typeof b.PrivateNote !== 'string' || b.PrivateNote.length > 4000) bad('private-note');
+    if (b.CustomerMemo !== undefined && (typeof b.CustomerMemo?.value !== 'string' || b.CustomerMemo.value.length > 1000)) bad('memo');
+}
+
+/** Recipients + online-payment options for a SPARSE update. Every field is always sent, flags included. */
+export interface QuickBooksInvoiceDeliveryFields {
+    billEmail: string;
+    /** One address or a comma-separated list; null leaves any existing CC untouched (V1 never clears one). */
+    billEmailCc: string | null;
+    payment: QuickBooksPaymentFlags;
+}
+
+/** One RFC 5322-style mailbox (local@domain), deliberately conservative. */
+export const QUICKBOOKS_RECIPIENT = /^[A-Za-z0-9.!#$%&*+/=?^_{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
+
+function deliveryBody(id: string, syncToken: string, f: QuickBooksInvoiceDeliveryFields): Record<string, unknown> {
+    const flags = [f?.payment?.card, f?.payment?.ach, f?.payment?.paypal, f?.payment?.affirm];
+    if (!flags.every((x) => typeof x === 'boolean')) throw new IntuitError('rejected', { faultCodes: ['local-payment-flags-incomplete'] });
+    if (typeof f.billEmail !== 'string' || f.billEmail.length > MAX_EMAIL_FIELD || !QUICKBOOKS_RECIPIENT.test(f.billEmail)) throw new IntuitError('rejected', { faultCodes: ['local-recipient'] });
+    if (f.billEmailCc !== null && (typeof f.billEmailCc !== 'string' || f.billEmailCc.length > MAX_EMAIL_FIELD
+        || !f.billEmailCc.split(',').map((s) => s.trim()).every((s) => QUICKBOOKS_RECIPIENT.test(s)))) throw new IntuitError('rejected', { faultCodes: ['local-cc'] });
+    return {
+        Id: id, SyncToken: syncToken, sparse: true,
+        BillEmail: { Address: f.billEmail },
+        ...(f.billEmailCc !== null ? { BillEmailCc: { Address: f.billEmailCc } } : {}),
+        AllowOnlineCreditCardPayment: f.payment.card,
+        AllowOnlineACHPayment: f.payment.ach,
+        AllowOnlinePayPalPayment: f.payment.paypal,
+        AllowOnlineAffirmPayment: f.payment.affirm,
+    };
+}
+
+function invoiceFrom(body: any, status: number, tid?: string): QuickBooksInvoiceSnapshot {
+    const inv = parseQuickBooksInvoice(body?.Invoice);
+    if (!inv) throw new IntuitError('malformed', { status, intuitTid: tid });
+    return inv;
+}
+
+/**
+ * Creates the UNSENT QuickBooks invoice. `requestId` must be the invoice link's reserved idempotency key.
+ * 'rejected' created nothing; 'network', 5xx 'http' and 'malformed' are AMBIGUOUS — repeat with the same requestId.
+ */
+export async function createQuickBooksInvoice(
+    config: QuickBooksConfig, accessToken: string, realmId: string,
+    body: QuickBooksInvoiceCreateBody, requestId: string, fetchImpl: FetchLike = fetch,
+): Promise<QuickBooksInvoiceSnapshot> {
+    if (!REQUEST_ID.test(requestId)) throw new IntuitError('rejected', { faultCodes: ['local-request-id'] });
+    assertUnsentInvoiceCreateBody(body);
+    const r = await accountingJson(config, accessToken, realmId, `/invoice?${mv}&requestid=${encodeURIComponent(requestId)}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, fetchImpl);
+    return invoiceFrom(r.body, r.status, r.tid);
+}
+
+/** Reads one QuickBooks invoice by the id FreezerIQ's own create returned; null when QuickBooks reports it missing (610). */
+export async function readQuickBooksInvoice(
+    config: QuickBooksConfig, accessToken: string, realmId: string, qboInvoiceId: string, fetchImpl: FetchLike = fetch,
+): Promise<QuickBooksInvoiceSnapshot | null> {
+    const raw = await readEntity(config, accessToken, realmId, 'invoice', qboInvoiceId, 'Invoice', fetchImpl);
+    if (raw === null) return null;
+    const inv = parseQuickBooksInvoice(raw);
+    if (!inv || inv.id !== qboInvoiceId) throw new IntuitError('malformed');
+    return inv;
+}
+
+/**
+ * Sparse update of recipients and online-payment options ONLY — nothing financial is ever sent. The four
+ * payment flags are always restated. 'stale_object' (5010) wrote nothing; 'network'/5xx/'malformed' are ambiguous.
+ */
+export async function updateQuickBooksInvoiceDelivery(
+    config: QuickBooksConfig, accessToken: string, realmId: string,
+    input: { id: string; syncToken: string; fields: QuickBooksInvoiceDeliveryFields }, requestId: string, fetchImpl: FetchLike = fetch,
+): Promise<QuickBooksInvoiceSnapshot> {
+    if (!OBJECT_ID.test(input.id) || !/^[0-9]{1,16}$/.test(input.syncToken) || !REQUEST_ID.test(requestId)) throw new IntuitError('rejected', { faultCodes: ['local-update'] });
+    const body = deliveryBody(input.id, input.syncToken, input.fields);
+    const r = await accountingJson(config, accessToken, realmId, `/invoice?${mv}&requestid=${encodeURIComponent(requestId)}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, fetchImpl);
+    const inv = invoiceFrom(r.body, r.status, r.tid);
+    if (inv.id !== input.id) throw new IntuitError('malformed', { status: r.status, intuitTid: r.tid });
+    return inv;
+}
+
+/**
+ * QuickBooks' explicit send, to the invoice's own BillEmail and BillEmailCc (never a `sendTo` override).
+ * A Fault (e.g. 2380: no email address) sent nothing; 'network'/5xx/'malformed' are AMBIGUOUS — read back.
+ */
+export async function sendQuickBooksInvoice(
+    config: QuickBooksConfig, accessToken: string, realmId: string, qboInvoiceId: string, fetchImpl: FetchLike = fetch,
+): Promise<QuickBooksInvoiceSnapshot> {
+    if (!OBJECT_ID.test(qboInvoiceId)) throw new IntuitError('rejected', { faultCodes: ['local-invoice-id'] });
+    const r = await accountingJson(config, accessToken, realmId, `/invoice/${qboInvoiceId}/send?${mv}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' } }, fetchImpl);
+    const inv = invoiceFrom(r.body, r.status, r.tid);
+    if (inv.id !== qboInvoiceId) throw new IntuitError('malformed', { status: r.status, intuitTid: r.tid });
+    return inv;
 }

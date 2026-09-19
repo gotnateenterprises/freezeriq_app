@@ -108,6 +108,9 @@ model Business {
   // QB-INVOICE-1B
   quickbooks_invoice_links QuickBooksInvoiceLink[]
   quickbooks_connections   QuickBooksConnection[]
+  // QB-INVOICE-1C
+  quickbooks_invoice_settings QuickBooksInvoiceSettings?
+  quickbooks_invoice_sends    QuickBooksInvoiceSend[]
 
   @@map("businesses")
 }
@@ -136,6 +139,8 @@ model Integration {
   quickbooks_connection     QuickBooksConnection?
   // Customer links, which Forget (deleting this row) deletes.
   quickbooks_customer_links QuickBooksCustomerLink[]
+  // QB-INVOICE-1C: invoice settings, which Forget deletes the same way.
+  quickbooks_invoice_settings QuickBooksInvoiceSettings?
 
   @@id([business_id, provider])
   @@map("integrations")
@@ -1026,6 +1031,8 @@ model Invoice {
   customer                  Customer      @relation(fields: [customer_id], references: [id], onDelete: Cascade)
   // QB-INVOICE-1B: QuickBooks invoice links (created by QB-INVOICE-1C, never by 1B).
   quickbooks_invoice_links  QuickBooksInvoiceLink[]
+  // QB-INVOICE-1C: the "Send via QuickBooks" lifecycle of this invoice (at most one).
+  quickbooks_invoice_send   QuickBooksInvoiceSend?
 
   // QB-INVOICE-1B: composite parent key so quickbooks_invoice_links can reference
   // (business_id, invoice_id) and Postgres enforces same-tenant ownership. It
@@ -2565,6 +2572,8 @@ model QuickBooksConnection {
   integration    Integration?             @relation(fields: [live_business_id, live_provider], references: [business_id, provider], onDelete: SetNull, onUpdate: NoAction)
   customer_links QuickBooksCustomerLink[]
   invoice_links  QuickBooksInvoiceLink[]
+  /// QB-INVOICE-1C: the tenant's invoice settings, only ever bound to the LIVE generation.
+  invoice_settings QuickBooksInvoiceSettings[]
 
   /// At most one LIVE generation per tenant (ended generations have NULLs, which never clash).
   @@unique([live_business_id, live_provider])
@@ -2658,7 +2667,138 @@ model QuickBooksInvoiceLink {
   /// Restrict: while an invoice link references a generation, the database refuses to delete it.
   connection QuickBooksConnection @relation(fields: [business_id, connection_id], references: [business_id, id], onDelete: Restrict, onUpdate: NoAction)
 
+  /// QB-INVOICE-1C: the send lifecycle of the linked invoice (at most one; never outlives its link).
+  send       QuickBooksInvoiceSend?
+
   /// One FreezerIQ invoice per QuickBooks invoice inside a generation.
   @@unique([connection_id, qbo_invoice_id])
+  /// QB-INVOICE-1C: FK target for the send lifecycle. Cannot fail — invoice_id is already unique.
+  @@unique([business_id, invoice_id])
   @@map("quickbooks_invoice_links")
+}
+
+/// QB-INVOICE-1C — how a tenant's QuickBooks invoices are built. Every id names one of the tenant's OWN
+/// QuickBooks objects; FreezerIQ never creates an account, and creates an item only after an explicit
+/// tenant confirmation (lib/quickbooks/invoiceSettings.ts). Ids only — names are read live for display.
+///
+/// Bound to the LIVE connection generation exactly like customer links: Forget deletes the integrations
+/// row and with it these settings, and a new generation (even for the same company) must be set up again.
+/// The account ids are the accounts each item posted to when the settings were verified; every send
+/// re-reads the items and refuses if an item now posts elsewhere, and every read-back re-proves it per line.
+model QuickBooksInvoiceSettings {
+  business_id        String   @id
+  /// Always 'quickbooks' (CHECK). Completes the composite FKs to integrations and the live generation.
+  provider           String   @default("quickbooks")
+  connection_id      String
+  /// The one generic fundraiser sales item (Service/NonInventory) and the Income account it posts to.
+  sales_item_id      String
+  sales_account_id   String
+  /// The organization-share item and its account (V1: Income › DiscountsRefundsGiven, contra-revenue). Both or neither (CHECK).
+  share_item_id      String?
+  share_account_id   String?
+  /// The supporter-tax item and its Other Current Liability account. Both or neither (CHECK).
+  tax_item_id        String?
+  tax_account_id     String?
+  /// A STANDARD QuickBooks term and its due days (QuickBooks derives DueDate = TxnDate + due days).
+  term_id            String
+  term_due_days      Int
+  /// Online payment options applied — only after verification — to invoices FreezerIQ sends. PayPal and Affirm are never enabled in V1.
+  allow_online_card  Boolean  @default(false)
+  allow_online_ach   Boolean  @default(false)
+  /// Optional CC addresses (comma-separated) prefilled in every send review; the tenant can change them there. Never a BCC.
+  default_cc         String?
+  updated_by         String?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  business    Business             @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  /// Forget deletes the integrations row, and with it these settings.
+  integration Integration          @relation(fields: [business_id, provider], references: [business_id, provider], onDelete: Cascade, onUpdate: NoAction)
+  /// Only the tenant's LIVE generation (an ended generation's live_* pair is NULL).
+  connection  QuickBooksConnection @relation(fields: [business_id, provider, connection_id], references: [live_business_id, live_provider, id], onDelete: Cascade, onUpdate: NoAction, map: "quickbooks_invoice_settings_live_connection_fkey")
+
+  /// Required by the one-to-one relation to integrations; business_id alone is already the key.
+  @@unique([business_id, provider])
+  @@map("quickbooks_invoice_settings")
+}
+
+/// QB-INVOICE-1C — where a "Send via QuickBooks" lifecycle stands. Every step is verified by reading the
+/// QuickBooks invoice back before the next one runs (lib/quickbooks/invoiceContract.ts).
+enum QuickBooksInvoiceSendStatus {
+  /// The invoice link (and its idempotency key) is reserved; the create may be in flight or not yet sent.
+  reserved
+  /// The QuickBooks invoice exists and its read-back passed: unsent, no recipient, every payment flag false.
+  created
+  /// Recipients were written and verified; still unsent, flags still false.
+  recipients_set
+  /// Online payment options were written and verified; still unsent.
+  payment_options_set
+  /// QuickBooks reports the invoice sent (explicitly, or during payment configuration). Not delivery, not payment.
+  sent
+  /// Fail-closed stop: a read-back failed, or the state is ambiguous. Nothing further happens until an admin reviews it.
+  needs_review
+}
+
+/// QB-INVOICE-1C — the send lifecycle of ONE FreezerIQ invoice's one QuickBooks invoice.
+///
+/// It never outlives its invoice link (RESTRICT) and never holds money: the amounts stay on the FreezerIQ
+/// invoice, and `review_hash` binds the lifecycle to the exact create body and read-back expectation, the
+/// recipients and the payment options the tenant reviewed. The REVIEW is stored (mapping, date, recipients,
+/// options) so a resume or re-send is checked against what was authorized, not against settings changed since.
+/// A lease (CAS on lease_id) lets only one request drive the lifecycle at a time.
+/// FreezerIQ's invoice becomes SENT in the same transaction that records status 'sent'.
+model QuickBooksInvoiceSend {
+  id                          String                      @id @default(uuid())
+  business_id                 String
+  invoice_id                  String                      @unique
+  status                      QuickBooksInvoiceSendStatus
+  /// sha256 over the reviewed create body + read-back expectation + payment options + recipients (not a secret).
+  review_hash                 String
+  recipient_to                String
+  /// One address or a comma-separated list ("a@x, b@y"), exactly as written to QuickBooks.
+  recipient_cc                String?
+  allow_online_card           Boolean
+  allow_online_ach            Boolean
+  /// The tenant-local invoice date (YYYY-MM-DD) sent at create; every later read-back is checked against it.
+  txn_date                    String
+  /// The reviewed QuickBooks object ids (items, accounts, term + due days). Ids only — no names, no money.
+  mapping                     Json
+  /// QuickBooks' own number for the invoice, recorded at create (human reference only; the link's qbo_invoice_id is authoritative).
+  qbo_doc_number              String?
+  qbo_sync_token              String?
+  lease_id                    String?
+  lease_until                 DateTime?
+  /// Bumped for every recipient/payment update, so each update carries its own Intuit requestid.
+  revision                    Int                         @default(0)
+  create_requested_at         DateTime?
+  created_verified_at         DateTime?
+  recipients_verified_at      DateTime?
+  payment_options_verified_at DateTime?
+  send_requested_at           DateTime?
+  /// QuickBooks' DeliveryTime for the (latest) send.
+  sent_at                     DateTime?
+  /// True when QuickBooks emailed the invoice while its verified payment options were being applied.
+  auto_sent                   Boolean                     @default(false)
+  send_count                  Int                         @default(0)
+  /// QuickBooks' DeliveryErrorType from the latest delivery check (e.g. Undeliverable). Never changes PAID.
+  delivery_error_type         String?
+  delivery_checked_at         DateTime?
+  /// Why the lifecycle is stopped or waiting (a code, never a name, email or amount).
+  problem                     String?
+  problem_detail              String?
+  problem_at                  DateTime?
+  started_by                  String?
+  sent_by                     String?
+  created_at                  DateTime                    @default(now())
+  updated_at                  DateTime                    @updatedAt
+
+  business Business              @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  /// NoAction: an invoice with a send lifecycle cannot be deleted on its own.
+  invoice  Invoice               @relation(fields: [business_id, invoice_id], references: [business_id, id], onDelete: NoAction, onUpdate: NoAction, map: "quickbooks_invoice_sends_invoice_fkey")
+  /// Restrict: the lifecycle belongs to the invoice's one QuickBooks link.
+  link     QuickBooksInvoiceLink @relation(fields: [business_id, invoice_id], references: [business_id, invoice_id], onDelete: Restrict, onUpdate: NoAction, map: "quickbooks_invoice_sends_link_fkey")
+
+  /// Required by the one-to-one relations; invoice_id alone is already unique.
+  @@unique([business_id, invoice_id])
+  @@map("quickbooks_invoice_sends")
 }

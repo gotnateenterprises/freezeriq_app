@@ -93,6 +93,9 @@ describe('1. schema and migration', () => {
             // QB-INVOICE-1B: QuickBooks connection identity + customer links + invoice-link
             // foundation. Additive; authorized by the owner's QB-INVOICE-1B brief.
             '20260913120000_qb_invoice_1b_quickbooks_links',
+            // QB-INVOICE-1C: QuickBooks invoice settings + the verified send lifecycle. Additive;
+            // authorized by the owner's QB-INVOICE-1C brief.
+            '20260915170000_qb_invoice_1c_invoice_send',
         ]);
     });
 });

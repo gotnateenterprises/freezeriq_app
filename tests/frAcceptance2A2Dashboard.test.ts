@@ -345,7 +345,14 @@ describe('this patch changed presentation only', () => {
         //       one unique index on invoices (business_id, id); no existing column or
         //       row changes, no backfill. Applying it to Production is gated on owner
         //       review and must precede the code that queries the new tables.
-        expect(migrations).toHaveLength(26);
+        //   27  QB-INVOICE-1C QuickBooks invoice settings and the "Send via QuickBooks"
+        //       lifecycle. Required by the owner's QB-INVOICE-1C brief ("QuickBooks Invoice
+        //       Create + Verify + Send"): tenant mapping and a lease-guarded, verified send
+        //       lifecycle. Additive: two new tables, one enum and one unique index on
+        //       quickbooks_invoice_links (business_id, invoice_id); no existing column or row
+        //       changes, no backfill. Applying it to Production is gated on owner review and
+        //       must precede the code that queries the new tables.
+        expect(migrations).toHaveLength(27);
         expect(migrations[15]).toBe('20260823010000_fr_acceptance_2a2_human_followup');
         expect(migrations[16]).toBe('20260825000000_inv_d_settlement_truth');
         expect(migrations[17]).toBe('20260826000000_m18_outreach_batch_campaign_ownership');
@@ -357,6 +364,7 @@ describe('this patch changed presentation only', () => {
         expect(migrations[23]).toBe('20260909000000_coord_manual_email_1b_order_email');
         expect(migrations[24]).toBe('20260912000000_fr_supporter_payment_status_1_order_paid');
         expect(migrations[25]).toBe('20260913120000_qb_invoice_1b_quickbooks_links');
+        expect(migrations[26]).toBe('20260915170000_qb_invoice_1c_invoice_send');
     });
 
     it('the acknowledgement and follow-up contracts are untouched', () => {

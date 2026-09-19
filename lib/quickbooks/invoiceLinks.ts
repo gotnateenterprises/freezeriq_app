@@ -44,7 +44,7 @@
  * the tenant forgot the connection while the request was in flight.
  */
 
-import { randomUUID } from 'crypto';
+import { createHash } from 'crypto';
 import { prisma } from '@/lib/db';
 import { withLiveConnection, type GenerationDb } from '@/lib/quickbooks/connectionGenerations';
 
@@ -87,6 +87,15 @@ export type ReserveResult =
 export type RecordResult = 'recorded' | 'already_recorded' | 'conflict' | 'not_found';
 
 const QBO_INVOICE_ID = /^[0-9]{1,32}$/;
+
+/**
+ * QB-INVOICE-1C: the Intuit `requestid` for an invoice's one create — DERIVED from the FreezerIQ invoice id,
+ * so it is the same for every attempt in the invoice's lifetime (and recomputable from the invoice alone).
+ * 46 characters of [a-z0-9-], inside Intuit's 50-character limit. Not a secret.
+ */
+export function invoiceCreateRequestId(invoiceId: string): string {
+    return `qbinv-${createHash('sha256').update(`freezeriq/quickbooks-invoice-create/v1|${invoiceId}`).digest('hex').slice(0, 40)}`;
+}
 
 const LINK_SELECT = {
     id: true,
@@ -166,7 +175,7 @@ export async function reserveQuickBooksInvoiceLink(
                         business_id: input.businessId,
                         invoice_id: input.invoiceId,
                         connection_id: input.connectionId,
-                        request_id: randomUUID(),
+                        request_id: invoiceCreateRequestId(input.invoiceId),
                         created_by: input.userId,
                     },
                     select: LINK_SELECT,

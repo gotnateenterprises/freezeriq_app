@@ -274,6 +274,8 @@ describe('PRESERVATION', () => {
             '20260912000000_fr_supporter_payment_status_1_order_paid',
             // QB-INVOICE-1B (owner-authorized, additive): QuickBooks links foundation.
             '20260913120000_qb_invoice_1b_quickbooks_links',
+            // QB-INVOICE-1C (owner-authorized, additive): QuickBooks invoice settings + send lifecycle.
+            '20260915170000_qb_invoice_1c_invoice_send',
         ]);
     });
 });

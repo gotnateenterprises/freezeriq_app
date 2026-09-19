@@ -14,6 +14,7 @@
 
 import {
     getQuickBooksInvoiceLink,
+    invoiceCreateRequestId,
     recordQuickBooksInvoiceId,
     reserveQuickBooksInvoiceLink,
 } from '@/lib/quickbooks/invoiceLinks';
@@ -236,7 +237,9 @@ describe('QB-INVOICE-1B · invoice links: scoping and idempotency', () => {
         const inv = t.linkDb.seedInvoice(TENANT_A);
         const first = await t.reserve(TENANT_A, inv.id, connectionId);
         expect(first).toMatchObject({ outcome: 'reserved', link: { connectionId, qboInvoiceId: null, qboLinkedAt: null, generation: { live: true } } });
-        expect((first as any).link.requestId).toMatch(/^[0-9a-f-]{36}$/);
+        // QB-INVOICE-1C: the key is DERIVED from the invoice (the same for every attempt in its lifetime), within Intuit's 50 characters.
+        expect((first as any).link.requestId).toBe(invoiceCreateRequestId(inv.id));
+        expect((first as any).link.requestId).toMatch(/^qbinv-[0-9a-f]{40}$/);
         const again = await t.reserve(TENANT_A, inv.id, connectionId);
         expect(again).toEqual({ outcome: 'existing', link: (first as any).link });
         expect(t.linkDb.invoiceLinks.size).toBe(1);

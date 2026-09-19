@@ -155,37 +155,61 @@ describe('QB-INVOICE-1A · no QuickBooks invoice can become a FreezerIQ Order', 
         // QB-INVOICE-1B narrowed this from "no access at all": customer mapping READS the
         // organization (id and name) and the invoice-link foundation READS an invoice's
         // id for ownership. Writing any of these FreezerIQ records stays forbidden.
+        // QB-INVOICE-1C narrowed it once more, exactly (owner brief "QuickBooks Invoice Create +
+        // Verify + Send"): "Send via QuickBooks" READS the invoice it sends and makes ONE write —
+        // status DRAFT → SENT, conditional on DRAFT, inside the verified lifecycle transaction —
+        // and ONLY the Intuit client builds QuickBooks invoice requests. Payments, bills,
+        // estimates, sales receipts, credit memos and refund receipts stay untouched everywhere.
         const connector = SOURCE.filter((p) => p.startsWith('lib/quickbooks/') || p.startsWith('app/api/integrations/quickbooks/'));
         const reads: string[] = [];
         for (const f of connector) {
             const code = strip(R(f));
-            const write = /\.(order|orderItem|customer|invoice|invoiceItem|fundraiserCampaign)\s*\.\s*(create|createMany|update|updateMany|upsert|delete|deleteMany)\b/.test(code);
-            const qboMoney = /\/v3\/company\/[^'"`]*\/(invoice|payment|bill|estimate|salesreceipt|creditmemo|refundreceipt)/i.test(code)
-                || /['"`]\/(invoice|payment|bill|estimate|salesreceipt|creditmemo|refundreceipt)\b/i.test(code);
-            expect({ f, write, qboMoney }).toEqual({ f, write: false, qboMoney: false });
+            const writes = [...code.matchAll(/\.(order|orderItem|customer|invoice|invoiceItem|fundraiserCampaign)\s*\.\s*(create|createMany|update|updateMany|upsert|delete|deleteMany)\b/g)].map((m) => `${m[1]}.${m[2]}`);
+            const qboMoney = /\/v3\/company\/[^'"`]*\/(payment|bill|estimate|salesreceipt|creditmemo|refundreceipt)/i.test(code)
+                || /['"`]\/(payment|bill|estimate|salesreceipt|creditmemo|refundreceipt)\b/i.test(code);
+            const qboInvoice = /\/v3\/company\/[^'"`]*\/invoice/i.test(code) || /['"`]\/invoice\b/i.test(code);
+            expect({ f, writes, qboMoney, qboInvoice }).toEqual({
+                f,
+                writes: f === 'lib/quickbooks/invoiceSend.ts' ? ['invoice.updateMany'] : [],
+                qboMoney: false,
+                qboInvoice: f === 'lib/quickbooks/intuitClient.ts',
+            });
             for (const m of code.matchAll(/\.(order|orderItem|customer|invoice|invoiceItem|fundraiserCampaign)\s*\.\s*(\w+)/g)) reads.push(`${f}: ${m[1]}.${m[2]}`);
         }
         expect(reads.sort()).toEqual([
             'lib/quickbooks/customerLinks.ts: customer.findFirst',
             'lib/quickbooks/invoiceLinks.ts: invoice.findFirst',
+            'lib/quickbooks/invoiceSend.ts: invoice.findFirst',
+            'lib/quickbooks/invoiceSend.ts: invoice.findFirst',
+            'lib/quickbooks/invoiceSend.ts: invoice.findFirst',
+            'lib/quickbooks/invoiceSend.ts: invoice.updateMany',
         ]);
+        // The one write, exactly: DRAFT → SENT, and nothing else on the row.
+        expect(strip(R('lib/quickbooks/invoiceSend.ts'))).toMatch(/tx\.invoice\.updateMany\(\{\s*where: \{ id: s\.invoiceId, business_id: s\.businessId, status: 'DRAFT' \},\s*data: \{ status: 'SENT' \},\s*\}\)/);
     });
 
-    it('the Accounting API surface is exactly CompanyInfo + Customer query/read/create (QB-INVOICE-1B)', () => {
+    it('the Accounting API surface is exactly CompanyInfo + Customer query/read/create (QB-INVOICE-1B) + the QB-INVOICE-1C invoice and setup calls', () => {
         const client = strip(R('lib/quickbooks/intuitClient.ts'));
         const paths = client.match(/\/v3\/company\/[^`'"]+/g) ?? [];
         expect(paths).toEqual([
             '/v3/company/${realm}/companyinfo/${realm}?minorversion=${QUICKBOOKS_MINOR_VERSION}',
             '/v3/company/${encodeURIComponent(realmId)}${pathAndQuery}',
         ]);
-        // Every path handed to the shared Accounting request builder:
-        const entityPaths = [...client.matchAll(/await accountingRequest\([^`]*`([^`]+)`/g)].map((m) => m[1].split('?')[0]);
-        expect(entityPaths.sort()).toEqual(['/customer', '/customer/${customerId}', '/query']);
-        // The only query ever built selects customers; the only write is a customer create.
-        expect(client.match(/select \* from (\w+)/g)).toEqual(['select * from Customer']);
-        expect(client.match(/method:\s*'(POST|PUT|PATCH|DELETE)'/g)).toEqual(["method: 'POST'", "method: 'POST'", "method: 'POST'"]); // token, revoke, customer create
+        // Every path handed to the shared Accounting request builders (1B accountingRequest, 1C accountingJson):
+        const entityPaths = [...client.matchAll(/(?:accountingRequest|accountingJson)\(config, accessToken, realmId,\s*`([^`]+)`/g)].map((m) => m[1].split('?')[0]);
+        expect(entityPaths.sort()).toEqual([
+            '/${entityPath}/${id}', '/customer', '/customer/${customerId}', '/invoice', '/invoice', '/invoice/${qboInvoiceId}/send', '/item', '/preferences', '/query', '/query',
+        ].sort());
+        // By-id reads: the three setup objects, and an invoice (by the id FreezerIQ's own create returned).
+        expect([...client.matchAll(/readEntity\(config, accessToken, realmId, '(\w+)'/g)].map((m) => m[1]).sort()).toEqual(['account', 'invoice', 'item', 'term']);
+        // The only queries: customers by name (1B) and the three setup lists (1C) — never an invoice or payment search.
+        expect(client.match(/select \* from (\w+)/g)).toEqual(['select * from Customer', 'select * from Account', 'select * from Item', 'select * from Term']);
+        // token, revoke, customer create (1B); item create, invoice create, invoice update, invoice send (1C)
+        expect(client.match(/method:\s*'(POST|PUT|PATCH|DELETE)'/g)).toEqual(Array(7).fill("method: 'POST'"));
         expect(client).not.toMatch(/method:\s*'(PUT|PATCH|DELETE)'/);
-        expect(client).not.toMatch(/sparse|operation=(update|delete)|SyncToken/i);
+        // The one sparse update is the recipients-and-payment-options update; nothing is ever voided or deleted.
+        expect(client.match(/sparse/g)).toEqual(['sparse']);
+        expect(client).not.toMatch(/operation=(update|delete)|\/void\b|\/delete\b/i);
     });
 });
 
@@ -241,7 +265,8 @@ describe('QB-INVOICE-1A · legacy routes are quarantined deliberately (Part 5)',
     it('the only QuickBooks connect link anywhere is the new ADMIN-gated route', () => {
         const links = SOURCE.flatMap((f) => (strip(R(f)).match(/['"`]\/api\/[^'"`]*(qbo|quickbooks)[^'"`]*['"`]/gi) ?? []).map((m) => `${f}: ${m}`));
         // QB-INVOICE-1B adds the ADMIN-gated organization mapping route (customers), not a connect link.
-        expect(links.filter((l) => !/\/api\/integrations\/quickbooks\/(connect|callback|disconnect|status|customers)/.test(l))).toEqual([]);
+        // QB-INVOICE-1C adds the ADMIN-gated invoice settings and "Send via QuickBooks" routes.
+        expect(links.filter((l) => !/\/api\/integrations\/quickbooks\/(connect|callback|disconnect|status|customers|invoice-settings|invoices)/.test(l))).toEqual([]);
     });
 });
 
