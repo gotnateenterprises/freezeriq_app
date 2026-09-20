@@ -266,6 +266,20 @@ describe('15-18. scope stayed presentation-only', () => {
     ];
     const inQbInvoice1c = (f: string) => QB_INVOICE_1C.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
 
+    // SEC-INTUIT-ATTEST-1 — a later, separately-authorized phase closing the three findings
+    // that blocked the owner's Intuit App Assessment security attestation. Code only: a
+    // global no-store cache policy for /api, deletion of two full-request-body debug logs,
+    // and a fail-closed tenant guard on two document GETs. No schema, no migration, no
+    // financial logic, no QuickBooks enablement — see tests/secIntuitAttest1.test.ts.
+    const SEC_INTUIT_ATTEST_1 = [
+        'next.config.js',
+        'app/api/tenant/invoices/route.ts',
+        'app/api/documents/route.ts',
+        'app/api/documents/templates/route.ts',
+        'tests/secIntuitAttest1.test.ts',
+    ];
+    const inSecIntuitAttest1 = (f: string) => SEC_INTUIT_ATTEST_1.includes(f);
+
     const ALLOWED = new Set([
         'components/coordinator/ShareCenter.tsx',
         'components/coordinator/QuietLinks.tsx',
@@ -341,7 +355,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // The real protection is the forbidden-path regex below, which is
             // unchanged — this only stops the check from going stale on every
             // subsequent phase that touches a regression suite.
-            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)).toBe(true);
+            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inSecIntuitAttest1(f)).toBe(true);
         }
         // And explicitly: no path under these directories appears at all.
         const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -349,7 +363,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // FR-TAX-CORRECTNESS-1 is separately authorized to edit the
             // fundraiser money path — exempt from THIS phase's
             // "presentation only" assertion; everything else still held to it.
-            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)) continue;
+            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inSecIntuitAttest1(f)) continue;
             expect(f).not.toMatch(forbidden);
         }
     });

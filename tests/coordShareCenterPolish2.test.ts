@@ -295,9 +295,22 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'tests/qbDisconnectPage.test.ts',
             ];
             const inQbInvoice1c = (f: string) => QB_INVOICE_1C.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
+            // SEC-INTUIT-ATTEST-1 — a later, separately-authorized phase closing the three
+            // findings that blocked the owner's Intuit App Assessment security attestation:
+            // a global no-store cache policy for /api, deletion of two full-request-body
+            // debug logs, and a fail-closed tenant guard on two document GETs. Code only —
+            // no schema, no migration, no financial logic.
+            const SEC_INTUIT_ATTEST_1 = [
+                'next.config.js',
+                'app/api/tenant/invoices/route.ts',
+                'app/api/documents/route.ts',
+                'app/api/documents/templates/route.ts',
+                'tests/secIntuitAttest1.test.ts',
+            ];
             for (const f of changed) {
                 const allowed = f === SHARE_CENTER || f.startsWith('tests/')
-                    || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f);
+                    || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
+                    || SEC_INTUIT_ATTEST_1.includes(f);
                 expect(allowed).toBe(true);
             }
             const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -306,7 +319,8 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 // fundraiser money path, so its files are exempt from THIS
                 // phase's "presentation only" assertion. Everything else is
                 // still held to it.
-                if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)) continue;
+                if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
+                    || SEC_INTUIT_ATTEST_1.includes(f)) continue;
                 expect(f).not.toMatch(forbidden);
             }
         });

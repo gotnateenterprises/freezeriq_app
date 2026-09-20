@@ -183,7 +183,6 @@ export async function POST(request: Request) {
     let body;
     try {
         body = await request.json();
-        console.log('[API] POST Invoice Body:', JSON.stringify(body, null, 2));
         const {
             customer_id,
             items,
@@ -373,7 +372,6 @@ export async function PUT(request: Request) {
     let body;
     try {
         body = await request.json();
-        console.log('[API] PUT Invoice Body:', JSON.stringify(body, null, 2));
         const {
             id,
             customer_id,

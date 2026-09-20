@@ -3,9 +3,14 @@ import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 
 // GET: Fetch all available templates (Global + Business Specific)
+//
+// Fail closed on tenant identity, not just on a session. `users.business_id` is nullable, so an
+// authenticated user can have `businessId === undefined`, and Prisma STRIPS an undefined value from a
+// where clause — the `{ business_id: businessId }` branch of the OR below would collapse to `{}`, which
+// matches every row, returning every tenant's templates. Same shape, same fix as app/api/training/route.ts.
 export async function GET(req: Request) {
     const session = await auth();
-    if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!session?.user?.businessId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const businessId = session.user.businessId;
 

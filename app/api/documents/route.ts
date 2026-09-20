@@ -3,9 +3,15 @@ import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 
 // GET: List documents for a specific customer
+//
+// Fail closed on tenant identity, not just on a session. `users.business_id` is nullable, so an
+// authenticated user can have `businessId === undefined`, and Prisma STRIPS an undefined value from a
+// where clause — `{ customer_id, business_id: undefined }` would collapse to `{ customer_id }` and
+// return another tenant's documents. Same shape, same fix as app/api/training/route.ts.
 export async function GET(req: Request) {
     const session = await auth();
-    if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!session?.user?.businessId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const businessId = session.user.businessId;
 
     const { searchParams } = new URL(req.url);
     const customerId = searchParams.get('customerId');
@@ -16,7 +22,7 @@ export async function GET(req: Request) {
         const documents = await prisma.document.findMany({
             where: {
                 customer_id: customerId,
-                business_id: session.user.businessId // Security check
+                business_id: businessId // Security check: concrete, never undefined (guarded above)
             },
             orderBy: { updated_at: 'desc' }
         });
