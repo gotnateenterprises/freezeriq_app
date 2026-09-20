@@ -143,7 +143,7 @@ describe('QB-INVOICE-1B · customer mapping route — flows', () => {
         const [row] = [...linkDb.links.values()];
         expect(row).toMatchObject({ business_id: TENANT_A, customer_id: org, linked_by: `user-admin-${TENANT_A}` });
         expect(row.qbo_customer_id).not.toBe('999');
-        expect(res.headers.get('cache-control')).toBe('no-store');
+        expect(res.headers.get('cache-control')).toBe('no-store, no-cache, must-revalidate');
     });
 
     it('GET → no match → POST create: 200 linked, and QuickBooks received the name only', async () => {

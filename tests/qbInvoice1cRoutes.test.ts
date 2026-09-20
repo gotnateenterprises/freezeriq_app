@@ -142,7 +142,7 @@ describe('QB-INVOICE-1C routes · flows', () => {
             businessId: OTHER_BIZ, userId: 'someone-else', qboInvoiceId: '999', qboCustomerId: '1', connectionId: 'forged', realmId: '9130000000000002', payment: { card: true },
         });
         expect(res.status).toBe(200);
-        expect(res.headers.get('cache-control')).toBe('no-store');
+        expect(res.headers.get('cache-control')).toBe('no-store, no-cache, must-revalidate');
         expect(await res.json()).toMatchObject({ outcome: 'sent', view: { state: 'sent', autoSent: false, sendCount: 1 } });
         expect(current.store.sends.get(inv.id)).toMatchObject({ business_id: BIZ, started_by: ADMIN_USER, sent_by: ADMIN_USER, allow_online_card: false });
         expect(current.qbo.creates()[0].body.CustomerRef.value).toBe(current.qboCustomer.Id);

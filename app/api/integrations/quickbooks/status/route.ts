@@ -28,7 +28,7 @@ import { resolveQuickBooksConfig } from '@/lib/quickbooks/config';
 import { intuitErrorDetail } from '@/lib/quickbooks/intuitClient';
 import { checkQuickBooksHealth } from '@/lib/quickbooks/connection';
 
-const NO_STORE = { 'Cache-Control': 'no-store' };
+const NO_STORE = { 'Cache-Control': 'no-store, no-cache, must-revalidate' };
 
 export async function GET() {
     const session = await auth();

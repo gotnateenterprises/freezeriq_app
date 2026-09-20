@@ -125,7 +125,10 @@ describe('QB-INVOICE-1C · route guards are the 1B shape', () => {
                 expect({ h, disabledFirst: disabled > -1 && disabled < service }).toEqual({ h, disabledFirst: true });
                 expect(body).not.toMatch(/Access-Control-Allow/);
             }
-            expect(code).toMatch(/const NO_STORE = \{ 'Cache-Control': 'no-store' \}/);
+            // SEC-INTUIT-ATTEST-1 aligned every route-level Cache-Control under app/api to the
+            // exact value next.config.js sets, because on Vercel a handler's own header overrides
+            // the config one. tests/secIntuitAttest1.test.ts owns that invariant repo-wide.
+            expect(code).toMatch(/const NO_STORE = \{ 'Cache-Control': 'no-store, no-cache, must-revalidate' \}/);
             expect(code).not.toMatch(/body\.(businessId|userId|connectionId|realmId|qboInvoiceId|qboCustomerId)/);
         });
     }

@@ -142,7 +142,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
                 'Content-Disposition': `attachment; filename="${safeDocumentFilename(doc.filename)}"`,
                 'Content-Length': String(doc.size_bytes),
                 // Never let a shared cache or CDN hold tax paperwork.
-                'Cache-Control': 'private, no-store, max-age=0',
+                'Cache-Control': 'no-store, no-cache, must-revalidate',
             },
         });
     } catch (e: any) {

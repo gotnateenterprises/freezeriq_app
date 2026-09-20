@@ -61,7 +61,7 @@ import { IntuitError, exchangeAuthorizationCode, intuitErrorDetail, isValidRealm
 import { saveAuthorizedConnection } from '@/lib/quickbooks/connection';
 import { consumeOAuthAttempt } from '@/lib/quickbooks/oauthAttempt';
 
-const NO_STORE = { 'Cache-Control': 'no-store' };
+const NO_STORE = { 'Cache-Control': 'no-store, no-cache, must-revalidate' };
 
 function sameString(a: string, b: string): boolean {
     if (a.length !== b.length) return false;
@@ -72,7 +72,7 @@ function sameString(a: string, b: string): boolean {
 
 function backToSettings(config: QuickBooksConfig, outcome: string) {
     const res = NextResponse.redirect(`${config.appOrigin}/settings?quickbooks=${encodeURIComponent(outcome)}`, 302);
-    res.headers.set('Cache-Control', 'no-store');
+    res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     return res;
 }
 

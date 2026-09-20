@@ -31,7 +31,7 @@ import {
     OrganizationNotFoundError,
 } from '@/lib/quickbooks/customerLinks';
 
-const NO_STORE = { 'Cache-Control': 'no-store' };
+const NO_STORE = { 'Cache-Control': 'no-store, no-cache, must-revalidate' };
 const ID = /^[A-Za-z0-9-]{1,64}$/;
 
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: NO_STORE });

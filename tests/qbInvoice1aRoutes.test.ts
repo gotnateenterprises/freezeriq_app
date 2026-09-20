@@ -164,7 +164,7 @@ describe('QB-INVOICE-1A · connect route', () => {
         mockAuth.mockResolvedValue(admin());
         const res = await connectGET();
         expect(res.status).toBe(302);
-        expect(res.headers.get('cache-control')).toBe('no-store');
+        expect(res.headers.get('cache-control')).toBe('no-store, no-cache, must-revalidate');
         const loc = new URL(res.headers.get('location')!);
         expect(`${loc.origin}${loc.pathname}`).toBe('https://appcenter.intuit.com/connect/oauth2');
         expect(loc.searchParams.get('scope')).toBe('com.intuit.quickbooks.accounting');
@@ -516,7 +516,7 @@ describe('QB-INVOICE-1A · status route', () => {
         const before = intuit.companyInfoCalls().length;
 
         const { res, body } = await statusAs(admin());
-        expect(res.headers.get('cache-control')).toBe('no-store');
+        expect(res.headers.get('cache-control')).toBe('no-store, no-cache, must-revalidate');
         expect(body).toMatchObject({ state: 'connected', environment: 'sandbox', companyName: 'Sandbox Company 1' });
         expect(intuit.companyInfoCalls().slice(before).filter((c) => c.url.includes(`/v3/company/${REALM_1}/companyinfo/${REALM_1}`))).toHaveLength(1);
 

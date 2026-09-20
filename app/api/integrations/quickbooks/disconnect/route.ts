@@ -23,7 +23,7 @@ import { resolveQuickBooksConfig } from '@/lib/quickbooks/config';
 import { intuitErrorDetail } from '@/lib/quickbooks/intuitClient';
 import { disconnectQuickBooks, forgetQuickBooksConnection } from '@/lib/quickbooks/connection';
 
-const NO_STORE = { 'Cache-Control': 'no-store' };
+const NO_STORE = { 'Cache-Control': 'no-store, no-cache, must-revalidate' };
 
 export async function POST(req: Request) {
     const session = await auth();

@@ -171,7 +171,13 @@ describe('10-13. the document is private, tenant-scoped, and never public', () =
 
     it('the download refuses to be cached by any shared cache', () => {
         const src = read('app', 'api', 'customers', '[id]', 'tax-document', 'route.ts');
-        expect(src).toMatch(/'Cache-Control':\s*'private, no-store, max-age=0'/);
+        // SEC-INTUIT-ATTEST-1 replaced `private, no-store, max-age=0` with the one value every
+        // route-level Cache-Control under app/api now uses, so the handler and next.config.js
+        // cannot disagree (on Vercel the handler's value wins). The `private` token is not a loss:
+        // `no-store` already forbids storage by shared AND private caches, which is strictly more
+        // than `private` asked for. This test's claim is unchanged.
+        expect(src).toMatch(/'Cache-Control':\s*'no-store, no-cache, must-revalidate'/);
+        expect(src).toMatch(/'Cache-Control':\s*'[^']*no-store[^']*'/);
     });
 
     it('the filename echoed into Content-Disposition is sanitised', () => {

@@ -300,17 +300,26 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
             // a global no-store cache policy for /api, deletion of two full-request-body
             // debug logs, and a fail-closed tenant guard on two document GETs. Code only —
             // no schema, no migration, no financial logic.
+            // Its follow-up aligned every route-level Cache-Control literal under app/api to the
+            // exact value next.config.js sets, because on Vercel a handler's own header overrides
+            // the config one. Header values only. Entries ending in '/' are directories.
             const SEC_INTUIT_ATTEST_1 = [
                 'next.config.js',
                 'app/api/tenant/invoices/route.ts',
                 'app/api/documents/route.ts',
                 'app/api/documents/templates/route.ts',
                 'tests/secIntuitAttest1.test.ts',
+                'app/api/auth/qbo/route.ts',
+                'app/api/auth/qbo/callback/route.ts',
+                'app/api/customers/[id]/tax-document/route.ts',
+                'app/api/integrations/quickbooks/',
+                'app/api/integrations/square/route.ts',
             ];
+            const inSecIntuitAttest1 = (f: string) => SEC_INTUIT_ATTEST_1.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
             for (const f of changed) {
                 const allowed = f === SHARE_CENTER || f.startsWith('tests/')
                     || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || SEC_INTUIT_ATTEST_1.includes(f);
+                    || inSecIntuitAttest1(f);
                 expect(allowed).toBe(true);
             }
             const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -320,7 +329,7 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 // phase's "presentation only" assertion. Everything else is
                 // still held to it.
                 if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || SEC_INTUIT_ATTEST_1.includes(f)) continue;
+                    || inSecIntuitAttest1(f)) continue;
                 expect(f).not.toMatch(forbidden);
             }
         });

@@ -129,6 +129,6 @@ describe('FR-COORD-123A · POST cannot create an order', () => {
 
     it('the refusal is not cached by any intermediary', async () => {
         const res = await (POST as any)(reqWith(SIMULATED_ORDER));
-        expect(res.headers.get('Cache-Control')).toBe('no-store');
+        expect(res.headers.get('Cache-Control')).toBe('no-store, no-cache, must-revalidate');
     });
 });

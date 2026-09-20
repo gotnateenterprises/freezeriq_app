@@ -224,7 +224,7 @@ describe('QB-INVOICE-1A · legacy routes are quarantined deliberately (Part 5)',
         expect(mod.GET.length).toBe(0); // no request parameter to read
         const res = await mod.GET();
         expect(res.status).toBe(410);
-        expect(res.headers.get('Cache-Control')).toBe('no-store');
+        expect(res.headers.get('Cache-Control')).toBe('no-store, no-cache, must-revalidate');
         expect(await res.json()).toEqual({ error: 'This endpoint is no longer available.' });
         expect(prismaTouches).toEqual([]);
         expect(mockAuth).not.toHaveBeenCalled();

@@ -271,14 +271,23 @@ describe('15-18. scope stayed presentation-only', () => {
     // global no-store cache policy for /api, deletion of two full-request-body debug logs,
     // and a fail-closed tenant guard on two document GETs. No schema, no migration, no
     // financial logic, no QuickBooks enablement — see tests/secIntuitAttest1.test.ts.
+    // Its follow-up aligned every route-level Cache-Control literal under app/api to the exact
+    // value next.config.js sets, because on Vercel a handler's own header overrides the config
+    // one. Header values only — no route logic, no response body, no auth, no QuickBooks call.
+    // Entries ending in '/' are directories.
     const SEC_INTUIT_ATTEST_1 = [
         'next.config.js',
         'app/api/tenant/invoices/route.ts',
         'app/api/documents/route.ts',
         'app/api/documents/templates/route.ts',
         'tests/secIntuitAttest1.test.ts',
+        'app/api/auth/qbo/route.ts',
+        'app/api/auth/qbo/callback/route.ts',
+        'app/api/customers/[id]/tax-document/route.ts',
+        'app/api/integrations/quickbooks/',
+        'app/api/integrations/square/route.ts',
     ];
-    const inSecIntuitAttest1 = (f: string) => SEC_INTUIT_ATTEST_1.includes(f);
+    const inSecIntuitAttest1 = (f: string) => SEC_INTUIT_ATTEST_1.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
 
     const ALLOWED = new Set([
         'components/coordinator/ShareCenter.tsx',

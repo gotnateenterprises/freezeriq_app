@@ -139,9 +139,70 @@ describe('A. next.config.js pins every /api response to no-store', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// B. The QuickBooks routes keep their own no-store — defence in depth
+// B. Route-level Cache-Control is aligned to the config, byte for byte
+//
+// WHY ALIGNMENT AND NOT JUST "SOME FORM OF no-store". Which layer wins a conflict
+// is platform-dependent, and it was measured on both:
+//   - On Vercel, a handler that sets its own Cache-Control OVERRIDES next.config.js.
+//   - Locally under `next start`, next.config.js won instead.
+// Neither ever emitted two headers; only the winner differed. So the only way to
+// guarantee the deployed value is the intended one is to make both layers identical.
+// That is what this section enforces, over EVERY route file, not a hand-kept list —
+// a new route that sets its own header is caught the day it is added.
 // ═════════════════════════════════════════════════════════════════════════════
-describe('B. QuickBooks routes still set no-store themselves', () => {
+describe('B. every explicit Cache-Control under app/api equals the config value', () => {
+    /** The one canonical value, read from next.config.js rather than retyped here. */
+    const canonical = (() => {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const config = require(join(ROOT, 'next.config.js'));
+        return config.headers().then((entries: Array<{ source: string; headers: Array<{ key: string; value: string }> }>) =>
+            entries.find((e) => e.source === '/api/:path*')!.headers.find((h) => h.key.toLowerCase() === 'cache-control')!.value);
+    })();
+
+    /** Every tracked route.ts under app/api. */
+    const routeFiles = (): string[] =>
+        execFileSync('git', ['ls-files', 'app/api/**/route.ts'], { cwd: ROOT, encoding: 'utf8' })
+            .split('\n').map((l) => l.trim()).filter(Boolean);
+
+    /** Every literal Cache-Control value a route sets, in either form. */
+    const literalsIn = (src: string): string[] => {
+        const out: string[] = [];
+        for (const m of src.matchAll(/'Cache-Control':\s*'([^']*)'/g)) out.push(m[1]);
+        for (const m of src.matchAll(/headers\.set\(\s*'Cache-Control'\s*,\s*'([^']*)'\s*\)/g)) out.push(m[1]);
+        return out;
+    };
+
+    it('finds the route-level setters to check', () => {
+        const withHeader = routeFiles().filter((f) => literalsIn(strip(read(f))).length > 0);
+        expect(withHeader.length).toBeGreaterThanOrEqual(11);
+    });
+
+    it('every one of them is byte-identical to the config value', async () => {
+        const want = await canonical;
+        const wrong: string[] = [];
+        for (const file of routeFiles()) {
+            for (const value of literalsIn(strip(read(file)))) {
+                if (value !== want) wrong.push(`${file}: '${value}'`);
+            }
+        }
+        expect(wrong).toEqual([]);
+    });
+
+    it('none of them is a bare no-store, a private value, or anything containing public', async () => {
+        const want = await canonical;
+        expect(want).toBe('no-store, no-cache, must-revalidate');
+        for (const file of routeFiles()) {
+            for (const value of literalsIn(strip(read(file)))) {
+                expect(value).not.toBe('no-store');
+                expect(value).not.toMatch(/\bpublic\b/);
+                expect(value).not.toMatch(/\bprivate\b/);
+                expect(value).toContain('no-store');
+                expect(value).toContain('no-cache');
+                expect(value).toContain('must-revalidate');
+            }
+        }
+    });
+
     const QB_ROUTES = [
         'app/api/integrations/quickbooks/callback/route.ts',
         'app/api/integrations/quickbooks/connect/route.ts',
@@ -152,14 +213,15 @@ describe('B. QuickBooks routes still set no-store themselves', () => {
         'app/api/integrations/quickbooks/status/route.ts',
     ];
 
-    it.each(QB_ROUTES)('%s sets Cache-Control: no-store in its own source', (path) => {
+    it.each(QB_ROUTES)('%s still sets the policy in its own source', (path) => {
         const src = strip(read(path));
-        expect(src).toMatch(/'Cache-Control':\s*'no-store'/);
+        expect(literalsIn(src).length).toBeGreaterThan(0);
+        expect(src).toMatch(/'Cache-Control':\s*'no-store, no-cache, must-revalidate'/);
     });
 
-    it('the OAuth callback still pins no-store on the redirect it returns', () => {
+    it('the OAuth callback still pins the policy on the redirect it returns', () => {
         const src = strip(read('app/api/integrations/quickbooks/callback/route.ts'));
-        expect(src).toMatch(/res\.headers\.set\('Cache-Control',\s*'no-store'\)/);
+        expect(src).toMatch(/res\.headers\.set\('Cache-Control',\s*'no-store, no-cache, must-revalidate'\)/);
     });
 });
 

@@ -35,7 +35,7 @@ import { buildAuthorizationUrl, intuitErrorDetail } from '@/lib/quickbooks/intui
 import { recordOAuthAttempt } from '@/lib/quickbooks/oauthAttempt';
 import { loadQuickBooksConnection } from '@/lib/quickbooks/connection';
 
-const NO_STORE = { 'Cache-Control': 'no-store' };
+const NO_STORE = { 'Cache-Control': 'no-store, no-cache, must-revalidate' };
 
 export async function GET() {
     const session = await auth();
@@ -63,7 +63,7 @@ export async function GET() {
         const stored = await loadQuickBooksConnection(businessId);
         if (stored.kind === 'unreadable' || (stored.kind === 'disconnected' && stored.realmId === null)) {
             const res = NextResponse.redirect(`${config.appOrigin}/settings?quickbooks=reconnect_blocked`, 302);
-            res.headers.set('Cache-Control', 'no-store');
+            res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
             return res;
         }
     } catch (e) {
@@ -98,6 +98,6 @@ export async function GET() {
     });
 
     const res = NextResponse.redirect(buildAuthorizationUrl(config, state), 302);
-    res.headers.set('Cache-Control', 'no-store');
+    res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     return res;
 }
