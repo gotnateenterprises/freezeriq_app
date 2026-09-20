@@ -1095,7 +1095,10 @@ function InvoicesContent() {
                                             alone meant "review and send", "resume", "view" and "delivery problem"
                                             at once. Fundraiser invoices only; tenant admins acting as themselves. */}
                                         {mayUseQuickBooks && inv.campaign_id && (() => {
-                                            const action = invoiceRowAction(inv.quickbooks_invoice_send);
+                                            // Null when this invoice has no QuickBooks action to offer — a first
+                                            // send can only start from a draft, which is what the gate enforces.
+                                            const action = invoiceRowAction(inv.quickbooks_invoice_send, inv.status);
+                                            if (!action) return null;
                                             const tone = action.tone === 'warn'
                                                 ? 'border-amber-200 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:text-amber-400 dark:hover:bg-amber-900/20'
                                                 : action.tone === 'ok'

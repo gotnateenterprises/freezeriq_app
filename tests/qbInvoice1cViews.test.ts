@@ -3,7 +3,7 @@
  * and the "Send via QuickBooks" dialog.
  */
 
-import { blockerText, INVALID_TEXT, invoiceRowAction, PROBLEM_TEXT, RECIPIENT_SOURCE_TEXT, RESEND_INTERRUPTED_TEXT, RESEND_INTERRUPTION_DETAIL, SENT_MEANING, sendDialogView, STEP_TEXT } from '@/lib/quickbooks/invoiceSendView';
+import { blockerText, INVALID_TEXT, invoiceRowAction, PROBLEM_TEXT, QUICKBOOKS_INITIAL_SEND_STATUS, RECIPIENT_SOURCE_TEXT, RESEND_INTERRUPTED_TEXT, RESEND_INTERRUPTION_DETAIL, SENT_MEANING, sendDialogView, STEP_TEXT } from '@/lib/quickbooks/invoiceSendView';
 import { helperItemPrompt, ROLE_LABELS, SETTINGS_BLOCKER_TEXT, SETTINGS_NOTICE_TEXT, SETTINGS_PROBLEM_TEXT, settingsCardSummary } from '@/lib/quickbooks/invoiceSettingsView';
 
 const ALL_BLOCKERS = [
@@ -96,31 +96,51 @@ describe('QB-INVOICE-1C · which actions the dialog offers', () => {
 
 describe('QB-INVOICE-1C · the invoice row action says what it will do', () => {
     it('nothing started → review and send; part-way → resume; stopped for review → review; sent → the QuickBooks number; delivery problem → that first', () => {
-        expect(invoiceRowAction(null)).toEqual({ label: 'Review & send', tone: 'neutral' });
-        expect(invoiceRowAction(undefined)).toEqual({ label: 'Review & send', tone: 'neutral' });
+        expect(invoiceRowAction(null, 'DRAFT')).toEqual({ label: 'Review & send', tone: 'neutral' });
+        expect(invoiceRowAction(undefined, 'DRAFT')).toEqual({ label: 'Review & send', tone: 'neutral' });
         for (const status of ['reserved', 'created', 'recipients_set', 'payment_options_set']) {
-            expect(invoiceRowAction({ status, qbo_doc_number: status === 'reserved' ? null : '1052', delivery_error_type: null }))
+            expect(invoiceRowAction({ status, qbo_doc_number: status === 'reserved' ? null : '1052', delivery_error_type: null }, 'DRAFT'))
                 .toEqual({ label: 'Resume QuickBooks send', tone: 'warn' });
         }
         // A lifecycle stopped for review offers no resume in the dialog, so the row must not promise one.
-        expect(invoiceRowAction({ status: 'needs_review', qbo_doc_number: '1052', delivery_error_type: null }))
+        expect(invoiceRowAction({ status: 'needs_review', qbo_doc_number: '1052', delivery_error_type: null }, 'DRAFT'))
             .toEqual({ label: 'Review QuickBooks send', tone: 'warn' });
-        expect(invoiceRowAction({ status: 'needs_review', qbo_doc_number: null, delivery_error_type: 'Undeliverable' }))
+        expect(invoiceRowAction({ status: 'needs_review', qbo_doc_number: null, delivery_error_type: 'Undeliverable' }, 'DRAFT'))
             .toEqual({ label: 'Review QuickBooks send', tone: 'warn' });
-        expect(invoiceRowAction({ status: 'sent', qbo_doc_number: '1052', delivery_error_type: null }))
+        expect(invoiceRowAction({ status: 'sent', qbo_doc_number: '1052', delivery_error_type: null }, 'SENT'))
             .toEqual({ label: 'View QuickBooks invoice #1052', tone: 'ok' });
-        expect(invoiceRowAction({ status: 'sent', qbo_doc_number: '1052', delivery_error_type: 'Undeliverable' }))
+        expect(invoiceRowAction({ status: 'sent', qbo_doc_number: '1052', delivery_error_type: 'Undeliverable' }, 'SENT'))
             .toEqual({ label: 'Review delivery issue', tone: 'warn' });
         // A delivery problem outranks the number, and a sent invoice without one still reads sensibly.
-        expect(invoiceRowAction({ status: 'sent', qbo_doc_number: null, delivery_error_type: null }))
+        expect(invoiceRowAction({ status: 'sent', qbo_doc_number: null, delivery_error_type: null }, 'SENT'))
             .toEqual({ label: 'View QuickBooks invoice', tone: 'ok' });
-        expect(invoiceRowAction({ status: 'sent', qbo_doc_number: '1052' }).label).toBe('View QuickBooks invoice #1052');
+        expect(invoiceRowAction({ status: 'sent', qbo_doc_number: '1052' }, 'SENT')!.label).toBe('View QuickBooks invoice #1052');
         // Every label is visible text, never an abbreviation.
         for (const send of [null, { status: 'created', qbo_doc_number: '1052', delivery_error_type: null }, { status: 'sent', qbo_doc_number: '1052', delivery_error_type: 'Undeliverable' }]) {
-            const { label } = invoiceRowAction(send);
-            expect(label.trim().length).toBeGreaterThan(0);
-            expect(label).not.toMatch(/\bQB\b|\bQBO\b/);
+            const action = invoiceRowAction(send, 'DRAFT')!;
+            expect(action.label.trim().length).toBeGreaterThan(0);
+            expect(action.label).not.toMatch(/\bQB\b|\bQBO\b/);
         }
+    });
+
+    it('a FIRST send is offered from a draft and from nothing else — a paid invoice gets no QuickBooks action', () => {
+        // The gate allows a first send only from DRAFT (`invoice_not_draft`), so the row offers it only there.
+        expect(QUICKBOOKS_INITIAL_SEND_STATUS).toBe('DRAFT');
+        expect(invoiceRowAction(null, 'DRAFT')).toEqual({ label: 'Review & send', tone: 'neutral' });
+        for (const status of ['PAID', 'PENDING', 'OVERDUE', 'CANCELED', 'SENT', 'draft', '', null, undefined]) {
+            expect({ status, action: invoiceRowAction(null, status) }).toEqual({ status, action: null });
+            expect({ status, action: invoiceRowAction(undefined, status) }).toEqual({ status, action: null });
+        }
+        // An invoice QuickBooks already holds keeps its action whatever the FreezerIQ status became - including
+        // PAID, where "view the QuickBooks invoice" is still true, and a delivery problem still needs attention.
+        expect(invoiceRowAction({ status: 'sent', qbo_doc_number: '1052', delivery_error_type: null }, 'PAID'))
+            .toEqual({ label: 'View QuickBooks invoice #1052', tone: 'ok' });
+        expect(invoiceRowAction({ status: 'sent', qbo_doc_number: '1052', delivery_error_type: 'Undeliverable' }, 'PAID'))
+            .toEqual({ label: 'Review delivery issue', tone: 'warn' });
+        expect(invoiceRowAction({ status: 'needs_review', qbo_doc_number: '1052', delivery_error_type: null }, 'PAID'))
+            .toEqual({ label: 'Review QuickBooks send', tone: 'warn' });
+        expect(invoiceRowAction({ status: 'created', qbo_doc_number: '1052', delivery_error_type: null }, 'CANCELED'))
+            .toEqual({ label: 'Resume QuickBooks send', tone: 'warn' });
     });
 });
 

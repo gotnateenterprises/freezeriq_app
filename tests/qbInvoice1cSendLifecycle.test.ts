@@ -521,6 +521,46 @@ describe('QB-INVOICE-1C · the pre-create gate', () => {
         expect(w.qbo.writes()).toEqual([]);
     });
 
+    it('an invoice that is not a draft is refused before QuickBooks is touched at all', async () => {
+        for (const status of ['PAID', 'PENDING', 'OVERDUE', 'CANCELED', 'SENT'] as const) {
+            const w = await world();
+            const inv = w.seedE2({ status });
+            // The dialog says why, and offers nothing.
+            expect(await getQuickBooksInvoiceSendView(input(w, inv.id), w.deps)).toEqual({ state: 'blocked', blockers: ['invoice_not_draft'] });
+            // A posted send — even with a well-formed review token — is refused by the gate.
+            const result = await startQuickBooksInvoiceSend({
+                ...input(w, inv.id), userId: ADMIN_USER, reviewToken: 'a'.repeat(64), recipientTo: RECIPIENT, recipientCc: null,
+            }, w.deps);
+            expect({ status, result }).toEqual({ status, result: { outcome: 'blocked', blockers: ['invoice_not_draft'] } });
+            // Nothing reached QuickBooks, nothing was recorded, and the invoice was not written.
+            expect({ status, calls: w.qbo.calls }).toEqual({ status, calls: [] });
+            expect({ status, links: w.store.link.invoiceLinks.size }).toEqual({ status, links: 0 });
+            expect({ status, lifecycles: w.store.sends.size }).toEqual({ status, lifecycles: 0 });
+            expect({ status, writes: w.store.invoiceWrites }).toEqual({ status, writes: [] });
+            expect(w.store.invoices.get(inv.id)!.status).toBe(status);
+        }
+    });
+
+    it('resume and re-send refuse a paid invoice too, so a settled invoice can never be sent again', async () => {
+        const w = await world();
+        const inv = w.seedE2();
+        expect((await send(w, inv.id)).outcome).toBe('sent');
+        const writesBefore = w.qbo.writes().length;
+        const invoiceWritesBefore = w.store.invoiceWrites.length;
+        w.store.invoices.get(inv.id)!.status = 'PAID'; // recorded through INV-D's settle, outside QuickBooks code
+
+        expect(await resendQuickBooksInvoice({ ...input(w, inv.id), userId: ADMIN_USER, recipientTo: 'fixed@lincoln-pta.example', recipientCc: null }, w.deps))
+            .toEqual({ outcome: 'blocked', blockers: ['invoice_not_sent'] });
+        // Resume on a settled invoice simply reports the state it is already in; it never sends again.
+        expect(await resumeQuickBooksInvoiceSend({ ...input(w, inv.id), userId: ADMIN_USER }, w.deps)).toMatchObject({ outcome: 'sent' });
+
+        expect(w.qbo.writes()).toHaveLength(writesBefore); // not one further create, update or send
+        expect(w.qbo.sent).toHaveLength(1);
+        expect(w.store.invoiceWrites).toHaveLength(invoiceWritesBefore); // the FreezerIQ invoice is not written again
+        expect(lifecycle(w, inv.id)).toMatchObject({ status: 'sent', send_count: 1 });
+        expect(w.store.invoices.get(inv.id)!.status).toBe('PAID');
+    });
+
     it('another tenant’s invoice is not found', async () => {
         const w = await world();
         const inv = w.store.seedInvoice({ business_id: OTHER_BIZ, customer_id: w.store.seedOrganization(OTHER_BIZ, 'Other Org') });

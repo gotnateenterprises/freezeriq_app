@@ -120,13 +120,23 @@ export interface InvoiceRowAction {
 }
 
 /**
- * One visible, state-aware action per invoice row, instead of an icon that meant five different things:
- * nothing started yet → review and send; a lifecycle that stopped part-way → resume the SAME invoice;
- * one stopped FOR REVIEW → review it, because that state deliberately offers no resume; sent → view
- * QuickBooks' own number; sent but QuickBooks reported a delivery problem → deal with that first.
+ * The ONE FreezerIQ invoice status a first send can start from. The gate refuses every other one with
+ * `invoice_not_draft` before it reaches QuickBooks (lib/quickbooks/invoiceSend.ts), so a row must not offer
+ * a first send from a paid, cancelled or otherwise issued invoice either. An invoice QuickBooks already
+ * holds keeps its own action whatever the FreezerIQ status later becomes — including PAID, where "view the
+ * QuickBooks invoice" is still true and useful.
  */
-export function invoiceRowAction(send: InvoiceRowSendState | null | undefined): InvoiceRowAction {
-    if (!send) return { label: 'Review & send', tone: 'neutral' };
+export const QUICKBOOKS_INITIAL_SEND_STATUS = 'DRAFT';
+
+/**
+ * One visible, state-aware action per invoice row, instead of an icon that meant five different things:
+ * nothing started yet and still a draft → review and send; a lifecycle that stopped part-way → resume the
+ * SAME invoice; one stopped FOR REVIEW → review it, because that state deliberately offers no resume; sent →
+ * view QuickBooks' own number; sent but QuickBooks reported a delivery problem → deal with that first.
+ * `null` means the row offers no QuickBooks action at all.
+ */
+export function invoiceRowAction(send: InvoiceRowSendState | null | undefined, invoiceStatus: string | null | undefined): InvoiceRowAction | null {
+    if (!send) return invoiceStatus === QUICKBOOKS_INITIAL_SEND_STATUS ? { label: 'Review & send', tone: 'neutral' } : null;
     if (send.status === 'needs_review') return { label: 'Review QuickBooks send', tone: 'warn' };
     if (send.status !== 'sent') return { label: 'Resume QuickBooks send', tone: 'warn' };
     if (send.delivery_error_type) return { label: 'Review delivery issue', tone: 'warn' };
