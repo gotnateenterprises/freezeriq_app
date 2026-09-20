@@ -31,7 +31,7 @@ import {
     QUICKBOOKS_STATE_TTL_SECONDS,
     resolveQuickBooksConfig,
 } from '@/lib/quickbooks/config';
-import { buildAuthorizationUrl } from '@/lib/quickbooks/intuitClient';
+import { buildAuthorizationUrl, intuitErrorDetail } from '@/lib/quickbooks/intuitClient';
 import { recordOAuthAttempt } from '@/lib/quickbooks/oauthAttempt';
 import { loadQuickBooksConnection } from '@/lib/quickbooks/connection';
 
@@ -67,7 +67,7 @@ export async function GET() {
             return res;
         }
     } catch (e) {
-        console.error(`[quickbooks] connect failed: ${e instanceof Error ? e.name : 'unknown'}`);
+        console.error(`[quickbooks] connect failed: ${intuitErrorDetail(e)}`);
         return NextResponse.json({ error: 'Could not start the QuickBooks connection.' }, { status: 500, headers: NO_STORE });
     }
 
@@ -84,7 +84,7 @@ export async function GET() {
     try {
         await recordOAuthAttempt({ businessId, nonce, expiresAt: new Date(exp * 1000) });
     } catch (e) {
-        console.error(`[quickbooks] connect failed: ${e instanceof Error ? e.name : 'unknown'}`);
+        console.error(`[quickbooks] connect failed: ${intuitErrorDetail(e)}`);
         return NextResponse.json({ error: 'Could not start the QuickBooks connection.' }, { status: 500, headers: NO_STORE });
     }
 

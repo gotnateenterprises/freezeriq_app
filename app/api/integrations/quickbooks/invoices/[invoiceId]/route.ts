@@ -22,6 +22,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { mayManageQuickBooks } from '@/lib/quickbooks/access';
 import { resolveQuickBooksConfig } from '@/lib/quickbooks/config';
+import { intuitErrorDetail } from '@/lib/quickbooks/intuitClient';
 import {
     checkQuickBooksInvoiceDelivery,
     getQuickBooksInvoiceSendView,
@@ -67,7 +68,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ invoice
         return json(await getQuickBooksInvoiceSendView({ businessId, invoiceId, config: resolved.config }));
     } catch (e) {
         if (e instanceof InvoiceNotFoundError) return json({ error: 'Invoice not found' }, 404);
-        console.error(`[quickbooks] invoice send view failed: ${e instanceof Error ? e.name : 'unknown'}`);
+        console.error(`[quickbooks] invoice send view failed: ${intuitErrorDetail(e)}`);
         return json({ state: 'error' });
     }
 }
@@ -115,7 +116,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ invoice
         return json(result, actionStatus(result));
     } catch (e) {
         if (e instanceof InvoiceNotFoundError) return json({ error: 'Invoice not found' }, 404);
-        console.error(`[quickbooks] invoice ${action} failed: ${e instanceof Error ? e.name : 'unknown'}`);
+        console.error(`[quickbooks] invoice ${action} failed: ${intuitErrorDetail(e)}`);
         return json({ error: 'Could not complete the QuickBooks request.' }, 500);
     }
 }

@@ -25,6 +25,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { mayManageQuickBooks } from '@/lib/quickbooks/access';
 import { resolveQuickBooksConfig } from '@/lib/quickbooks/config';
+import { intuitErrorDetail } from '@/lib/quickbooks/intuitClient';
 import { checkQuickBooksHealth } from '@/lib/quickbooks/connection';
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
@@ -48,7 +49,7 @@ export async function GET() {
         const health = await checkQuickBooksHealth({ businessId, config: resolved.config });
         return NextResponse.json(health, { headers: NO_STORE });
     } catch (e) {
-        console.error(`[quickbooks] status failed: ${e instanceof Error ? e.name : 'unknown'}`);
+        console.error(`[quickbooks] status failed: ${intuitErrorDetail(e)}`);
         return NextResponse.json({ state: 'error', environment: resolved.config.environment, cause: 'status_unavailable' }, { headers: NO_STORE });
     }
 }

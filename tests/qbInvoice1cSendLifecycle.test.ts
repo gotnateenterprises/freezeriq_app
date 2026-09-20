@@ -399,7 +399,11 @@ describe('QB-INVOICE-1C · a failed send reuses the same invoice', () => {
         const w = await world();
         const inv = w.seedE2();
         w.qbo.failNext({ op: 'send', kind: 'status', status: 400, code: '6000' });
-        expect(await send(w, inv.id)).toMatchObject({ outcome: 'in_progress', view: { problem: 'send_rejected', problemDetail: 'rejected,6000' } });
+        // The detail is the sanitized Intuit record kept for support: reason, HTTP status, Fault code and
+        // Intuit's own correlation id (Intuit App Assessment, Error Handling Q3).
+        const refused: any = await send(w, inv.id);
+        expect(refused).toMatchObject({ outcome: 'in_progress', view: { problem: 'send_rejected' } });
+        expect(refused.view.problemDetail).toMatch(/^kind:rejected,http:400,fault:6000,tid:tid-\d+$/);
         expect(lifecycle(w, inv.id)!.send_requested_at).toBeNull();
         expect((await resumeQuickBooksInvoiceSend({ ...input(w, inv.id), userId: ADMIN_USER }, w.deps)).outcome).toBe('sent');
         expect(w.qbo.creates()).toHaveLength(1);

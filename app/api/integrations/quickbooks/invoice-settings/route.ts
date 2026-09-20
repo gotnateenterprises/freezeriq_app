@@ -17,6 +17,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { mayManageQuickBooks } from '@/lib/quickbooks/access';
 import { resolveQuickBooksConfig } from '@/lib/quickbooks/config';
+import { intuitErrorDetail } from '@/lib/quickbooks/intuitClient';
 import {
     createQuickBooksHelperItem,
     getQuickBooksInvoiceSettingsView,
@@ -43,7 +44,7 @@ export async function GET() {
     try {
         return json(await getQuickBooksInvoiceSettingsView({ businessId, config: resolved.config }));
     } catch (e) {
-        console.error(`[quickbooks] invoice settings view failed: ${e instanceof Error ? e.name : 'unknown'}`);
+        console.error(`[quickbooks] invoice settings view failed: ${intuitErrorDetail(e)}`);
         return json({ state: 'error' });
     }
 }
@@ -83,7 +84,7 @@ export async function PUT(req: Request) {
         const status = result.outcome === 'saved' ? 200 : result.outcome === 'invalid' ? 400 : result.outcome === 'unavailable' ? 503 : 409;
         return json(result, status);
     } catch (e) {
-        console.error(`[quickbooks] invoice settings save failed: ${e instanceof Error ? e.name : 'unknown'}`);
+        console.error(`[quickbooks] invoice settings save failed: ${intuitErrorDetail(e)}`);
         return json({ error: 'Could not save the QuickBooks invoice settings.' }, 500);
     }
 }
@@ -122,7 +123,7 @@ export async function POST(req: Request) {
                         : 409; // stale
         return json(result, status);
     } catch (e) {
-        console.error(`[quickbooks] helper item create failed: ${e instanceof Error ? e.name : 'unknown'}`);
+        console.error(`[quickbooks] helper item create failed: ${intuitErrorDetail(e)}`);
         return json({ error: 'Could not complete the QuickBooks request.' }, 500);
     }
 }

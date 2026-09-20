@@ -126,7 +126,10 @@ describe('QB-INVOICE-1B · least privilege and data minimisation', () => {
         const fns = Object.entries(intuitClient).filter(([, v]) => typeof v === 'function').map(([k]) => k).sort();
         expect(fns).toEqual([
             'IntuitError', 'assertUnsentInvoiceCreateBody', 'buildAuthorizationUrl', 'createCustomer', 'createQuickBooksInvoice', 'createQuickBooksServiceItem',
-            'displayNameProblem', 'exchangeAuthorizationCode', 'fetchCompanyInfo', 'findCustomersByDisplayName', 'findInactiveCustomersByDisplayName', 'isValidRealmId',
+            'displayNameProblem', 'exchangeAuthorizationCode', 'fetchCompanyInfo', 'findCustomersByDisplayName', 'findInactiveCustomersByDisplayName',
+            // Pure formatter for the sanitized Intuit error detail (Intuit App Assessment, Error Handling Q3):
+            // reads only an IntuitError's own reason, status, Fault codes and intuit_tid. No network, no body.
+            'intuitErrorDetail', 'isValidRealmId',
             'listQuickBooksAccounts', 'listQuickBooksItems', 'listQuickBooksTerms', 'parseQuickBooksInvoice', 'readCustomer', 'readQuickBooksAccount', 'readQuickBooksInvoice',
             'readQuickBooksItem', 'readQuickBooksPreferences', 'readQuickBooksTerm', 'refreshAccessToken', 'revokeToken', 'sendQuickBooksInvoice', 'updateQuickBooksInvoiceDelivery',
         ]);

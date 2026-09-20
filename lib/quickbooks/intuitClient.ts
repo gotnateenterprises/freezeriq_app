@@ -93,6 +93,32 @@ export class IntuitError extends Error {
     }
 }
 
+/**
+ * The ONE sanitized description of a failed Intuit request — for server logs and for the durable
+ * `problem_detail` a tenant's support case is reconstructed from (Intuit App Assessment, Error Handling Q3).
+ *
+ * It is built ONLY from fields IntuitError already holds, each of which was validated when it was captured:
+ * the reason code, the HTTP status, Intuit's numeric Fault codes, and `intuit_tid` — Intuit's own correlation
+ * id, which is what their support asks for. A response body is never reparsed here and never included, so no
+ * token, authorization code, client secret, realm id, customer name, email address, amount or invoice line can
+ * reach a log line or a database column through this function. Anything that is not an IntuitError reduces to
+ * its error NAME, never its message.
+ *
+ * Deterministic and bounded: at most ~140 characters, so it always fits the 500-character `problem_detail`
+ * constraint alongside a reason code.
+ */
+export function intuitErrorDetail(error: unknown): string {
+    if (!(error instanceof IntuitError)) {
+        const name = error instanceof Error && /^[A-Za-z_][A-Za-z0-9_]{0,40}$/.test(error.name) ? error.name : 'unknown';
+        return `kind:${name}`;
+    }
+    const parts = [`kind:${error.kind}`];
+    if (typeof error.status === 'number' && Number.isFinite(error.status)) parts.push(`http:${error.status}`);
+    if (error.faultCodes?.length) parts.push(`fault:${error.faultCodes.join('|')}`);
+    if (error.intuitTid) parts.push(`tid:${error.intuitTid}`);
+    return parts.join(',').slice(0, 140);
+}
+
 export interface IntuitTokenSet {
     accessToken: string;
     refreshToken: string;

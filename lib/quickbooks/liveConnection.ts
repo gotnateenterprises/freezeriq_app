@@ -22,7 +22,7 @@ import {
     type QuickBooksAccess,
 } from '@/lib/quickbooks/connection';
 import { ensureLiveGeneration, type GenerationDb, type GenerationDeps } from '@/lib/quickbooks/connectionGenerations';
-import { fetchCompanyInfo, IntuitError, type FetchLike } from '@/lib/quickbooks/intuitClient';
+import { fetchCompanyInfo, IntuitError, intuitErrorDetail, type FetchLike } from '@/lib/quickbooks/intuitClient';
 
 export interface LiveConnectionDeps {
     db: Pick<typeof prisma, 'integration' | '$transaction' | 'quickBooksConnection'>;
@@ -114,7 +114,7 @@ export async function liveConnection(businessId: string, config: QuickBooksConfi
     } catch (e) {
         if (e instanceof QuickBooksConnectionError) return connectionProblem(e);
         if (e instanceof IntuitError || e instanceof ConnectionChangedError) {
-            console.warn(`[quickbooks] connection generation unavailable: ${e instanceof IntuitError ? e.kind : 'connection_changed'}`);
+            console.warn(`[quickbooks] connection generation unavailable: ${e instanceof IntuitError ? intuitErrorDetail(e) : 'connection_changed'}`);
             return { state: 'unavailable' };
         }
         throw e;

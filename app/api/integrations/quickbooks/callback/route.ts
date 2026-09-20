@@ -57,7 +57,7 @@ import {
     resolveQuickBooksConfig,
     type QuickBooksConfig,
 } from '@/lib/quickbooks/config';
-import { IntuitError, exchangeAuthorizationCode, isValidRealmId } from '@/lib/quickbooks/intuitClient';
+import { IntuitError, exchangeAuthorizationCode, intuitErrorDetail, isValidRealmId } from '@/lib/quickbooks/intuitClient';
 import { saveAuthorizedConnection } from '@/lib/quickbooks/connection';
 import { consumeOAuthAttempt } from '@/lib/quickbooks/oauthAttempt';
 
@@ -159,10 +159,7 @@ export async function GET(req: NextRequest) {
         if (outcome === 'connected') console.info(`[quickbooks] connected (${config.environment})`);
         return backToSettings(config, outcome);
     } catch (e) {
-        const detail = e instanceof IntuitError
-            ? `${e.kind}${e.status ? ` (HTTP ${e.status})` : ''}${e.intuitTid ? ` intuit_tid=${e.intuitTid}` : ''}`
-            : (e instanceof Error ? e.name : 'unknown');
-        console.error(`[quickbooks] callback failed: ${detail}`);
+        console.error(`[quickbooks] callback failed: ${intuitErrorDetail(e)}`);
         return backToSettings(config, e instanceof IntuitError ? 'token_exchange_failed' : 'error');
     }
 }

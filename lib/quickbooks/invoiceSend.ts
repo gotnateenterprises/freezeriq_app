@@ -50,6 +50,7 @@ import { QuickBooksConnectionError, type Deps } from '@/lib/quickbooks/connectio
 import {
     createQuickBooksInvoice,
     IntuitError,
+    intuitErrorDetail,
     PAYMENT_FLAGS_OFF,
     readCustomer,
     readQuickBooksInvoice,
@@ -375,7 +376,7 @@ async function evaluate(
             return blocked(p.state === 'unavailable' ? 'quickbooks_unavailable' : p.state);
         }
         if (e instanceof IntuitError || e instanceof ConnectionChangedError) {
-            console.warn(`[quickbooks] invoice send gate unavailable: ${e instanceof IntuitError ? e.kind : 'connection_changed'}`);
+            console.warn(`[quickbooks] invoice send gate unavailable: ${e instanceof IntuitError ? intuitErrorDetail(e) : 'connection_changed'}`);
             return blocked('quickbooks_unavailable');
         }
         throw e;
@@ -638,7 +639,8 @@ async function park(s: Session, problem: SendProblem, detail: string | null, sto
         } as any,
     });
     if (res.count !== 1) throw new LeaseLostError();
-    console.warn(`[quickbooks] invoice send ${stop ? 'stopped for review' : 'paused'}: ${problem}`);
+    // The same sanitized detail that was just persisted, so a support case can be traced from the logs too.
+    console.warn(`[quickbooks] invoice send ${stop ? 'stopped for review' : 'paused'}: ${problem}${detail ? ` ${detail}` : ''}`);
     return currentOutcome(s.d, s.businessId, s.invoiceId);
 }
 
@@ -671,7 +673,12 @@ function verify(
 }
 
 const failureDetail = (r: ContractResult) => r.failures.map((f) => f.check).join(',');
-const faultDetail = (e: unknown) => (e instanceof IntuitError ? [e.kind, ...(e.faultCodes ?? [])].join(',') : 'unknown');
+/**
+ * What a failed Intuit call leaves behind on the lifecycle row. The shared sanitized formatter, so the durable
+ * `problem_detail` carries the reason code, the HTTP status, Intuit's Fault codes AND `intuit_tid` — everything
+ * Intuit support needs to trace one request, and nothing else (Intuit App Assessment, Error Handling Q3).
+ */
+const faultDetail = (e: unknown) => intuitErrorDetail(e);
 const throttled = (e: unknown) => e instanceof IntuitError && e.status === 429;
 /** Intuit validated and refused the write: nothing was written. */
 const refused = (e: unknown) => e instanceof IntuitError && !throttled(e) && ['rejected', 'duplicate_name', 'not_found'].includes(e.kind);
@@ -702,7 +709,7 @@ async function run(s: Session): Promise<SendActionResult> {
             if (e instanceof LeaseLostError) return await currentOutcome(s.d, s.businessId, s.invoiceId);
             if (e instanceof ConnectionChangedError) return await park(s, 'connection_changed', null, true);
             if (transient(e)) {
-                return await park(s, 'quickbooks_unavailable', e instanceof IntuitError ? e.kind : (e as QuickBooksConnectionError).kind, false);
+                return await park(s, 'quickbooks_unavailable', e instanceof IntuitError ? intuitErrorDetail(e) : (e as QuickBooksConnectionError).kind, false);
             }
         } catch (inner) {
             if (inner instanceof LeaseLostError) return currentOutcome(s.d, s.businessId, s.invoiceId);
@@ -987,7 +994,7 @@ export async function resendQuickBooksInvoice(
             where: { business_id: s.businessId, invoice_id: s.invoiceId, lease_id: s.leaseId },
             data: { problem, problem_detail: detail ? detail.slice(0, 500) : null, problem_at: new Date(s.d.now()), lease_id: null, lease_until: null },
         });
-        console.warn(`[quickbooks] invoice re-send not completed: ${problem}`);
+        console.warn(`[quickbooks] invoice re-send not completed: ${problem}${detail ? ` ${detail}` : ''}`);
         return answer;
     };
 
@@ -1058,7 +1065,7 @@ export async function resendQuickBooksInvoice(
         if (e instanceof LeaseLostError) return currentOutcome(d, input.businessId, input.invoiceId);
         await releaseLease(s).catch(() => undefined);
         if (transient(e) || e instanceof ConnectionChangedError) {
-            console.warn(`[quickbooks] invoice re-send unavailable: ${e instanceof IntuitError ? e.kind : 'connection'}`);
+            console.warn(`[quickbooks] invoice re-send unavailable: ${e instanceof IntuitError ? intuitErrorDetail(e) : 'connection'}`);
             return { outcome: 'blocked', blockers: ['quickbooks_unavailable'] };
         }
         throw e;

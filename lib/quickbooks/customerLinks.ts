@@ -61,6 +61,7 @@ import {
     findCustomersByDisplayName,
     findInactiveCustomersByDisplayName,
     IntuitError,
+    intuitErrorDetail,
     readCustomer,
     type DisplayNameProblem,
     type QuickBooksCustomerSummary,
@@ -224,7 +225,7 @@ async function evaluate(input: { businessId: string; customerId: string; config:
     } catch (e) {
         if (e instanceof OrganizationNotFoundError) throw e;
         if (e instanceof IntuitError || e instanceof QuickBooksConnectionError || e instanceof ConnectionChangedError) {
-            console.warn(`[quickbooks] customer link status unavailable: ${e instanceof ConnectionChangedError ? 'connection_changed' : e.kind}`);
+            console.warn(`[quickbooks] customer link status unavailable: ${e instanceof ConnectionChangedError ? 'connection_changed' : intuitErrorDetail(e)}`);
             return { status: e instanceof QuickBooksConnectionError ? connectionProblem(e) : { state: 'unavailable' } };
         }
         throw e;
@@ -421,7 +422,7 @@ export async function createAndLinkCustomer(
             // Only a refused (401) first attempt leads here, so nothing was created.
             return { outcome: 'stale', status: await getCustomerLinkStatus(input, deps) };
         }
-        console.warn(`[quickbooks] customer create outcome unknown: ${e instanceof IntuitError ? e.kind : 'unknown'}`);
+        console.warn(`[quickbooks] customer create outcome unknown: ${intuitErrorDetail(e)}`);
         return { outcome: 'unknown' };
     }
     // Link only what was actually asked for.

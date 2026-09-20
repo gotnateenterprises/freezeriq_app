@@ -37,6 +37,7 @@ import {
     displayNameProblem,
     fetchCompanyInfo,
     IntuitError,
+    intuitErrorDetail,
     listQuickBooksAccounts,
     listQuickBooksItems,
     listQuickBooksTerms,
@@ -231,7 +232,7 @@ async function readStored(businessId: string, connectionId: string, d: Resolved)
 
 function unavailable(e: unknown): ConnectionProblem {
     if (e instanceof QuickBooksConnectionError) return connectionProblem(e);
-    console.warn(`[quickbooks] invoice settings unavailable: ${e instanceof IntuitError ? e.kind : e instanceof ConnectionChangedError ? 'connection_changed' : 'unknown'}`);
+    console.warn(`[quickbooks] invoice settings unavailable: ${e instanceof ConnectionChangedError ? 'connection_changed' : intuitErrorDetail(e)}`);
     return { state: 'unavailable' };
 }
 
@@ -410,7 +411,7 @@ export async function createQuickBooksHelperItem(
         if (e instanceof IntuitError && e.kind === 'rejected') return { outcome: 'rejected', reason: 'invalid' };
         if (e instanceof QuickBooksConnectionError) return { outcome: 'unavailable', view: connectionProblem(e) };
         if (e instanceof ConnectionChangedError) return { outcome: 'stale' };
-        console.warn(`[quickbooks] helper item create outcome unknown: ${e instanceof IntuitError ? e.kind : 'unknown'}`);
+        console.warn(`[quickbooks] helper item create outcome unknown: ${intuitErrorDetail(e)}`);
         return { outcome: 'unknown' };
     }
     if (item.name !== input.name || item.incomeAccountId !== account.id || !isInvoiceItemType(item)) {

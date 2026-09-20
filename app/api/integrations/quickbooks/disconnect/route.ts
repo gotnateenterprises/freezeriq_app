@@ -20,6 +20,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { mayManageQuickBooks } from '@/lib/quickbooks/access';
 import { resolveQuickBooksConfig } from '@/lib/quickbooks/config';
+import { intuitErrorDetail } from '@/lib/quickbooks/intuitClient';
 import { disconnectQuickBooks, forgetQuickBooksConnection } from '@/lib/quickbooks/connection';
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
@@ -68,7 +69,7 @@ export async function POST(req: Request) {
         const result = await disconnectQuickBooks({ businessId, config: resolved.config, actorUserId: session.user.id });
         return NextResponse.json(result, { headers: NO_STORE });
     } catch (e) {
-        console.error(`[quickbooks] disconnect failed: ${e instanceof Error ? e.name : 'unknown'}`);
+        console.error(`[quickbooks] disconnect failed: ${intuitErrorDetail(e)}`);
         return NextResponse.json({ error: 'Failed to change the QuickBooks connection.' }, { status: 500, headers: NO_STORE });
     }
 }
