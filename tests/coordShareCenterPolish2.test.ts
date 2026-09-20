@@ -288,6 +288,11 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'components/invoices/',
                 'components/settings/QuickBooksInvoiceSettingsCard.tsx',
                 'prisma/migrations/20260915170000_qb_invoice_1c_invoice_send/',
+                // Intuit production readiness, a later separately-authorized step of the same workstream: the
+                // PUBLIC disconnect information page Intuit requires as the app's Disconnect URL. A static page
+                // and its structural test; no route, no schema, no migration, no state change.
+                'app/legal/disconnect/',
+                'tests/qbDisconnectPage.test.ts',
             ];
             const inQbInvoice1c = (f: string) => QB_INVOICE_1C.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
             for (const f of changed) {
