@@ -266,6 +266,18 @@ describe('15-18. scope stayed presentation-only', () => {
     ];
     const inQbInvoice1c = (f: string) => QB_INVOICE_1C.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
 
+    // QB-INVOICE-1D — "Check QuickBooks payment", a later, separately-authorized phase. Its files under lib/quickbooks/,
+    // app/api/integrations/quickbooks/, components/invoices/ and app/invoices/page.tsx are covered by the lists above.
+    // These are its other files: the settlement transition moved UNCHANGED out of the settle route into its own module
+    // so a verified QuickBooks payment and Record Payment share it, and settlement learns the verified method. Exact
+    // paths only; no schema, no migration.
+    const QB_INVOICE_1D = [
+        'app/api/tenant/invoices/[id]/settle/route.ts',
+        'lib/invoiceSettlement.ts',
+        'lib/invoiceSettlementTransition.ts',
+    ];
+    const inQbInvoice1d = (f: string) => QB_INVOICE_1D.includes(f);
+
     // SEC-INTUIT-ATTEST-1 — a later, separately-authorized phase closing the three findings
     // that blocked the owner's Intuit App Assessment security attestation. Code only: a
     // global no-store cache policy for /api, deletion of two full-request-body debug logs,
@@ -364,7 +376,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // The real protection is the forbidden-path regex below, which is
             // unchanged — this only stops the check from going stale on every
             // subsequent phase that touches a regression suite.
-            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inSecIntuitAttest1(f)).toBe(true);
+            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inSecIntuitAttest1(f)).toBe(true);
         }
         // And explicitly: no path under these directories appears at all.
         const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -372,7 +384,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // FR-TAX-CORRECTNESS-1 is separately authorized to edit the
             // fundraiser money path — exempt from THIS phase's
             // "presentation only" assertion; everything else still held to it.
-            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inSecIntuitAttest1(f)) continue;
+            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inSecIntuitAttest1(f)) continue;
             expect(f).not.toMatch(forbidden);
         }
     });

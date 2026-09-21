@@ -130,8 +130,12 @@ describe('QB-INVOICE-1B · least privilege and data minimisation', () => {
             // Pure formatter for the sanitized Intuit error detail (Intuit App Assessment, Error Handling Q3):
             // reads only an IntuitError's own reason, status, Fault codes and intuit_tid. No network, no body.
             'intuitErrorDetail', 'isValidRealmId',
-            'listQuickBooksAccounts', 'listQuickBooksItems', 'listQuickBooksTerms', 'parseQuickBooksInvoice', 'readCustomer', 'readQuickBooksAccount', 'readQuickBooksInvoice',
-            'readQuickBooksItem', 'readQuickBooksPreferences', 'readQuickBooksTerm', 'refreshAccessToken', 'revokeToken', 'sendQuickBooksInvoice', 'updateQuickBooksInvoiceDelivery',
+            'listQuickBooksAccounts', 'listQuickBooksItems', 'listQuickBooksTerms',
+            // QB-INVOICE-1D: READ-only payment evidence — two pure parsers, the invoice read with its LinkedTxn, and ONE
+            // Payment read by the id that LinkedTxn names. No payment create, update, void, query or search exists.
+            'parseLinkedTxns', 'parseQuickBooksInvoice', 'parseQuickBooksPayment', 'readCustomer', 'readQuickBooksAccount', 'readQuickBooksInvoice',
+            'readQuickBooksInvoicePaymentLinks', 'readQuickBooksItem', 'readQuickBooksPayment',
+            'readQuickBooksPreferences', 'readQuickBooksTerm', 'refreshAccessToken', 'revokeToken', 'sendQuickBooksInvoice', 'updateQuickBooksInvoiceDelivery',
         ]);
     });
 

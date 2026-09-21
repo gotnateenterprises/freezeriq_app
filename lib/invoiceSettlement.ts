@@ -34,6 +34,11 @@
  * settled. Anything finer is a different product decision and would need its own
  * schema; faking it on top of a single boolean-ish status would produce numbers
  * that look precise and are not.
+ *
+ * QB-INVOICE-1D adds exactly one thing: an admin may ask FreezerIQ to VERIFY a
+ * QuickBooks payment (VERIFIED_SETTLEMENT_METHODS below). That is still a single
+ * full settlement — never partial, never an aggregate of several payments — and
+ * it runs the same transition as Record Payment (lib/invoiceSettlementTransition.ts).
  */
 
 import { OUTSTANDING_INVOICE_STATUSES } from './invoiceSendTruth';
@@ -66,6 +71,53 @@ export function isSettlementPaymentMethod(value: unknown): value is SettlementPa
     return typeof value === 'string'
         && (SETTLEMENT_PAYMENT_METHODS as readonly string[]).includes(value);
 }
+
+/**
+ * QB-INVOICE-1D — methods that are NOT a human's statement but a payment FreezerIQ itself VERIFIED with the
+ * provider. Deliberately a separate list, never merged into SETTLEMENT_PAYMENT_METHODS:
+ *
+ *   - SETTLEMENT_PAYMENT_METHODS is what a person may CLAIM through Record Payment (and what the dropdown
+ *     offers). `quickbooks` is not in it, so nobody can type "paid through QuickBooks" into FreezerIQ.
+ *   - `quickbooks` is written only by lib/quickbooks/invoicePayment.ts, and only after QuickBooks shows ONE
+ *     Payment that applies exactly this invoice's total to exactly this invoice. For this method,
+ *     `payment_reference` holds that Payment's QuickBooks Id and the invoice's QuickBooks number, and
+ *     `paid_at` holds the Payment's own transaction date.
+ *
+ * A verified settlement is NOT undone through Undo Payment (see isVerifiedSettlement): that action corrects a
+ * human's mistaken statement, and this one is backed by QuickBooks' own record. A refund or reversal made in
+ * QuickBooks afterwards needs a later reconciliation workflow; FreezerIQ never un-pays automatically.
+ */
+export const VERIFIED_SETTLEMENT_METHODS = ['quickbooks'] as const;
+
+export type VerifiedSettlementMethod = typeof VERIFIED_SETTLEMENT_METHODS[number];
+
+export const VERIFIED_SETTLEMENT_METHOD_LABELS: Record<VerifiedSettlementMethod, string> = {
+    quickbooks: 'QuickBooks Payments',
+};
+
+export function isVerifiedSettlementMethod(value: unknown): value is VerifiedSettlementMethod {
+    return typeof value === 'string'
+        && (VERIFIED_SETTLEMENT_METHODS as readonly string[]).includes(value);
+}
+
+/** Display label for any recorded settlement method — a human's claim or a verified provider payment. */
+export function settlementMethodLabel(value: unknown): string | null {
+    if (isSettlementPaymentMethod(value)) return SETTLEMENT_METHOD_LABELS[value];
+    if (isVerifiedSettlementMethod(value)) return VERIFIED_SETTLEMENT_METHOD_LABELS[value];
+    return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/** A PAID invoice whose settlement FreezerIQ verified with a provider (QuickBooks), with its payment date. */
+export function isVerifiedSettlement(invoice: { status?: unknown; paid_at?: unknown; payment_method?: unknown }): boolean {
+    if (invoice?.status !== 'PAID') return false;
+    if (invoice?.paid_at === null || invoice?.paid_at === undefined) return false;
+    return isVerifiedSettlementMethod(invoice?.payment_method);
+}
+
+/** What the Undo Payment action answers for a verified settlement. Method-agnostic on purpose. */
+export const VERIFIED_SETTLEMENT_UNDO_REFUSAL =
+    'This payment was verified with the payment provider, not recorded by hand, so it cannot be undone here. '
+    + 'If the payment was refunded or reversed, correct it with the provider first; FreezerIQ does not reverse a verified payment automatically.';
 
 // ───────────────────────────────────────────────────────────────────────────
 // ELIGIBILITY

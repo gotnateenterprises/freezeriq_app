@@ -12,8 +12,10 @@
  *     query/read and a DisplayName-only Customer create; and — QB-INVOICE-1C —
  *     Preferences/Account/Item/Term reads, a confirmed Service-item create, and
  *     one invoice's create (always unsent), read by its own id, recipient/payment-
- *     option update and explicit send. Nothing here reads, creates or records a
- *     payment, and nothing queries or searches invoices.
+ *     option update and explicit send; and — QB-INVOICE-1D — a READ of the one
+ *     Payment an invoice's own LinkedTxn names. Nothing here creates, updates,
+ *     voids or records a payment, nothing queries or searches payments, and
+ *     nothing queries or searches invoices.
  *   - Credentials travel only in the Authorization header or a POST body — never
  *     in a URL, where they would land in access logs.
  *   - No error message, thrown value or log line ever contains a token, the
@@ -951,6 +953,95 @@ export async function readQuickBooksInvoice(
     const inv = parseQuickBooksInvoice(raw);
     if (!inv || inv.id !== qboInvoiceId) throw new IntuitError('malformed');
     return inv;
+}
+
+// ── QB-INVOICE-1D: payment EVIDENCE — read-only ─────────────────────────────────────────────
+//
+// Facts relied on — Intuit's Invoice and Payment entity references (minorversion 75), confirmed field by
+// field against real responses in the 1D sandbox shape spike (2026-09-21):
+//   - Invoice.LinkedTxn lists every payment applied to the invoice as { TxnId, TxnType: 'Payment' }. Intuit:
+//     "Links to Payment transactions are established within the QuickBooks UI, only, and are available as
+//     read-only at the API level. Use LinkedTxn.TxnId as the ID in a separate read request." An unpaid
+//     invoice reads back `LinkedTxn: []`.
+//   - A credit memo applied to an invoice does NOT appear on the invoice as a CreditMemo: it appears as a
+//     linked PAYMENT whose TotalAmt is 0 and whose lines link the Invoice AND the CreditMemo. A linked Payment
+//     is therefore not evidence that money arrived — only the Payment object itself can say that.
+//   - Payment.Line[].LinkedTxn.TxnType is one of Invoice, CreditMemo, JournalEntry, Expense, Check,
+//     CreditCardCredit. An overpayment carries UnappliedAmt > 0. A voided Payment is unlinked from the
+//     invoice and reads back TotalAmt 0 and Line [].
+//   - Payment has no status field: an in-flight bank (ACH) payment reads exactly like a settled one.
+// Only ONE Payment is ever read — the id the invoice's own LinkedTxn names — and nothing here queries,
+// creates, updates, voids or records a payment.
+
+/** One entry of a transaction's LinkedTxn, as Intuit returns it. */
+export interface QuickBooksLinkedTxnRef {
+    txnId: string;
+    txnType: string;
+}
+
+/** An allowlisted view of one QuickBooks Payment — the evidence fields, nothing else (no note, no card data). */
+export interface QuickBooksPaymentSnapshot {
+    id: string;
+    txnDate: string | null;
+    customerId: string | null;
+    currency: string | null;
+    totalAmt: number | null;
+    unappliedAmt: number | null;
+    lines: Array<{ amount: number | null; linked: QuickBooksLinkedTxnRef[] | null }>;
+}
+
+const TXN_TYPE = /^[A-Za-z]{1,32}$/;
+
+/** Parses a LinkedTxn array. null when it is absent or any entry is not exactly { TxnId, TxnType } — never skipped. */
+export function parseLinkedTxns(raw: unknown): QuickBooksLinkedTxnRef[] | null {
+    if (!Array.isArray(raw)) return null;
+    const out: QuickBooksLinkedTxnRef[] = [];
+    for (const l of raw) {
+        if (!l || typeof l !== 'object' || typeof (l as any).TxnId !== 'string' || !OBJECT_ID.test((l as any).TxnId)
+            || typeof (l as any).TxnType !== 'string' || !TXN_TYPE.test((l as any).TxnType)) return null;
+        out.push({ txnId: (l as any).TxnId, txnType: (l as any).TxnType });
+    }
+    return out;
+}
+
+export function parseQuickBooksPayment(raw: any): QuickBooksPaymentSnapshot | null {
+    if (!raw || typeof raw !== 'object' || typeof raw.Id !== 'string' || !OBJECT_ID.test(raw.Id)) return null;
+    if (raw.Line !== undefined && !Array.isArray(raw.Line)) return null;
+    return {
+        id: raw.Id,
+        txnDate: strOrNull(raw.TxnDate, 32),
+        customerId: refValue(raw.CustomerRef),
+        currency: refValue(raw.CurrencyRef),
+        totalAmt: numOrNull(raw.TotalAmt),
+        unappliedAmt: numOrNull(raw.UnappliedAmt),
+        lines: (raw.Line ?? []).map((l: any) => ({ amount: numOrNull(l?.Amount), linked: parseLinkedTxns(l?.LinkedTxn) })),
+    };
+}
+
+/**
+ * Reads one QuickBooks invoice — by the id FreezerIQ's own create returned — together with its LinkedTxn, for the
+ * payment check. The invoice snapshot is exactly readQuickBooksInvoice's; `linkedTxns` is null when QuickBooks
+ * returned none or something that is not a well-formed LinkedTxn array. null when the invoice is missing (610).
+ */
+export async function readQuickBooksInvoicePaymentLinks(
+    config: QuickBooksConfig, accessToken: string, realmId: string, qboInvoiceId: string, fetchImpl: FetchLike = fetch,
+): Promise<{ invoice: QuickBooksInvoiceSnapshot; linkedTxns: QuickBooksLinkedTxnRef[] | null } | null> {
+    const raw = await readEntity(config, accessToken, realmId, 'invoice', qboInvoiceId, 'Invoice', fetchImpl);
+    if (raw === null) return null;
+    const invoice = parseQuickBooksInvoice(raw);
+    if (!invoice || invoice.id !== qboInvoiceId) throw new IntuitError('malformed');
+    return { invoice, linkedTxns: parseLinkedTxns(raw.LinkedTxn) };
+}
+
+/** Reads ONE QuickBooks Payment by the id an invoice's LinkedTxn named; null when QuickBooks reports it missing (610). */
+export async function readQuickBooksPayment(
+    config: QuickBooksConfig, accessToken: string, realmId: string, paymentId: string, fetchImpl: FetchLike = fetch,
+): Promise<QuickBooksPaymentSnapshot | null> {
+    const raw = await readEntity(config, accessToken, realmId, 'payment', paymentId, 'Payment', fetchImpl);
+    if (raw === null) return null;
+    const p = parseQuickBooksPayment(raw);
+    if (!p || p.id !== paymentId) throw new IntuitError('malformed');
+    return p;
 }
 
 /**

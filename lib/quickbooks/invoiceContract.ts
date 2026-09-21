@@ -34,7 +34,14 @@ export type ContractStage =
      * A sent invoice on the way to being re-sent: read before the re-send, and again after the recipient update.
      * Everything 'sent' requires except the delivery TIME, which QuickBooks removes when the invoice is updated.
      */
-    | 'resend_recipients';
+    | 'resend_recipients'
+    /**
+     * QB-INVOICE-1D: a sent invoice re-read before its payment evidence is trusted. Every identity, line and
+     * money check still applies — it must still be the invoice FreezerIQ created, with FreezerIQ's numbers —
+     * EXCEPT `balance_unpaid`, because a payment legitimately lowers the Balance (the payment check classifies the
+     * Balance itself), and no delivery check, because payment evidence does not depend on who was emailed.
+     */
+    | 'payment';
 
 export interface ExpectedQuickBooksLine {
     role: 'bundle' | 'share' | 'tax';
@@ -152,7 +159,9 @@ export function verifyQuickBooksInvoice(
     check('no_quickbooks_tax', (inv.totalTax === null || cents(inv.totalTax) === 0) && inv.taxLineCount === 0 && inv.txnTaxCodeId === null, 0,
         { totalTax: inv.totalTax, taxLines: inv.taxLineCount, taxCode: inv.txnTaxCodeId });
     check('total_equals_freezeriq_total', wholeCents(inv.totalAmt) && cents(inv.totalAmt) === expected.totalCents, expected.totalCents / 100, inv.totalAmt);
-    check('balance_unpaid', wholeCents(inv.balance) && cents(inv.balance) === expected.totalCents, expected.totalCents / 100, inv.balance);
+    if (stage !== 'payment') {
+        check('balance_unpaid', wholeCents(inv.balance) && cents(inv.balance) === expected.totalCents, expected.totalCents / 100, inv.balance);
+    }
     const lineSum = sales.reduce((s, l) => s + (cents(l.amount) ?? 0), 0);
     check('lines_sum_to_total', lineSum === cents(inv.totalAmt), cents(inv.totalAmt), lineSum);
 

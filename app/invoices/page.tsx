@@ -38,6 +38,7 @@ import {
     SETTLEMENT_METHOD_LABELS,
     SETTLEMENT_PAYMENT_METHODS,
     SETTLEMENT_REFERENCE_MAX_LENGTH,
+    settlementMethodLabel,
     utcNoonToCalendarDate,
     type SettlementPaymentMethod,
 } from '@/lib/invoiceSettlement';
@@ -847,8 +848,7 @@ function InvoicesContent() {
                             <div className="text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/40 rounded-xl px-4 py-3 space-y-1">
                                 <div className="font-bold text-slate-600 dark:text-slate-300">Will be cleared:</div>
                                 <div>
-                                    {SETTLEMENT_METHOD_LABELS[undoingInvoice.payment_method as SettlementPaymentMethod]
-                                        ?? undoingInvoice.payment_method}
+                                    {settlementMethodLabel(undoingInvoice.payment_method)}
                                     {undoingInvoice.paid_at
                                         ? ` · ${utcNoonToCalendarDate(new Date(undoingInvoice.paid_at))}`
                                         : ''}
@@ -1062,8 +1062,8 @@ function InvoicesContent() {
                                             <div className="mt-1.5 text-[11px] font-medium text-slate-400">
                                                 {inv.paid_at ? (
                                                     <>
-                                                        {SETTLEMENT_METHOD_LABELS[inv.payment_method as SettlementPaymentMethod]
-                                                            ?? inv.payment_method}
+                                                        {/* QB-INVOICE-1D: a verified QuickBooks payment reads "QuickBooks Payments". */}
+                                                        {settlementMethodLabel(inv.payment_method)}
                                                         {' · '}
                                                         {utcNoonToCalendarDate(new Date(inv.paid_at))}
                                                         {inv.payment_reference ? ` · ${inv.payment_reference}` : ''}

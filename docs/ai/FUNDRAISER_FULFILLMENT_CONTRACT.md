@@ -198,13 +198,28 @@ tier data for them.
 supporter order        → Order.status = 'fundraiser_hold'
 campaign closeout      → Invoice DRAFT → SENT
 payment recorded       → Invoice.status = 'PAID'   [single writer]
+  or payment verified
 PAID winner            → fundraiser_hold → production_ready   [exactly once]
 ```
 
-The sole release writer is `app/api/tenant/invoices/[id]/settle/route.ts`.
+The sole release writer is `settleInvoiceInTransaction` in
+`lib/invoiceSettlementTransition.ts` — the one conditional PAID transition.
+Until QB-INVOICE-1D it lived inline in the settle route; 1D moved it, unchanged,
+into its own module so that a second way of being paid runs the SAME transition
+rather than a copy. It has exactly two callers:
+
+- `app/api/tenant/invoices/[id]/settle/route.ts` — a human's Record Payment
+  (Square / Check), from any outstanding status;
+- `lib/quickbooks/invoicePayment.ts` — "Check QuickBooks payment": an admin asks
+  FreezerIQ to read the invoice's QuickBooks payment, and only on proof of ONE
+  exact full payment does it settle, from SENT only, as `quickbooks`.
+
 Exactly-once is achieved twice over: the promotion sits inside the winner-only
 branch of the conditional PAID transition, and `status: 'fundraiser_hold'` is
-itself a durable claim — once promoted, the rows can never match again.
+itself a durable claim — once promoted, the rows can never match again. A
+Record Payment racing a QuickBooks check therefore releases the food once
+between them. Nothing reverts a release: not Undo Payment, and not a later
+change in QuickBooks (tests/qbInvoice1dScope.test.ts holds both rules).
 
 ## 5.2 Do not reopen this gate
 

@@ -20,6 +20,17 @@
  * Failures are injectable (refused, 200-with-Fault, lost after processing, never arrived, malformed, gated) and
  * any invoice can be tampered with, so every read-back check can be driven. Every call is recorded.
  *
+ * QB-INVOICE-1D adds what the ORGANIZATION does in QuickBooks after the invoice is sent — pay it, pay part of it,
+ * pay it twice, overpay it, have a credit memo applied to it, or have a payment voided — each modelled on the
+ * real responses captured in the 1D sandbox shape spike (2026-09-21):
+ *   - an unpaid invoice reads back `LinkedTxn: []`; each payment applied to it adds { TxnId, TxnType: 'Payment' };
+ *   - a Payment has TotalAmt, UnappliedAmt, CurrencyRef, CustomerRef, TxnDate and Line[{ Amount, LinkedTxn[] }];
+ *   - a credit memo applied to an invoice appears on the invoice as a linked PAYMENT with TotalAmt 0 whose two lines
+ *     link the Invoice and the CreditMemo — never as a CreditMemo link on the invoice;
+ *   - an overpayment has UnappliedAmt > 0; a voided payment is unlinked, reads TotalAmt 0 and Line [], and its
+ *     applied amount returns to the invoice Balance.
+ * Only `GET /payment/{id}` is served; any payment WRITE by FreezerIQ is recorded as op 'payment_write' and refused.
+ *
  * `fakeInvoiceSendDb` extends the 1B fakeLinkDb with the 1C tables and the guarantees the lifecycle relies on:
  * UNIQUE(invoice_id) on the lifecycle (P2002), every CHECK constraint of the migration (P2004), the foreign keys to
  * the invoice link and the invoice (P2003), settings bound to the LIVE generation (Forget deletes them), and
@@ -53,7 +64,7 @@ export interface FakePreferences {
     multiCurrency: boolean;
 }
 
-export type InvoicingOp = 'create' | 'update' | 'read' | 'send' | 'query' | 'preferences' | 'entity' | 'item_create';
+export type InvoicingOp = 'create' | 'update' | 'read' | 'send' | 'query' | 'preferences' | 'entity' | 'item_create' | 'payment_read' | 'payment_write';
 export type InvoicingFailure =
     /** Refused before processing: nothing happened. */
     | { op: InvoicingOp; kind: 'status'; status: number; code?: string }
@@ -84,6 +95,8 @@ export function fakeQuickBooksInvoicing(opts: { now?: () => number; autoSend?: b
     const items = new Map<string, FakeItem>();
     const terms = new Map<string, FakeTerm>();
     const invoices = new Map<string, any>();
+    /** QB-INVOICE-1D: payments the organization made in QuickBooks, keyed by Payment Id. */
+    const payments = new Map<string, any>();
     const prefs: FakePreferences = { defaultCc: null, defaultBcc: null, emailCopyToCompany: false, onlinePayments: true, customTxnNumbers: false, homeCurrency: 'USD', multiCurrency: false };
     /** What an omitted flag becomes (the company setting). */
     const companyFlagDefaults = { card: true, ach: true, paypal: false, affirm: false };
@@ -175,6 +188,7 @@ export function fakeQuickBooksInvoicing(opts: { now?: () => number; autoSend?: b
             Line: lines,
             TotalAmt: total,
             Balance: total,
+            LinkedTxn: [], // observed on every unpaid invoice (1D sandbox shape spike)
             MetaData: { CreateTime: nowIso(), LastUpdatedTime: nowIso() },
         };
         for (const [k, field] of Object.entries(FLAG_FIELDS)) {
@@ -213,7 +227,7 @@ export function fakeQuickBooksInvoicing(opts: { now?: () => number; autoSend?: b
         const requestId = req.url.searchParams.get('requestid');
         const record = (op: InvoicingCall['op'], extra: Partial<InvoicingCall> = {}) =>
             calls.push({ op, method: req.method, path: req.path, search: req.url.search, requestId, realm, ...extra });
-        const known = /^\/(preferences|query|account\/\d+|item(\/\d+)?|term\/\d+|invoice(\/\d+(\/send)?)?)$/.test(req.path);
+        const known = /^\/(preferences|query|account\/\d+|item(\/\d+)?|term\/\d+|invoice(\/\d+(\/send)?)?|payment(\/\d+)?)$/.test(req.path);
         if (!known) return undefined; // customers etc. belong to other fakes
         if (req.url.searchParams.get('minorversion') !== '75') { record('other'); return fault(json, 400, '4000'); }
 
@@ -326,15 +340,111 @@ export function fakeQuickBooksInvoicing(opts: { now?: () => number; autoSend?: b
             });
         }
 
+        // ── QB-INVOICE-1D: one Payment, read by id ──
+        const paymentRead = /^\/payment\/(\d+)$/.exec(req.path);
+        if (req.method === 'GET' && paymentRead) {
+            record('payment_read');
+            return injectable('payment_read', json, () => {
+                const p = payments.get(paymentRead[1]);
+                if (!p) return fault(json, 400, '610');
+                const res = json(200, { Payment: copy(p), time: nowIso() });
+                runAfter('payment_read', p);
+                return res;
+            });
+        }
+        if (/^\/payment(\/\d+)?$/.test(req.path)) {
+            // FreezerIQ never writes a payment. Recorded (so a test can prove it never happened) and refused.
+            record('payment_write');
+            return fault(json, 400, '4000');
+        }
+
         record('other');
         return fault(json, 400, '4000');
     }
+
+    // ── QB-INVOICE-1D: what the ORGANIZATION does in QuickBooks (never FreezerIQ) ──────────────
+    let paymentSeq = 900;
+    const txnToday = () => new Date(now()).toISOString().slice(0, 10);
+    /** Applies `amounts` of `payment` to invoices exactly as QuickBooks does: Balance down, a Payment link added. */
+    const applyToInvoices = (paymentId: string, lines: Array<{ invoiceId: string; amount: number }>) => {
+        for (const l of lines) {
+            const inv = invoices.get(l.invoiceId);
+            if (!inv) throw new Error(`fake QuickBooks: no invoice ${l.invoiceId}`);
+            inv.Balance = round2(inv.Balance - l.amount);
+            inv.LinkedTxn = [...(inv.LinkedTxn ?? []), { TxnId: paymentId, TxnType: 'Payment' }];
+            inv.SyncToken = String(Number(inv.SyncToken) + 1);
+        }
+    };
+    const paymentRow = (p: { id: string; customerId: string; total: number; unapplied: number; txnDate: string; lines: any[]; note?: string }) => ({
+        CustomerRef: { value: p.customerId, name: 'Customer' },
+        DepositToAccountRef: { value: '4' },
+        TotalAmt: p.total,
+        UnappliedAmt: p.unapplied,
+        ProcessPayment: false,
+        domain: 'QBO', sparse: false,
+        Id: p.id, SyncToken: '0',
+        MetaData: { CreateTime: nowIso(), LastUpdatedTime: nowIso() },
+        TxnDate: p.txnDate,
+        CurrencyRef: { value: 'USD', name: 'United States Dollar' },
+        ...(p.note ? { PrivateNote: p.note } : {}),
+        Line: p.lines,
+    });
 
     return {
         accounting,
         calls,
         sent,
         invoices,
+        payments,
+        /**
+         * The organization pays in QuickBooks. `amount` is applied to `invoiceId`; `total` (default `amount`) is
+         * what was received — more than `amount` leaves UnappliedAmt. `alsoApplyTo` spreads one payment over
+         * other invoices too. Returns the new Payment Id.
+         */
+        receivePayment(o: { invoiceId: string; amount: number; total?: number; txnDate?: string; customerId?: string; alsoApplyTo?: Array<{ invoiceId: string; amount: number }> }): string {
+            const inv = invoices.get(o.invoiceId);
+            const id = String(++paymentSeq);
+            const applied = [{ invoiceId: o.invoiceId, amount: o.amount }, ...(o.alsoApplyTo ?? [])];
+            const appliedTotal = round2(applied.reduce((s, a) => s + a.amount, 0));
+            const total = o.total ?? appliedTotal;
+            payments.set(id, paymentRow({
+                id, customerId: o.customerId ?? inv.CustomerRef.value, total, unapplied: round2(total - appliedTotal), txnDate: o.txnDate ?? txnToday(),
+                lines: applied.map((a) => ({ Amount: a.amount, LinkedTxn: [{ TxnId: a.invoiceId, TxnType: 'Invoice' }], LineEx: { any: [] } })),
+            }));
+            applyToInvoices(id, applied);
+            return id;
+        },
+        /** A credit memo applied to the invoice: QuickBooks records it as a $0 Payment linking the Invoice AND the CreditMemo. */
+        applyCreditMemo(o: { invoiceId: string; amount: number; txnDate?: string }): string {
+            const inv = invoices.get(o.invoiceId);
+            const creditMemoId = String(++paymentSeq);
+            const id = String(++paymentSeq);
+            payments.set(id, paymentRow({
+                id, customerId: inv.CustomerRef.value, total: 0, unapplied: 0, txnDate: o.txnDate ?? txnToday(),
+                lines: [
+                    { Amount: o.amount, LinkedTxn: [{ TxnId: o.invoiceId, TxnType: 'Invoice' }], LineEx: { any: [] } },
+                    { Amount: o.amount, LinkedTxn: [{ TxnId: creditMemoId, TxnType: 'CreditMemo' }], LineEx: { any: [] } },
+                ],
+            }));
+            applyToInvoices(id, [{ invoiceId: o.invoiceId, amount: o.amount }]);
+            return id;
+        },
+        /** Voids a payment: it is unlinked from every invoice, reads TotalAmt 0 and Line [], and its amount returns. */
+        voidPayment(paymentId: string) {
+            const p = payments.get(paymentId);
+            for (const line of p.Line) {
+                for (const l of line.LinkedTxn) {
+                    const inv = l.TxnType === 'Invoice' ? invoices.get(l.TxnId) : null;
+                    if (!inv) continue;
+                    inv.Balance = round2(inv.Balance + line.Amount);
+                    inv.LinkedTxn = (inv.LinkedTxn ?? []).filter((x: any) => x.TxnId !== paymentId);
+                }
+            }
+            Object.assign(p, { TotalAmt: 0, UnappliedAmt: 0, Line: [], PrivateNote: `Voided - ${p.PrivateNote ?? ''}`.trim() });
+        },
+        /** Change a stored payment as if someone edited it in QuickBooks. */
+        tamperPayment: (id: string, fn: (p: any) => void) => { fn(payments.get(id)); },
+        paymentReads: () => calls.filter((c) => c.op === 'payment_read'),
         prefs,
         companyFlagDefaults,
         setAutoSend: (on: boolean) => { autoSend = on; },
@@ -379,8 +489,13 @@ export interface FakeInvoice {
     id: string; business_id: string; customer_id: string; campaign_id: string | null; status: string;
     total_amount: string; tax_amount: string | null; tax_rate_percent: string | null; tax_status: string | null;
     fundraiser_profit_amount: string | null; fundraiser_profit_percent: string | null; paid_at: Date | null;
+    /** QB-INVOICE-1D: the settlement facts the shared transition writes. */
+    payment_method?: string | null; payment_reference?: string | null;
     items: FakeInvoiceItem[];
 }
+
+/** QB-INVOICE-1D: a campaign's supporter order, as the kitchen release sees it. */
+export interface FakeOrder { id: string; business_id: string; campaign_id: string; source: string; status: string; canceled_at: Date | null }
 
 type Undo = Array<() => void>;
 
@@ -411,9 +526,19 @@ function project(row: any, select: Record<string, any> | undefined, relations: R
 const HEX64 = /^[a-f0-9]{64}$/;
 const NUM_ID = /^[0-9]{1,32}$/;
 
-export function fakeInvoiceSendDb() {
+/**
+ * `settlement: true` (QB-INVOICE-1D only) additionally permits EXACTLY the shared settlement transition
+ * (lib/invoiceSettlementTransition.ts) inside a transaction: a conditional `status: { in: [...] }` → PAID write of the
+ * four settlement fields, and the one fundraiser release `fundraiser_hold` → `production_ready` on the campaign's own
+ * orders. Every other invoice or order write still FAILS THE TEST. The 1C suites use the strict default.
+ */
+export function fakeInvoiceSendDb(dbOptions: { settlement?: boolean } = {}) {
     const link = fakeLinkDb();
     const invoices = new Map<string, FakeInvoice>();
+    const orders = new Map<string, FakeOrder>();
+    /** QB-INVOICE-1D: every order write attempted, and every settlement write attempted. */
+    const orderWrites: Array<{ where: any; data: any; count: number }> = [];
+    const settlementWrites: Array<{ where: any; data: any; count: number }> = [];
     const timezones = new Map<string, string>();
     const contactEmails = new Map<string, string | null>();
     /** campaign_id -> the campaign's primary coordinator assignment, already in CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT shape. */
@@ -456,6 +581,25 @@ export function fakeInvoiceSendDb() {
                 return async ({ where, data }: any) => {
                     await tick();
                     invoiceWrites.push({ where: { ...where }, data: { ...data }, inTransaction: !!undo });
+                    // QB-INVOICE-1D (opt-in): the shared settlement transition, and only its exact shape.
+                    const settlement = dbOptions.settlement && !!undo && typeof where.id === 'string' && typeof where.business_id === 'string'
+                        && where.status && Array.isArray(where.status.in) && where.status.in.length > 0
+                        && where.status.in.every((s: string) => ['PENDING', 'SENT', 'OVERDUE'].includes(s))
+                        && JSON.stringify(Object.keys(data).sort()) === JSON.stringify(['paid_at', 'payment_method', 'payment_reference', 'status'])
+                        && data.status === 'PAID' && data.paid_at instanceof Date && typeof data.payment_method === 'string';
+                    if (settlement) {
+                        let count = 0;
+                        for (const inv of invoices.values()) {
+                            if (inv.id === where.id && inv.business_id === where.business_id && where.status.in.includes(inv.status)) {
+                                const before = { status: inv.status, paid_at: inv.paid_at, payment_method: inv.payment_method ?? null, payment_reference: inv.payment_reference ?? null };
+                                Object.assign(inv, { status: 'PAID', paid_at: data.paid_at, payment_method: data.payment_method, payment_reference: data.payment_reference });
+                                undo!.push(() => { Object.assign(inv, before); });
+                                count++;
+                            }
+                        }
+                        settlementWrites.push({ where: copy(where), data: { ...data }, count });
+                        return { count };
+                    }
                     const allowed = !!undo && Object.keys(data).length === 1 && data.status === 'SENT' && where.status === 'DRAFT' && typeof where.id === 'string' && typeof where.business_id === 'string';
                     if (!allowed) {
                         violations.push(`invoice.updateMany ${JSON.stringify({ where, data, inTransaction: !!undo })}`);
@@ -567,6 +711,45 @@ export function fakeInvoiceSendDb() {
         },
     });
 
+    // ── QB-INVOICE-1D: the fundraiser release, and nothing else, on the campaign's own orders ──
+    const RELEASE_WHERE = ['business_id', 'campaign_id', 'canceled_at', 'source', 'status'];
+    const orderModel = (undo: Undo | null) => new Proxy({}, {
+        get(_t, method: string) {
+            if (method === 'updateMany') {
+                return async ({ where, data }: any) => {
+                    await tick();
+                    const release = dbOptions.settlement && !!undo
+                        && JSON.stringify(Object.keys(where).sort()) === JSON.stringify(RELEASE_WHERE)
+                        && where.source === 'fundraiser' && where.status === 'fundraiser_hold' && where.canceled_at === null
+                        && typeof where.campaign_id === 'string' && typeof where.business_id === 'string'
+                        && JSON.stringify(data) === JSON.stringify({ status: 'production_ready' });
+                    if (!release) {
+                        violations.push(`order.updateMany ${JSON.stringify({ where, data, inTransaction: !!undo })}`);
+                        throw new Error('the only order write allowed is the fundraiser release inside the settlement transaction');
+                    }
+                    let count = 0;
+                    for (const o of orders.values()) {
+                        if (o.business_id === where.business_id && o.campaign_id === where.campaign_id && o.source === 'fundraiser'
+                            && o.status === 'fundraiser_hold' && o.canceled_at === null) {
+                            o.status = 'production_ready';
+                            undo!.push(() => { o.status = 'fundraiser_hold'; });
+                            count++;
+                        }
+                    }
+                    orderWrites.push({ where: { ...where }, data: { ...data }, count });
+                    return { count };
+                };
+            }
+            return async () => { violations.push(`order.${method}`); throw new Error(`order.${method} must never be called`); };
+        },
+    });
+    /** Loyalty is globally paused (LOY-P0), so the settlement transition must never reach these. */
+    const forbidden = (model: string) => new Proxy({}, {
+        get(_t, method: string) {
+            return async () => { violations.push(`${model}.${method}`); throw new Error(`${model}.${method} must never be called`); };
+        },
+    });
+
     async function $transaction(fn: (tx: any) => Promise<any>, opts?: any) {
         const undo: Undo = [];
         try {
@@ -575,6 +758,8 @@ export function fakeInvoiceSendDb() {
                 invoice: invoiceModel(undo),
                 quickBooksInvoiceSettings: settingsModel(undo),
                 quickBooksInvoiceSend: sendModel(undo),
+                order: orderModel(undo),
+                loyaltyPoint: forbidden('loyaltyPoint'),
             }), opts);
         } catch (e) {
             for (const u of undo.reverse()) u(); // what this transaction wrote is rolled back
@@ -587,6 +772,8 @@ export function fakeInvoiceSendDb() {
         invoice: invoiceModel(null),
         quickBooksInvoiceSettings: settingsModel(null),
         quickBooksInvoiceSend: sendModel(null),
+        order: orderModel(null),
+        loyaltyPoint: forbidden('loyaltyPoint'),
         $transaction,
     } as any;
 
@@ -599,6 +786,19 @@ export function fakeInvoiceSendDb() {
         violations,
         rejectedWrites,
         invoiceWrites,
+        orders,
+        orderWrites,
+        settlementWrites,
+        /** QB-INVOICE-1D: supporter orders held for a campaign (and optionally canceled / other-campaign noise). */
+        seedHeldOrders(businessId: string, campaignId: string, n: number, over: Partial<FakeOrder> = {}): FakeOrder[] {
+            const out: FakeOrder[] = [];
+            for (let i = 0; i < n; i++) {
+                const o: FakeOrder = { id: randomUUID(), business_id: businessId, campaign_id: campaignId, source: 'fundraiser', status: 'fundraiser_hold', canceled_at: null, ...over };
+                orders.set(o.id, o);
+                out.push(o);
+            }
+            return out;
+        },
         setTimezone: (businessId: string, tz: string) => { timezones.set(businessId, tz); },
         /** The campaign's assigned coordinator (as the coordinator portal records it). */
         assignCoordinator(campaignId: string, c: { name: string; email: string | null; ended?: boolean }) {
@@ -614,7 +814,8 @@ export function fakeInvoiceSendDb() {
         seedInvoice(inv: Partial<FakeInvoice> & { business_id: string; customer_id: string }): FakeInvoice {
             const row: FakeInvoice = {
                 id: randomUUID(), campaign_id: randomUUID(), status: 'DRAFT', total_amount: '0.00', tax_amount: '0.00', tax_rate_percent: null,
-                tax_status: 'TAXABLE', fundraiser_profit_amount: '0.00', fundraiser_profit_percent: '20.00', paid_at: null, items: [], ...inv,
+                tax_status: 'TAXABLE', fundraiser_profit_amount: '0.00', fundraiser_profit_percent: '20.00', paid_at: null,
+                payment_method: null, payment_reference: null, items: [], ...inv,
             };
             invoices.set(row.id, row);
             link.invoices.set(row.id, { id: row.id, business_id: row.business_id, status: row.status, total_amount: row.total_amount, paid_at: null, campaign_id: row.campaign_id });

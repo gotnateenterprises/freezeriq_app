@@ -45,12 +45,27 @@ describe('QB-INVOICE-1C · no 1D: no payments, webhooks, polling, PAID or fulfil
     });
 
     it('QuickBooks code never writes PAID, payment facts, orders, fulfillment or release — and nothing at fundraiser close calls it', () => {
+        // QB-INVOICE-1D restates this guard; it does not loosen it. ONE QuickBooks file — the payment check — may
+        // READ settlement facts and may settle, but ONLY through the shared transition in lib/invoiceSettlementTransition.ts
+        // (the same one Record Payment runs); tests/qbInvoice1dScope.test.ts pins that file's contract. The client-safe
+        // dialog wording may COMPARE a status. Every other QuickBooks file keeps the full 1C ban, word for word.
+        const PAYMENT_CHECK = 'lib/quickbooks/invoicePayment.ts';
+        const DIALOG_WORDING = 'lib/quickbooks/invoiceSendView.ts';
         for (const f of [...QB_LIB, ...QB_ROUTES]) {
             const code = strip(R(f));
-            expect({ f, hit: /'PAID'|paid_at|payment_method|payment_reference|production_ready|fundraiser_hold|released_to_delivery|loyalty/.test(code) }).toEqual({ f, hit: false });
+            // No QuickBooks file writes PAID, releases food, touches loyalty, or reaches orders/campaigns. Ever.
+            expect({ f, hit: /status:\s*'PAID'|production_ready|fundraiser_hold|released_to_delivery|loyalty/.test(code) }).toEqual({ f, hit: false });
             expect({ f, hit: /\.(order|orderItem|fundraiserCampaign)\s*\./.test(code) }).toEqual({ f, hit: false });
+            if (f === PAYMENT_CHECK) continue;
+            if (f === DIALOG_WORDING) {
+                expect({ f, hit: /paid_at|payment_method|payment_reference/.test(code) }).toEqual({ f, hit: false });
+                continue;
+            }
+            expect({ f, hit: /'PAID'|paid_at|payment_method|payment_reference/.test(code) }).toEqual({ f, hit: false });
         }
         expect(strip(R('app/api/campaigns/[id]/closeout/route.ts'))).not.toMatch(/quickbooks/i);
+        // The human Record Payment route still knows nothing of QuickBooks: it cannot record one, and it refuses to
+        // undo a VERIFIED settlement through a method-agnostic rule (lib/invoiceSettlement.ts isVerifiedSettlement).
         expect(strip(R('app/api/tenant/invoices/[id]/settle/route.ts'))).not.toMatch(/quickbooks/i);
     });
 
@@ -99,8 +114,9 @@ describe('QB-INVOICE-1C · one path to every QuickBooks invoice write', () => {
     });
 
     it('only the two 1C routes reach the 1C services; FreezerIQ never emails through QuickBooks code', () => {
-        // Runtime imports only: the client-safe view modules import TYPES, which compile away.
-        expect(users(/^import (?!type )[^;]*from '@\/lib\/quickbooks\/invoiceSend';/m)).toEqual([INVOICE_ROUTE]);
+        // Runtime imports only: the client-safe view modules import TYPES, which compile away. QB-INVOICE-1D's payment
+        // check reuses the lifecycle's own "what was sent" (loadSentReview) rather than a second definition of it.
+        expect(users(/^import (?!type )[^;]*from '@\/lib\/quickbooks\/invoiceSend';/m).sort()).toEqual([INVOICE_ROUTE, 'lib/quickbooks/invoicePayment.ts'].sort());
         expect(users(/^import (?!type )[^;]*from '@\/lib\/quickbooks\/invoiceSettings';/m).filter((f) => f.startsWith('app/') || f.startsWith('components/'))).toEqual([SETTINGS_ROUTE]);
         for (const f of ['components/invoices/QuickBooksInvoiceSendDialog.tsx', 'components/settings/QuickBooksInvoiceSettingsCard.tsx', 'lib/quickbooks/invoiceSendView.ts', 'lib/quickbooks/invoiceSettingsView.ts']) {
             expect({ f, runtimeServerImport: /^import (?!type )[^;]*from '@\/lib\/(db|quickbooks\/(invoiceSend|invoiceSettings|connection|intuitClient|liveConnection))';/m.test(R(f)) }).toEqual({ f, runtimeServerImport: false });

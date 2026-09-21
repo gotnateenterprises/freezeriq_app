@@ -42,6 +42,8 @@ const ROOT = process.cwd();
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
 
 const SETTLE_ROUTE = 'app/api/tenant/invoices/[id]/settle/route.ts';
+/** QB-INVOICE-1D: the conditional PAID transition and the release, moved out of SETTLE_ROUTE unchanged. */
+const SETTLEMENT_TRANSITION = 'lib/invoiceSettlementTransition.ts';
 const CLOSEOUT_ROUTE = 'app/api/campaigns/[id]/closeout/route.ts';
 const DASHBOARD_ROUTE = 'app/api/production/dashboard/route.ts';
 
@@ -392,10 +394,13 @@ describe('OPS-3 release gate: only an authoritative Invoice PAID releases the fu
     });
 
     it('10. a SENT but UNPAID invoice releases nothing until payment is actually recorded', async () => {
-        // Proven by construction: no release call exists until the settle POST
-        // wins its PAID transition. Nothing else in the app writes PAID.
+        // Proven by construction: no release call exists until a settlement wins
+        // its PAID transition. QB-INVOICE-1D moved that transition, unchanged, from
+        // the settle route into lib/invoiceSettlementTransition.ts so a verified
+        // QuickBooks payment runs the same one; the settle route calls it.
         expect(releaseCalls()).toHaveLength(0);
-        const src = read(SETTLE_ROUTE);
+        expect(read(SETTLE_ROUTE)).toContain('settleInvoiceInTransaction(');
+        const src = read(SETTLEMENT_TRANSITION);
         // The release is INSIDE the winner-only guard.
         const winnerGuard = src.indexOf('if (result.count !== 1) return result;');
         const campaignRelease = src.indexOf('campaign_id: invoice.campaign_id');

@@ -179,6 +179,9 @@ describe('QB-INVOICE-1A · no QuickBooks invoice can become a FreezerIQ Order', 
         expect(reads.sort()).toEqual([
             'lib/quickbooks/customerLinks.ts: customer.findFirst',
             'lib/quickbooks/invoiceLinks.ts: invoice.findFirst',
+            // QB-INVOICE-1D: the payment check READS the FreezerIQ invoice. It writes nothing here — settling goes
+            // through lib/invoiceSettlementTransition.ts, outside the connector (see qbInvoice1dScope).
+            'lib/quickbooks/invoicePayment.ts: invoice.findFirst',
             'lib/quickbooks/invoiceSend.ts: invoice.findFirst',
             'lib/quickbooks/invoiceSend.ts: invoice.findFirst',
             'lib/quickbooks/invoiceSend.ts: invoice.findFirst',
@@ -200,8 +203,10 @@ describe('QB-INVOICE-1A · no QuickBooks invoice can become a FreezerIQ Order', 
         expect(entityPaths.sort()).toEqual([
             '/${entityPath}/${id}', '/customer', '/customer/${customerId}', '/invoice', '/invoice', '/invoice/${qboInvoiceId}/send', '/item', '/preferences', '/query', '/query',
         ].sort());
-        // By-id reads: the three setup objects, and an invoice (by the id FreezerIQ's own create returned).
-        expect([...client.matchAll(/readEntity\(config, accessToken, realmId, '(\w+)'/g)].map((m) => m[1]).sort()).toEqual(['account', 'invoice', 'item', 'term']);
+        // By-id reads: the three setup objects, and an invoice (by the id FreezerIQ's own create returned) — read
+        // twice: for the send lifecycle and, QB-INVOICE-1D, with its LinkedTxn for the payment check — plus ONE
+        // Payment, by the id that invoice's own LinkedTxn names. A read, never a query and never a write.
+        expect([...client.matchAll(/readEntity\(config, accessToken, realmId, '(\w+)'/g)].map((m) => m[1]).sort()).toEqual(['account', 'invoice', 'invoice', 'item', 'payment', 'term']);
         // The only queries: customers by name (1B) and the three setup lists (1C) — never an invoice or payment search.
         expect(client.match(/select \* from (\w+)/g)).toEqual(['select * from Customer', 'select * from Account', 'select * from Item', 'select * from Term']);
         // token, revoke, customer create (1B); item create, invoice create, invoice update, invoice send (1C)

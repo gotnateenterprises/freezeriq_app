@@ -1,9 +1,11 @@
 # FreezerIQ — QuickBooks Online Integration
 
-**Status:** QB-INVOICE-1A **ACCEPTED / CLOSED** by the owner on September 13, 2026, after a successful live Intuit sandbox proof (§4). Sandbox OAuth foundation only: no QuickBooks customers, invoices or payment sync, and Production stays disabled.
+**Status:** QB-INVOICE-1A **ACCEPTED / CLOSED** by the owner on September 13, 2026, after a successful live Intuit sandbox proof (§4). Sandbox OAuth foundation only: no QuickBooks customers, invoices or payment sync, and Production stayed disabled at that stage.
 **QB-INVOICE-1B:** customer mapping + invoice-link schema foundation, with the owner's acceptance fix (one QuickBooks invoice link per invoice for life; retained connection generations) — owner Intuit sandbox acceptance PASSED on September 14, 2026 (§11.8); on the isolated branch `worktree-qb-invoice-1b`, not merged and not deployed, and its migration is not applied to Production or Preview; see §11. It creates and sends no QuickBooks invoice.
 **QB-INVOICE-1C:** "Send via QuickBooks" — tenant invoice settings and a verified create → recipients → payment options → send lifecycle — implemented on the isolated branch `qb-invoice-1c`, uncommitted, awaiting owner review and Intuit sandbox acceptance; see §12. No payments, webhooks or PAID behaviour (QB-INVOICE-1D).
-**Scope of this document:** the connector's architecture and safety properties, the environment rules, the evidence behind them, and the compliance and readiness gaps that remain before Intuit production credentials may be requested.
+**QB-INVOICE-1D:** "Check QuickBooks payment" — on an admin's explicit click, FreezerIQ reads a sent invoice's QuickBooks payment and settles it through the shared settlement transition only when QuickBooks proves ONE exact full payment — owner-approved on September 21, 2026 and committed on the isolated branch `qb-invoice-1d` (from `4767422`), pushed for a Preview only, awaiting the owner's browser acceptance; not released to Production. Engineering acceptance against the Intuit sandbox passed on September 21, 2026. Code only: no migration, no new scope, no QuickBooks write, no webhook or polling; see §13.
+**Production (owner-reported, September 21, 2026):** QuickBooks is enabled (`QBO_PRODUCTION_ENABLED=true`) and Freezer Chef is connected to its real QuickBooks company; its invoice settings are Ready, with card and ACH payments enabled. No FreezerIQ-created fundraiser invoice has been sent through QuickBooks yet. Preview is always disabled (§2).
+**Scope of this document:** the connector's architecture and safety properties, the environment rules, the evidence behind them, and the compliance and readiness work recorded on the way to Intuit production credentials.
 
 This is an engineering record, not a legal opinion. Nothing here claims compliance with Intuit's terms beyond the technical evidence listed. Items marked **OWNER** or **COUNSEL** need a human decision.
 
@@ -384,7 +386,7 @@ The migration is additive:
 **Preview shares the Production database, and `npm run build` never migrates.** Procedure, each step only with explicit owner authorization:
 1. Owner review and sandbox acceptance (passed September 14, 2026); commit on the isolated branch `worktree-qb-invoice-1b`. Merging into the release branch is a separate owner-authorized step.
 2. Before the code is promoted, apply the migration to the Production database with `prisma migrate deploy`, run by the owner (or with explicit authorization) against the Production URL. It is safe before the code, because nothing existing reads the new tables. Confirm `_prisma_migrations` lists `20260913120000_qb_invoice_1b_quickbooks_links` as finished.
-3. Deploy. Even if the code reached Preview or Production first, the new routes answer `disabled` before touching the database there (QuickBooks is disabled in both), and the card renders nothing.
+3. Deploy. Even if the code reached Preview or Production first, the new routes answer `disabled` before touching the database there (QuickBooks was disabled in both at the time), and the card renders nothing.
 4. Rollback of code alone needs nothing: old code ignores the new tables. Reversing the migration destroys generations and links, so it is only for a database where no QuickBooks invoice link exists and only with an owner decision:
 
 ```sql
@@ -490,7 +492,7 @@ Remove-Item -Recurse -Force $base, "$base.zip"
 
 ## 12. QB-INVOICE-1C — Send via QuickBooks
 
-**Status:** implemented on the isolated branch `qb-invoice-1c` (from `7d17fc8`), uncommitted, awaiting owner review and Intuit **sandbox** acceptance (§12.12). Not deployed; the migration is not applied to Production, Preview or the owner's local database. QuickBooks stays disabled in Preview and in Production (§2) — nothing here changes that.
+**Status:** implemented on the isolated branch `qb-invoice-1c` (from `7d17fc8`), uncommitted, awaiting owner review and Intuit **sandbox** acceptance (§12.12). Not deployed; the migration is not applied to Production, Preview or the owner's local database. QuickBooks stays disabled in Preview (§2); Production was enabled later by a separate owner step (see the status lines at the top).
 
 ### 12.1 What it adds
 
@@ -605,7 +607,7 @@ No payment webhook, polling, automatic PAID, Payments API, card/ACH handling in 
 
 ### 12.11 Migration and release procedure
 
-Additive: two new tables, one enum, one unique index on the 1B link table; no existing column or row changes; nothing backfilled. Existing code never reads the new tables, so the migration is safe BEFORE the code — and must precede it, because the new invoices list query selects the lifecycle. Each step only with explicit owner authorization: owner review → sandbox acceptance (§12.12) → commit on `qb-invoice-1c` → Production migration (`prisma migrate deploy` against the direct session URL, confirm `20260915170000_qb_invoice_1c_invoice_send` finished) → release. QuickBooks remains disabled in Preview and Production until a separate, owner-approved enablement. Reversal (only while `quickbooks_invoice_sends` and `quickbooks_invoice_settings` are empty, with an owner decision):
+Additive: two new tables, one enum, one unique index on the 1B link table; no existing column or row changes; nothing backfilled. Existing code never reads the new tables, so the migration is safe BEFORE the code — and must precede it, because the new invoices list query selects the lifecycle. Each step only with explicit owner authorization: owner review → sandbox acceptance (§12.12) → commit on `qb-invoice-1c` → Production migration (`prisma migrate deploy` against the direct session URL, confirm `20260915170000_qb_invoice_1c_invoice_send` finished) → release. QuickBooks remains disabled in Preview; enabling it in Production was a separate, owner-approved step (see the status lines at the top). Reversal (only while `quickbooks_invoice_sends` and `quickbooks_invoice_settings` are empty, with an owner decision):
 
 ```sql
 BEGIN;
@@ -636,5 +638,110 @@ Rolling back the CODE after invoices were sent through QuickBooks is not neutral
 11. **Send again** to `acceptance-fixed@example.com` (same CCs): the same QuickBooks invoice gets the new recipient and a new delivery time; send count 2; still one invoice. Record whether DeliveryTime updates and whether DeliveryErrorType clears.
 12. **Locks.** Via the API or UI: delete the invoice (409), change its organization or status by editing (409), email it through FreezerIQ (409).
 13. **Stop.** Do not record a payment in QuickBooks, do not enable online payments, and do not connect any real company. Report differences from §12.4–§12.7 before QB-INVOICE-1D is considered.
+
+---
+
+## 13. QB-INVOICE-1D — Check QuickBooks payment
+
+**Status:** owner-approved on September 21, 2026 and committed on the isolated branch `qb-invoice-1d` (from `4767422`); pushed for a Preview only, awaiting the owner's browser acceptance; not released to Production. Code only — no migration, no new dependency, no new OAuth scope, no QuickBooks write. Engineering acceptance against the Intuit **sandbox** passed on September 21, 2026 (§13.9). QuickBooks is always disabled in Preview (§2), so a Preview proves the build and rendering only. Production has QuickBooks enabled with Freezer Chef connected (status lines at the top), so once released the check is live for any invoice sent through QuickBooks.
+
+### 13.1 What it adds
+
+| Surface | Path | Who |
+|---|---|---|
+| Check QuickBooks payment | `POST {action:'check_payment'}` `/api/integrations/quickbooks/invoices/[invoiceId]` | tenant ADMIN (`mayManageQuickBooks`, the same gate as send / resume / check delivery) |
+| Button | "Check QuickBooks payment" in the QuickBooks dialog, separate from "Check delivery"; offered only while the FreezerIQ invoice is SENT | ADMIN only |
+| Method label | a verified settlement reads "QuickBooks Payments" on `/invoices` (`settlementMethodLabel`) | — |
+
+Library: `lib/quickbooks/invoicePayment.ts` (classification, the evidence rule, settlement); two read-only calls in `intuitClient.ts` (§13.7); `loadSentReview` in `invoiceSend.ts`, which re-derives the invoice FreezerIQ sent from the STORED review with the same planner and review hash that resume and send-again use; contract stage `payment` in `invoiceContract.ts` (every identity, line and money check, without "unpaid" and without delivery checks). `lib/invoiceSettlementTransition.ts` is the conditional PAID transition, moved unchanged out of the settle route so both ways of being paid run the same one (Fundraiser Fulfillment Contract §5.1).
+
+Nothing is automatic: no webhook, no polling, no cron, no check on page load. QuickBooks is read only when an admin clicks.
+
+### 13.2 What counts as paid (the evidence rule)
+
+A QuickBooks `Balance` of 0 is never proof by itself — a credit memo, a write-off or a journal entry zeroes it too. FreezerIQ marks the invoice paid only when ALL of these hold, in integer cents:
+
+1. The FreezerIQ invoice is SENT. PAID answers `already_paid` without contacting QuickBooks; any other status is blocked.
+2. The connection is live and is the generation the invoice was sent under, and the stored review still matches the current FreezerIQ invoice (`changed_since_review` otherwise).
+3. The QuickBooks invoice, read by its own Id, still matches what FreezerIQ sent: Id, DocNumber, customer, dates, lines, amounts, total.
+4. Its Balance is 0. Equal to the total is `not_paid`; between is `partially_paid`; anything else is a review.
+5. Its `LinkedTxn` lists only `Payment` entries, and exactly ONE distinct Payment.
+6. That Payment, read by its own Id — never searched for — has: the same Id; the invoice's customer; USD; exactly one line linking exactly one transaction, this invoice (`TxnType` `Invoice`); nothing unapplied; a line amount and a `TotalAmt` each equal to the invoice total; a `TxnDate` that is a real calendar day, not before 2020-01-01 and not more than one day in the future.
+
+Why the Payment itself must be read (each observed in the sandbox, §13.9): a credit memo applied to an invoice appears on the invoice as ONE linked "Payment" — only the Payment shows its `TotalAmt` of 0 and a second line linking the CreditMemo; an overpayment's leftover is later auto-applied by QuickBooks to the customer's next invoice, adding a second invoice line to the SAME Payment; a voided Payment keeps its Id with `TotalAmt` 0 and no lines.
+
+### 13.3 Answers
+
+| Outcome | HTTP | Meaning | Writes |
+|---|---|---|---|
+| `paid` | 200 | the rule held; settled now | the settlement (§13.4) |
+| `already_paid` | 200 | FreezerIQ already records PAID, by any method | none — QuickBooks not contacted |
+| `not_paid` | 200 | QuickBooks balance equals the total | none |
+| `partially_paid` | 200 | 0 < balance < total; the balance due is shown | none |
+| `needs_review` + reason | 409 | QuickBooks shows something the rule does not accept | none |
+| `blocked` + blocker | 409, or 503 for not connected / reconnect required | not sent through QuickBooks, not a campaign invoice, lifecycle unreadable, sent under another connection, customer not linked | none |
+| `unavailable` | 503 | QuickBooks unreachable, throttled, refused, or malformed | none |
+
+Review reasons: `changed_since_review`, `invoice_status_changed`, `qbo_invoice_missing`, `qbo_invoice_changed`, `balance_inconsistent`, `payment_evidence_unreadable`, `no_payment_evidence`, `unsupported_linked_transaction`, `multiple_payments`, `payment_missing`, `payment_not_for_this_invoice`, `payment_customer_mismatch`, `payment_currency_mismatch`, `payment_includes_other_transactions`, `payment_unapplied_amount`, `payment_amount_mismatch`, `payment_date_invalid` — each worded for the admin in `invoiceSendView.ts`. A review records nothing; where the money did arrive, the admin records it by hand (Record Payment). Failures are logged with the sanitized `intuitErrorDetail` (kind, HTTP status, fault codes, `intuit_tid`) — never a token, realm id, body or amount.
+
+### 13.4 Settlement
+
+- Through `settleInvoiceInTransaction`, **from SENT only**: `payment_method = 'quickbooks'`; `paid_at` = the Payment's `TxnDate` at 12:00 UTC (the calendar-day convention Record Payment uses); `payment_reference` = `QuickBooks payment <Id> · invoice #<DocNumber>`. No schema change: the Payment Id and invoice number are the durable evidence.
+- The transition's winner-only branch is the one fundraiser release (the campaign's held orders → `production_ready`), exactly as for Record Payment; loyalty accrual stays paused. A double click, two concurrent checks, or a check racing a human's Record Payment settle and release once between them; the loser reports what is stored.
+- The check writes no amount, no lifecycle row, no link, no order directly, and nothing in QuickBooks.
+
+### 13.5 What a person can and cannot do
+
+- Record Payment still offers only Square and Check (`SETTLEMENT_PAYMENT_METHODS` unchanged) and answers 400 to `quickbooks`. No dialog offers "QuickBooks" as a hand-entered method, and the generic invoice routes cannot write PAID at all (INV-A / INV-D).
+- **Undo Payment refuses a verified settlement** (409, `verified_settlement`), checked before anything else by a method-agnostic rule (`isVerifiedSettlement`: PAID, a payment date, a verified method). A human's Check or Square record is undoable as before.
+- Nothing un-pays automatically. A later refund, void, deletion or edit in QuickBooks does not change a PAID FreezerIQ invoice, and nothing puts released food back on hold. Correct the payment in QuickBooks first; reversing a verified settlement inside FreezerIQ is a later, owner-approved phase.
+
+### 13.6 Known limits (V1)
+
+- **ACH returns and refunds are invisible.** A QuickBooks Payment has no status: an ACH payment later returned by the bank, or a refund, does not change the Payment's `TotalAmt` or its link. The dialog says so before the click.
+- **Only one full payment settles automatically.** Partial, several payments, credits, adjustments, overpayments and voids are shown, not recorded.
+- **Point in time.** A check reflects QuickBooks at that moment, and QuickBooks can later reshape a Payment (auto-applied leftovers). A settled invoice is never re-checked.
+- **AutoApplyCredit.** When QuickBooks' "automatically apply credits" is on (the sandbox default), a customer's unapplied payment or credit is applied to their next NEW invoice as it is created — observed in the sandbox (§13.9). For 1C such an invoice fails its `created` read-back (Balance ≠ total) and stops in `needs_review` before anything is emailed; for 1D it reads as partially paid or as a review. Check an organization's open QuickBooks credits before sending.
+- **The Payment Id is visible** in the stored reference on the invoice row. It is not a secret; no token, realm id or company name is stored.
+
+### 13.7 Intuit API calls introduced
+
+| Call | Purpose |
+|---|---|
+| `GET /invoice/{id}` | the QuickBooks invoice FreezerIQ created, by its stored Id, with `Balance` and `LinkedTxn` |
+| `GET /payment/{id}` | the ONE Payment that invoice links, by its own Id |
+
+Both with `minorversion=75`, honouring a Fault on HTTP 200. No query, no search of Payment history, no Payments API, no write of any kind. The OAuth scope is still exactly `com.intuit.quickbooks.accounting`.
+
+### 13.8 Tests
+
+- New suites: `qbInvoice1dPaymentEvidence` (28), `qbInvoice1dPaymentCheck` (43), `qbInvoice1dRoute` (8), `qbInvoice1dSettlement` (7), `qbInvoice1dScope` (15). Fixtures use only shapes the sandbox returned (§13.9). Mutation proof: accepting any Payment, accepting several Payments, releasing for a losing request, and settling from any outstanding status each make the suites fail.
+- Updated: `invDSettlementTruth` and `ops3FundraiserBatchProduction` (the transition moved), the `qbInvoice1aLegacyQuarantine`, `qbInvoice1bScope` and `qbInvoice1cScope` censuses, the `coordPolish1` / `coordShareCenterPolish2` working-tree ledgers, and `tests/helpers/quickbooksInvoiceFakes.ts` (Payment reads, credit memos, voids, a strict settlement write).
+- Gates (September 21, 2026, local): full Jest 5,590 passing — the only failures are the 7 suites / 6 tests that fail identically on a fresh checkout of `4767422` (CRLF line endings and parked-schema assumptions); `tsc --noEmit` clean; `next build` exit 0 (191 pages) against a disposable migrated database; no dependency change.
+
+### 13.9 Sandbox acceptance (Claude-run, September 21, 2026 — PASSED)
+
+Sandbox company only; artificial data (`FreezerIQ 1C Acceptance -` and `FreezerIQ 1D Spike -` names). The harness and evidence live in the session scratchpad, outside git.
+
+- **Spike, before any code.** Five sandbox invoices, six Payments (one later voided) and one credit memo established the shapes: an unpaid invoice returns `LinkedTxn: []`; a Payment appears on the invoice as `{TxnId, TxnType: 'Payment'}`; a Payment carries `Line[].Amount`, `Line[].LinkedTxn[{TxnId, TxnType: 'Invoice'}]`, `UnappliedAmt`, `CustomerRef`, `CurrencyRef` and `TxnDate`, and has no status field.
+- **End to end through the candidate's code and the local database**, on the $451.59 fundraiser invoice the 1C acceptance sent through QuickBooks:
+  1. Unpaid → `not_paid`: one Intuit call (`GET /invoice/{id}`); 69 of 69 local tables unchanged.
+  2. The one sandbox write: a $451.59 Payment dated the day before the check, one line linking the invoice, under a `requestid`. QuickBooks then showed `Balance` 451.59 → 0 and one `LinkedTxn` of type `Payment`; the Payment showed `UnappliedAmt` 0.
+  3. Check → `paid`: two Intuit calls (`GET /invoice/{id}`, `GET /payment/{id}`), no QuickBooks write, no token refresh. Locally only `invoices` changed: PAID, `quickbooks`, `paid_at` = the Payment's date at 12:00 UTC (deliberately not the day of the check), reference `QuickBooks payment <Id> · invoice #<DocNumber>`. The acceptance campaign has no orders, so the release matched none.
+  4. Check again → `already_paid`: zero Intuit calls, zero local changes.
+- **Real shapes through the 1D reads and rules:** two Payments → `multiple_payments`; a credit memo → `payment_includes_other_transactions`; an overpayment whose $50 leftover QuickBooks auto-applied to the customer's next invoice → `payment_includes_other_transactions`; that next invoice ($50 auto-applied, its own $100 Payment voided) → `partially_paid`, $50 due; one clean Payment → accepted. The clean Payment held against another invoice, another customer, or a total 1¢ lower → refused each time.
+- **The moved transition on real Postgres** (a disposable, freshly migrated database, dropped afterwards): 22 of 22 checks — the winner releases exactly its campaign's held fundraiser orders (never a canceled order, another business's order, a non-fundraiser order or another campaign's); a replay changes nothing; SENT-only refuses an OVERDUE invoice that Record Payment's statuses still settle; a PAID source is refused before any write; the ordinary branch still promotes its own order; no loyalty row is written. In a real row-lock race, Record Payment arriving while a verified check held the row waited about 450 ms, re-read, and matched nothing — one settlement, one release.
+
+Sandbox artifacts are left in place. The local acceptance invoice is now PAID via QuickBooks and, by design, cannot be undone in the app.
+
+### 13.10 Release procedure
+
+Code only, no migration, so it may deploy in any order relative to the database. Each step only with explicit owner authorization: owner review → commit on `qb-invoice-1d` → Preview → owner browser acceptance → release. QuickBooks is always disabled in Preview. In Production it is enabled with Freezer Chef connected, so the release makes the check available to Freezer Chef's admin for invoices sent through QuickBooks (none had been sent as of September 21, 2026).
+
+Rolling the CODE back after a verified settlement exists is safe for the data but not neutral: the older settle route knows only the legacy rule, so it would again let a person Undo that settlement, and the invoices list would print the raw method `quickbooks`.
+
+### 13.11 Not in QB-INVOICE-1D
+
+Webhooks, polling or scheduled checks; partial or multi-payment settlement; credits, write-offs, refunds, voids or ACH returns; automatic un-pay or fulfilment rollback; card/ACH fees; deposits and bank reconciliation; the Payments API; any QuickBooks write.
 
 ---

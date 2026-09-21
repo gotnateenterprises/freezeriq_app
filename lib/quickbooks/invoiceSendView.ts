@@ -8,7 +8,9 @@
  */
 
 import type { InvoiceSendStep, InvoiceSendView, SendBlocker, SendProblem } from '@/lib/quickbooks/invoiceSend';
+import type { PaymentCheckResult, PaymentReviewReason } from '@/lib/quickbooks/invoicePayment';
 import { SETTINGS_BLOCKER_TEXT, SETTINGS_PROBLEM_TEXT } from '@/lib/quickbooks/invoiceSettingsView';
+import { settlementMethodLabel } from '@/lib/invoiceSettlement';
 
 export type InvoiceSendPayload = InvoiceSendView | { state: 'disabled' } | { state: 'error' };
 
@@ -151,9 +153,66 @@ export interface SendDialogView {
     canResume: boolean;
     canCheckDelivery: boolean;
     canResend: boolean;
+    /** QB-INVOICE-1D: an invoice QuickBooks emailed and FreezerIQ still shows as Sent (never Paid). */
+    canCheckPayment: boolean;
 }
 
-const base: SendDialogView = { title: '', tone: 'neutral', messages: [], canSend: false, canResume: false, canCheckDelivery: false, canResend: false };
+const base: SendDialogView = { title: '', tone: 'neutral', messages: [], canSend: false, canResume: false, canCheckDelivery: false, canResend: false, canCheckPayment: false };
+
+// ── QB-INVOICE-1D: "Check QuickBooks payment" ──────────────────────────────
+
+/** Said beside the button: what the check does, and what it can never know. Explicit, not monitoring. */
+export const PAYMENT_CHECK_EXPLAINER =
+    'FreezerIQ checks QuickBooks only when you ask. It marks this invoice paid only when QuickBooks shows one payment for the full amount applied to this invoice; '
+    + 'anything else — a partial payment, several payments, a credit or an adjustment — is shown to you and nothing is recorded. '
+    + 'A bank (ACH) payment can still be returned by the bank after QuickBooks records it, and FreezerIQ never reverses a payment automatically.';
+
+export const PAYMENT_REVIEW_TEXT: Record<PaymentReviewReason, string> = {
+    changed_since_review: 'This invoice changed in FreezerIQ after it was sent through QuickBooks, so FreezerIQ will not match a payment to it.',
+    invoice_status_changed: 'The invoice changed while its payment was being checked. Nothing was recorded — check again.',
+    qbo_invoice_missing: 'The QuickBooks invoice can no longer be found, so no payment was recorded.',
+    qbo_invoice_changed: 'The QuickBooks invoice no longer matches what FreezerIQ sent (for example, it was edited in QuickBooks), so no payment was recorded.',
+    balance_inconsistent: 'QuickBooks shows a balance FreezerIQ cannot reconcile with this invoice, so no payment was recorded.',
+    payment_evidence_unreadable: 'QuickBooks shows nothing owed, but the payment details could not be read, so no payment was recorded.',
+    no_payment_evidence: 'QuickBooks shows nothing owed, but no payment is linked to this invoice (for example, it was written off or adjusted). No payment was recorded — if the money arrived, record it by hand.',
+    unsupported_linked_transaction: 'QuickBooks shows this invoice settled by something other than a payment. No payment was recorded.',
+    multiple_payments: 'QuickBooks shows this invoice paid by more than one payment. FreezerIQ records only a single full payment automatically — confirm the payments in QuickBooks, then record the payment by hand.',
+    payment_missing: 'The payment QuickBooks links to this invoice can no longer be found (it may have been deleted). No payment was recorded.',
+    payment_not_for_this_invoice: 'The QuickBooks payment linked here is not applied to this invoice. No payment was recorded.',
+    payment_customer_mismatch: 'The QuickBooks payment linked here belongs to a different customer. No payment was recorded.',
+    payment_currency_mismatch: 'The QuickBooks payment linked here is not in US dollars. No payment was recorded.',
+    payment_includes_other_transactions: 'The QuickBooks payment linked here also applies a credit, an adjustment or another invoice, or it was voided. FreezerIQ records only a single cash payment for exactly this invoice automatically. No payment was recorded.',
+    payment_unapplied_amount: 'The QuickBooks payment linked here was larger than this invoice (part of it is unapplied). No payment was recorded.',
+    payment_amount_mismatch: 'The QuickBooks payment linked here does not equal this invoice’s total. No payment was recorded.',
+    payment_date_invalid: 'The QuickBooks payment linked here has a date FreezerIQ cannot accept (missing, too old, or in the future). No payment was recorded.',
+};
+
+export interface PaymentCheckMessage { tone: 'ok' | 'neutral' | 'warn' | 'bad'; text: string }
+
+/** One sentence for each answer the payment check can give. Pure. */
+export function paymentCheckMessage(result: PaymentCheckResult | { outcome?: undefined; error?: string } | null): PaymentCheckMessage {
+    const money = (n: number) => `$${n.toFixed(2)}`;
+    switch (result?.outcome) {
+        case 'paid':
+            return { tone: 'ok', text: `QuickBooks shows one payment for the full amount on this invoice. FreezerIQ marked it paid via QuickBooks Payments${result.settlement.paidOn ? ` on ${result.settlement.paidOn}` : ''}.` };
+        case 'already_paid': {
+            const label = settlementMethodLabel(result.settlement.method);
+            return { tone: 'ok', text: `This invoice is already recorded as paid${label ? ` (${label}${result.settlement.paidOn ? `, ${result.settlement.paidOn}` : ''})` : ''}. Nothing was changed.` };
+        }
+        case 'not_paid':
+            return { tone: 'neutral', text: 'QuickBooks shows no payment on this invoice yet. Nothing was changed.' };
+        case 'partially_paid':
+            return { tone: 'warn', text: `QuickBooks shows part of this invoice paid (${money(result.balanceDue)} still due). FreezerIQ records only a full payment automatically, so nothing was changed.` };
+        case 'needs_review':
+            return { tone: 'warn', text: PAYMENT_REVIEW_TEXT[result.reason] ?? 'QuickBooks shows something FreezerIQ will not treat as a payment on its own. Nothing was recorded.' };
+        case 'blocked':
+            return { tone: 'warn', text: result.blocker === 'invoice_not_sent' ? 'Only an invoice that is still marked Sent can be checked for a QuickBooks payment.' : blockerText(result.blocker) };
+        case 'unavailable':
+            return { tone: 'bad', text: 'QuickBooks could not be reached. Nothing was changed — try again in a moment.' };
+        default:
+            return { tone: 'bad', text: (result as any)?.error ?? 'Could not check QuickBooks for a payment.' };
+    }
+}
 
 export function sendDialogView(payload: InvoiceSendPayload | null): SendDialogView {
     if (payload === null) return { ...base, title: 'Checking QuickBooks…' };
@@ -192,6 +251,7 @@ export function sendDialogView(payload: InvoiceSendPayload | null): SendDialogVi
                     ? `${RESEND_INTERRUPTED_TEXT} ${interrupted}`
                     : `The last attempt to send it again did not complete: ${PROBLEM_TEXT[payload.lastProblem]}`);
             }
+            if (payload.invoiceStatus === 'PAID') messages.push('FreezerIQ records this invoice as paid.');
             return {
                 ...base,
                 title: payload.docNumber ? `Sent via QuickBooks — invoice ${payload.docNumber}` : 'Sent via QuickBooks',
@@ -199,6 +259,7 @@ export function sendDialogView(payload: InvoiceSendPayload | null): SendDialogVi
                 messages,
                 canCheckDelivery: !payload.busy,
                 canResend: !payload.busy && payload.invoiceStatus === 'SENT',
+                canCheckPayment: !payload.busy && payload.invoiceStatus === 'SENT',
             };
         }
         default: return { ...base, title: 'Could not load', tone: 'bad' };

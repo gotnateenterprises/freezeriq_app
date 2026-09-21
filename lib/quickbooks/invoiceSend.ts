@@ -387,9 +387,15 @@ const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 /** Binds a click to the exact QuickBooks invoice that would be created, its read-back expectation and the payment options. */
 function reviewTokenFor(ctx: Context): string {
+    return reviewTokenOf(ctx.live.connectionId, ctx.freezeriq.id, ctx.body, ctx.expected, ctx.payment);
+}
+
+function reviewTokenOf(
+    connectionId: string, invoiceId: string, body: QuickBooksInvoiceCreateBody, expected: ExpectedQuickBooksInvoice, payment: QuickBooksPaymentFlags,
+): string {
     return sha256(JSON.stringify([
-        'freezeriq/quickbooks-invoice-send-review/v1', ctx.live.connectionId, ctx.freezeriq.id,
-        ctx.body, ctx.expected, ctx.payment.card, ctx.payment.ach,
+        'freezeriq/quickbooks-invoice-send-review/v1', connectionId, invoiceId,
+        body, expected, payment.card, payment.ach,
     ]));
 }
 
@@ -896,6 +902,80 @@ async function acceptSent(s: Session, inv: QuickBooksInvoiceSnapshot, requestedA
     }
     console.info(`[quickbooks] invoice sent via QuickBooks${autoSent ? ' (QuickBooks sent it when the verified payment options were applied)' : ''}`);
     return currentOutcome(s.d, s.businessId, s.invoiceId);
+}
+
+// ── QB-INVOICE-1D: the invoice FreezerIQ sent, re-derived for the payment check ──
+
+/** Why the payment check cannot even start from what was sent. Codes only. */
+export type SentReviewBlocker =
+    | 'invoice_not_sent' | 'invoice_not_campaign' | 'not_sent_via_quickbooks' | 'lifecycle_unreadable'
+    | 'linked_to_another_connection' | 'customer_not_linked' | 'changed_since_review' | InvoicePlanProblem;
+
+export type SentReview =
+    | {
+        ok: true;
+        /** What the QuickBooks invoice must still say — the send's own read-back expectation. */
+        expected: ExpectedQuickBooksInvoice;
+        /** The QuickBooks invoice FreezerIQ's own create returned (the link, recorded once). */
+        qboInvoiceId: string;
+        /** QuickBooks' number for it, recorded when the create was verified. */
+        docNumber: string | null;
+    }
+    | { ok: false; blocker: SentReviewBlocker };
+
+/**
+ * QB-INVOICE-1D: the QuickBooks invoice FreezerIQ SENT for this FreezerIQ invoice, re-derived from the lifecycle's
+ * STORED review and the CURRENT FreezerIQ invoice with the same planner and the same review hash that the send, the
+ * resume and the re-send use — so there is exactly one definition of "the invoice we sent", and a FreezerIQ invoice
+ * whose money changed since it was sent can never be reconciled against it.
+ *
+ * It deliberately does NOT re-verify the tenant's QuickBooks settings or the customer's status: those decide
+ * whether an invoice may be SENT, not whether a payment for an invoice already sent is real — a company CC added
+ * later, or a customer made inactive after paying, must not block recognising the payment. Only the live
+ * connection generation must match: the link, the lifecycle and the customer link all belong to it.
+ *
+ * Reads only. Writes nothing to FreezerIQ and calls nothing in QuickBooks.
+ */
+export async function loadSentReview(
+    input: { businessId: string; invoiceId: string; connectionId: string }, deps: InvoiceSendDeps = {},
+): Promise<SentReview> {
+    const d = resolve(deps);
+    const invoice = await loadInvoice(d, input.businessId, input.invoiceId); // InvoiceNotFoundError outside the tenant
+    if (invoice.status !== 'SENT') return { ok: false, blocker: 'invoice_not_sent' };
+    if (!invoice.campaign_id) return { ok: false, blocker: 'invoice_not_campaign' };
+
+    const row = await readRow(d, input.businessId, input.invoiceId);
+    if (!row || row.status !== 'sent') return { ok: false, blocker: 'not_sent_via_quickbooks' };
+    const reviewed = reviewedOf(row);
+    if (!reviewed) return { ok: false, blocker: 'lifecycle_unreadable' };
+
+    const link = await getQuickBooksInvoiceLink(input, linkDeps(d));
+    if (!link?.qboInvoiceId) return { ok: false, blocker: 'lifecycle_unreadable' };
+    if (link.connectionId !== input.connectionId) return { ok: false, blocker: 'linked_to_another_connection' };
+
+    const customerLink = await d.db.quickBooksCustomerLink.findUnique({
+        where: { business_id_customer_id: { business_id: input.businessId, customer_id: invoice.customer_id } },
+        select: { connection_id: true, qbo_customer_id: true },
+    });
+    if (!customerLink || customerLink.connection_id !== input.connectionId) return { ok: false, blocker: 'customer_not_linked' };
+
+    const plan = planQuickBooksInvoice({
+        invoice: {
+            id: invoice.id, campaignId: invoice.campaign_id,
+            totalAmount: invoice.total_amount, taxAmount: invoice.tax_amount, taxRatePercent: invoice.tax_rate_percent, taxStatus: invoice.tax_status,
+            shareAmount: invoice.fundraiser_profit_amount, sharePercent: invoice.fundraiser_profit_percent,
+            items: invoice.items.map((i) => ({ id: i.id, description: i.description, variantSize: i.variant_size, quantity: i.quantity, unitPrice: i.unit_price, total: i.total })),
+        },
+        mapping: reviewed.mapping,
+        qboCustomerId: customerLink.qbo_customer_id,
+        txnDate: reviewed.txnDate,
+    });
+    if (!plan.ok) return { ok: false, blocker: plan.problem };
+
+    const token = reviewTokenOf(input.connectionId, invoice.id, plan.body, plan.expected, reviewed.payment);
+    if (reviewHashFor(token, row.recipient_to, row.recipient_cc) !== row.review_hash) return { ok: false, blocker: 'changed_since_review' };
+
+    return { ok: true, expected: plan.expected, qboInvoiceId: link.qboInvoiceId, docNumber: row.qbo_doc_number };
 }
 
 // ── delivery follow-up ──────────────────────────────────────────────────────

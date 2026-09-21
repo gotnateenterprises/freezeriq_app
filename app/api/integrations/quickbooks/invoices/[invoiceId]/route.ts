@@ -7,11 +7,16 @@
  *       {"action":"resume"}
  *       {"action":"check_delivery"}
  *       {"action":"resend","recipientTo":"…","recipientCc":"…"|null}
+ *       {"action":"check_payment"}                                   (QB-INVOICE-1D)
  *
  * Nothing is created or sent at fundraiser close. A QuickBooks invoice is created ONLY by an explicit "send"
  * carrying the review token the GET issued for the invoice exactly as it stands — and it is created unsent,
  * verified, and only then emailed by QuickBooks (lib/quickbooks/invoiceSend.ts). SENT means QuickBooks reports it
- * emailed the invoice — not delivered, not paid. Nothing here touches PAID, payments or fulfillment.
+ * emailed the invoice — not delivered, not paid.
+ *
+ * QB-INVOICE-1D: "check_payment" READS QuickBooks for this invoice's payment and marks the FreezerIQ invoice PAID —
+ * through the same settlement transition Record Payment uses — only when ONE QuickBooks Payment applies exactly the
+ * invoice total to exactly this invoice (lib/quickbooks/invoicePayment.ts). It never writes to QuickBooks.
  *
  * Tenant ADMIN only, acting as themselves (not View As). The invoice must belong to the session's tenant (404
  * otherwise). JSON bodies only (415 otherwise). No response carries a token, the realm id, the connection id or a
@@ -32,6 +37,7 @@ import {
     startQuickBooksInvoiceSend,
     type SendActionResult,
 } from '@/lib/quickbooks/invoiceSend';
+import { checkQuickBooksInvoicePayment, type PaymentCheckResult } from '@/lib/quickbooks/invoicePayment';
 
 // A send reads and writes QuickBooks several times, each verified; give it room.
 export const maxDuration = 60;
@@ -42,6 +48,16 @@ const FORBIDDEN = 'Only a tenant administrator can send invoices through QuickBo
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: NO_STORE });
 
 const CONNECTION_BLOCKERS = new Set(['not_connected', 'reconnect_required', 'quickbooks_unavailable']);
+
+/** QB-INVOICE-1D: a completed check is 200 whatever QuickBooks showed; refusals and outages say so. */
+function paymentStatus(result: PaymentCheckResult): number {
+    switch (result.outcome) {
+        case 'paid': case 'already_paid': case 'not_paid': case 'partially_paid': return 200;
+        case 'unavailable': return 503;
+        case 'blocked': return result.blocker === 'not_connected' || result.blocker === 'reconnect_required' ? 503 : 409;
+        default: return 409; // needs_review
+    }
+}
 
 function actionStatus(result: SendActionResult): number {
     switch (result.outcome) {
@@ -93,7 +109,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ invoice
         return json({ error: 'Invalid request' }, 400);
     }
     const action = body?.action;
-    if (action !== 'send' && action !== 'resume' && action !== 'check_delivery' && action !== 'resend') {
+    if (action !== 'send' && action !== 'resume' && action !== 'check_delivery' && action !== 'resend' && action !== 'check_payment') {
         return json({ error: 'Invalid request' }, 400);
     }
 
@@ -101,6 +117,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ invoice
     const userId = session.user.id as string;
     const config = resolved.config;
     try {
+        if (action === 'check_payment') {
+            const result = await checkQuickBooksInvoicePayment({ businessId, invoiceId, config });
+            return json(result, paymentStatus(result));
+        }
         if (action === 'check_delivery') {
             const result = await checkQuickBooksInvoiceDelivery({ businessId, invoiceId, config });
             return json(result, result.outcome === 'checked' ? 200 : result.outcome === 'unavailable' ? 503 : 409);

@@ -58,6 +58,8 @@ const code = (p: string): string =>
         .replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
 
 const SETTLE_ROUTE = 'app/api/tenant/invoices/[id]/settle/route.ts';
+/** QB-INVOICE-1D: the conditional PAID write and its winner-only effects, moved out of SETTLE_ROUTE unchanged. */
+const SETTLEMENT_TRANSITION = 'lib/invoiceSettlementTransition.ts';
 const INVOICES_ROUTE = 'app/api/tenant/invoices/route.ts';
 const ORDERS_ROUTE = 'app/api/orders/route.ts';
 const INVOICES_PAGE = 'app/invoices/page.tsx';
@@ -247,6 +249,11 @@ describe('INV-D · PAID is no longer the generic editor\'s to give or take', () 
 // ───────────────────────────────────────────────────────────────────────────
 describe('INV-D · the settlement endpoint', () => {
     const src = code(SETTLE_ROUTE);
+    /** POST handler only: the Undo (DELETE) handler also writes the invoice, so a whole-file search could
+     *  land on ITS write and pass vacuously. QB-INVOICE-1D moved the PAID write itself, unchanged, into
+     *  lib/invoiceSettlementTransition.ts, which the POST calls — the assertions follow it there. */
+    const post = src.slice(src.indexOf('export async function POST('), src.indexOf('export async function DELETE('));
+    const transition = code(SETTLEMENT_TRANSITION);
 
     it('is tenant-scoped and answers 404 rather than revealing another tenant\'s invoice', () => {
         expect(src).toContain('where: { id: invoiceId, business_id: businessId }');
@@ -254,26 +261,30 @@ describe('INV-D · the settlement endpoint', () => {
     });
 
     it('validates the settlement input before writing anything', () => {
-        expect(src).toContain('validateSettlement(');
-        expect(src.indexOf('validateSettlement(')).toBeLessThan(src.indexOf('updateMany'));
+        expect(post).toContain('validateSettlement(');
+        expect(post).toContain('settleInvoiceInTransaction(');
+        expect(post.indexOf('validateSettlement(')).toBeLessThan(post.indexOf('settleInvoiceInTransaction('));
     });
 
     it('writes PAID only through a conditional transition out of a settleable status', () => {
-        expect(src).toContain('status: { in: SETTLEABLE_INVOICE_STATUSES');
-        expect(src).toContain('updateMany');
-        expect(src).toContain('claimed.count !== 1');
+        expect(post).toContain('fromStatuses: SETTLEABLE_INVOICE_STATUSES');
+        expect(post).toContain('claimed.count !== 1');
+        expect(transition).toContain('status: { in: fromStatuses');
+        expect(transition).toContain('tx.invoice.updateMany');
+        expect(transition).toContain('if (result.count !== 1) return result;');
     });
 
     it('never takes a status from the request body', () => {
         expect(src).not.toContain('body?.status');
         expect(src).not.toContain('body.status');
-        expect(src).toContain("status: 'PAID'");
+        expect(transition).toContain("status: 'PAID'");
     });
 
     it('writes ONLY settlement fields — INV-B\'s frozen financials are not in the write set', () => {
-        // Asserted against the `data:` payload specifically. The route legitimately
+        // Asserted against the `data:` payload specifically. The transition legitimately
         // READS total_amount (for loyalty points), so a whole-file search for the
         // string would fail on a select and prove nothing about what is written.
+        const src = transition;
         const upd = src.indexOf('tx.invoice.updateMany');
         expect(upd).toBeGreaterThan(-1);
         const dataStart = src.indexOf('data: {', upd);
@@ -311,7 +322,9 @@ describe('INV-D · approving an order no longer asserts payment', () => {
     });
 
     it('payment now flows the other way — a recorded payment releases the order', () => {
-        const src = code(SETTLE_ROUTE);
+        // The settle route runs the shared transition (QB-INVOICE-1D moved it, unchanged).
+        expect(code(SETTLE_ROUTE)).toContain('settleInvoiceInTransaction(');
+        const src = code(SETTLEMENT_TRANSITION);
         expect(src).toContain("status: 'production_ready'");
         expect(src).toContain('invoice_id: invoice.id');
         // Campaign invoices are excluded exactly as INV-A excluded them.

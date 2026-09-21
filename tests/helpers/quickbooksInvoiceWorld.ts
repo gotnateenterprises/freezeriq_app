@@ -40,6 +40,8 @@ export interface WorldOptions {
     defaultCc?: string | null;
     /** Seed no settings row. */
     noSettings?: boolean;
+    /** QB-INVOICE-1D: let the database double accept the shared settlement transition (and only it). */
+    settlement?: boolean;
 }
 
 export async function invoiceWorld(options: WorldOptions = {}) {
@@ -47,7 +49,7 @@ export async function invoiceWorld(options: WorldOptions = {}) {
     const now = () => Date.now() + clock.offsetMs;
     const config = sandboxConfig();
     const env = sandboxEnv();
-    const store = fakeInvoiceSendDb();
+    const store = fakeInvoiceSendDb({ settlement: options.settlement });
     const customers = fakeQuickBooksCustomers();
     const qbo = fakeQuickBooksInvoicing({ autoSend: options.autoSend, now });
     const intuit = fakeIntuit({

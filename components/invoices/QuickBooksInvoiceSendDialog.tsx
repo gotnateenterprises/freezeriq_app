@@ -8,6 +8,10 @@
  * Tenant admins only (the invoices page gates it; the route enforces it). The dialog never sees a token, realm id,
  * connection id or raw QuickBooks id — only QuickBooks' own invoice number once it exists. Nothing is sent without
  * the explicit button, and the server refuses a click whose review token no longer matches the invoice.
+ *
+ * QB-INVOICE-1D adds "Check QuickBooks payment" for a sent invoice FreezerIQ still shows as Sent: an explicit read of
+ * QuickBooks that marks the invoice paid only on proof of one full payment. The one QuickBooks id it can show is the
+ * Payment's own, inside the stored settlement reference, which is the tenant's audit evidence.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -16,9 +20,12 @@ import { Loader2, X } from 'lucide-react';
 import {
     blockerText,
     INVALID_TEXT,
+    PAYMENT_CHECK_EXPLAINER,
+    paymentCheckMessage,
     RECIPIENT_SOURCE_TEXT,
     sendDialogView,
     type InvoiceSendPayload,
+    type PaymentCheckMessage,
 } from '@/lib/quickbooks/invoiceSendView';
 
 const TONE_CLASS: Record<string, string> = {
@@ -47,6 +54,8 @@ export default function QuickBooksInvoiceSendDialog({
     const [busy, setBusy] = useState(false);
     const [recipientTo, setRecipientTo] = useState('');
     const [recipientCc, setRecipientCc] = useState('');
+    /** QB-INVOICE-1D: the answer to the last "Check QuickBooks payment", shown until the dialog closes. */
+    const [paymentNote, setPaymentNote] = useState<PaymentCheckMessage | null>(null);
 
     const adopt = useCallback((next: InvoiceSendPayload) => {
         setPayload(next);
@@ -96,6 +105,30 @@ export default function QuickBooksInvoiceSendDialog({
         } catch {
             toast.error('Could not complete the QuickBooks request.');
             await load();
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    /**
+     * QB-INVOICE-1D — an explicit read of QuickBooks. It records a payment ONLY when QuickBooks shows one full payment
+     * on this invoice; every other answer changes nothing and is shown as it is. Never automatic.
+     */
+    async function checkPayment() {
+        setBusy(true);
+        try {
+            const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'check_payment' }) });
+            const data = await res.json().catch(() => ({}));
+            const note = paymentCheckMessage(data?.outcome ? data : { error: data?.error });
+            setPaymentNote(note);
+            if (note.tone === 'ok') toast.success(note.text);
+            else if (note.tone === 'bad') toast.error(note.text);
+            else toast.message(note.text);
+            if (data?.outcome === 'paid') onChanged();
+            await load();
+        } catch {
+            setPaymentNote({ tone: 'bad', text: 'Could not check QuickBooks for a payment.' });
+            toast.error('Could not check QuickBooks for a payment.');
         } finally {
             setBusy(false);
         }
@@ -191,6 +224,12 @@ export default function QuickBooksInvoiceSendDialog({
                             <div>Delivery: {sent.deliveryErrorType ? `problem reported (${sent.deliveryErrorType})` : 'no problem reported'}{sent.deliveryCheckedAt ? ` · checked ${new Date(sent.deliveryCheckedAt).toLocaleString()}` : ''}</div>
                         </div>
                     )}
+                    {view.canCheckPayment && (
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{PAYMENT_CHECK_EXPLAINER}</p>
+                    )}
+                    {paymentNote && (
+                        <p className={`text-sm font-semibold ${TONE_CLASS[paymentNote.tone]}`}>{paymentNote.text}</p>
+                    )}
                     {inProgress?.docNumber && <p className="text-xs text-slate-500">QuickBooks invoice {inProgress.docNumber}</p>}
                     {payload?.state === 'needs_review' && payload.problemDetail && (
                         <p className="text-xs text-slate-400 break-words">Details for review: {payload.problemDetail}</p>
@@ -205,6 +244,12 @@ export default function QuickBooksInvoiceSendDialog({
                         <button type="button" onClick={() => act({ action: 'check_delivery' })} disabled={busy}
                             className="px-4 py-2.5 rounded-xl text-sm font-bold border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 disabled:opacity-50">
                             Check delivery
+                        </button>
+                    )}
+                    {view.canCheckPayment && (
+                        <button type="button" onClick={checkPayment} disabled={busy}
+                            className="px-4 py-2.5 rounded-xl text-sm font-bold border border-emerald-200 text-emerald-700 dark:text-emerald-300 disabled:opacity-50">
+                            {busy ? 'Checking…' : 'Check QuickBooks payment'}
                         </button>
                     )}
                     {view.canResend && (

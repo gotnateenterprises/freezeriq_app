@@ -33,19 +33,27 @@
  * fundraiser_profit_percent, fundraiser_profit_amount and the invoice's items
  * are computed by INV-B closeout and are not in this route's write set, so
  * settling an invoice can never re-price it.
+ *
+ * QB-INVOICE-1D: the conditional PAID write and its winner-only effects (the
+ * kitchen release, loyalty) now live in lib/invoiceSettlementTransition.ts,
+ * moved there unchanged, because a VERIFIED QuickBooks payment must run the
+ * same transition. This route is still the only way a HUMAN records a payment,
+ * and it still accepts only Square or Check — never QuickBooks.
  */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
-import { LOYALTY_ACCRUAL_ENABLED } from '@/lib/loyalty';
 import {
     validateSettlement,
     isSettleableInvoiceStatus,
     SETTLEABLE_INVOICE_STATUSES,
     hasDurableSettlement,
     isLegacyUnrecordedPayment,
+    isVerifiedSettlement,
     resolveUnsettledStatus,
+    VERIFIED_SETTLEMENT_UNDO_REFUSAL,
 } from '@/lib/invoiceSettlement';
+import { settleInvoiceInTransaction } from '@/lib/invoiceSettlementTransition';
 
 /** Shape returned for an invoice that is settled, however it got that way. */
 function settledPayload(invoice: {
@@ -147,110 +155,18 @@ export async function POST(
 
         const { method, paidAt, reference } = validation.value;
 
-        // ── Idempotency, part two: the write is a CONDITIONAL transition.
-        //    Guarding on the outstanding statuses means two concurrent settlements
-        //    cannot both succeed — the loser's `count` is 0 and it falls through to
-        //    the re-read below instead of stamping its own date over the winner's.
-        //    It also makes it structurally impossible for this route to move an
-        //    invoice out of PAID, DRAFT or CANCELED.
-        const claimed = await prisma.$transaction(async (tx) => {
-            const result = await tx.invoice.updateMany({
-                where: {
-                    id: invoice.id,
-                    business_id: businessId,
-                    status: { in: SETTLEABLE_INVOICE_STATUSES as unknown as any[] },
-                },
-                data: {
-                    status: 'PAID' as any,
-                    paid_at: paidAt,
-                    payment_method: method,
-                    payment_reference: reference,
-                },
-            });
-
-            // Only the request that actually won the transition runs the effects.
-            if (result.count !== 1) return result;
-
-            // ── Paid-side effects, RELOCATED not removed.
-            //
-            //    Both of these used to hang off `status === 'PAID'` in the generic
-            //    invoice route. Taking PAID away from that route would have quietly
-            //    deleted them, so they moved here — the one place an invoice now
-            //    becomes paid — and their conditions are unchanged.
-
-            // 1. A paid invoice releases its work to the kitchen.
-            //
-            //    ORDINARY invoice: promote the order linked by invoice_id. A
-            //    campaign invoice has no such linked order, which is why this
-            //    branch is scoped and why the campaign case needs its own.
-            if (!invoice.campaign_id) {
-                await tx.order.updateMany({
-                    where: { invoice_id: invoice.id, business_id: businessId },
-                    data: { status: 'production_ready' },
-                });
-            } else {
-                // ── OPS-3: the fundraiser production release. ────────────────
-                //
-                //    CAMPAIGN invoice: its fulfilment is the campaign's own
-                //    orders, reached by campaign_id (they are never linked by
-                //    invoice_id). This updateMany is the one that used to live
-                //    in app/api/campaigns/[id]/closeout/route.ts and ran at
-                //    CLOSEOUT — releasing food before the invoice was even sent.
-                //    It is unchanged apart from where it runs: same predicate,
-                //    same target status.
-                //
-                //    EXACT-ONCE, twice over, with no new schema and no time
-                //    window:
-                //      1. it is inside `result.count !== 1` above, so only the
-                //         request that actually won the PAID transition reaches
-                //         it — a second Record Payment returns the already-paid
-                //         payload and never gets here;
-                //      2. `status: 'fundraiser_hold'` is itself the durable
-                //         claim — once these rows are production_ready they can
-                //         never match again, so a replay, a retry, a refresh, or
-                //         a future duplicate payment event promotes nothing.
-                //
-                //    business_id is asserted on the Order rows themselves, not
-                //    inferred from the campaign, so a campaign id can never
-                //    reach across tenants.
-                await tx.order.updateMany({
-                    where: {
-                        campaign_id: invoice.campaign_id,
-                        business_id: businessId,
-                        source: 'fundraiser' as any,
-                        status: 'fundraiser_hold' as any,
-                        canceled_at: null,
-                    },
-                    data: { status: 'production_ready' as any },
-                });
-            }
-
-            // 2. Loyalty accrual for direct customers/orgs. Still globally paused by
-            //    LOY-P0, and still keyed on the same `Invoice <id>` reason string the
-            //    old call sites used, so the two can never double-award if the
-            //    unreachable branches there are ever revived.
-            if (LOYALTY_ACCRUAL_ENABLED && invoice.customer?.type !== 'fundraiser_org') {
-                const points = Math.floor(Number(invoice.total_amount));
-                const existingPoints = await tx.loyaltyPoint.findFirst({
-                    where: { reason: `Invoice ${invoice.id}` },
-                });
-                if (!existingPoints && points > 0) {
-                    await tx.loyaltyPoint.create({
-                        data: {
-                            customer_id: invoice.customer_id,
-                            points,
-                            reason: `Invoice ${invoice.id}`,
-                        },
-                    });
-                    await tx.customer.update({
-                        where: { id: invoice.customer_id },
-                        data: { loyalty_balance: { increment: points } },
-                    });
-                }
-            }
-
-            return result;
-        });
+        // ── Idempotency, part two: the write is a CONDITIONAL transition, and the
+        //    paid-side effects (the kitchen release and loyalty) run only for the
+        //    request that won it. Both live in lib/invoiceSettlementTransition.ts —
+        //    moved there UNCHANGED by QB-INVOICE-1D so that a verified QuickBooks
+        //    payment runs exactly this transition rather than a copy of it. A human's
+        //    Record Payment may settle any outstanding status, as it always could.
+        const claimed = await prisma.$transaction((tx) => settleInvoiceInTransaction(tx, {
+            invoice,
+            businessId,
+            facts: { method, paidAt, reference },
+            fromStatuses: SETTLEABLE_INVOICE_STATUSES,
+        }));
 
         if (claimed.count !== 1) {
             // Lost the race, or the invoice moved underneath us. Report the truth
@@ -372,6 +288,17 @@ export async function DELETE(
                 },
                 message: 'This invoice is already marked unpaid.',
             });
+        }
+
+        // ── QB-INVOICE-1D: a payment FreezerIQ VERIFIED with the provider is not a
+        //    human's statement, so it is not this action's to undo. Checked first
+        //    so the owner gets the specific reason. The kitchen release that came
+        //    with it is never reversed here either (see below).
+        if (isVerifiedSettlement(invoice)) {
+            return NextResponse.json(
+                { error: VERIFIED_SETTLEMENT_UNDO_REFUSAL, reason: 'verified_settlement' },
+                { status: 409 },
+            );
         }
 
         // ── The legacy gate. Checked BEFORE the durable-settlement test so the
