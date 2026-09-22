@@ -306,6 +306,11 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'lib/invoiceSettlementTransition.ts',
             ];
             const inQbInvoice1d = (f: string) => QB_INVOICE_1D.includes(f);
+            // QB-ORG-LINK-1 — a later, separately-authorized fix: the organization's QuickBooks customer card
+            // (QB-INVOICE-1B) also renders on the canonical organization profile that Customer CRM → Organizations
+            // opens. One page; exact path.
+            const QB_ORG_LINK_1 = ['app/fundraisers/[id]/page.tsx'];
+            const inQbOrgLink1 = (f: string) => QB_ORG_LINK_1.includes(f);
             // SEC-INTUIT-ATTEST-1 — a later, separately-authorized phase closing the three
             // findings that blocked the owner's Intuit App Assessment security attestation:
             // a global no-store cache policy for /api, deletion of two full-request-body
@@ -330,7 +335,7 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
             for (const f of changed) {
                 const allowed = f === SHARE_CENTER || f.startsWith('tests/')
                     || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inSecIntuitAttest1(f);
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inSecIntuitAttest1(f);
                 expect(allowed).toBe(true);
             }
             const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -340,7 +345,7 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 // phase's "presentation only" assertion. Everything else is
                 // still held to it.
                 if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inSecIntuitAttest1(f)) continue;
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inSecIntuitAttest1(f)) continue;
                 expect(f).not.toMatch(forbidden);
             }
         });

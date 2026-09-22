@@ -8,6 +8,7 @@ import Link from 'next/link';
 import DocumentsTab from '@/components/crm/DocumentsTab';
 import FundraisersTab from '@/components/crm/FundraisersTab';
 import FundraiserOverview from '@/components/crm/FundraiserOverview';
+import QuickBooksCustomerLinkCard from '@/components/crm/QuickBooksCustomerLinkCard';
 import { STATUS_COLORS, STATUS_LABELS, type CustomerStatus } from '@/lib/statusConstants';
 // CRM-2: Organization profile components
 import { PipelineStepper } from '@/components/crm2/PipelineStepper';
@@ -433,12 +434,19 @@ export default function FundraiserProfilePage({ params }: { params: Promise<{ id
             </div>
 
             {activeTab === 'overview' && (
-                <FundraiserOverview
-                    customer={customer}
-                    onUpdateCustomer={handleUpdateProfile}
-                    onEditProfile={() => setIsEditingProfile(true)}
-                    onNavigateToCampaigns={() => setActiveTab('campaigns')}
-                />
+                <>
+                    <FundraiserOverview
+                        customer={customer}
+                        onUpdateCustomer={handleUpdateProfile}
+                        onEditProfile={() => setIsEditingProfile(true)}
+                        onNavigateToCampaigns={() => setActiveTab('campaigns')}
+                    />
+                    {/* QB-INVOICE-1B card, on the canonical organization profile (CRM-2/CRM-3: Customer CRM →
+                        Organizations opens this page). `customer.id` is the organization's own id — the id its
+                        campaigns, their invoices and its one QuickBooks customer link all carry. Tenant admins
+                        only; renders nothing when QuickBooks is unavailable. */}
+                    <QuickBooksCustomerLinkCard customerId={customer.id} />
+                </>
             )}
 
             {activeTab === 'campaigns' && (

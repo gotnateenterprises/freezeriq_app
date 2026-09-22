@@ -262,7 +262,7 @@ The connector is an independent implementation of Intuit's published HTTP endpoi
 |---|---|---|
 | Organization's QuickBooks customer — state | `GET /api/integrations/quickbooks/customers/[customerId]` | tenant ADMIN |
 | Link an exact match / create a customer | `POST` same path, `{"action":"link","confirmation"}` or `{"action":"create","confirmation","attemptId"}` (application/json only) | tenant ADMIN |
-| Card on the organization page (Overview tab) | `components/crm/QuickBooksCustomerLinkCard.tsx` | renders only for an ADMIN, and nothing when QuickBooks is disabled |
+| Card on the organization page (Overview tab) — the organization profile `/fundraisers/[id]` that Customer CRM → Organizations opens (added by QB-ORG-LINK-1), and `/customers/[id]` | `components/crm/QuickBooksCustomerLinkCard.tsx` (one component, one route) | renders only for an ADMIN, and nothing when QuickBooks is disabled |
 
 Library: `lib/quickbooks/customerLinks.ts` (mapping service), `lib/quickbooks/connectionGenerations.ts` (connection generations and the generation lock), `lib/quickbooks/customerLinkView.ts` (card wording), `lib/quickbooks/invoiceLinks.ts` (invoice-link primitives — **no caller in 1B**), and three Customer functions in `lib/quickbooks/intuitClient.ts`.
 
