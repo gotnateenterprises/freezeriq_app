@@ -109,6 +109,14 @@ export class InvoiceNotFoundError extends Error {
     }
 }
 
+/** Thrown if a repair session ever reaches the create step. Nothing was sent to Intuit when it is thrown. */
+export class CreateForbiddenError extends Error {
+    constructor() {
+        super('QuickBooks invoice create is forbidden on a repair session');
+        Object.setPrototypeOf(this, CreateForbiddenError.prototype); // ES5 target
+    }
+}
+
 class LeaseLostError extends Error {
     constructor() {
         super('QuickBooks invoice send lease lost');
@@ -133,6 +141,8 @@ export type SendBlocker =
     | 'invoice_not_campaign' | 'invoice_not_draft' | 'invoice_not_sent' | 'not_sent_via_quickbooks'
     | 'customer_not_linked' | 'customer_link_invalid' | 'timezone_invalid'
     | 'linked_to_another_connection' | 'changed_since_review' | 'qbo_invoice_changed' | 'update_rejected' | 'lifecycle_unreadable'
+    /** This stopped lifecycle is not one the create-stage recheck may touch (it is the ONLY repair that exists). */
+    | 'recheck_not_available'
     | 'settings_missing' | SettingsProblem | SettingsBlocker | InvoicePlanProblem;
 
 /** Why a lifecycle is paused (retryable) or stopped (needs_review). Codes only — never a name, email or amount. */
@@ -182,7 +192,16 @@ export type InvoiceSendView =
         problem: SendProblem | null;
         problemDetail: string | null;
     }
-    | { state: 'needs_review'; docNumber: string | null; recipientTo: string; recipientCc: string | null; problem: SendProblem | null; problemDetail: string | null }
+    | {
+        state: 'needs_review';
+        docNumber: string | null;
+        recipientTo: string;
+        recipientCc: string | null;
+        problem: SendProblem | null;
+        problemDetail: string | null;
+        /** The create-stage read-back failed on an invoice QuickBooks already holds: it may be re-read and re-checked. */
+        recheckable: boolean;
+    }
     | {
         state: 'sent';
         busy: boolean;
@@ -268,6 +287,19 @@ async function readRow(d: Resolved, businessId: string, invoiceId: string): Prom
 
 /** A lifecycle has reached QuickBooks once a create was attempted (or it stopped). Before that, a new review may replace it. */
 const reachedQuickBooks = (row: SendRow) => !(row.status === 'reserved' && row.create_requested_at === null);
+
+/**
+ * The ONE stopped state a repair may act on, from the lifecycle row alone: the CREATE-stage read-back failed on an
+ * invoice QuickBooks had already accepted (`create_requested_at` is the durable proof the create was dispatched),
+ * FreezerIQ never emailed anything, and the send was never recorded. Every other `needs_review` stays terminal —
+ * there is no general-purpose force-resume. The deeper conditions (a current-generation link, an existing
+ * `qboInvoiceId`, a still-DRAFT FreezerIQ invoice, the unchanged review) are re-proven live by the action itself.
+ */
+const recheckableRow = (row: SendRow) => row.status === 'needs_review'
+    && row.problem === 'verification_failed_created'
+    && row.create_requested_at !== null
+    && row.send_count === 0
+    && row.sent_at === null;
 const leaseActive = (row: SendRow, now: number) => row.lease_id !== null && row.lease_until !== null && row.lease_until.getTime() > now;
 
 /** The mapping the tenant reviewed, as stored on the lifecycle. Ids only. */
@@ -429,7 +461,10 @@ function viewOf(row: SendRow, now: number, invoiceStatus: string | null = null):
         };
     }
     if (row.status === 'needs_review') {
-        return { state: 'needs_review', docNumber: row.qbo_doc_number, recipientTo: row.recipient_to, recipientCc: row.recipient_cc, problem, problemDetail: row.problem_detail };
+        return {
+            state: 'needs_review', docNumber: row.qbo_doc_number, recipientTo: row.recipient_to, recipientCc: row.recipient_cc,
+            problem, problemDetail: row.problem_detail, recheckable: recheckableRow(row),
+        };
     }
     return {
         state: 'in_progress', step: row.status, busy: leaseActive(row, now), docNumber: row.qbo_doc_number,
@@ -606,6 +641,91 @@ async function resumeLifecycle(
     });
 }
 
+// ── recheck: the ONE repair a stopped lifecycle allows ──────────────────────
+
+/**
+ * POST recheck — re-read the SAME QuickBooks invoice and re-run the CREATE-stage read-back contract.
+ *
+ * `needs_review` is terminal by design, with exactly one exception: a lifecycle whose create-stage read-back failed
+ * on an invoice QuickBooks had ALREADY accepted. That state is recoverable without touching QuickBooks at all —
+ * the contract itself may have been wrong about a company's own tax metadata (Automated Sales Tax stamps zero-value
+ * tax detail onto every invoice), or a read may have caught the invoice before QuickBooks settled it. So this path
+ * reads, verifies, and does one of exactly two things:
+ *
+ *   - it passes: the lifecycle returns to its post-create stage — the SAME row, the SAME QuickBooks invoice, the
+ *     SAME reviewed recipients and payment options — and the owner's existing Resume action carries it on from
+ *     there. Nothing is emailed here: a repair is not a send, and the send semantics are left exactly as they are.
+ *   - it fails: the lifecycle stays stopped, now recording what failed this time.
+ *
+ * It can NEVER create a QuickBooks invoice: an existing `qboInvoiceId` is a precondition, the create step refuses a
+ * repair session outright (`noCreate`), and no QuickBooks write of any kind is issued on this path.
+ */
+export async function recheckQuickBooksInvoiceCreate(
+    input: { businessId: string; invoiceId: string; config: QuickBooksConfig; userId: string | null },
+    deps: InvoiceSendDeps = {},
+): Promise<SendActionResult> {
+    const d = resolve(deps);
+    const row = await readRow(d, input.businessId, input.invoiceId);
+    if (!row) {
+        await loadInvoice(d, input.businessId, input.invoiceId); // 404 for another tenant's invoice
+        return { outcome: 'blocked', blockers: ['not_sent_via_quickbooks'] };
+    }
+    // (1) stopped, (2) by a create-stage verification failure, (5) after the create was dispatched, (7) never sent.
+    if (!recheckableRow(row)) return { outcome: 'blocked', blockers: ['recheck_not_available'] };
+
+    const reviewed = reviewedOf(row);
+    if (!reviewed) return { outcome: 'blocked', blockers: ['lifecycle_unreadable'] };
+    // (6) the FreezerIQ invoice must still be the DRAFT that was reviewed — the gate a resume runs, unchanged.
+    const ev = await evaluate(input, d, { expectStatus: 'DRAFT', reviewed });
+    if (!ev.ok) return { outcome: 'blocked', blockers: ev.blockers };
+    if (reviewHashFor(reviewTokenFor(ev.ctx), row.recipient_to, row.recipient_cc) !== row.review_hash) {
+        return { outcome: 'stale', view: viewOf(row, d.now()) };
+    }
+    const link = await getQuickBooksInvoiceLink(input, linkDeps(d));
+    if (!link) return { outcome: 'blocked', blockers: ['lifecycle_unreadable'] }; // (3) the durable link must exist
+    if (link.connectionId !== ev.ctx.live.connectionId) return { outcome: 'blocked', blockers: ['linked_to_another_connection'] }; // (8)
+    // (4) THE invariant of this path: it repairs an invoice QuickBooks already holds. No recorded id, no recheck.
+    if (!link.qboInvoiceId) return { outcome: 'blocked', blockers: ['recheck_not_available'] };
+
+    const leaseId = d.newLeaseId();
+    const now = d.now();
+    const claimed = await d.db.quickBooksInvoiceSend.updateMany({
+        where: {
+            business_id: input.businessId, invoice_id: input.invoiceId,
+            status: 'needs_review', problem: 'verification_failed_created', send_count: 0,
+            OR: [{ lease_id: null }, { lease_until: { lt: new Date(now) } }],
+        },
+        data: { lease_id: leaseId, lease_until: new Date(now + LEASE_MS) },
+    });
+    if (claimed.count !== 1) return currentOutcome(d, input.businessId, input.invoiceId);
+    const fresh = await readRow(d, input.businessId, input.invoiceId);
+    if (!fresh) return { outcome: 'blocked', blockers: ['lifecycle_unreadable'] };
+
+    return recheckCreated({
+        d, config: input.config, businessId: input.businessId, invoiceId: input.invoiceId, userId: input.userId, leaseId, row: fresh, ctx: ev.ctx,
+        link: { id: link.id, connectionId: link.connectionId, requestId: link.requestId, qboInvoiceId: link.qboInvoiceId },
+        noCreate: true,
+    });
+}
+
+/** The repair under the lease: ONE read of the invoice QuickBooks already holds, then the create-stage contract. */
+async function recheckCreated(s: Session): Promise<SendActionResult> {
+    return guarded(s, async () => {
+        if (!s.link.qboInvoiceId) throw new CreateForbiddenError(); // proven by the caller; the last line of defence
+        const inv = await read(s);
+        if (!inv) return await park(s, 'qbo_invoice_missing', null, true);
+        const v = verify(s, inv, 'created');
+        if (!v.ok) return await park(s, 'verification_failed_created', failureDetail(v), true);
+        // Back to the post-create stage, exactly as the create step leaves it. The owner resumes from here.
+        await writeRow(s, {
+            status: 'created', qbo_doc_number: inv.docNumber, qbo_sync_token: inv.syncToken,
+            created_verified_at: new Date(s.d.now()), ...clearProblem,
+        });
+        await releaseLease(s);
+        return await currentOutcome(s.d, s.businessId, s.invoiceId);
+    });
+}
+
 // ── the session: one lease-holding run over a lifecycle ─────────────────────
 
 interface Session {
@@ -618,6 +738,12 @@ interface Session {
     row: SendRow;
     ctx: Context;
     link: { id: string; connectionId: string; requestId: string; qboInvoiceId: string | null };
+    /**
+     * A REPAIR session: it exists only to re-read an invoice QuickBooks already holds, so it may never create one.
+     * The create step refuses outright when this is set — a structural guard, so no future wiring of the repair
+     * into the step loop could ever reach a create.
+     */
+    noCreate?: boolean;
 }
 
 type StepResult = SendActionResult | 'next';
@@ -695,7 +821,7 @@ const transient = (e: unknown) => e instanceof IntuitError || e instanceof Quick
 const clearProblem = { problem: null, problem_detail: null, problem_at: null };
 
 async function run(s: Session): Promise<SendActionResult> {
-    try {
+    return guarded(s, async () => {
         for (let guard = 0; guard < 8; guard++) {
             const status = s.row.status;
             const step: StepResult | null = status === 'reserved' ? await stepCreate(s)
@@ -710,6 +836,13 @@ async function run(s: Session): Promise<SendActionResult> {
             if (step !== 'next') return step;
         }
         return await park(s, 'unexpected_state', 'step_limit', true);
+    });
+}
+
+/** The interruption policy every lease-holding body shares: a lost lease, a changed connection, a silent QuickBooks. */
+async function guarded(s: Session, body: () => Promise<SendActionResult>): Promise<SendActionResult> {
+    try {
+        return await body();
     } catch (e) {
         try {
             if (e instanceof LeaseLostError) return await currentOutcome(s.d, s.businessId, s.invoiceId);
@@ -730,6 +863,9 @@ async function run(s: Session): Promise<SendActionResult> {
 // ── steps ───────────────────────────────────────────────────────────────────
 
 async function stepCreate(s: Session): Promise<StepResult> {
+    // A repair session may NEVER create an invoice. Unreachable today (repairs never enter the step loop) and kept
+    // so it stays unreachable: this throws before the requestid, the body or any Intuit call is touched.
+    if (s.noCreate) throw new CreateForbiddenError();
     if (!s.link.qboInvoiceId) {
         const firstAttempt = s.row.create_requested_at;
         if (firstAttempt && s.d.now() - firstAttempt.getTime() > CREATE_RETRY_WINDOW_MS) {

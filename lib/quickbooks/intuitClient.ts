@@ -792,12 +792,39 @@ export interface QuickBooksInvoiceSnapshot {
     eInvoiceStatus: string | null;
     totalAmt: number | null;
     balance: number | null;
+    /** QuickBooks' own tax total for the transaction (`TxnTaxDetail.TotalTax`). */
     totalTax: number | null;
-    taxLineCount: number;
+    /** Every QuickBooks-native tax line's amount, in order; `null` for one QuickBooks did not report as a number. */
+    taxLineAmounts: (number | null)[];
+    /** The transaction tax code QuickBooks attaches (`TxnTaxCodeRef`). Metadata: it carries no amount of its own. */
     txnTaxCodeId: string | null;
+    /** False when a tax block is present in a shape this parser cannot interpret, so the contract can fail closed. */
+    taxDetailReadable: boolean;
     payment: { card: boolean | null; ach: boolean | null; paypal: boolean | null; affirm: boolean | null };
     customerMemo: string | null;
     lines: QuickBooksInvoiceLineSnapshot[];
+}
+
+/**
+ * QuickBooks' transaction tax block, reduced to the two facts the read-back contract needs: QuickBooks' own tax
+ * total, and every native tax line's amount. A company on Automated Sales Tax returns this block on invoices
+ * FreezerIQ sends no tax detail for — a transaction tax code, and in some companies a zero-value tax line — so the
+ * contract has to judge the AMOUNTS, not the presence of the metadata. `readable` is false when the block is present
+ * but in a shape this parser cannot interpret (including a TotalTax that is not a finite number): the contract then
+ * fails closed rather than reading an unknown shape as "no tax".
+ */
+function taxDetailOf(tt: any): { totalTax: number | null; taxLineAmounts: (number | null)[]; readable: boolean } {
+    if (tt === undefined || tt === null) return { totalTax: null, taxLineAmounts: [], readable: true };
+    if (typeof tt !== 'object' || Array.isArray(tt)) return { totalTax: null, taxLineAmounts: [], readable: false };
+    const stated = tt.TotalTax !== undefined && tt.TotalTax !== null;
+    const totalTax = stated ? numOrNull(tt.TotalTax) : null;
+    const lines = tt.TaxLine;
+    const linesReadable = lines === undefined || lines === null || Array.isArray(lines);
+    return {
+        totalTax,
+        taxLineAmounts: Array.isArray(lines) ? lines.map((l: any) => numOrNull(l?.Amount)) : [],
+        readable: (!stated || totalTax !== null) && linesReadable,
+    };
 }
 
 export function parseQuickBooksInvoice(raw: any): QuickBooksInvoiceSnapshot | null {
@@ -805,6 +832,7 @@ export function parseQuickBooksInvoice(raw: any): QuickBooksInvoiceSnapshot | nu
     if (raw.Line !== undefined && !Array.isArray(raw.Line)) return null;
     const di = raw.DeliveryInfo;
     const tt = raw.TxnTaxDetail;
+    const tax = taxDetailOf(tt);
     return {
         id: raw.Id,
         syncToken: raw.SyncToken.slice(0, 32),
@@ -822,9 +850,10 @@ export function parseQuickBooksInvoice(raw: any): QuickBooksInvoiceSnapshot | nu
         eInvoiceStatus: strOrNull(raw.EInvoiceStatus, 32),
         totalAmt: numOrNull(raw.TotalAmt),
         balance: numOrNull(raw.Balance),
-        totalTax: tt && typeof tt === 'object' ? numOrNull(tt.TotalTax) : null,
-        taxLineCount: tt && Array.isArray(tt.TaxLine) ? tt.TaxLine.length : 0,
+        totalTax: tax.totalTax,
+        taxLineAmounts: tax.taxLineAmounts,
         txnTaxCodeId: tt && typeof tt === 'object' ? refValue(tt.TxnTaxCodeRef) : null,
+        taxDetailReadable: tax.readable,
         payment: {
             card: boolOrNull(raw.AllowOnlineCreditCardPayment),
             ach: boolOrNull(raw.AllowOnlineACHPayment),

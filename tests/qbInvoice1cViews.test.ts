@@ -3,20 +3,20 @@
  * and the "Send via QuickBooks" dialog.
  */
 
-import { blockerText, INVALID_TEXT, invoiceRowAction, PROBLEM_TEXT, QUICKBOOKS_INITIAL_SEND_STATUS, RECIPIENT_SOURCE_TEXT, RESEND_INTERRUPTED_TEXT, RESEND_INTERRUPTION_DETAIL, SENT_MEANING, sendDialogView, STEP_TEXT } from '@/lib/quickbooks/invoiceSendView';
+import { blockerText, INVALID_TEXT, invoiceRowAction, PROBLEM_TEXT, QUICKBOOKS_INITIAL_SEND_STATUS, RECHECK_ACTION_LABEL, RECHECK_TEXT, RECIPIENT_SOURCE_TEXT, RESEND_INTERRUPTED_TEXT, RESEND_INTERRUPTION_DETAIL, SENT_MEANING, sendDialogView, STEP_TEXT } from '@/lib/quickbooks/invoiceSendView';
 import { helperItemPrompt, ROLE_LABELS, SETTINGS_BLOCKER_TEXT, SETTINGS_NOTICE_TEXT, SETTINGS_PROBLEM_TEXT, settingsCardSummary } from '@/lib/quickbooks/invoiceSettingsView';
 
 const ALL_BLOCKERS = [
     'not_connected', 'reconnect_required', 'quickbooks_unavailable', 'invoice_not_campaign', 'invoice_not_draft', 'invoice_not_sent', 'not_sent_via_quickbooks',
     'customer_not_linked', 'customer_link_invalid', 'timezone_invalid', 'linked_to_another_connection', 'changed_since_review', 'qbo_invoice_changed', 'update_rejected',
-    'lifecycle_unreadable', 'settings_missing', 'not_campaign_invoice', 'no_lines', 'too_many_lines', 'total_not_positive', 'money_invalid', 'line_does_not_reconcile',
+    'lifecycle_unreadable', 'recheck_not_available', 'settings_missing', 'not_campaign_invoice', 'no_lines', 'too_many_lines', 'total_not_positive', 'money_invalid', 'line_does_not_reconcile',
     'invoice_does_not_reconcile', 'tax_status_conflict', 'share_item_not_configured', 'tax_item_not_configured', 'description_invalid', 'date_invalid',
     ...Object.keys(SETTINGS_BLOCKER_TEXT), ...Object.keys(SETTINGS_PROBLEM_TEXT),
 ] as const;
 
 const everyText = () => [
     ...ALL_BLOCKERS.map((b) => blockerText(b as any)), ...Object.values(PROBLEM_TEXT), ...Object.values(STEP_TEXT), SENT_MEANING,
-    ...Object.values(RECIPIENT_SOURCE_TEXT), ...Object.values(INVALID_TEXT),
+    ...Object.values(RECIPIENT_SOURCE_TEXT), ...Object.values(INVALID_TEXT), RECHECK_TEXT, RECHECK_ACTION_LABEL,
     ...Object.values(SETTINGS_BLOCKER_TEXT), ...Object.values(SETTINGS_NOTICE_TEXT), ...Object.values(SETTINGS_PROBLEM_TEXT),
     ...Object.values(ROLE_LABELS).flatMap((r) => [r.title, r.help]),
 ];
@@ -54,7 +54,7 @@ describe('QB-INVOICE-1C · which actions the dialog offers', () => {
         expect(pick(sendDialogView({ state: 'blocked', blockers: ['settings_missing'] }))).toEqual({ send: false, resume: false, check: false, resend: false });
         expect(pick(sendDialogView({ state: 'in_progress', step: 'created', busy: false, docNumber: '1052', recipientTo: 'a@example.invalid', recipientCc: null, problem: 'stale_object', problemDetail: null }))).toEqual({ send: false, resume: true, check: false, resend: false });
         expect(pick(sendDialogView({ state: 'in_progress', step: 'created', busy: true, docNumber: null, recipientTo: 'a@example.invalid', recipientCc: null, problem: null, problemDetail: null }))).toEqual({ send: false, resume: false, check: false, resend: false });
-        expect(pick(sendDialogView({ state: 'needs_review', docNumber: '1052', recipientTo: 'a@example.invalid', recipientCc: null, problem: 'verification_failed_created', problemDetail: 'total_equals_freezeriq_total' }))).toEqual({ send: false, resume: false, check: false, resend: false });
+        expect(pick(sendDialogView({ state: 'needs_review', docNumber: '1052', recipientTo: 'a@example.invalid', recipientCc: null, problem: 'verification_failed_created', problemDetail: 'total_equals_freezeriq_total', recheckable: false }))).toEqual({ send: false, resume: false, check: false, resend: false });
         expect(pick(sendDialogView({ state: 'disabled' }))).toEqual({ send: false, resume: false, check: false, resend: false });
     });
 
@@ -88,8 +88,33 @@ describe('QB-INVOICE-1C · which actions the dialog offers', () => {
         expect(sendDialogView(sent).messages.join(' ')).not.toContain('did not complete');
     });
 
+    /**
+     * The ONE repair the dialog offers, and only for a send the create-stage read-back stopped. Every other stopped
+     * send stays terminal — there is no general "force resume" button anywhere in this view.
+     */
+    it('a create-stage stop offers Recheck QuickBooks invoice; every other stopped send offers nothing', () => {
+        const stopped = (over: Record<string, unknown>) => sendDialogView({
+            state: 'needs_review', docNumber: '1052', recipientTo: 'a@example.invalid', recipientCc: null,
+            problem: 'verification_failed_created', problemDetail: 'quickbooks_tax_did_not_affect_total', recheckable: false, ...over,
+        } as any);
+        const offered = stopped({ recheckable: true });
+        expect(offered).toMatchObject({ canRecheck: true, canSend: false, canResume: false, canCheckDelivery: false, canResend: false, canCheckPayment: false });
+        expect(offered.messages.join(' ')).toContain(RECHECK_TEXT);
+        expect(RECHECK_ACTION_LABEL).toBe('Recheck QuickBooks invoice');
+        // It promises exactly what the code does: the same invoice, no new invoice, no send, and Resume finishes it.
+        expect(RECHECK_TEXT).toMatch(/re-reads the SAME QuickBooks invoice/);
+        expect(RECHECK_TEXT).toMatch(/No new invoice is created and nothing is emailed by the recheck/);
+        expect(RECHECK_TEXT).toMatch(/you finish it with Resume/);
+        expect(RECHECK_TEXT).toMatch(/If it still does not match, it stays stopped/);
+        for (const over of [{}, { problem: 'verification_failed_recipients' }, { problem: 'create_rejected' }, { problem: 'qbo_invoice_missing' }, { problem: null }]) {
+            const other = stopped(over);
+            expect(other.canRecheck).toBe(false);
+            expect(other.messages.join(' ')).not.toContain(RECHECK_TEXT);
+        }
+    });
+
     it('a stopped send says nothing more is sent, the invoice is not marked Sent, and no second QuickBooks invoice is created', () => {
-        expect(sendDialogView({ state: 'needs_review', docNumber: null, recipientTo: 'a@example.invalid', recipientCc: null, problem: null, problemDetail: null }).messages.join(' '))
+        expect(sendDialogView({ state: 'needs_review', docNumber: null, recipientTo: 'a@example.invalid', recipientCc: null, problem: null, problemDetail: null, recheckable: false }).messages.join(' '))
             .toMatch(/Nothing further is sent, the FreezerIQ invoice is not marked Sent, and no second QuickBooks invoice will be created/);
     });
 });

@@ -5,6 +5,7 @@
  *       and a review token), in progress, needs review, or sent (with QuickBooks' number and delivery state).
  * POST  {"action":"send","reviewToken":"…","recipientTo":"…","recipientCc":"…"|null}
  *       {"action":"resume"}
+ *       {"action":"recheck"}                                         (re-reads the SAME invoice; never creates one)
  *       {"action":"check_delivery"}
  *       {"action":"resend","recipientTo":"…","recipientCc":"…"|null}
  *       {"action":"check_payment"}                                   (QB-INVOICE-1D)
@@ -32,6 +33,7 @@ import {
     checkQuickBooksInvoiceDelivery,
     getQuickBooksInvoiceSendView,
     InvoiceNotFoundError,
+    recheckQuickBooksInvoiceCreate,
     resendQuickBooksInvoice,
     resumeQuickBooksInvoiceSend,
     startQuickBooksInvoiceSend,
@@ -109,7 +111,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ invoice
         return json({ error: 'Invalid request' }, 400);
     }
     const action = body?.action;
-    if (action !== 'send' && action !== 'resume' && action !== 'check_delivery' && action !== 'resend' && action !== 'check_payment') {
+    if (action !== 'send' && action !== 'resume' && action !== 'recheck' && action !== 'check_delivery' && action !== 'resend' && action !== 'check_payment') {
         return json({ error: 'Invalid request' }, 400);
     }
 
@@ -132,7 +134,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ invoice
             })
             : action === 'resume'
                 ? await resumeQuickBooksInvoiceSend({ businessId, invoiceId, config, userId })
-                : await resendQuickBooksInvoice({ businessId, invoiceId, config, userId, recipientTo: body.recipientTo, recipientCc: body.recipientCc ?? null });
+                // The one repair: re-read the SAME QuickBooks invoice. It never creates one, and never sends.
+                : action === 'recheck'
+                    ? await recheckQuickBooksInvoiceCreate({ businessId, invoiceId, config, userId })
+                    : await resendQuickBooksInvoice({ businessId, invoiceId, config, userId, recipientTo: body.recipientTo, recipientCc: body.recipientCc ?? null });
         return json(result, actionStatus(result));
     } catch (e) {
         if (e instanceof InvoiceNotFoundError) return json({ error: 'Invoice not found' }, 404);

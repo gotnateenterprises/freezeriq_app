@@ -22,6 +22,7 @@ import {
     INVALID_TEXT,
     PAYMENT_CHECK_EXPLAINER,
     paymentCheckMessage,
+    RECHECK_ACTION_LABEL,
     RECIPIENT_SOURCE_TEXT,
     sendDialogView,
     type InvoiceSendPayload,
@@ -89,8 +90,15 @@ export default function QuickBooksInvoiceSendDialog({
             switch (data?.outcome) {
                 case 'sent': toast.success(body.action === 'resend' ? 'QuickBooks emailed the invoice again.' : 'QuickBooks emailed the invoice.'); break;
                 case 'checked': toast.success('Delivery status updated from QuickBooks.'); break;
-                case 'in_progress': toast.message('The send is paused or still running. Its progress is shown here.'); break;
-                case 'needs_review': toast.error('The send stopped for review. Nothing further was sent.'); break;
+                case 'in_progress':
+                    if (body.action === 'recheck') toast.success('The QuickBooks invoice matched FreezerIQ. Continue with Resume to finish sending it.');
+                    else toast.message('The send is paused or still running. Its progress is shown here.');
+                    break;
+                case 'needs_review':
+                    toast.error(body.action === 'recheck'
+                        ? 'The QuickBooks invoice still does not match FreezerIQ. Nothing was sent and no new invoice was created.'
+                        : 'The send stopped for review. Nothing further was sent.');
+                    break;
                 case 'stale': toast.error('The invoice changed since you reviewed it. Nothing was sent — review it again.'); break;
                 case 'invalid': toast.error(INVALID_TEXT[data.reason] ?? 'Check the recipient and try again.'); break;
                 case 'blocked': toast.error((data.blockers ?? []).map(blockerText).join(' ') || 'This invoice cannot be sent through QuickBooks right now.'); break;
@@ -257,6 +265,12 @@ export default function QuickBooksInvoiceSendDialog({
                             onClick={() => { if (confirm(`Have QuickBooks email the same invoice again to ${recipientTo.trim()}${recipientCc.trim() ? ` (CC ${recipientCc.trim()})` : ''}?`)) act({ action: 'resend', recipientTo, recipientCc: recipientCc.trim() || null }); }}
                             className="px-4 py-2.5 rounded-xl text-sm font-bold border border-indigo-200 text-indigo-700 dark:text-indigo-300 disabled:opacity-50">
                             Send again
+                        </button>
+                    )}
+                    {view.canRecheck && (
+                        <button type="button" onClick={() => act({ action: 'recheck' })} disabled={busy}
+                            className="px-5 py-2.5 rounded-xl text-sm font-black bg-slate-900 text-white disabled:opacity-50">
+                            {busy ? 'Rechecking…' : RECHECK_ACTION_LABEL}
                         </button>
                     )}
                     {view.canResume && (

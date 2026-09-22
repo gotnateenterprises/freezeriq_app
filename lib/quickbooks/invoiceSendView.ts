@@ -30,6 +30,7 @@ const OWN_BLOCKER_TEXT: Record<Exclude<SendBlocker, keyof typeof SETTINGS_BLOCKE
     qbo_invoice_changed: 'The QuickBooks invoice no longer matches what FreezerIQ sent — for example it was edited or paid in QuickBooks. FreezerIQ will not send it again.',
     update_rejected: 'QuickBooks refused the new recipient. Check the address and try again.',
     lifecycle_unreadable: 'This invoice’s QuickBooks record could not be read. It needs an administrator’s review.',
+    recheck_not_available: 'This stopped send cannot be rechecked. Only a send that stopped because the new QuickBooks invoice did not match FreezerIQ can be re-read.',
     settings_missing: 'Set up the QuickBooks invoice settings first (Settings → Integrations).',
     not_campaign_invoice: 'Only fundraiser invoices created at closeout can be sent through QuickBooks.',
     no_lines: 'This invoice has no lines to send.',
@@ -80,6 +81,14 @@ export const STEP_TEXT: Record<InvoiceSendStep, string> = {
     recipients_set: 'Recipients verified; setting payment options',
     payment_options_set: 'Verified; asking QuickBooks to email the invoice',
 };
+
+/**
+ * The ONE repair the dialog offers, and only for a send stopped by the create-stage read-back. It promises exactly
+ * what the code does: one read of the SAME QuickBooks invoice, never a second invoice, and never a send — a match
+ * hands the invoice back to the normal send workflow, which the owner still finishes with Resume.
+ */
+export const RECHECK_TEXT = 'Recheck QuickBooks invoice re-reads the SAME QuickBooks invoice — the one already created — and checks it against FreezerIQ again. No new invoice is created and nothing is emailed by the recheck. If it matches, the send continues where it stopped and you finish it with Resume. If it still does not match, it stays stopped.';
+export const RECHECK_ACTION_LABEL = 'Recheck QuickBooks invoice';
 
 export const SENT_MEANING = 'Sent means QuickBooks reports it emailed the invoice. It does not mean the email was delivered, and it does not mean the invoice was paid.';
 export const SEND_EXPLAINER = 'FreezerIQ creates this invoice in QuickBooks unsent, checks every line and total against FreezerIQ, adds the recipients, and only then asks QuickBooks to email it. If anything does not match, nothing is sent and the same QuickBooks invoice is kept for review.';
@@ -155,9 +164,13 @@ export interface SendDialogView {
     canResend: boolean;
     /** QB-INVOICE-1D: an invoice QuickBooks emailed and FreezerIQ still shows as Sent (never Paid). */
     canCheckPayment: boolean;
+    /** A send stopped by the create-stage read-back: the SAME QuickBooks invoice may be re-read and re-checked. */
+    canRecheck: boolean;
 }
 
-const base: SendDialogView = { title: '', tone: 'neutral', messages: [], canSend: false, canResume: false, canCheckDelivery: false, canResend: false, canCheckPayment: false };
+const base: SendDialogView = {
+    title: '', tone: 'neutral', messages: [], canSend: false, canResume: false, canCheckDelivery: false, canResend: false, canCheckPayment: false, canRecheck: false,
+};
 
 // ── QB-INVOICE-1D: "Check QuickBooks payment" ──────────────────────────────
 
@@ -235,7 +248,9 @@ export function sendDialogView(payload: InvoiceSendPayload | null): SendDialogVi
                 title: 'Stopped — needs review',
                 tone: 'bad',
                 messages: [payload.problem ? PROBLEM_TEXT[payload.problem] : PROBLEM_TEXT.unexpected_state,
-                    'Nothing further is sent, the FreezerIQ invoice is not marked Sent, and no second QuickBooks invoice will be created.'],
+                    'Nothing further is sent, the FreezerIQ invoice is not marked Sent, and no second QuickBooks invoice will be created.',
+                    ...(payload.recheckable ? [RECHECK_TEXT] : [])],
+                canRecheck: payload.recheckable,
             };
         case 'sent': {
             const messages = [

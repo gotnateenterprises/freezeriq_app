@@ -552,11 +552,11 @@ Only the tenant's OWN QuickBooks objects, filtered by purpose on the server and 
 - **The review is the authorization.** Resume and "send again" rebuild the create body and expectation from the STORED review plus the CURRENT FreezerIQ invoice, re-verify the stored mapping in QuickBooks, and refuse on any difference — so a later settings change neither breaks nor silently alters an invoice already in QuickBooks.
 - **Lease.** A compare-and-set lease (`lease_id`, 2 minutes) lets one request drive a lifecycle; a double click answers `in_progress`. Every QuickBooks write is preceded by a lease-renewing write, so a request whose lease expired cannot reach QuickBooks.
 - **Never a second QuickBooks invoice:** UNIQUE `invoice_id` on the link and on the lifecycle, the derived requestid, the record-once link. No QuickBooks invoice is ever searched for or matched.
-- **Paused vs stopped.** QuickBooks unreachable, throttled, a stale SyncToken, or an unconfirmed update/send keep the status with a problem code; **Resume** continues from the last verified step after reading QuickBooks again. A failed read-back, a refused create or update, a missing invoice, or an unexpected send stop the lifecycle in `needs_review`: nothing further is sent, the FreezerIQ invoice is not marked SENT, the same QuickBooks invoice is kept, and no repair action exists in V1 (§12.9).
+- **Paused vs stopped.** QuickBooks unreachable, throttled, a stale SyncToken, or an unconfirmed update/send keep the status with a problem code; **Resume** continues from the last verified step after reading QuickBooks again. A failed read-back, a refused create or update, a missing invoice, or an unexpected send stop the lifecycle in `needs_review`: nothing further is sent, the FreezerIQ invoice is not marked SENT, and the same QuickBooks invoice is kept. `needs_review` is terminal, with ONE narrow exception — the create-stage **recheck** (§14.2).
 
 ### 12.5 Read-back contract (`invoiceContract.ts`)
 
-Every read-back must show, in integer cents: the same `Id` and a present, unchanged DocNumber; customer, USD, invoice date, term and derived due date; the memo when required; only item lines plus QuickBooks' subtotal line; per line the item, the **posting account (`ItemAccountRef`)**, description, quantity, whole-cent unit price and amount, `NON`; bundles = pre-tax sales, tax line = frozen tax, share line = −share; no QuickBooks tax (TotalTax 0, no tax lines, no tax code); TotalAmt = FreezerIQ total; Balance = total (unpaid); lines sum to TotalAmt. Then per stage:
+Every read-back must show, in integer cents: the same `Id` and a present, unchanged DocNumber; customer, USD, invoice date, term and derived due date; the memo when required; only item lines plus QuickBooks' subtotal line; per line the item, the **posting account (`ItemAccountRef`)**, description, quantity, whole-cent unit price and amount, `NON`; bundles = pre-tax sales, tax line = frozen tax, share line = −share; **QuickBooks' own tax did not affect the total** — its `TotalTax` is zero or absent and every native tax line is worth zero, while a transaction tax code and zero-value automated tax lines are accepted as the metadata they are, and unreadable tax detail fails closed (§14.1); TotalAmt = FreezerIQ total; Balance = total (unpaid); lines sum to TotalAmt. Then per stage:
 
 | Stage | Delivery checks |
 |---|---|
@@ -596,7 +596,7 @@ All with `minorversion=75`; a Fault is honoured on HTTP 200; Fault codes are kep
 
 ### 12.9 Not in QB-INVOICE-1C
 
-No payment webhook, polling, automatic PAID, Payments API, card/ACH handling in FreezerIQ, or fulfillment release (QB-INVOICE-1D and later). No void / repair workflow for a stopped lifecycle or for correcting an invoice after it is in QuickBooks. No expense/commission share mapping. No non-US, non-USD or custom-numbering companies. No linking of pre-existing QuickBooks invoices.
+No payment webhook, polling, automatic PAID, Payments API, card/ACH handling in FreezerIQ, or fulfillment release (QB-INVOICE-1D and later). No void / repair workflow for a stopped lifecycle beyond the create-stage recheck added later (§14.2), and none for correcting an invoice after it is in QuickBooks. No expense/commission share mapping. No non-US, non-USD or custom-numbering companies. No linking of pre-existing QuickBooks invoices.
 
 ### 12.10 Tests and evidence (September 15, 2026, local)
 
@@ -743,5 +743,69 @@ Rolling the CODE back after a verified settlement exists is safe for the data bu
 ### 13.11 Not in QB-INVOICE-1D
 
 Webhooks, polling or scheduled checks; partial or multi-payment settlement; credits, write-offs, refunds, voids or ACH returns; automatic un-pay or fulfilment rollback; card/ACH fees; deposits and bank reconciliation; the Payments API; any QuickBooks write.
+
+---
+
+## 14. QB-QBO-TAX-RESUME — Automated Sales Tax compatibility and the create-stage recheck
+
+Candidate, September 22, 2026. Built on the released Production baseline `ec3d695` (QB-ORG-LINK-1). Code only: no migration, no schema change, no new dependency, no new Intuit call and no change to the OAuth scope.
+
+**Why.** Freezer Chef's real QuickBooks company (Automated Sales Tax active, Illinois Department of Revenue, custom rates Tax Exempt 0% and Food 1%) stamps its own tax metadata onto every invoice — a transaction tax code, and in companies with their own rates a zero-value tax line — even on an invoice FreezerIQ creates with wholly non-taxable (`NON`) lines and no tax detail of its own. The 1C sandbox company uses legacy sales tax and returns a bare `TxnTaxDetail {TotalTax: 0}`, so the contract had been written as "QuickBooks holds NO tax metadata". The first real invoice (QuickBooks **#1026**) was created correctly, read back, and refused by that check alone: the money was right — total, every line and the balance passed — and the lifecycle stopped in `needs_review` with the QuickBooks invoice kept, which is exactly what it is designed to do when a check fails.
+
+### 14.1 The tax invariant, corrected
+
+The invariant is **QuickBooks' own tax did not affect this invoice's money** — not "QuickBooks has no tax metadata". The check is named for it: `quickbooks_tax_did_not_affect_total` (it replaces `no_quickbooks_tax`; a `problem_detail` recorded before this release still reads `no_quickbooks_tax`).
+
+| QuickBooks returns | Result |
+|---|---|
+| no `TxnTaxDetail` at all | PASS |
+| `TotalTax` 0, no tax lines | PASS |
+| `TotalTax` 0 + `TxnTaxCodeRef` (Automated Sales Tax) | PASS |
+| `TotalTax` 0 + one or more zero-value tax lines | PASS |
+| `TotalTax` ≠ 0 | FAIL |
+| zero `TotalTax` but any tax line amount ≠ 0 | FAIL |
+| a tax amount that is not a whole number of cents | FAIL |
+| tax detail that cannot be read (not an object, a non-numeric `TotalTax`, `TaxLine` not a list, a line whose `Amount` is not a number) | FAIL — closed, never read as "no tax" |
+
+FreezerIQ remains authoritative for fundraiser tax and keeps carrying it as its own line against the tenant's mapped tax item; every other check is unchanged, so a native tax that moved the money still fails `total_equals_freezeriq_total` and `lines_sum_to_total` as well. Every comparison is in integer cents.
+
+**Snapshot change** (`intuitClient.ts`): the allowlisted invoice snapshot now carries `taxLineAmounts` (each native tax line's amount, `null` when QuickBooks did not state it as a number) in place of `taxLineCount`, plus `taxDetailReadable`. `txnTaxCodeId` is unchanged and is used for diagnosis only. No raw payload is kept, and the tax facts are read only by the contract layer.
+
+### 14.2 The create-stage recheck (the ONE repair)
+
+`needs_review` stays terminal, with one exception: a lifecycle the **create-stage read-back** stopped on an invoice QuickBooks had already accepted. `recheckQuickBooksInvoiceCreate` is permitted only when ALL of these hold:
+
+1. lifecycle status is `needs_review`;
+2. its problem is `verification_failed_created`;
+3. a durable invoice link exists;
+4. the link already holds a `qbo_invoice_id`;
+5. `create_requested_at` proves the create was dispatched;
+6. the FreezerIQ invoice is still DRAFT;
+7. `send_count` is 0 and `sent_at` is null;
+8. the link belongs to the CURRENT live connection generation;
+9. the caller passes `mayManageQuickBooks` (tenant ADMIN, as themselves, never View As).
+
+It then takes the lease and does exactly one thing: **read the same QuickBooks invoice and re-run the complete create-stage contract.**
+
+- **It matches** → the SAME lifecycle row returns to `created` (doc number, sync token, verification time recorded, the problem cleared) and the lease is released. Nothing is emailed: the owner finishes with the existing **Resume**, which continues through recipients → payment options → send exactly as before, from the stored review — Due-on-Receipt term, card and ACH as reviewed, the same QuickBooks invoice.
+- **It does not match** → the lifecycle stays `needs_review`, now recording what failed this time. Nothing is sent.
+
+**It can never create a QuickBooks invoice.** An existing `qbo_invoice_id` is a precondition checked before the lease; the repair body calls only the read; the session is marked `noCreate` and the create step throws `CreateForbiddenError` on such a session before touching the requestid or the body. Source-level and behavioural tests both prove it. A recheck issues no QuickBooks write of any kind.
+
+**Product surface.** The stopped-send dialog offers one deliberate action, **"Recheck QuickBooks invoice"**, and only for this cause; every other stopped send offers nothing, and there is no general-purpose force-resume. The dialog says what it does: FreezerIQ re-reads the SAME QuickBooks invoice, no new invoice is created, nothing is emailed by the recheck, a match continues the normal send workflow (finished with Resume), and otherwise it stays stopped. `POST {"action":"recheck"}` on the invoice route, under the same guard as every other action.
+
+### 14.3 Tests and evidence
+
+`tests/qbInvoice1cContract.test.ts` (the zero-tax matrix, including a tax-exempt $0 invoice and the fail-closed shapes), `tests/qbInvoice1cIntuitClient.test.ts` (the snapshot's tax facts), `tests/qbInvoiceRecheck.test.ts` (eligibility, idempotency, concurrency, "no create", "no send", and an end-to-end send against a company that returns zero-value automated tax metadata), `tests/qbInvoice1cScope.test.ts` (source-level proof that the repair cannot create), `tests/qbInvoice1cViews.test.ts` (the wording and the single button) and `tests/qbInvoice1cRoutes.test.ts` (401 / 403 / 404 / 503 for the new action).
+
+The fixtures are documented **representative Automated Sales Tax zero-tax patterns** in the `TaxLine` shape the Intuit Accounting API documents — not a captured Production payload. Production invoice #1026 was NOT read, refreshed, edited, sent, voided or deleted while this was built.
+
+### 14.4 Acceptance for invoice #1026 (after release)
+
+The lifecycle for that invoice is stopped at the create stage with the QuickBooks invoice recorded (QuickBooks id 319, DocNumber 1026), `send_count` 0, the FreezerIQ invoice still DRAFT — all nine conditions hold. After release the owner opens that invoice, chooses **Recheck QuickBooks invoice**, and expects: the same invoice re-read, the contract passing, the send returning to its post-create step, then **Resume** to finish it — invoice **#1026**, never a #1027.
+
+### 14.5 Not in QB-QBO-TAX-RESUME
+
+No change to what FreezerIQ sends (still `NON` lines and no tax detail), to the money rules, to 1C's stages or 1D's payment check; no repair for any other stopped state; no editing of a QuickBooks invoice; no reading or changing of a company's sales-tax setup.
 
 ---

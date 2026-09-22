@@ -94,6 +94,34 @@ describe('QB-INVOICE-1C · one path to every QuickBooks invoice write', () => {
         for (const m of code.matchAll(/readQuickBooksInvoice\([^)]*\)/g)) expect(m[0]).toMatch(/link\.qboInvoiceId!/);
     });
 
+    /**
+     * QB-QBO-TAX-RESUME — the repair path may NEVER create a QuickBooks invoice. Proven at the source, because
+     * "it happens not to call create today" is not the guarantee the owner asked for: the create step refuses a
+     * repair session before it touches the requestid or the body, the repair body dispatches no step at all, and
+     * its only Intuit call is a read of the id already recorded.
+     */
+    it('the recheck repair can never create, update or send an invoice, create a customer or record a payment', () => {
+        const code = strip(R(SEND));
+        // Two of the five are impossible for the whole module: it cannot even import a customer create or a payment.
+        expect(code).not.toMatch(/\bcreateCustomer\b|\bcreateAndLinkCustomer\b|readQuickBooksPayment|readQuickBooksInvoicePaymentLinks|checkQuickBooksInvoicePayment/);
+        expect(code).toMatch(/async function stepCreate\(s: Session\): Promise<StepResult> \{\s*if \(s\.noCreate\) throw new CreateForbiddenError\(\);/);
+
+        const repair = /async function recheckCreated\(s: Session\): Promise<SendActionResult> \{[\s\S]*?\n\}/.exec(code)![0];
+        expect(repair).toMatch(/if \(!s\.link\.qboInvoiceId\) throw new CreateForbiddenError\(\);/);
+        expect(repair).toMatch(/readQuickBooksInvoice|read\(s\)/);
+        for (const fn of ['createQuickBooksInvoice', 'updateQuickBooksInvoiceDelivery', 'sendQuickBooksInvoice', 'recordQuickBooksInvoiceId',
+            'stepCreate', 'stepRecipients', 'stepPaymentOptions', 'stepSend']) {
+            expect({ fn, inRepair: repair.includes(fn) }).toEqual({ fn, inRepair: false });
+        }
+
+        const entry = /export async function recheckQuickBooksInvoiceCreate\([\s\S]*?\n\}/.exec(code)![0];
+        expect(entry).toMatch(/if \(!link\.qboInvoiceId\) return \{ outcome: 'blocked', blockers: \['recheck_not_available'\] \};/);
+        expect(entry).toMatch(/noCreate: true,/);
+        expect(entry).not.toMatch(/createQuickBooksInvoice|reserveQuickBooksInvoiceLink|recordQuickBooksInvoiceId|sendQuickBooksInvoice/);
+        // Only the create step may ever create — and only a non-repair session reaches it.
+        expect(code.match(/noCreate/g)).toHaveLength(3); // the Session field, the step's refusal, the repair's own flag
+    });
+
     it('every recipients update restates all four payment flags (a partial update would re-enable them)', () => {
         const code = strip(R(SEND));
         const calls = [...code.matchAll(/updateQuickBooksInvoiceDelivery\([\s\S]*?fields: \{([^}]*\})/g)].map((m) => m[1]);

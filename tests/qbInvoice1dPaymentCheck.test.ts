@@ -152,7 +152,7 @@ describe('QB-INVOICE-1D · the QuickBooks invoice must still be the one FreezerI
         ['12. a different total', (inv: any) => { inv.TotalAmt = 451.6; }, 'total_equals_freezeriq_total'],
         ['13. a different currency', (inv: any) => { inv.CurrencyRef = { value: 'CAD' }; }, 'currency_usd'],
         ['an edited line', (inv: any) => { inv.Line[0].Description = 'Changed in QuickBooks'; }, 'line_1_bundle_description'],
-        ['native tax added', (inv: any) => { inv.TxnTaxDetail = { TotalTax: 3.2, TxnTaxCodeRef: { value: '2' } }; }, 'no_quickbooks_tax'],
+        ['native tax added', (inv: any) => { inv.TxnTaxDetail = { TotalTax: 3.2, TxnTaxCodeRef: { value: '2' } }; }, 'quickbooks_tax_did_not_affect_total'],
     ])('%s → needs review, never settled — even when a full payment is linked', async (_label, tamper, failedCheck) => {
         const w = await world();
         const s = await sentInvoice(w);

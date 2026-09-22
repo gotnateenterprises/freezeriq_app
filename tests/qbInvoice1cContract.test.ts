@@ -89,10 +89,84 @@ describe('QB-INVOICE-1C · read-back contract: money and tax', () => {
         expect(failed(check({ ...created(), Balance: 0 }, 'created'))).toEqual(['balance_unpaid']);
     });
 
-    it('QuickBooks native tax appearing is rejected (TotalTax, a tax code, or tax lines)', () => {
-        expect(failed(check({ ...created(), TxnTaxDetail: { TotalTax: 5.59 } }, 'created'))).toEqual(['no_quickbooks_tax']);
-        expect(failed(check({ ...created(), TxnTaxDetail: { TotalTax: 0, TxnTaxCodeRef: { value: '2' } } }, 'created'))).toEqual(['no_quickbooks_tax']);
-        expect(failed(check({ ...created(), TxnTaxDetail: { TotalTax: 0, TaxLine: [{ Amount: 0 }] } }, 'created'))).toEqual(['no_quickbooks_tax']);
+    /**
+     * QuickBooks AUTOMATED SALES TAX. A company with sales tax switched on (Illinois Department of Revenue, custom
+     * rates Tax Exempt 0% and Food 1%, in the Production company this was proven against) stamps its own tax detail
+     * onto every invoice — a transaction tax code, and in some companies a zero-value tax line — even when FreezerIQ
+     * sends none and every line is NON. The fixtures below are those zero-tax metadata patterns, not a captured
+     * Production payload: tax code only, zero tax line only, and both, in the TaxLine shape the Intuit Accounting
+     * API documents (Amount + TaxLineDetail.TaxRateRef).
+     *
+     * The invariant is that QuickBooks' own tax did not change the money — NOT that QuickBooks holds no tax
+     * metadata. FreezerIQ stays authoritative for fundraiser tax and carries it as its own line, which the
+     * surrounding checks keep proving to the cent.
+     */
+    it('zero-value Automated Sales Tax metadata passes; tax that is worth money does not', () => {
+        const withTax = (TxnTaxDetail: unknown) => failed(check({ ...created(), TxnTaxDetail }, 'created'));
+        const AST_LINE = { Amount: 0, DetailType: 'TaxLineDetail', TaxLineDetail: { TaxRateRef: { value: '5' }, PercentBased: true, TaxPercent: 1, NetAmountTaxable: 0 } };
+
+        // 1 · no tax block at all (a legacy-sales-tax company)          2 · a stated zero total, no tax lines
+        expect(withTax(undefined)).toEqual([]);
+        expect(withTax({ TotalTax: 0 })).toEqual([]);
+        // 3 · zero total + the transaction tax code Automated Sales Tax attaches
+        expect(withTax({ TotalTax: 0, TxnTaxCodeRef: { value: '7' } })).toEqual([]);
+        // 4 · zero total + one zero-value automated tax line            5 · several of them
+        expect(withTax({ TotalTax: 0, TaxLine: [AST_LINE] })).toEqual([]);
+        expect(withTax({ TotalTax: 0, TxnTaxCodeRef: { value: '7' }, TaxLine: [AST_LINE, { ...AST_LINE, Amount: 0 }] })).toEqual([]);
+        // 6 · tax that is worth money                                   7 · a zero total contradicted by a tax line
+        expect(withTax({ TotalTax: 5.59 })).toEqual(['quickbooks_tax_did_not_affect_total']);
+        expect(withTax({ TotalTax: 0, TaxLine: [{ ...AST_LINE, Amount: 0.01 }] })).toEqual(['quickbooks_tax_did_not_affect_total']);
+        // 8 · native tax that moved the total: the tax check AND the total/line-sum checks all refuse it
+        expect(failed(check({ ...created(), TxnTaxDetail: { TotalTax: 5.59, TaxLine: [{ Amount: 5.59 }] }, TotalAmt: 457.18 }, 'created')))
+            .toEqual(['quickbooks_tax_did_not_affect_total', 'total_equals_freezeriq_total', 'lines_sum_to_total']);
+        // 9 · the whole Production-equivalent shape: every sales line NON, zero-value automated tax metadata
+        const ast = { ...created(), TxnTaxDetail: { TotalTax: 0, TxnTaxCodeRef: { value: '7' }, TaxLine: [AST_LINE] } };
+        expect(ast.Line.filter((l: any) => l.SalesItemLineDetail).every((l: any) => l.SalesItemLineDetail.TaxCodeRef.value === 'NON')).toBe(true);
+        expect(check(ast, 'created')).toEqual({ ok: true, failures: [], deliveryErrorType: null });
+        // 10 · FreezerIQ's OWN supporter-tax line stays governed by the mapping — one cent off is still refused
+        const drifted = { ...ast, Line: created().Line };
+        drifted.Line[3] = { ...drifted.Line[3], Amount: 5.6 };
+        expect(failed(check(drifted, 'created'))).toEqual(expect.arrayContaining(['line_4_tax_amount', 'tax_line_equals_frozen_tax']));
+        // 12 · tax detail that cannot be read is never read as "no tax"
+        expect(withTax('nope')).toEqual(['quickbooks_tax_did_not_affect_total']);
+        expect(withTax({ TotalTax: '0' })).toEqual(['quickbooks_tax_did_not_affect_total']);
+        expect(withTax({ TotalTax: 0, TaxLine: { Amount: 0 } })).toEqual(['quickbooks_tax_did_not_affect_total']);
+        expect(withTax({ TotalTax: 0, TaxLine: [{ Amount: '0' }] })).toEqual(['quickbooks_tax_did_not_affect_total']);
+        expect(withTax({ TotalTax: 0.004 })).toEqual(['quickbooks_tax_did_not_affect_total']);
+    });
+
+    /** 11 · a tax-exempt organization: FreezerIQ sends no tax line at all, and the company's tax code is still zero. */
+    it('a $0 tax-exempt invoice passes with the same zero-value automated tax metadata', () => {
+        const exempt = planQuickBooksInvoice({
+            invoice: {
+                id: 'inv-x', campaignId: 'camp-1', totalAmount: '340.00', taxAmount: '0.00', taxRatePercent: '0.00', taxStatus: 'EXEMPT', shareAmount: '85.00', sharePercent: '20.00',
+                items: [{ id: 'a', description: 'Family Friendly', variantSize: 'serves_5', quantity: '4.00', unitPrice: '106.25', total: '425.00' }],
+            },
+            mapping: MAPPING, qboCustomerId: '58', txnDate: '2026-09-15',
+        });
+        if (!exempt.ok) throw new Error('fixture does not plan');
+        expect(exempt.expected.taxCents).toBe(0);
+        expect(exempt.body.Line).toHaveLength(2); // one bundle line, one negative share line — no tax line
+        const raw = {
+            Id: '131', SyncToken: '0', DocNumber: '1053', TxnDate: '2026-09-15', DueDate: '2026-09-30',
+            CustomerRef: { value: '58' }, CurrencyRef: { value: 'USD' }, SalesTermRef: { value: '2' }, EmailStatus: 'NotSet',
+            TxnTaxDetail: { TotalTax: 0, TxnTaxCodeRef: { value: '7' }, TaxLine: [{ Amount: 0, DetailType: 'TaxLineDetail', TaxLineDetail: { TaxRateRef: { value: '6' }, NetAmountTaxable: 0 } }] },
+            AllowOnlineCreditCardPayment: false, AllowOnlineACHPayment: false, AllowOnlinePayPalPayment: false, AllowOnlineAffirmPayment: false,
+            Line: [
+                ...exempt.body.Line.map((l, i) => ({
+                    Id: String(i + 1), Description: l.Description, Amount: l.Amount, DetailType: 'SalesItemLineDetail',
+                    SalesItemLineDetail: {
+                        ItemRef: { value: l.SalesItemLineDetail.ItemRef.value }, ItemAccountRef: { value: ACCOUNT_OF[l.SalesItemLineDetail.ItemRef.value] },
+                        UnitPrice: l.SalesItemLineDetail.UnitPrice, Qty: l.SalesItemLineDetail.Qty, TaxCodeRef: { value: 'NON' },
+                    },
+                })),
+                { Amount: 340, DetailType: 'SubTotalLineDetail', SubTotalLineDetail: {} },
+            ],
+            TotalAmt: 340, Balance: 340,
+        };
+        const inv = parseQuickBooksInvoice(raw);
+        expect(verifyQuickBooksInvoice(inv!, exempt.expected, { billEmail: null, billEmailCc: null, payment: OFF, qboInvoiceId: '131' }, 'created'))
+            .toEqual({ ok: true, failures: [], deliveryErrorType: null });
     });
 
     it('an unexpected taxable line, a re-pointed ItemAccountRef, another item, description or quantity is rejected', () => {
@@ -189,7 +263,7 @@ describe('QB-INVOICE-1C · read-back contract: delivery safety at each stage', (
         expect(bad({ ...updatedAfterSend(), CustomerRef: { value: '77' } })).toEqual(['customer']);
         expect(bad({ ...updatedAfterSend(), TotalAmt: 451.6 })).toEqual(expect.arrayContaining(['total_equals_freezeriq_total', 'lines_sum_to_total']));
         expect(bad({ ...updatedAfterSend(), Balance: 0 })).toEqual(['balance_unpaid']);
-        expect(bad({ ...updatedAfterSend(), TxnTaxDetail: { TotalTax: 5.59 } })).toEqual(['no_quickbooks_tax']);
+        expect(bad({ ...updatedAfterSend(), TxnTaxDetail: { TotalTax: 5.59 } })).toEqual(['quickbooks_tax_did_not_affect_total']);
         const amount = updatedAfterSend(); amount.Line[1].Amount = 119.99;
         expect(bad(amount)).toEqual(expect.arrayContaining(['line_2_bundle_amount', 'bundle_sales_equal_pre_tax_sales']));
         const repointed = updatedAfterSend(); repointed.Line[2].SalesItemLineDetail.ItemAccountRef.value = '99';

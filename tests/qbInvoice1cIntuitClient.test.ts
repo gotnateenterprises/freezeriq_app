@@ -66,7 +66,7 @@ describe('QB-INVOICE-1C · create: always unsent, always the reserved requestid'
         expect(JSON.parse(r.calls[0].body!)).toEqual(BODY);
         expect(r.calls[0].headers.get('authorization')).toBe(`Bearer ${TOKEN}`);
         expect(inv).toMatchObject({ id: '130', docNumber: '1052', emailStatus: 'NotSet', billEmail: null, payment: { card: false, ach: false, paypal: false, affirm: false } });
-        expect(Object.keys(inv).sort()).toEqual(['balance', 'billEmail', 'billEmailBcc', 'billEmailCc', 'currency', 'customerId', 'customerMemo', 'delivery', 'docNumber', 'dueDate', 'eInvoiceStatus', 'emailStatus', 'id', 'lines', 'payment', 'syncToken', 'taxLineCount', 'termId', 'totalAmt', 'totalTax', 'txnDate', 'txnTaxCodeId']);
+        expect(Object.keys(inv).sort()).toEqual(['balance', 'billEmail', 'billEmailBcc', 'billEmailCc', 'currency', 'customerId', 'customerMemo', 'delivery', 'docNumber', 'dueDate', 'eInvoiceStatus', 'emailStatus', 'id', 'lines', 'payment', 'syncToken', 'taxDetailReadable', 'taxLineAmounts', 'termId', 'totalAmt', 'totalTax', 'txnDate', 'txnTaxCodeId']);
     });
 
     it('refuses, before any request, a body that could send: a recipient, NeedToSend, a DocNumber, native tax, a discount, a missing or true flag, a taxable line', async () => {
@@ -175,11 +175,41 @@ describe('QB-INVOICE-1C · send and read', () => {
     });
 
     it('parsing keeps delivery, tax and payment facts and drops everything else', () => {
-        const inv = parseQuickBooksInvoice({ ...INVOICE, BillEmailBcc: { Address: 'hidden@example.invalid' }, EInvoiceStatus: 'Viewed', TxnTaxDetail: { TotalTax: 3, TxnTaxCodeRef: { value: '2' }, TaxLine: [{}, {}] }, ShipAddr: { Line1: '1 Main' }, CustomerMemo: { value: 'memo' } })!;
-        expect(inv).toMatchObject({ billEmailBcc: 'hidden@example.invalid', eInvoiceStatus: 'Viewed', totalTax: 3, txnTaxCodeId: '2', taxLineCount: 2, customerMemo: 'memo' });
+        const inv = parseQuickBooksInvoice({ ...INVOICE, BillEmailBcc: { Address: 'hidden@example.invalid' }, EInvoiceStatus: 'Viewed', TxnTaxDetail: { TotalTax: 3, TxnTaxCodeRef: { value: '2' }, TaxLine: [{ Amount: 1 }, {}] }, ShipAddr: { Line1: '1 Main' }, CustomerMemo: { value: 'memo' } })!;
+        expect(inv).toMatchObject({ billEmailBcc: 'hidden@example.invalid', eInvoiceStatus: 'Viewed', totalTax: 3, txnTaxCodeId: '2', taxLineAmounts: [1, null], taxDetailReadable: true, customerMemo: 'memo' });
         expect(JSON.stringify(inv)).not.toContain('1 Main');
         expect(parseQuickBooksInvoice({ ...INVOICE, Id: 'abc' })).toBeNull();
         expect(parseQuickBooksInvoice({ ...INVOICE, Line: 'x' })).toBeNull();
+    });
+
+    /**
+     * QuickBooks AUTOMATED SALES TAX returns tax metadata FreezerIQ never sends: a transaction tax code, and — in
+     * companies with their own tax rates — a tax line, both worth zero on a wholly non-taxable invoice. The snapshot
+     * has to carry the AMOUNTS so the contract can judge what the tax did to the money, and has to say plainly when
+     * a tax block cannot be read at all, so the contract can fail closed instead of reading it as "no tax".
+     */
+    it('carries every native tax line AMOUNT, and marks unreadable tax detail unreadable', () => {
+        const tax = (TxnTaxDetail: unknown) => {
+            const inv = parseQuickBooksInvoice({ ...INVOICE, TxnTaxDetail })!;
+            return { totalTax: inv.totalTax, taxLineAmounts: inv.taxLineAmounts, txnTaxCodeId: inv.txnTaxCodeId, readable: inv.taxDetailReadable };
+        };
+        // Legacy sales tax on a non-taxable invoice, and the three Automated Sales Tax zero-tax shapes.
+        expect(tax(undefined)).toEqual({ totalTax: null, taxLineAmounts: [], txnTaxCodeId: null, readable: true });
+        expect(tax({ TotalTax: 0 })).toEqual({ totalTax: 0, taxLineAmounts: [], txnTaxCodeId: null, readable: true });
+        expect(tax({ TotalTax: 0, TxnTaxCodeRef: { value: '7' } })).toEqual({ totalTax: 0, taxLineAmounts: [], txnTaxCodeId: '7', readable: true });
+        expect(tax({ TotalTax: 0, TaxLine: [{ Amount: 0, DetailType: 'TaxLineDetail', TaxLineDetail: { TaxRateRef: { value: '5' }, NetAmountTaxable: 0 } }] }))
+            .toEqual({ totalTax: 0, taxLineAmounts: [0], txnTaxCodeId: null, readable: true });
+        expect(tax({ TotalTax: 0, TxnTaxCodeRef: { value: '7' }, TaxLine: [{ Amount: 0 }, { Amount: 0 }] }))
+            .toEqual({ totalTax: 0, taxLineAmounts: [0, 0], txnTaxCodeId: '7', readable: true });
+        // Tax that is worth money is carried exactly, per line.
+        expect(tax({ TotalTax: 5.59, TaxLine: [{ Amount: 5.59 }] })).toEqual({ totalTax: 5.59, taxLineAmounts: [5.59], txnTaxCodeId: null, readable: true });
+        // Unreadable: a block that is not an object, a TotalTax that is not a finite number, tax lines that are not a list.
+        expect(tax('x').readable).toBe(false);
+        expect(tax([{ TotalTax: 0 }]).readable).toBe(false);
+        expect(tax({ TotalTax: '0' })).toEqual({ totalTax: null, taxLineAmounts: [], txnTaxCodeId: null, readable: false });
+        expect(tax({ TotalTax: 0, TaxLine: { Amount: 0 } })).toEqual({ totalTax: 0, taxLineAmounts: [], txnTaxCodeId: null, readable: false });
+        // A tax line whose amount QuickBooks did not state as a number is kept as null — the contract refuses it.
+        expect(tax({ TotalTax: 0, TaxLine: [{ Amount: '0' }] }).taxLineAmounts).toEqual([null]);
     });
 });
 

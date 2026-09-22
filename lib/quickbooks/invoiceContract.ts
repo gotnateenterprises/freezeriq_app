@@ -108,6 +108,26 @@ export function addDaysToDate(date: string, days: number): string {
     return d.toISOString().slice(0, 10);
 }
 
+/**
+ * The invariant: QuickBooks' OWN sales tax did not affect this invoice's money.
+ *
+ * It is NOT "QuickBooks holds no tax metadata". A company on QuickBooks Automated Sales Tax stamps a transaction
+ * tax code — and, depending on the company's tax setup, a zero-value tax line — onto every invoice, including one
+ * FreezerIQ creates with wholly non-taxable (NON) lines and no tax detail of its own. That metadata changes no
+ * amount: TotalAmt, the line amounts and the Balance stay exactly FreezerIQ's numbers, which the checks around this
+ * one prove independently. FreezerIQ remains authoritative for fundraiser tax, which it carries as its own line.
+ *
+ * So: PASS when QuickBooks' own tax total is zero (or absent) AND every QuickBooks-native tax line is worth zero.
+ * FAIL when any of it is worth money, when an amount is not a whole number of cents, or when the tax block cannot
+ * be read at all — an unknown shape is never read as "no tax".
+ */
+export function quickBooksTaxIsZero(inv: QuickBooksInvoiceSnapshot): boolean {
+    const zero = (n: number | null) => wholeCents(n) && cents(n) === 0;
+    return inv.taxDetailReadable
+        && (inv.totalTax === null || zero(inv.totalTax))
+        && inv.taxLineAmounts.every(zero);
+}
+
 export function verifyQuickBooksInvoice(
     inv: QuickBooksInvoiceSnapshot,
     expected: ExpectedQuickBooksInvoice,
@@ -156,8 +176,8 @@ export function verifyQuickBooksInvoice(
     check('bundle_sales_equal_pre_tax_sales', byRole('bundle') === expected.preTaxCents, expected.preTaxCents / 100, byRole('bundle') / 100);
     check('tax_line_equals_frozen_tax', byRole('tax') === expected.taxCents, expected.taxCents / 100, byRole('tax') / 100);
     check('share_line_equals_negative_share', byRole('share') === -expected.shareCents, -expected.shareCents / 100, byRole('share') / 100);
-    check('no_quickbooks_tax', (inv.totalTax === null || cents(inv.totalTax) === 0) && inv.taxLineCount === 0 && inv.txnTaxCodeId === null, 0,
-        { totalTax: inv.totalTax, taxLines: inv.taxLineCount, taxCode: inv.txnTaxCodeId });
+    check('quickbooks_tax_did_not_affect_total', quickBooksTaxIsZero(inv), 0,
+        { totalTax: inv.totalTax, taxLines: inv.taxLineAmounts, taxCode: inv.txnTaxCodeId, readable: inv.taxDetailReadable });
     check('total_equals_freezeriq_total', wholeCents(inv.totalAmt) && cents(inv.totalAmt) === expected.totalCents, expected.totalCents / 100, inv.totalAmt);
     if (stage !== 'payment') {
         check('balance_unpaid', wholeCents(inv.balance) && cents(inv.balance) === expected.totalCents, expected.totalCents / 100, inv.balance);

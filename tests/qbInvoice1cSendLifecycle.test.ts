@@ -333,7 +333,7 @@ describe('QB-INVOICE-1C · fail-closed read-back: stop, send nothing, keep the i
 
     it('QuickBooks sales tax appearing on the created invoice', async () => {
         const { view } = await stoppedBy((w) => w.qbo.afterNext('create', (i) => { i.TxnTaxDetail = { TxnTaxCodeRef: { value: '2' }, TotalTax: 5.59, TaxLine: [{ Amount: 5.59 }] }; }));
-        expect(view).toMatchObject({ problem: 'verification_failed_created', problemDetail: expect.stringContaining('no_quickbooks_tax') });
+        expect(view).toMatchObject({ problem: 'verification_failed_created', problemDetail: expect.stringContaining('quickbooks_tax_did_not_affect_total') });
     });
 
     it('an unexpected taxable line', async () => {
