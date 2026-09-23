@@ -54,8 +54,10 @@ import {
     PAYMENT_FLAGS_OFF,
     readCustomer,
     readQuickBooksInvoice,
+    readQuickBooksInvoicePaymentLinks,
     sendQuickBooksInvoice,
     updateQuickBooksInvoiceDelivery,
+    voidQuickBooksInvoice,
     type QuickBooksInvoiceCreateBody,
     type QuickBooksInvoiceSnapshot,
     type QuickBooksPaymentFlags,
@@ -143,6 +145,14 @@ export type SendBlocker =
     | 'linked_to_another_connection' | 'changed_since_review' | 'qbo_invoice_changed' | 'update_rejected' | 'lifecycle_unreadable'
     /** This stopped lifecycle is not one the create-stage recheck may touch (it is the ONLY repair that exists). */
     | 'recheck_not_available'
+    /** QB-INVOICE-CANCEL-1: this invoice is not one "Cancel invoice" may act on. */
+    | 'cancel_not_available'
+    /** The FreezerIQ invoice is already PAID: a paid invoice is never canceled. */
+    | 'invoice_paid'
+    /** QuickBooks has a payment (or a credit) applied to the invoice: FreezerIQ will not void it. */
+    | 'paid_in_quickbooks'
+    /** The void succeeded, but this invoice changed while it ran — the two now disagree and need a person. */
+    | 'cancel_conflict'
     | 'settings_missing' | SettingsProblem | SettingsBlocker | InvoicePlanProblem;
 
 /** Why a lifecycle is paused (retryable) or stopped (needs_review). Codes only — never a name, email or amount. */
@@ -152,7 +162,11 @@ export type SendProblem =
     | 'update_rejected' | 'update_outcome_unknown'
     | 'send_rejected' | 'send_outcome_unknown'
     | 'qbo_invoice_missing' | 'qbo_invoice_changed' | 'invoice_status_changed' | 'unexpected_email_status' | 'unexpected_state'
-    | 'verification_failed_created' | 'verification_failed_recipients' | 'verification_failed_payment_options' | 'verification_failed_sent';
+    | 'verification_failed_created' | 'verification_failed_recipients' | 'verification_failed_payment_options' | 'verification_failed_sent'
+    /** QB-INVOICE-CANCEL-1 — the cancellation's own interruptions. The FreezerIQ invoice is unchanged by all three. */
+    | 'void_rejected' | 'void_outcome_unknown' | 'verification_failed_voided'
+    /** The QuickBooks invoice is voided, but the FreezerIQ invoice moved at the same moment. A person decides. */
+    | 'cancel_conflict';
 
 export interface SendPreviewLine { role: 'bundle' | 'share' | 'tax'; description: string; quantity: number; unitPrice: number; amount: number }
 
@@ -217,14 +231,24 @@ export type InvoiceSendView =
         /** The FreezerIQ invoice's status (only a SENT invoice can be re-sent). */
         invoiceStatus: string | null;
         lastProblem: SendProblem | null;
+        /** QB-INVOICE-CANCEL-1: when the linked QuickBooks invoice was voided by "Cancel invoice". */
+        canceledAt: string | null;
+        /**
+         * QB-INVOICE-CANCEL-1: when FreezerIQ committed to voiding the QuickBooks invoice. Set before
+         * QuickBooks is touched and kept until the cancellation is reconciled, so while this is set and the
+         * invoice is not yet Canceled the dialog must not offer payment actions — the outcome is unknown.
+         */
+        cancelPendingAt: string | null;
     };
 
 export type SendActionResult =
     | { outcome: 'sent' | 'in_progress' | 'needs_review'; view: InvoiceSendView }
+    /** QB-INVOICE-CANCEL-1: the QuickBooks invoice is voided and the FreezerIQ invoice is canceled. */
+    | { outcome: 'canceled'; view: InvoiceSendView }
     | { outcome: 'blocked'; blockers: SendBlocker[] }
     /** What the tenant reviewed no longer matches FreezerIQ or QuickBooks. Nothing was sent. */
     | { outcome: 'stale'; view: InvoiceSendView }
-    | { outcome: 'invalid'; reason: RecipientProblem | 'review_token' };
+    | { outcome: 'invalid'; reason: RecipientProblem | 'review_token' | 'confirmation' };
 
 // ── internals: loading ──────────────────────────────────────────────────────
 
@@ -458,6 +482,8 @@ function viewOf(row: SendRow, now: number, invoiceStatus: string | null = null):
             state: 'sent', busy: leaseActive(row, now), docNumber: row.qbo_doc_number, sentAt: iso(row.sent_at), autoSent: row.auto_sent,
             sendCount: row.send_count, recipientTo: row.recipient_to, recipientCc: row.recipient_cc,
             deliveryErrorType: row.delivery_error_type, deliveryCheckedAt: iso(row.delivery_checked_at), invoiceStatus, lastProblem: problem,
+            canceledAt: iso(cancellation(row).voidedAt),
+            cancelPendingAt: iso(cancellation(row).requestedAt),
         };
     }
     if (row.status === 'needs_review') {
@@ -1073,11 +1099,12 @@ export type SentReview =
  * Reads only. Writes nothing to FreezerIQ and calls nothing in QuickBooks.
  */
 export async function loadSentReview(
-    input: { businessId: string; invoiceId: string; connectionId: string }, deps: InvoiceSendDeps = {},
+    input: { businessId: string; invoiceId: string; connectionId: string; statuses?: readonly string[] }, deps: InvoiceSendDeps = {},
 ): Promise<SentReview> {
     const d = resolve(deps);
     const invoice = await loadInvoice(d, input.businessId, input.invoiceId); // InvoiceNotFoundError outside the tenant
-    if (invoice.status !== 'SENT') return { ok: false, blocker: 'invoice_not_sent' };
+    // SENT for the payment check (QB-INVOICE-1D); "Cancel invoice" widens it to every outstanding status.
+    if (!(input.statuses ?? ['SENT']).includes(invoice.status)) return { ok: false, blocker: 'invoice_not_sent' };
     if (!invoice.campaign_id) return { ok: false, blocker: 'invoice_not_campaign' };
 
     const row = await readRow(d, input.businessId, input.invoiceId);
@@ -1282,6 +1309,255 @@ export async function resendQuickBooksInvoice(
         await releaseLease(s).catch(() => undefined);
         if (transient(e) || e instanceof ConnectionChangedError) {
             console.warn(`[quickbooks] invoice re-send unavailable: ${e instanceof IntuitError ? intuitErrorDetail(e) : 'connection'}`);
+            return { outcome: 'blocked', blockers: ['quickbooks_unavailable'] };
+        }
+        throw e;
+    }
+}
+
+// ── QB-INVOICE-CANCEL-1: cancel the invoice, voiding QuickBooks' copy ───────
+
+/** The FreezerIQ invoice statuses "Cancel invoice" may act on: outstanding, never PAID, never DRAFT, never CANCELED. */
+export const CANCELABLE_INVOICE_STATUSES = ['SENT', 'PENDING', 'OVERDUE'] as const;
+
+/** The void's Intuit requestid — derived, so a repeat of the SAME cancellation is the SAME request to Intuit. */
+const voidRequestId = (invoiceId: string, qboInvoiceId: string) =>
+    `qbvoid-${sha256(`freezeriq/quickbooks-invoice-void/v1|${invoiceId}|${qboInvoiceId}`).slice(0, 32)}`;
+
+/** The lifecycle's two cancellation facts, readable from any row shape (they are additive columns). */
+const cancellation = (row: unknown) => {
+    const r = row as { void_requested_at?: Date | null; voided_at?: Date | null };
+    return { requestedAt: r.void_requested_at ?? null, voidedAt: r.voided_at ?? null };
+};
+
+/**
+ * Has FreezerIQ already committed to voiding this invoice in QuickBooks? The durable intent (or a recorded
+ * void) is the tenant's typed authorization, made before QuickBooks was touched — so a resumed cancellation
+ * does not ask for it again, and no settlement may run until the cancellation is reconciled.
+ */
+const cancellationUnderWay = (row: unknown) => {
+    const c = cancellation(row);
+    return c.requestedAt !== null || c.voidedAt !== null;
+};
+
+/** Written when FreezerIQ can PROVE QuickBooks was never written: the invoice becomes ordinary again. */
+const CLEAR_VOID_INTENT = { void_requested_at: null, void_requested_by: null } as const;
+
+/** True when QuickBooks already holds this invoice as a void: worth nothing, everywhere it carries money. */
+const readsAsVoided = (inv: QuickBooksInvoiceSnapshot) => {
+    const zero = (n: number | null) => n !== null && Math.abs(n) < 0.005;
+    return zero(inv.totalAmt) && zero(inv.balance) && inv.lines.every((l) => zero(l.amount));
+};
+
+/**
+ * POST cancel — "Cancel invoice": VOID the SAME QuickBooks invoice, then mark the FreezerIQ invoice CANCELED.
+ *
+ * The order is the safety property. QuickBooks is voided and RE-READ first, and the FreezerIQ invoice is canceled
+ * only on that proof; if anything fails — the connection, the void, the read-back, the contract — the FreezerIQ
+ * invoice is left exactly as it was and the failure is recorded on the lifecycle.
+ *
+ * It creates nothing (no invoice, no customer, no payment, no credit memo), marks nothing paid, never runs the
+ * settlement transition and never touches an order: the fundraiser's food stays on hold.
+ *
+ * Idempotent: QuickBooks is read BEFORE the write, so a repeat — or a retry after a lost answer — finds an invoice
+ * that is already void, skips the write entirely and simply finishes the FreezerIQ side.
+ */
+export async function cancelQuickBooksInvoice(
+    input: { businessId: string; invoiceId: string; config: QuickBooksConfig; userId: string | null; confirmation: unknown },
+    deps: InvoiceSendDeps = {},
+): Promise<SendActionResult> {
+    const d = resolve(deps);
+    const row = await readRow(d, input.businessId, input.invoiceId);
+    if (!row) {
+        await loadInvoice(d, input.businessId, input.invoiceId); // 404 for another tenant's invoice
+        return { outcome: 'blocked', blockers: ['not_sent_via_quickbooks'] };
+    }
+    if (row.status !== 'sent' || row.qbo_doc_number === null) return { outcome: 'blocked', blockers: ['cancel_not_available'] };
+    // The deliberate confirmation: QuickBooks' own number for the invoice being canceled, typed by the tenant.
+    // A cancellation already under way needs no second one — the durable intent IS that authorization, recorded
+    // before QuickBooks was touched. "Resume cancellation" is this same call, carrying no confirmation.
+    if (!cancellationUnderWay(row) && (typeof input.confirmation !== 'string' || input.confirmation.trim() !== row.qbo_doc_number)) {
+        return { outcome: 'invalid', reason: 'confirmation' };
+    }
+
+    const invoice = await loadInvoice(d, input.businessId, input.invoiceId);
+    // Already canceled: nothing to do, and nothing to undo.
+    if (invoice.status === 'CANCELED') return { outcome: 'canceled', view: viewOf(row, d.now(), invoice.status) };
+    if (invoice.status === 'PAID') return { outcome: 'blocked', blockers: ['invoice_paid'] };
+    if (!(CANCELABLE_INVOICE_STATUSES as readonly string[]).includes(invoice.status)) return { outcome: 'blocked', blockers: ['cancel_not_available'] };
+
+    const live = await liveConnection(input.businessId, input.config, liveDeps(d));
+    if (isConnectionProblem(live)) return { outcome: 'blocked', blockers: [live.state === 'unavailable' ? 'quickbooks_unavailable' : live.state] };
+    const sent = await loadSentReview({ ...input, connectionId: live.connectionId, statuses: CANCELABLE_INVOICE_STATUSES }, deps);
+    if (!sent.ok) return { outcome: 'blocked', blockers: [sent.blocker === 'invoice_not_sent' ? 'cancel_not_available' : sent.blocker] };
+
+    const leaseId = d.newLeaseId();
+    const now = d.now();
+    const claimed = await d.db.quickBooksInvoiceSend.updateMany({
+        where: { business_id: input.businessId, invoice_id: input.invoiceId, status: 'sent', OR: [{ lease_id: null }, { lease_until: { lt: new Date(now) } }] },
+        data: { lease_id: leaseId, lease_until: new Date(now + LEASE_MS) },
+    });
+    if (claimed.count !== 1) return currentOutcome(d, input.businessId, input.invoiceId);
+    const fresh = await readRow(d, input.businessId, input.invoiceId);
+    if (!fresh) return { outcome: 'blocked', blockers: ['lifecycle_unreadable'] };
+    const link = await getQuickBooksInvoiceLink(input, linkDeps(d));
+    if (!link?.qboInvoiceId) return { outcome: 'blocked', blockers: ['lifecycle_unreadable'] };
+
+    /** Releases this request's lease without recording a problem: nothing happened. */
+    const standDown = async (): Promise<void> => {
+        await d.db.quickBooksInvoiceSend.updateMany({
+            where: { business_id: input.businessId, invoice_id: input.invoiceId, lease_id: leaseId }, data: { lease_id: null, lease_until: null },
+        }).catch(() => undefined);
+    };
+    // THE ordering check. Only a read taken AFTER the lease was claimed can authorize an irreversible QuickBooks
+    // write: a settlement already in flight cannot have committed without blocking this claim first (it locks the
+    // same lifecycle row), so if one won, it is visible HERE — and QuickBooks is never touched. The pre-lease
+    // reads above are for refusing early and cheaply; this one is what makes the void safe.
+    const stillOutstanding = await loadInvoice(d, input.businessId, input.invoiceId);
+    if (!(CANCELABLE_INVOICE_STATUSES as readonly string[]).includes(stillOutstanding.status)) {
+        await standDown();
+        return { outcome: 'blocked', blockers: [stillOutstanding.status === 'PAID' ? 'invoice_paid' : 'cancel_not_available'] };
+    }
+
+    // ── THE DURABLE INTENT, committed BEFORE FreezerIQ touches QuickBooks and outliving both the lease and this
+    //    process. From this write onwards the shared settlement transition refuses this invoice outright: no
+    //    Record Payment, no verified QuickBooks payment, no kitchen release — and not for two minutes, but until
+    //    the cancellation is reconciled. If everything below is lost to a crash, THIS is what makes it
+    //    impossible for the invoice to look collectible again while QuickBooks holds its copy void.
+    //    It is cleared again only where FreezerIQ can PROVE QuickBooks was not written.
+    if (cancellation(fresh).requestedAt === null) {
+        const intended = await d.db.quickBooksInvoiceSend.updateMany({
+            where: { business_id: input.businessId, invoice_id: input.invoiceId, lease_id: leaseId },
+            data: { void_requested_at: new Date(d.now()), void_requested_by: input.userId } as any,
+        });
+        if (intended.count !== 1) throw new LeaseLostError();
+    }
+
+    const access = <T>(fn: (a: LiveConnection['access']) => Promise<T>): Promise<T> => withAccess(input.businessId, input.config, live, liveDeps(d), fn);
+    const expectation = {
+        billEmail: null, billEmailCc: null, payment: { ...PAYMENT_FLAGS_OFF },
+        qboInvoiceId: sent.qboInvoiceId, docNumber: sent.docNumber ?? undefined,
+    };
+    /**
+     * Releases the lease, recording why the cancellation did not complete. Nothing in FreezerIQ has changed —
+     * except for whatever `also` records: either the durable intent being RELEASED (`CLEAR_VOID_INTENT`, only
+     * where QuickBooks is PROVEN unwritten) or the void being recorded (see the read-back below). With neither,
+     * the cancellation stays unresolved and this invoice stays unsettleable, which is the safe default.
+     */
+    const refuse = async (problem: SendProblem, detail: string | null, answer: SendActionResult, also: Record<string, unknown> = {}): Promise<SendActionResult> => {
+        await d.db.quickBooksInvoiceSend.updateMany({
+            where: { business_id: input.businessId, invoice_id: input.invoiceId, lease_id: leaseId },
+            data: { ...also, problem, problem_detail: detail ? detail.slice(0, 500) : null, problem_at: new Date(d.now()), lease_id: null, lease_until: null } as any,
+        });
+        console.warn(`[quickbooks] invoice cancel not completed: ${problem}${detail ? ` ${detail}` : ''}`);
+        return answer;
+    };
+
+    try {
+        // ── 1. What QuickBooks holds right now: still FreezerIQ's invoice, and is anything applied to it? ──
+        //
+        //    An invoice that still carries its money is PROOF that no void of it has ever succeeded — this
+        //    attempt's or an earlier interrupted one's — so every refusal from this block releases the durable
+        //    intent and hands the invoice back to normal collection. A read that fails outright proves nothing,
+        //    so it does not.
+        const read = await access((a) => readQuickBooksInvoicePaymentLinks(input.config, a.accessToken, a.realmId, sent.qboInvoiceId, d.fetchImpl));
+        if (!read) return refuse('qbo_invoice_missing', null, { outcome: 'blocked', blockers: ['qbo_invoice_changed'] });
+        const { invoice: qboNow, linkedTxns: linksNow } = read;
+        const alreadyVoid = readsAsVoided(qboNow);
+        if (!alreadyVoid) {
+            // It still carries money, so it must still be exactly the invoice FreezerIQ sent — and still unpaid.
+            const identity = verifyQuickBooksInvoice(qboNow, sent.expected, expectation, 'payment');
+            if (!identity.ok) return refuse('qbo_invoice_changed', failureDetail(identity), { outcome: 'blocked', blockers: ['qbo_invoice_changed'] }, CLEAR_VOID_INTENT);
+            if (linksNow === null || linksNow.length > 0) {
+                return refuse('qbo_invoice_changed', 'linked_transaction', { outcome: 'blocked', blockers: ['paid_in_quickbooks'] },
+                    linksNow === null ? {} : CLEAR_VOID_INTENT);
+            }
+        }
+
+        // ── 2. The void, with the derived requestid. Skipped entirely when QuickBooks already holds it void.
+        //
+        //    Intuit's three DEFINITIVE refusals — a validation fault, a throttle, a stale SyncToken — all mean
+        //    the void was rejected before it was applied, so the intent is released and the invoice is ordinary
+        //    again. Anything else (a lost answer, a 5xx, an unreadable body) proves nothing: the intent STAYS,
+        //    the read-back below decides what to record, and the invoice remains unsettleable until it does.
+        if (!alreadyVoid) {
+            try {
+                await access((a) => voidQuickBooksInvoice(input.config, a.accessToken, a.realmId,
+                    { id: qboNow.id, syncToken: qboNow.syncToken }, voidRequestId(input.invoiceId, sent.qboInvoiceId), d.fetchImpl));
+            } catch (e) {
+                if (refused(e)) return refuse('void_rejected', faultDetail(e), { outcome: 'blocked', blockers: ['update_rejected'] }, CLEAR_VOID_INTENT);
+                if (throttled(e)) return refuse('void_outcome_unknown', 'throttled', { outcome: 'blocked', blockers: ['quickbooks_unavailable'] }, CLEAR_VOID_INTENT);
+                if (e instanceof IntuitError && e.kind === 'stale_object') return refuse('void_outcome_unknown', faultDetail(e), { outcome: 'blocked', blockers: ['qbo_invoice_changed'] }, CLEAR_VOID_INTENT);
+                if (!ambiguous(e)) throw e;
+                // The answer was lost: the read-back below decides, and a later retry is safe (the same requestid).
+                console.warn(`[quickbooks] invoice void answer lost: ${intuitErrorDetail(e)}`);
+            }
+        }
+
+        // ── 3. Read the SAME invoice back and run the dedicated VOID contract. Fail closed on anything else. ──
+        const back = await access((a) => readQuickBooksInvoicePaymentLinks(input.config, a.accessToken, a.realmId, sent.qboInvoiceId, d.fetchImpl));
+        if (!back) return refuse('qbo_invoice_missing', null, { outcome: 'blocked', blockers: ['qbo_invoice_changed'] });
+        const { invoice: qboVoided, linkedTxns: linksAfter } = back;
+        const voided = verifyQuickBooksInvoice(qboVoided, sent.expected, { ...expectation, linkedTxnCount: linksAfter?.length ?? null }, 'voided');
+        if (!voided.ok) {
+            // The contract failed, so FreezerIQ is NOT canceled — but the read-back may still PROVE that QuickBooks
+            // now holds this invoice as a void (nothing left on any line). A void cannot be taken back, so that fact
+            // is recorded even while refusing: `voided_at` is what permanently stops this invoice being settled, and
+            // without it a later Record Payment would leave QuickBooks voided and FreezerIQ PAID.
+            //
+            // The other branch deliberately records NOTHING and clears NOTHING. This read follows a void whose
+            // answer was lost, and a read is not a receipt for a write that may still be in flight — so the
+            // durable intent stays, the invoice stays unsettleable, and Resume cancellation reconciles it against
+            // the SAME QuickBooks invoice. Only Intuit's own refusal (step 2) releases the intent.
+            const proven = readsAsVoided(qboVoided)
+                ? { voided_at: new Date(d.now()), voided_by: input.userId, qbo_sync_token: qboVoided.syncToken }
+                : {};
+            return refuse('verification_failed_voided', failureDetail(voided), { outcome: 'blocked', blockers: ['qbo_invoice_changed'] }, proven);
+        }
+
+        // ── 4. ONLY NOW the FreezerIQ invoice: a conditional transition, never from PAID and never to PAID, and
+        //      deliberately NOT the settlement transition — so no order is released and no payment fact is written.
+        const canceled = await d.db.invoice.updateMany({
+            where: { id: input.invoiceId, business_id: input.businessId, status: { in: CANCELABLE_INVOICE_STATUSES as unknown as any[] } },
+            data: { status: 'CANCELED' as any },
+        });
+        // The conditional write is authoritative, and it is also a DEFENSIVE detector: no supported path can lose
+        // here any more. A settlement cannot commit between the lease claim and this write, because it must lock
+        // this invoice's lifecycle row first and the claim is an UPDATE of that row — so a settlement either lost
+        // to the lease or committed before it, in which case the post-lease re-read above already stood down.
+        // Reaching this means something outside those paths moved the invoice. The void cannot be taken back, so
+        // record BOTH facts, refuse to report a cancellation that did not happen, and leave it for a person.
+        if (canceled.count !== 1) {
+            const current = await loadInvoice(d, input.businessId, input.invoiceId);
+            await d.db.quickBooksInvoiceSend.updateMany({
+                where: { business_id: input.businessId, invoice_id: input.invoiceId, lease_id: leaseId },
+                data: {
+                    voided_at: new Date(d.now()), voided_by: input.userId, qbo_sync_token: qboVoided.syncToken,
+                    problem: 'cancel_conflict' as SendProblem, problem_detail: `invoice_status:${current.status}`, problem_at: new Date(d.now()),
+                    lease_id: null, lease_until: null,
+                } as any,
+            });
+            console.warn(`[quickbooks] invoice cancel conflict: the QuickBooks invoice is voided, the FreezerIQ invoice is ${current.status}`);
+            return { outcome: 'blocked', blockers: ['cancel_conflict'] };
+        }
+        const recorded = await d.db.quickBooksInvoiceSend.updateMany({
+            where: { business_id: input.businessId, invoice_id: input.invoiceId, lease_id: leaseId },
+            data: {
+                voided_at: new Date(d.now()), voided_by: input.userId, qbo_sync_token: qboVoided.syncToken,
+                ...clearProblem, lease_id: null, lease_until: null,
+            } as any,
+        });
+        if (recorded.count !== 1) throw new LeaseLostError();
+        console.info('[quickbooks] invoice canceled: the QuickBooks invoice is voided and the FreezerIQ invoice is marked canceled');
+        const latest = await loadInvoice(d, input.businessId, input.invoiceId);
+        return { outcome: 'canceled', view: viewOf((await readRow(d, input.businessId, input.invoiceId)) ?? fresh, d.now(), latest.status) };
+    } catch (e) {
+        if (e instanceof LeaseLostError) return currentOutcome(d, input.businessId, input.invoiceId);
+        await d.db.quickBooksInvoiceSend.updateMany({
+            where: { business_id: input.businessId, invoice_id: input.invoiceId, lease_id: leaseId }, data: { lease_id: null, lease_until: null },
+        }).catch(() => undefined);
+        if (transient(e) || e instanceof ConnectionChangedError) {
+            console.warn(`[quickbooks] invoice cancel unavailable: ${e instanceof IntuitError ? intuitErrorDetail(e) : 'connection'}`);
             return { outcome: 'blocked', blockers: ['quickbooks_unavailable'] };
         }
         throw e;

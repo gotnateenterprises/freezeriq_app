@@ -57,6 +57,17 @@ describe('QB-INVOICE-1C · no 1D: no payments, webhooks, polling, PAID or fulfil
             expect({ f, hit: /status:\s*'PAID'|production_ready|fundraiser_hold|released_to_delivery|loyalty/.test(code) }).toEqual({ f, hit: false });
             expect({ f, hit: /\.(order|orderItem|fundraiserCampaign)\s*\./.test(code) }).toEqual({ f, hit: false });
             if (f === PAYMENT_CHECK) continue;
+            if (f === SEND) {
+                // QB-INVOICE-CANCEL-1: "Cancel invoice" READS the status, to refuse an invoice that is already paid.
+                // That one comparison is all it may do with PAID: it writes no payment fact, and never that status.
+                expect({ f, hit: /paid_at|payment_method|payment_reference|status:\s*'PAID'/.test(code) }).toEqual({ f, hit: false });
+                // Exactly two comparisons, both refusals: the early one, and the one AFTER the lease is claimed —
+                // the only read that may authorize an irreversible QuickBooks void (QB-INVOICE-CANCEL-1).
+                expect(code.match(/'PAID'/g)).toHaveLength(2);
+                expect(code).toContain("if (invoice.status === 'PAID') return { outcome: 'blocked', blockers: ['invoice_paid'] };");
+                expect(code).toContain("blockers: [stillOutstanding.status === 'PAID' ? 'invoice_paid' : 'cancel_not_available'] };");
+                continue;
+            }
             if (f === DIALOG_WORDING) {
                 expect({ f, hit: /paid_at|payment_method|payment_reference/.test(code) }).toEqual({ f, hit: false });
                 continue;
@@ -103,7 +114,9 @@ describe('QB-INVOICE-1C · one path to every QuickBooks invoice write', () => {
     it('the recheck repair can never create, update or send an invoice, create a customer or record a payment', () => {
         const code = strip(R(SEND));
         // Two of the five are impossible for the whole module: it cannot even import a customer create or a payment.
-        expect(code).not.toMatch(/\bcreateCustomer\b|\bcreateAndLinkCustomer\b|readQuickBooksPayment|readQuickBooksInvoicePaymentLinks|checkQuickBooksInvoicePayment/);
+        // The module can create no customer and touch no payment. (It may READ an invoice's linked transactions —
+        // QB-INVOICE-CANCEL-1 checks them before voiding — which is a read of the invoice, not of any payment.)
+        expect(code).not.toMatch(/\bcreateCustomer\b|\bcreateAndLinkCustomer\b|\breadQuickBooksPayment\b|checkQuickBooksInvoicePayment|recordQuickBooksPayment/);
         expect(code).toMatch(/async function stepCreate\(s: Session\): Promise<StepResult> \{\s*if \(s\.noCreate\) throw new CreateForbiddenError\(\);/);
 
         const repair = /async function recheckCreated\(s: Session\): Promise<SendActionResult> \{[\s\S]*?\n\}/.exec(code)![0];
@@ -120,6 +133,66 @@ describe('QB-INVOICE-1C · one path to every QuickBooks invoice write', () => {
         expect(entry).not.toMatch(/createQuickBooksInvoice|reserveQuickBooksInvoiceLink|recordQuickBooksInvoiceId|sendQuickBooksInvoice/);
         // Only the create step may ever create — and only a non-repair session reaches it.
         expect(code.match(/noCreate/g)).toHaveLength(3); // the Session field, the step's refusal, the repair's own flag
+    });
+
+    /**
+     * QB-INVOICE-CANCEL-1 — "Cancel invoice" is a VOID of the same invoice and nothing else. Proven at the source:
+     * the void has one call site, carries the derived requestid, and the cancellation never creates, sends, records
+     * a payment or runs the settlement transition — the one FreezerIQ write it makes is the conditional status
+     * change, which can only move an OUTSTANDING invoice to CANCELED.
+     */
+    it('the cancellation voids the same invoice and can do nothing else', () => {
+        const code = strip(R(SEND));
+        expect({ fn: 'voidQuickBooksInvoice', users: users(/\bvoidQuickBooksInvoice\(/).filter((f) => f !== 'lib/quickbooks/intuitClient.ts') }).toEqual({ fn: 'voidQuickBooksInvoice', users: [SEND] });
+        expect(code.match(/voidQuickBooksInvoice\(/g)).toHaveLength(1);
+        expect(code).toMatch(/voidQuickBooksInvoice\(input\.config, a\.accessToken, a\.realmId,\s*\{ id: qboNow\.id, syncToken: qboNow\.syncToken \}, voidRequestId\(input\.invoiceId, sent\.qboInvoiceId\), d\.fetchImpl\)/);
+        expect(strip(R('lib/quickbooks/intuitClient.ts'))).toMatch(/\/invoice\?operation=void&\$\{mv\}&requestid=\$\{encodeURIComponent\(requestId\)\}/);
+
+        const cancel = /export async function cancelQuickBooksInvoice\([\s\S]*?\n\}/.exec(code)![0];
+        for (const fn of ['createQuickBooksInvoice', 'sendQuickBooksInvoice', 'updateQuickBooksInvoiceDelivery', 'recordQuickBooksInvoiceId',
+            'reserveQuickBooksInvoiceLink', 'settleInvoiceInTransaction', 'paid_at', 'payment_method', 'payment_reference', 'production_ready', 'order']) {
+            expect({ fn, inCancel: cancel.includes(fn) }).toEqual({ fn, inCancel: false });
+        }
+        // The ONLY FreezerIQ invoice write: one field, and only from an outstanding status.
+        expect(cancel).toMatch(/d\.db\.invoice\.updateMany\(\{\s*where: \{ id: input\.invoiceId, business_id: input\.businessId, status: \{ in: CANCELABLE_INVOICE_STATUSES as unknown as any\[\] \} \},\s*data: \{ status: 'CANCELED' as any \},/);
+        expect(cancel.match(/d\.db\.invoice\.updateMany\(/g)).toHaveLength(1);
+        expect(code).toMatch(/export const CANCELABLE_INVOICE_STATUSES = \['SENT', 'PENDING', 'OVERDUE'\] as const;/);
+        // QuickBooks is read and verified BEFORE the FreezerIQ invoice is touched.
+        expect(cancel.indexOf("'voided'")).toBeLessThan(cancel.indexOf('d.db.invoice.updateMany'));
+        expect(cancel.indexOf('verification_failed_voided')).toBeLessThan(cancel.indexOf('d.db.invoice.updateMany'));
+        // …and the invoice is re-proved AFTER the lease is claimed, BEFORE QuickBooks is touched at all.
+        expect(cancel.indexOf('claimed.count !== 1')).toBeLessThan(cancel.indexOf('const stillOutstanding'));
+        expect(cancel.indexOf('const stillOutstanding')).toBeLessThan(cancel.indexOf('readQuickBooksInvoicePaymentLinks'));
+        expect(cancel).toContain('CANCELABLE_INVOICE_STATUSES as readonly string[]).includes(stillOutstanding.status)');
+        // THE CRASH WINDOW: the durable intent is committed between that re-read and the first QuickBooks call,
+        // so a killed process can never leave an invoice that looks collectible while QuickBooks holds it void.
+        expect(cancel).toContain('void_requested_at: new Date(d.now()), void_requested_by: input.userId');
+        expect(cancel.indexOf('const stillOutstanding')).toBeLessThan(cancel.indexOf('void_requested_at: new Date'));
+        expect(cancel.indexOf('void_requested_at: new Date')).toBeLessThan(cancel.indexOf('readQuickBooksInvoicePaymentLinks'));
+        expect(cancel.match(/void_requested_at: new Date/g)).toHaveLength(1); // written in exactly one place
+        // It is RELEASED only where QuickBooks is proven unwritten: Intuit's three definitive refusals, and a
+        // pre-void read that still shows the invoice carrying its money. Never after an ambiguous outcome.
+        expect(code).toContain("const CLEAR_VOID_INTENT = { void_requested_at: null, void_requested_by: null } as const;");
+        const clears = cancel.match(/CLEAR_VOID_INTENT/g) ?? [];
+        expect(clears).toHaveLength(5); // the declaration is outside the function; these are its five uses
+        for (const definitive of ['void_rejected', "throttled", "e.kind === 'stale_object'"]) {
+            const at = cancel.indexOf(definitive);
+            expect({ definitive, releasesIntent: cancel.slice(at, at + 220).includes('CLEAR_VOID_INTENT') }).toEqual({ definitive, releasesIntent: true });
+        }
+        // …and NOT on the ambiguous path: the read-back records the void if it can prove one, and nothing else.
+        const readBack = cancel.slice(cancel.indexOf('const voided = verifyQuickBooksInvoice'), cancel.indexOf('d.db.invoice.updateMany'));
+        expect(readBack).not.toContain('CLEAR_VOID_INTENT');
+        expect(readBack).toContain('readsAsVoided(qboVoided)');
+        // The shared settlement transition locks that same lifecycle row before it decides anything, and reads
+        // all three cancellation facts under that lock.
+        const transition = strip(R('lib/invoiceSettlementTransition.ts'));
+        expect(transition).toContain('SELECT "lease_until", "voided_at", "void_requested_at" FROM "quickbooks_invoice_sends" WHERE "invoice_id" = ${invoice.id} FOR UPDATE');
+        expect(transition.indexOf('FOR UPDATE')).toBeLessThan(transition.indexOf('tx.invoice.updateMany'));
+        expect(transition).toContain('lifecycle.voided_at !== null || lifecycle.void_requested_at !== null');
+        expect(transition.match(/void_requested_at: null/g)).toHaveLength(2); // both relation-filter branches
+        // A canceled lifecycle keeps its send history: the cancellation is an additive fact, not a status change.
+        expect(cancel).toMatch(/voided_at: new Date\(d\.now\(\)\), voided_by: input\.userId,/);
+        expect(cancel).not.toMatch(/status: '(sent|needs_review|reserved|created)'[^;]*\}\s*as any/);
     });
 
     it('every recipients update restates all four payment flags (a partial update would re-enable them)', () => {

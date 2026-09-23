@@ -596,7 +596,7 @@ All with `minorversion=75`; a Fault is honoured on HTTP 200; Fault codes are kep
 
 ### 12.9 Not in QB-INVOICE-1C
 
-No payment webhook, polling, automatic PAID, Payments API, card/ACH handling in FreezerIQ, or fulfillment release (QB-INVOICE-1D and later). No void / repair workflow for a stopped lifecycle beyond the create-stage recheck added later (§14.2), and none for correcting an invoice after it is in QuickBooks. No expense/commission share mapping. No non-US, non-USD or custom-numbering companies. No linking of pre-existing QuickBooks invoices.
+No payment webhook, polling, automatic PAID, Payments API, card/ACH handling in FreezerIQ, or fulfillment release (QB-INVOICE-1D and later). No void / repair workflow for a stopped lifecycle beyond the create-stage recheck added later (§14.2), no cancellation until QB-INVOICE-CANCEL-1 (§15), and none for correcting an invoice after it is in QuickBooks. No expense/commission share mapping. No non-US, non-USD or custom-numbering companies. No linking of pre-existing QuickBooks invoices.
 
 ### 12.10 Tests and evidence (September 15, 2026, local)
 
@@ -807,5 +807,95 @@ The lifecycle for that invoice is stopped at the create stage with the QuickBook
 ### 14.5 Not in QB-QBO-TAX-RESUME
 
 No change to what FreezerIQ sends (still `NON` lines and no tax detail), to the money rules, to 1C's stages or 1D's payment check; no repair for any other stopped state; no editing of a QuickBooks invoice; no reading or changing of a company's sales-tax setup.
+
+---
+
+## 15. QB-INVOICE-CANCEL-1 — Cancel invoice (synchronized QuickBooks void)
+
+Candidate, September 23, 2026, on the released Production baseline `17d5d7f` (QB-QBO-TAX-RESUME). One additive migration; no dependency, no new Intuit scope.
+
+**Why.** Before this, an invoice QuickBooks had emailed could not be stopped from FreezerIQ at all: the QuickBooks lock refuses every status change on a linked invoice (§12.7), so `CANCELED` was unreachable, and the only status a sent invoice could still move to was PAID. A tenant who sent the wrong invoice — or a rehearsal invoice, like #1026 — had no supported way to stop collecting on it, and no way to keep FreezerIQ and QuickBooks in agreement.
+
+### 15.1 What it adds
+
+One tenant-facing action on a sent, unpaid invoice: **Cancel invoice**. It voids the SAME QuickBooks invoice and then marks the FreezerIQ invoice `CANCELED`. Nothing is deleted, nothing is replaced, nothing is marked paid, and no held food is released.
+
+### 15.2 The QuickBooks void, as Intuit actually behaves
+
+Established against the sandbox company (2026-09-23, minorversion 75) before a line of the contract was written. `POST /invoice?operation=void` with `{Id, SyncToken}` answers 200 with the voided Invoice:
+
+| Fact | Observed |
+|---|---|
+| `Id`, `DocNumber` | unchanged |
+| `SyncToken` | incremented by one |
+| `TotalAmt`, `Balance`, every line `Amount` | 0 — the lines, items and descriptions remain |
+| `PrivateNote` | gains `Voided` (appended to whatever was there) |
+| `CustomerRef`, `CurrencyRef`, `TxnDate`, `DueDate`, `EmailStatus` | untouched |
+| `LinkedTxn` | stays empty — voiding creates no Payment and no credit |
+| stale `SyncToken` | Fault 5010, nothing written |
+| repeat with the SAME `requestid` | the original response, unchanged |
+| repeat with a NEW `requestid` | voids AGAIN — `SyncToken` bumps and `PrivateNote` gains a second `- Voided` |
+
+That last row is why the action reads QuickBooks first and skips the write when the invoice is already void.
+
+### 15.3 Eligibility (all of it, or the action is refused)
+
+The lifecycle is `sent` with a recorded QuickBooks number; the FreezerIQ invoice is `SENT`, `PENDING` or `OVERDUE` — never `PAID`, never `DRAFT`, and an already-`CANCELED` invoice answers "canceled" without contacting QuickBooks; the durable link exists on the CURRENT live connection generation; the stored review still matches the invoice (`loadSentReview`); the caller passes `mayManageQuickBooks` (tenant ADMIN, acting as themselves, never View As, tenant-scoped, 404 for another tenant's invoice); and the request carries the deliberate confirmation — **QuickBooks' own invoice number, typed by the tenant**. QuickBooks must also still show the invoice as FreezerIQ's, unchanged and unpaid: the 'payment'-stage contract runs before the void, and any linked transaction (a payment, a credit) refuses it with `paid_in_quickbooks`.
+
+### 15.4 The order, which is the safety property
+
+An invoice may end `PAID` **or** `CANCELED`, never both, and a QuickBooks void cannot be undone. So the DECISION to void is made durable *before* the external write, and from that moment no settlement may run. The one lifecycle row is the gate for both paths:
+
+1. **claim the lifecycle lease** — a compare-and-set UPDATE of `quickbooks_invoice_sends`. The shared settlement transition takes `SELECT "lease_until", "voided_at", "void_requested_at" … FOR UPDATE` on that same row before it decides, so this claim cannot commit while a settlement transaction is open, and no settlement can decide while the claim holds the row;
+2. **re-read the FreezerIQ invoice after the claim**, and require `SENT`, `PENDING` or `OVERDUE` again. No pre-lease read may authorize a void; if this read says `PAID`, the lease is handed straight back, nothing is recorded, and QuickBooks is never contacted;
+3. **record the decision**: `void_requested_at` / `void_requested_by`, committed before any QuickBooks request leaves. This is the crash guard — see below;
+4. read the invoice and its linked transactions;
+5. verify it is still FreezerIQ's invoice and still unpaid (skipped only when it already reads as void);
+6. **void** it, with the derived `qbvoid-…` requestid;
+7. read the SAME invoice back and run the dedicated `voided` contract — same Id, same DocNumber, same customer, USD, same date, TotalAmt 0, Balance 0, every line 0, no native tax, nothing linked. Anything unreadable fails closed;
+8. only then, the FreezerIQ invoice: a conditional `SENT|PENDING|OVERDUE → CANCELED`, one field, never from PAID and never to PAID;
+9. record `voided_at` / `voided_by` on the lifecycle row, which keeps its `sent` status and its whole send history.
+
+The other side of the gate is in `lib/invoiceSettlementTransition.ts`, the ONE place that writes `PAID` and the only place that releases `fundraiser_hold` orders. Inside its transaction, after the `FOR UPDATE` lock, **any** of three facts makes it write nothing at all — no PAID, no payment facts, no release: a live cancel lease, an unresolved `void_requested_at`, or a `voided_at`. The same condition is repeated in the `updateMany` predicate. Manual Record Payment and 1D's verified QuickBooks settlement both go through it, so both are covered by one rule, and an invoice with no QuickBooks lifecycle is unaffected.
+
+**Why the decision and not just the lease.** The lease orders two live requests, and it expires after two minutes. If the FreezerIQ process is *killed* between Intuit accepting the void and step 9, nothing local records what happened; when the lease lapses the invoice would look ordinary again, and a later Record Payment would leave QuickBooks voided and FreezerIQ PAID. `void_requested_at` is written at step 3 and does not expire, so from the moment FreezerIQ commits to voiding, that invoice is unsettleable until the cancellation is reconciled — however the process ends.
+
+Together these make the ordering total. A cancellation holds its lease either *before* a settlement locked the row (the settlement then sees the lease and refuses) or *after* that settlement committed (step 2 then sees `PAID` and stands down untouched). And once step 3 has committed, no settlement runs at all. "QuickBooks voided **and** FreezerIQ PAID" has no path left, racing or otherwise.
+
+**When the decision is released.** Only when FreezerIQ can PROVE QuickBooks was not written: Intuit rejected the void outright (a validation fault, a throttle, or a stale `SyncToken` — all rejections *before* it was applied), or the pre-void read at step 4 shows the invoice still carrying its money. Then `void_requested_at` is cleared with the lease and the invoice collects normally again. An ambiguous outcome — a lost answer, a 5xx, an unreadable body — releases nothing, because a read is not a receipt for a write that may still be in flight; the invoice stays **Cancellation pending** until Resume cancellation reconciles it.
+
+If any step fails the FreezerIQ invoice is left exactly as it was and the reason is recorded (`void_rejected`, `void_outcome_unknown`, `verification_failed_voided`, `qbo_invoice_changed`). One thing is recorded even while refusing, because a void cannot be taken back: when the read-back at step 7 fails its contract but still shows an invoice worth nothing on every line, QuickBooks **is** voided, so `voided_at` is written anyway. That seals the invoice against ever being settled.
+
+`cancel_conflict` is the defensive backstop below all of that: the final `SENT|PENDING|OVERDUE → CANCELED` compare-and-set is still authoritative, and if it ever lost, the cancellation reports `blocked`, never success, and records the contradiction for a human. No ordinary flow can reach it.
+
+### 15.5 What it never does
+
+Creates nothing — no second invoice, no customer, no item, no payment, no credit memo. Marks nothing paid: the settlement transition is not imported and cannot run, so the fundraiser's `fundraiser_hold` orders are untouched and nothing reaches the kitchen. Deletes nothing: the QuickBooks invoice, its number, its lines and the FreezerIQ link and lifecycle all stay for the audit trail. It also weakens nothing: the generic editor still refuses status and organization changes on a linked invoice, and a linked invoice still cannot be deleted.
+
+### 15.6 After cancellation — and while one is unfinished
+
+The invoice reads `CANCELED` in the list, with `QuickBooks #<number> · voided`, and the dialog says "Canceled — QuickBooks invoice #<number> voided" with the send history kept. Check QuickBooks payment is refused (`invoice_not_sent`), Send again is refused, Record Payment is not offered (`CANCELED` is not a settleable status) and there is no un-cancel: a QuickBooks void cannot be undone, which the confirmation says before the tenant types the number.
+
+While a cancellation is **unresolved** — `void_requested_at` set and the invoice not yet `CANCELED` — the invoice must not read as ordinary and collectible, because QuickBooks' copy may already be worth nothing. The list row says `QuickBooks #<number> · cancellation pending` and its action becomes "Finish canceling QuickBooks invoice"; Record Payment is not offered on the row; and the dialog shows **Cancellation pending**: *"FreezerIQ started canceling this QuickBooks invoice but did not finish confirming the result. Payment actions are temporarily blocked. Choose Resume cancellation to safely check the same QuickBooks invoice and finish the cancellation."* The only button is **Resume cancellation** — no Record Payment, no Check QuickBooks payment, no Send again, no second Cancel, and no "clear cancellation". It posts the same `cancel` action with no confirmation, because the durable decision already *is* the tenant's typed authorization, and it runs the same idempotent path: read QuickBooks first, void nothing that is already void, verify, finish `CANCELED`.
+
+### 15.7 Schema
+
+One additive migration, `20260923010000_qb_invoice_cancel_1_voided`, with four nullable columns on `quickbooks_invoice_sends`: `void_requested_at` / `void_requested_by` (the durable decision) and `voided_at` / `voided_by` (the outcome). The lifecycle `status` deliberately stays `sent` — the invoice WAS sent, and that history is part of the audit trail; the cancellation is a separate later fact recorded beside it, exactly as `sent_at`/`sent_by` record the send. Nothing is overloaded: `problem` still means "stopped or waiting" and `needs_review` still means "a read-back failed"; neither carries a cancellation in progress. No enum value, no column change, no default, no backfill. The FreezerIQ invoice status needs no migration: `CANCELED` already exists and is already excluded from the outstanding and settleable sets.
+
+**Deployment order is load-bearing.** `npm run build` does not run `migrate deploy`, and the settlement transition's locked read names `void_requested_at` and `voided_at` for *every* settlement, QuickBooks-linked or not. Apply migration #28 to Production FIRST, then promote. Proven on disposable databases: the released client generated from 17d5d7f's own schema reads, creates, leases and settles against a database carrying all 28 migrations, emitting no `SELECT *` and never naming a new column (so both "Production tolerates it" and "rollback is safe"); and the candidate's own locked read fails with `column "voided_at" does not exist` against a database carrying only the 27 released migrations.
+
+### 15.8 Tests and evidence
+
+`tests/qbInvoiceCancel.test.ts` (49) over the doubles — the void of the same invoice, the CANCELED transition only on proof, no payment, no release, no creation of anything, the typed confirmation, PAID and DRAFT refusals, a stale generation, an unlinked invoice, the lease, idempotent repeats, a lost answer reconciled, concurrent cancels, and what remains offered afterwards. Its last block, **the terminal invariant case by case**, forces the ordering at a real barrier (the void is gated open mid-flight while the other operation runs): CASE 1 settlement first → PAID, zero void calls, normal release; CASE 2 lease first vs manual Record Payment → refused, one void, CANCELED, nothing released; CASE 3 lease first vs 1D's verified QuickBooks settlement → same; CASE 4 the previously admitted gap — a stale pre-lease read cannot authorize a void once PAID has won: zero void calls, the lease handed back; CASE 5 crash after the void, before the local write → settlement still refuses and a retry reconciles without a second void; CASE 6 concurrent cancels → one void, one CANCELED. Two more close the non-race route into the same pair: a void that succeeded while its read-back failed the contract records `voided_at` anyway, and a Record Payment on that invoice then returns `{count: 0}`; a void QuickBooks refused outright releases the decision, and the invoice settles normally.
+
+Its final block, **the crash window**, kills the process at four exact points by abandoning the QuickBooks request mid-flight — so nothing the cancellation would have written afterwards is written, not even an error path or a released lease. TEST 1 killed before QuickBooks is read; TEST 2 killed after the read, before the void; TEST 3 killed the instant Intuit accepted the void; TEST 4 killed after the read-back returned. In all four the decision survives, the lease is then allowed to lapse, **both** Record Payment and the verified QuickBooks payment check return nothing, the food stays held, and Resume cancellation finishes it — with no second void where one had already applied, and never a "Voided - Voided". TEST 5 a definitive Intuit refusal releases the decision and the invoice settles normally; TEST 6 an ambiguous answer does not, and the dialog shows Cancellation pending with Resume as its only action; TEST 7 a settlement that wins first leaves no decision behind and zero void calls; TEST 8 the decision wins first and both settlement paths refuse; TEST 9 the lease expires while the decision is unresolved and settlement is still refused; TEST 10 a retry of an already-canceled invoice asks QuickBooks nothing at all.
+
+`tests/qbInvoice1cRealDb.test.ts` (13, opt-in, real Postgres) is the evidence that all of this is Postgres' behaviour and not a snapshot argument: with a settlement transaction holding the lifecycle row, the cancel's lease claim — and, separately, the decision write — are **observed to block** (still unfinished after 750 ms), complete only once that transaction commits, and by then the invoice reads `PAID`, which is exactly what the post-lease re-read sees; a lease claimed first makes the transition return `{count: 0}`; an unresolved decision with a long-expired lease (and with no lease at all) still returns `{count: 0}`; and clearing the decision returns the invoice to `{count: 1}` and `PAID`. `tests/qbInvoice1dSettlement.test.ts` (8) and `tests/ops3FundraiserBatchProduction.test.ts` (37) hold the same rule for the two real settlement entry points, including the expired-lease-with-live-decision case. `tests/qbInvoice1cScope.test.ts` (20) pins it at source level: one void call site, the derived requestid, no create/send/update/settlement in the cancel body, the single conditional invoice write, both `'PAID'` refusal comparisons, and the orderings themselves — lease claim before the post-lease re-read before the decision before the QuickBooks read; the decision written in exactly one place and released on exactly the three definitive refusals but never on the read-back path; and the transition's `FOR UPDATE` naming all three facts before its `invoice.updateMany`. `tests/qbInvoice1cViews.test.ts` (14: the buttons, their wording, the canceled view and the Cancellation pending view); `tests/qbInvoice1cRoutes.test.ts` (401/403/404/503 for the new action); plus the 1A/1B/1D censuses, `tests/secIntuitAttest1.test.ts` and the three migration ledgers, each updated to register this phase.
+
+**Sandbox acceptance (2026-09-23, PASSED — 13/13):** a disposable customer and invoice in the sandbox company; the candidate's own `voidQuickBooksInvoice` voided it (same Id, DocNumber kept, amounts zeroed); the candidate's read-back and dedicated `voided` contract PASSED against the real Intuit response; the same requestid replayed without writing; the already-void reconcile was recognised; exactly one invoice and no Payment existed afterwards. Production was never contacted.
+
+### 15.9 Not in QB-INVOICE-CANCEL-1
+
+No un-cancel or restore; no editing or correcting an invoice QuickBooks holds; no credit memo, refund or write-off; no delete of anything, in either system; no cancellation of a DRAFT lifecycle mid-send; no order cancellation, no release, no un-hold; no customer inactivation or unlink; no change to 1C's send, 1D's payment check or the Automated Sales Tax handling.
 
 ---

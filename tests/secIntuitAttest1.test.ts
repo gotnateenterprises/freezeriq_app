@@ -288,9 +288,27 @@ describe('D. invoice behaviour is otherwise unchanged', () => {
         expect(baselineSource().length).toBeGreaterThan(1000);
     });
 
+    /**
+     * QB-INVOICE-CANCEL-1 — a later, separately authorized phase widened exactly ONE select in this file, so the
+     * invoice list can see whether a cancellation is unresolved and withhold Record Payment. That block is put
+     * back into its released shape here, and named, so this assertion keeps saying what it was written to say:
+     * the attestation patch changed nothing but the two log lines, and nothing ELSE in this route has changed.
+     */
+    const CANCEL_1_BLOCK = `                // QB-INVOICE-CANCEL-1 adds the two cancellation facts: an invoice whose QuickBooks copy is (or
+                //    may already be) void must not offer Record Payment, and its row says what is unfinished.
+                quickbooks_invoice_send: {
+                    select: {
+                        status: true, qbo_doc_number: true, delivery_error_type: true,
+                        void_requested_at: true, voided_at: true,
+                    },
+                },`;
+    const CANCEL_1_RELEASED = '                quickbooks_invoice_send: { select: { status: true, qbo_doc_number: true, delivery_error_type: true } },';
+
     it('differs from the released baseline ONLY by the two removed body-log lines', () => {
+        const candidate = read(FILE).replace(/\r\n/g, '\n');
+        expect(candidate).toContain(CANCEL_1_BLOCK);
         const before = lines(baselineSource());
-        const after = lines(read(FILE));
+        const after = lines(candidate.replace(CANCEL_1_BLOCK, CANCEL_1_RELEASED));
 
         const removed = before.filter((l) => !after.includes(l) || before.filter((x) => x === l).length > after.filter((x) => x === l).length);
         const added = after.filter((l) => !before.includes(l) || after.filter((x) => x === l).length > before.filter((x) => x === l).length);

@@ -326,7 +326,18 @@ describe('QB-INVOICE-1D · one exact full payment settles through the EXISTING t
 
         // 27: ONE conditional transition, from SENT only.
         expect(w.store.settlementWrites).toEqual([{
-            where: { id: s.inv.id, business_id: BIZ, status: { in: ['SENT'] } },
+            where: {
+                id: s.inv.id, business_id: BIZ, status: { in: ['SENT'] },
+                OR: [
+                    // QB-INVOICE-CANCEL-1: not while a QuickBooks lease is held on this invoice, never once
+                    // FreezerIQ has decided to void its QuickBooks copy, and never once that copy IS void.
+                    // Ordinary invoices carry no lifecycle row.
+                    { quickbooks_invoice_send: null },
+                    { quickbooks_invoice_send: { voided_at: null, void_requested_at: null, lease_until: null } },
+                    // (the double records the where through JSON, so the timestamp arrives as a string)
+                    { quickbooks_invoice_send: { voided_at: null, void_requested_at: null, lease_until: { lt: expect.any(String) } } },
+                ],
+            },
             data: { status: 'PAID', paid_at: new Date('2026-09-20T12:00:00.000Z'), payment_method: 'quickbooks', payment_reference: reference },
             count: 1,
         }]);

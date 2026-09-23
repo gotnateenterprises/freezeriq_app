@@ -282,6 +282,16 @@ describe('15-18. scope stayed presentation-only', () => {
     // also renders on the canonical organization profile that Customer CRM → Organizations opens. One page; exact path.
     const QB_ORG_LINK_1 = ['app/fundraisers/[id]/page.tsx'];
     const inQbOrgLink1 = (f: string) => QB_ORG_LINK_1.includes(f);
+    // QB-INVOICE-CANCEL-1 — a later, separately-authorized phase: "Cancel invoice" voids the SAME linked
+    // QuickBooks invoice and marks the FreezerIQ invoice CANCELED. Its code under lib/quickbooks/ and
+    // app/api/integrations/quickbooks/ is covered by the QB-INVOICE-1A prefixes, its dialog by
+    // components/invoices/ and its schema hunk by prisma/schema.prisma (excluded above). These are its
+    // other files, and its one additive migration, named exactly.
+    const QB_INVOICE_CANCEL_1 = [
+        'app/invoices/page.tsx',
+        'prisma/migrations/20260923010000_qb_invoice_cancel_1_voided/',
+    ];
+    const inQbInvoiceCancel1 = (f: string) => QB_INVOICE_CANCEL_1.some((p) => (p.endsWith("/") ? f.startsWith(p) : f === p));
 
     // SEC-INTUIT-ATTEST-1 — a later, separately-authorized phase closing the three findings
     // that blocked the owner's Intuit App Assessment security attestation. Code only: a
@@ -381,7 +391,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // The real protection is the forbidden-path regex below, which is
             // unchanged — this only stops the check from going stale on every
             // subsequent phase that touches a regression suite.
-            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inSecIntuitAttest1(f)).toBe(true);
+            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f)).toBe(true);
         }
         // And explicitly: no path under these directories appears at all.
         const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -389,7 +399,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // FR-TAX-CORRECTNESS-1 is separately authorized to edit the
             // fundraiser money path — exempt from THIS phase's
             // "presentation only" assertion; everything else still held to it.
-            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inSecIntuitAttest1(f)) continue;
+            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f)) continue;
             expect(f).not.toMatch(forbidden);
         }
     });
@@ -405,6 +415,8 @@ describe('15-18. scope stayed presentation-only', () => {
             'prisma/migrations/20260913120000_qb_invoice_1b_quickbooks_links/',
             // QB-INVOICE-1C's single approved migration, by exact path.
             'prisma/migrations/20260915170000_qb_invoice_1c_invoice_send/',
+            // QB-INVOICE-CANCEL-1's single approved migration (voided_at / voided_by), by exact path.
+            'prisma/migrations/20260923010000_qb_invoice_cancel_1_voided/',
         ];
         const remaining = out.split('\n').filter((l) => !approvedLater.some((a) => l.includes(a))).join('\n');
         expect(remaining).not.toMatch(/prisma\/migrations\//);

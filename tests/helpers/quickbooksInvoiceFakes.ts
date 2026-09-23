@@ -64,7 +64,7 @@ export interface FakePreferences {
     multiCurrency: boolean;
 }
 
-export type InvoicingOp = 'create' | 'update' | 'read' | 'send' | 'query' | 'preferences' | 'entity' | 'item_create' | 'payment_read' | 'payment_write';
+export type InvoicingOp = 'create' | 'update' | 'void' | 'read' | 'send' | 'query' | 'preferences' | 'entity' | 'item_create' | 'payment_read' | 'payment_write';
 export type InvoicingFailure =
     /** Refused before processing: nothing happened. */
     | { op: InvoicingOp; kind: 'status'; status: number; code?: string }
@@ -200,6 +200,26 @@ export function fakeQuickBooksInvoicing(opts: { now?: () => number; autoSend?: b
         return json(200, { Invoice: copy(inv), time: nowIso() });
     }
 
+    /**
+     * QB-INVOICE-CANCEL-1 — QuickBooks' own void, exactly as the sandbox company answers it (2026-09-23):
+     * the SAME transaction is kept with its Id and DocNumber, SyncToken is bumped, TotalAmt, Balance and EVERY
+     * line Amount become 0 (the lines and their items remain), PrivateNote gains "Voided", and LinkedTxn is
+     * untouched — voiding creates no Payment. A stale SyncToken is refused with 5010, as for any update.
+     */
+    function voidInvoice(body: any, json: AccountingRequest['json']): Response {
+        const inv = invoices.get(body?.Id);
+        if (!inv) return fault(json, 400, '610');
+        if (body.SyncToken !== inv.SyncToken) return fault(json, 400, '5010');
+        inv.TotalAmt = 0;
+        inv.Balance = 0;
+        inv.Line = (inv.Line ?? []).map((l: any) => ({ ...l, Amount: 0 }));
+        inv.PrivateNote = inv.PrivateNote ? `${inv.PrivateNote} - Voided` : 'Voided';
+        inv.SyncToken = String(Number(inv.SyncToken) + 1);
+        inv.MetaData = { ...(inv.MetaData ?? {}), LastUpdatedTime: nowIso() };
+        runAfter('void', inv);
+        return json(200, { Invoice: copy(inv), time: nowIso() });
+    }
+
     function updateInvoice(body: any, json: AccountingRequest['json']): Response {
         const inv = invoices.get(body.Id);
         if (!inv) return fault(json, 400, '610');
@@ -303,13 +323,14 @@ export function fakeQuickBooksInvoicing(opts: { now?: () => number; autoSend?: b
         if (req.method === 'POST' && req.path === '/invoice') {
             let body: any = null;
             try { body = JSON.parse(req.body); } catch { /* null */ }
-            const isUpdate = body && body.Id !== undefined;
-            record(isUpdate ? 'update' : 'create', { body });
+            const isVoid = req.url.searchParams.get('operation') === 'void';
+            const isUpdate = !isVoid && body && body.Id !== undefined;
+            record(isVoid ? 'void' : isUpdate ? 'update' : 'create', { body });
             const key = `invoice|${realm}|${requestId}`;
-            return injectable(isUpdate ? 'update' : 'create', json, async () => {
+            return injectable(isVoid ? 'void' : isUpdate ? 'update' : 'create', json, async () => {
                 // A repeated requestid answers with the original response (and a replay can be lost too).
                 if (requestId && replay.has(key)) return json(replay.get(key)!.status, replay.get(key)!.body);
-                const res = isUpdate ? updateInvoice(body, json) : createInvoice(body, json);
+                const res = isVoid ? voidInvoice(body, json) : isUpdate ? updateInvoice(body, json) : createInvoice(body, json);
                 if (requestId) replay.set(key, { status: res.status, body: await res.clone().json() });
                 return res;
             });
@@ -474,6 +495,7 @@ export function fakeQuickBooksInvoicing(opts: { now?: () => number; autoSend?: b
         markUndeliverable: (id: string) => { invoices.get(id).DeliveryInfo.DeliveryErrorType = 'Undeliverable'; },
         creates: () => calls.filter((c) => c.op === 'create'),
         updates: () => calls.filter((c) => c.op === 'update'),
+        voids: () => calls.filter((c) => c.op === 'void'),
         sends: () => calls.filter((c) => c.op === 'send'),
         reads: () => calls.filter((c) => c.op === 'read'),
         writes: () => calls.filter((c) => c.method !== 'GET'),
@@ -588,6 +610,22 @@ export function fakeInvoiceSendDb(dbOptions: { settlement?: boolean } = {}) {
                         && JSON.stringify(Object.keys(data).sort()) === JSON.stringify(['paid_at', 'payment_method', 'payment_reference', 'status'])
                         && data.status === 'PAID' && data.paid_at instanceof Date && typeof data.payment_method === 'string';
                     if (settlement) {
+                        // QB-INVOICE-CANCEL-1: the transition also refuses while FreezerIQ holds a QuickBooks
+                        // lease on this invoice, and once its QuickBooks copy is voided. Evaluated here exactly
+                        // as Postgres evaluates the relation filter, so the race tests mean something.
+                        const send = sends.get(where.id) ?? null;
+                        const allowed = !Array.isArray(where.OR) || where.OR.some((branch: any) => {
+                            const cond = branch.quickbooks_invoice_send;
+                            if (cond === null || cond === undefined) return send === null;
+                            if (send === null) return false;
+                            return Object.entries(cond).every(([k, v]: [string, any]) => (v && typeof v === 'object' && 'lt' in v
+                                ? send[k] instanceof Date && send[k].getTime() < v.lt.getTime()
+                                : (v === null ? (send[k] === null || send[k] === undefined) : send[k] === v)));
+                        });
+                        if (!allowed) {
+                            settlementWrites.push({ where: copy(where), data: { ...data }, count: 0 });
+                            return { count: 0 };
+                        }
                         let count = 0;
                         for (const inv of invoices.values()) {
                             if (inv.id === where.id && inv.business_id === where.business_id && where.status.in.includes(inv.status)) {
@@ -598,6 +636,22 @@ export function fakeInvoiceSendDb(dbOptions: { settlement?: boolean } = {}) {
                             }
                         }
                         settlementWrites.push({ where: copy(where), data: { ...data }, count });
+                        return { count };
+                    }
+                    // QB-INVOICE-CANCEL-1: the cancellation's own conditional transition — one field, outstanding
+                    // statuses only, never in the settlement transaction, and it writes no payment fact.
+                    const cancel = !undo && Object.keys(data).length === 1 && data.status === 'CANCELED'
+                        && typeof where.id === 'string' && typeof where.business_id === 'string'
+                        && where.status && Array.isArray(where.status.in)
+                        && JSON.stringify([...where.status.in].sort()) === JSON.stringify(['OVERDUE', 'PENDING', 'SENT']);
+                    if (cancel) {
+                        let count = 0;
+                        for (const inv of invoices.values()) {
+                            if (inv.id === where.id && inv.business_id === where.business_id && where.status.in.includes(inv.status)) {
+                                inv.status = 'CANCELED';
+                                count++;
+                            }
+                        }
                         return { count };
                     }
                     const allowed = !!undo && Object.keys(data).length === 1 && data.status === 'SENT' && where.status === 'DRAFT' && typeof where.id === 'string' && typeof where.business_id === 'string';
@@ -661,7 +715,12 @@ export function fakeInvoiceSendDb(dbOptions: { settlement?: boolean } = {}) {
             && row.revision >= 0 && row.send_count >= 0
             && (['reserved', 'needs_review'].includes(row.status) || (!!row.qbo_doc_number && row.qbo_sync_token !== null && row.created_verified_at !== null))
             && (row.status !== 'sent' || (row.sent_at !== null && row.send_count >= 1))
-            && ['reserved', 'created', 'recipients_set', 'payment_options_set', 'sent', 'needs_review'].includes(row.status);
+            && ['reserved', 'created', 'recipients_set', 'payment_options_set', 'sent', 'needs_review'].includes(row.status)
+            // QB-INVOICE-CANCEL-1: a voided lifecycle keeps its send history — the cancellation is recorded beside it.
+            && (row.voided_at === null || row.status === 'sent')
+            // …and a recorded void is only ever reached through a recorded intent, never on its own.
+            && (row.voided_at === null || row.void_requested_at !== null)
+            && (row.void_requested_at === null || row.status === 'sent');
         if (!ok) throw refuse('quickbooks_invoice_sends', 'P2004');
         const l = [...link.invoiceLinks.values()].find((x) => x.business_id === row.business_id && x.invoice_id === row.invoice_id);
         const inv = invoices.get(row.invoice_id);
@@ -672,6 +731,7 @@ export function fakeInvoiceSendDb(dbOptions: { settlement?: boolean } = {}) {
         create_requested_at: null, created_verified_at: null, recipients_verified_at: null, payment_options_verified_at: null,
         send_requested_at: null, sent_at: null, auto_sent: false, send_count: 0, delivery_error_type: null, delivery_checked_at: null,
         problem: null, problem_detail: null, problem_at: null, started_by: null, sent_by: null,
+        void_requested_at: null, void_requested_by: null, voided_at: null, voided_by: null,
     };
     const sendModel = (undo: Undo | null) => new Proxy({
         async findUnique({ where }: any) {
@@ -750,11 +810,30 @@ export function fakeInvoiceSendDb(dbOptions: { settlement?: boolean } = {}) {
         },
     });
 
+    /**
+     * QB-INVOICE-CANCEL-1: the ONE raw statement the settlement transition issues — the FOR UPDATE lock on this
+     * invoice's QuickBooks lifecycle row. The double cannot block a single-threaded test, so it answers the row and
+     * RECORDS that the lock was taken; the blocking itself is proven against real Postgres.
+     */
+    const lifecycleLocks: string[] = [];
+    const isLifecycleLock = (sql: any) => /FROM "quickbooks_invoice_sends"[\s\S]*FOR UPDATE/.test(Array.isArray(sql) ? sql.join('?') : String(sql));
+    const lockLifecycleRow = async (values: any[]) => {
+        await tick();
+        const invoiceId = values[0];
+        lifecycleLocks.push(invoiceId);
+        const row = sends.get(invoiceId);
+        return row
+            ? [{ lease_until: row.lease_until ?? null, voided_at: row.voided_at ?? null, void_requested_at: row.void_requested_at ?? null }]
+            : [];
+    };
+
     async function $transaction(fn: (tx: any) => Promise<any>, opts?: any) {
         const undo: Undo = [];
         try {
             return await link.db.$transaction(async (tx: any) => fn({
                 ...tx,
+                // The lifecycle FOR UPDATE lock is answered here; every other raw query is the 1B double's own.
+                $queryRaw: (sql: any, ...values: any[]) => (isLifecycleLock(sql) ? lockLifecycleRow(values) : (tx as any).$queryRaw(sql, ...values)),
                 invoice: invoiceModel(undo),
                 quickBooksInvoiceSettings: settingsModel(undo),
                 quickBooksInvoiceSend: sendModel(undo),
@@ -789,6 +868,8 @@ export function fakeInvoiceSendDb(dbOptions: { settlement?: boolean } = {}) {
         orders,
         orderWrites,
         settlementWrites,
+        /** Every lifecycle row the settlement transition locked FOR UPDATE, in order. */
+        lifecycleLocks,
         /** QB-INVOICE-1D: supporter orders held for a campaign (and optionally canceled / other-campaign noise). */
         seedHeldOrders(businessId: string, campaignId: string, n: number, over: Partial<FakeOrder> = {}): FakeOrder[] {
             const out: FakeOrder[] = [];

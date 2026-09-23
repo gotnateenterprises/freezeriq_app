@@ -23,6 +23,8 @@ import { liveConnection } from '@/lib/quickbooks/liveConnection';
 import { invoiceCreateRequestId } from '@/lib/quickbooks/invoiceLinks';
 import { getQuickBooksInvoiceSettingsView, saveQuickBooksInvoiceSettings } from '@/lib/quickbooks/invoiceSettings';
 import { checkQuickBooksInvoiceDelivery, getQuickBooksInvoiceSendView, startQuickBooksInvoiceSend } from '@/lib/quickbooks/invoiceSend';
+import { settleInvoiceInTransaction } from '@/lib/invoiceSettlementTransition';
+import { SETTLEABLE_INVOICE_STATUSES } from '@/lib/invoiceSettlement';
 import { fakeIntuit, sandboxConfig, sandboxEnv } from './helpers/quickbooksFakes';
 import { fakeQuickBooksCustomers } from './helpers/quickbooksCustomerFakes';
 import { fakeQuickBooksInvoicing } from './helpers/quickbooksInvoiceFakes';
@@ -241,4 +243,274 @@ describeIfDb('QB-INVOICE-1C · real Postgres', () => {
         expect(await db.quickBooksInvoiceSend.findUnique({ where: { invoice_id: inv } })).toMatchObject({ status: 'payment_options_set', lease_id: 'mine', send_count: 0 });
         expect((await db.invoice.findUnique({ where: { id: inv } }))!.status).toBe('PAID');
     });
+    /**
+     * QB-INVOICE-CANCEL-1 — the shared settlement transition's new condition, against REAL Postgres. The doubles
+     * cannot prove Prisma actually compiles the relation filter, and this is the money path: an invoice may not
+     * become PAID while FreezerIQ holds a QuickBooks lease on it (a cancellation is mid-void), nor once its
+     * QuickBooks copy is voided. An ordinary invoice, with no QuickBooks lifecycle at all, is unaffected.
+     */
+    it('the settlement transition refuses a leased or voided QuickBooks invoice, and never an ordinary one', async () => {
+        const facts = { method: 'check' as const, paidAt: new Date('2026-09-20T12:00:00.000Z'), reference: 'check 4021' };
+        const settle = async (invoiceId: string, campaignId: string | null) => db.$transaction((tx) => settleInvoiceInTransaction(tx, {
+            invoice: { id: invoiceId, campaign_id: campaignId, customer_id: ORG, total_amount: '451.59', customer: { type: 'fundraiser_org' } },
+            businessId: BIZ,
+            facts,
+            fromStatuses: SETTLEABLE_INVOICE_STATUSES,
+        }));
+
+        // 1. an ordinary invoice — no QuickBooks lifecycle row — still settles exactly as before.
+        const plain = await seedInvoice({ status: 'SENT' as any });
+        const campaignOf = async (id: string) => (await db.invoice.findUnique({ where: { id }, select: { campaign_id: true } }))!.campaign_id;
+        expect(await settle(plain, await campaignOf(plain))).toEqual({ count: 1 });
+        expect((await db.invoice.findUnique({ where: { id: plain } }))!.status).toBe('PAID');
+
+        // 2. an invoice whose QuickBooks lifecycle holds a LIVE lease — a cancellation inside its void — is refused.
+        const leased = await seedInvoice({ status: 'SENT' as any });
+        await rawLink(leased);
+        await db.quickBooksInvoiceSend.create({
+            data: sendRow(leased, {
+                status: 'sent' as any, qbo_doc_number: '1052', qbo_sync_token: '2', created_verified_at: new Date(), sent_at: new Date(), send_count: 1,
+                lease_id: 'cancel-in-flight', lease_until: new Date(Date.now() + 60_000),
+            }),
+        });
+        expect(await settle(leased, await campaignOf(leased))).toEqual({ count: 0 });
+        expect((await db.invoice.findUnique({ where: { id: leased } }))!.status).toBe('SENT');
+
+        // 3. the same invoice once the lease has expired: settleable again.
+        await db.quickBooksInvoiceSend.update({ where: { invoice_id: leased }, data: { lease_until: new Date(Date.now() - 1_000) } });
+        expect(await settle(leased, await campaignOf(leased))).toEqual({ count: 1 });
+        expect((await db.invoice.findUnique({ where: { id: leased } }))!.status).toBe('PAID');
+
+        // 4. an invoice whose QuickBooks copy is VOIDED is refused for good, lease or no lease.
+        const voided = await seedInvoice({ status: 'SENT' as any });
+        await rawLink(voided);
+        await db.quickBooksInvoiceSend.create({
+            data: sendRow(voided, {
+                status: 'sent' as any, qbo_doc_number: '1053', qbo_sync_token: '3', created_verified_at: new Date(), sent_at: new Date(), send_count: 1,
+                lease_id: null, lease_until: null, void_requested_at: new Date(), void_requested_by: `admin-${BIZ}`, voided_at: new Date(), voided_by: `admin-${BIZ}`,
+            }),
+        });
+        expect(await settle(voided, await campaignOf(voided))).toEqual({ count: 0 });
+        expect((await db.invoice.findUnique({ where: { id: voided } }))!.status).toBe('SENT');
+    });
+    /**
+     * QB-INVOICE-CANCEL-1 — the ORDERING, observed against real Postgres rather than argued from a snapshot model.
+     *
+     * The settlement transition locks this invoice's QuickBooks lifecycle row FOR UPDATE before it decides. A
+     * cancellation's lease claim is an UPDATE of that same row, so while a settlement transaction is open the claim
+     * CANNOT commit — it waits. That is what makes the dangerous interleaving impossible: a cancellation can only
+     * hold its lease either before a settlement locked the row (the settlement then sees the lease and refuses) or
+     * after that settlement committed (the cancellation's own post-lease re-read then sees PAID and never voids).
+     */
+    it('a settlement in flight BLOCKS the cancel lease claim until it commits, and the invoice is PAID by then', async () => {
+        const inv = await seedInvoice({ status: 'SENT' as any });
+        await rawLink(inv);
+        await db.quickBooksInvoiceSend.create({
+            data: sendRow(inv, {
+                status: 'sent' as any, qbo_doc_number: '1052', qbo_sync_token: '2', created_verified_at: new Date(),
+                sent_at: new Date(), send_count: 1, lease_id: null, lease_until: null,
+            }),
+        });
+        const campaignId = (await db.invoice.findUnique({ where: { id: inv }, select: { campaign_id: true } }))!.campaign_id;
+
+        let locked!: () => void;
+        const lockTaken = new Promise<void>((r) => { locked = r; });
+        let proceed!: () => void;
+        const mayFinish = new Promise<void>((r) => { proceed = r; });
+
+        // A settlement transaction: take the same lock the transition takes, hold it open, then settle.
+        const settlement = db.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT "lease_until", "voided_at" FROM "quickbooks_invoice_sends" WHERE "invoice_id" = ${inv} FOR UPDATE`;
+            locked();
+            await mayFinish;
+            return settleInvoiceInTransaction(tx, {
+                invoice: { id: inv, campaign_id: campaignId, customer_id: ORG, total_amount: '451.59', customer: { type: 'fundraiser_org' } },
+                businessId: BIZ,
+                facts: { method: 'check' as const, paidAt: new Date('2026-09-20T12:00:00.000Z'), reference: 'check 4021' },
+                fromStatuses: SETTLEABLE_INVOICE_STATUSES,
+            });
+        }, { timeout: 20_000, maxWait: 10_000 });
+        await lockTaken;
+
+        // The cancellation now tries to claim its lease — the very write that authorizes a QuickBooks void.
+        const claim = db.quickBooksInvoiceSend.updateMany({
+            where: { business_id: BIZ, invoice_id: inv, status: 'sent' as any, OR: [{ lease_id: null }, { lease_until: { lt: new Date() } }] },
+            data: { lease_id: 'cancel-lease', lease_until: new Date(Date.now() + 120_000) },
+        });
+        const waited = await Promise.race([
+            claim.then(() => 'claimed while the settlement was open'),
+            new Promise((r) => setTimeout(() => r('blocked'), 750)),
+        ]);
+        expect(waited).toBe('blocked'); // OBSERVED: Postgres makes it wait for the settlement's row lock
+
+        proceed();
+        expect(await settlement).toEqual({ count: 1 });
+        expect(await claim).toEqual({ count: 1 }); // it completes only now, AFTER the settlement committed
+
+        // …and this is what the cancellation reads immediately after claiming: the settlement's own result.
+        const afterClaim = await db.invoice.findUnique({ where: { id: inv }, select: { status: true, paid_at: true } });
+        expect(afterClaim).toMatchObject({ status: 'PAID' });
+        expect(afterClaim!.paid_at).not.toBeNull();
+        // So the cancellation stands down here, and QuickBooks is never voided.
+        await db.quickBooksInvoiceSend.updateMany({ where: { invoice_id: inv }, data: { lease_id: null, lease_until: null } });
+    }, 60_000);
+
+    it('a lease claimed FIRST makes the settlement refuse, with no PAID write and no release', async () => {
+        const inv = await seedInvoice({ status: 'SENT' as any });
+        await rawLink(inv);
+        await db.quickBooksInvoiceSend.create({
+            data: sendRow(inv, {
+                status: 'sent' as any, qbo_doc_number: '1054', qbo_sync_token: '2', created_verified_at: new Date(),
+                sent_at: new Date(), send_count: 1, lease_id: 'cancel-lease', lease_until: new Date(Date.now() + 120_000),
+            }),
+        });
+        const campaignId = (await db.invoice.findUnique({ where: { id: inv }, select: { campaign_id: true } }))!.campaign_id;
+
+        const result = await db.$transaction((tx) => settleInvoiceInTransaction(tx, {
+            invoice: { id: inv, campaign_id: campaignId, customer_id: ORG, total_amount: '451.59', customer: { type: 'fundraiser_org' } },
+            businessId: BIZ,
+            facts: { method: 'check' as const, paidAt: new Date('2026-09-20T12:00:00.000Z'), reference: 'check 4021' },
+            fromStatuses: SETTLEABLE_INVOICE_STATUSES,
+        }));
+
+        expect(result).toEqual({ count: 0 });
+        expect((await db.invoice.findUnique({ where: { id: inv } }))!.status).toBe('SENT');
+    });
+
+    /**
+     * QB-INVOICE-CANCEL-1 — THE CRASH WINDOW, against real Postgres.
+     *
+     * The lease is what orders two live requests, and it expires. The DURABLE INTENT is what survives a killed
+     * process, and it does not. These prove the three things the doubles cannot: that Prisma really compiles the
+     * intent into both the locked read and the relation filter, that an expired lease with an unresolved intent
+     * is still refused, and that clearing the intent genuinely returns the invoice to normal collection.
+     */
+    const settleReal = (invoiceId: string, campaignId: string | null) => db.$transaction((tx) => settleInvoiceInTransaction(tx, {
+        invoice: { id: invoiceId, campaign_id: campaignId, customer_id: ORG, total_amount: '451.59', customer: { type: 'fundraiser_org' } },
+        businessId: BIZ,
+        facts: { method: 'check' as const, paidAt: new Date('2026-09-20T12:00:00.000Z'), reference: 'check 4021' },
+        fromStatuses: SETTLEABLE_INVOICE_STATUSES,
+    }));
+    const campaignOfInvoice = async (id: string) => (await db.invoice.findUnique({ where: { id }, select: { campaign_id: true } }))!.campaign_id;
+
+    it('an unresolved void intent outlives the lease: settlement is refused until it is proven unwritten', async () => {
+        const inv = await seedInvoice({ status: 'SENT' as any });
+        await rawLink(inv);
+        await db.quickBooksInvoiceSend.create({
+            data: sendRow(inv, {
+                status: 'sent' as any, qbo_doc_number: '1056', qbo_sync_token: '2', created_verified_at: new Date(),
+                sent_at: new Date(), send_count: 1, lease_id: 'cancel-lease', lease_until: new Date(Date.now() + 120_000),
+            }),
+        });
+        const campaignId = await campaignOfInvoice(inv);
+
+        // The cancellation commits its decision — an ordinary UPDATE of the leased row — and is then killed.
+        await db.quickBooksInvoiceSend.updateMany({
+            where: { business_id: BIZ, invoice_id: inv, lease_id: 'cancel-lease' },
+            data: { void_requested_at: new Date(), void_requested_by: `admin-${BIZ}` },
+        });
+        const stored = await db.quickBooksInvoiceSend.findUnique({ where: { invoice_id: inv } });
+        expect(stored!.void_requested_at).toBeInstanceOf(Date);
+        expect(stored!.voided_at).toBeNull();
+
+        // Two minutes pass. The lease is worth nothing now — and that must change nothing.
+        await db.quickBooksInvoiceSend.update({
+            where: { invoice_id: inv }, data: { lease_id: 'cancel-lease', lease_until: new Date(Date.now() - 600_000) },
+        });
+        expect(await settleReal(inv, campaignId)).toEqual({ count: 0 });
+        expect((await db.invoice.findUnique({ where: { id: inv } }))!.status).toBe('SENT');
+
+        // With no lease at all, the intent alone still refuses it.
+        await db.quickBooksInvoiceSend.update({ where: { invoice_id: inv }, data: { lease_id: null, lease_until: null } });
+        expect(await settleReal(inv, campaignId)).toEqual({ count: 0 });
+        expect((await db.invoice.findUnique({ where: { id: inv } }))!.status).toBe('SENT');
+
+        // And the retry finishes it: the conditional transition Cancel uses moves it to CANCELED, once.
+        const canceled = await db.invoice.updateMany({
+            where: { id: inv, business_id: BIZ, status: { in: ['SENT', 'PENDING', 'OVERDUE'] as any[] } },
+            data: { status: 'CANCELED' as any },
+        });
+        expect(canceled).toEqual({ count: 1 });
+        await db.quickBooksInvoiceSend.update({ where: { invoice_id: inv }, data: { voided_at: new Date(), voided_by: `admin-${BIZ}` } });
+        expect(await settleReal(inv, campaignId)).toEqual({ count: 0 });
+        expect((await db.invoice.findUnique({ where: { id: inv } }))!.status).toBe('CANCELED');
+    });
+
+    it('a definitively rejected void clears the intent, and the invoice collects normally again', async () => {
+        const inv = await seedInvoice({ status: 'SENT' as any });
+        await rawLink(inv);
+        await db.quickBooksInvoiceSend.create({
+            data: sendRow(inv, {
+                status: 'sent' as any, qbo_doc_number: '1057', qbo_sync_token: '2', created_verified_at: new Date(),
+                sent_at: new Date(), send_count: 1, lease_id: 'cancel-lease', lease_until: new Date(Date.now() + 120_000),
+                void_requested_at: new Date(), void_requested_by: `admin-${BIZ}`,
+            }),
+        });
+        const campaignId = await campaignOfInvoice(inv);
+        expect(await settleReal(inv, campaignId)).toEqual({ count: 0 });
+
+        // Intuit refused the void outright, so FreezerIQ releases its decision and the lease together.
+        await db.quickBooksInvoiceSend.updateMany({
+            where: { business_id: BIZ, invoice_id: inv, lease_id: 'cancel-lease' },
+            data: { void_requested_at: null, void_requested_by: null, problem: 'void_rejected', problem_at: new Date(), lease_id: null, lease_until: null },
+        });
+
+        expect(await settleReal(inv, campaignId)).toEqual({ count: 1 });
+        const paid = await db.invoice.findUnique({ where: { id: inv } });
+        expect(paid!.status).toBe('PAID');
+        expect(paid!.paid_at).not.toBeNull();
+    });
+
+    // The lease is deliberately NOT held here: this isolates the decision write itself, proving that it is an
+    // UPDATE of the locked row and so cannot slip past an open settlement — independently of the lease, which
+    // would refuse that settlement on its own and hide the thing being measured.
+    it('the intent write is ordered by the same row lock: a settlement in flight makes it wait', async () => {
+        const inv = await seedInvoice({ status: 'SENT' as any });
+        await rawLink(inv);
+        await db.quickBooksInvoiceSend.create({
+            data: sendRow(inv, {
+                status: 'sent' as any, qbo_doc_number: '1058', qbo_sync_token: '2', created_verified_at: new Date(),
+                sent_at: new Date(), send_count: 1, lease_id: null, lease_until: null,
+            }),
+        });
+        const campaignId = await campaignOfInvoice(inv);
+
+        let locked!: () => void;
+        const lockTaken = new Promise<void>((r) => { locked = r; });
+        let proceed!: () => void;
+        const mayFinish = new Promise<void>((r) => { proceed = r; });
+
+        const settlement = db.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT "lease_until", "voided_at", "void_requested_at" FROM "quickbooks_invoice_sends" WHERE "invoice_id" = ${inv} FOR UPDATE`;
+            locked();
+            await mayFinish;
+            return settleInvoiceInTransaction(tx, {
+                invoice: { id: inv, campaign_id: campaignId, customer_id: ORG, total_amount: '451.59', customer: { type: 'fundraiser_org' } },
+                businessId: BIZ,
+                facts: { method: 'check' as const, paidAt: new Date('2026-09-20T12:00:00.000Z'), reference: 'check 4021' },
+                fromStatuses: SETTLEABLE_INVOICE_STATUSES,
+            });
+        }, { timeout: 20_000, maxWait: 10_000 });
+        await lockTaken;
+
+        // The cancellation's decision is a write to that same row, so it cannot slip past an open settlement.
+        const intent = db.quickBooksInvoiceSend.updateMany({
+            where: { business_id: BIZ, invoice_id: inv },
+            data: { void_requested_at: new Date(), void_requested_by: `admin-${BIZ}` },
+        });
+        const waited = await Promise.race([
+            intent.then(() => 'committed while the settlement was open'),
+            new Promise((r) => setTimeout(() => r('blocked'), 750)),
+        ]);
+        expect(waited).toBe('blocked'); // OBSERVED: Postgres makes the decision wait for the settlement's lock
+
+        proceed();
+        expect(await settlement).toEqual({ count: 1 });
+        expect(await intent).toEqual({ count: 1 }); // it lands only now, after the settlement committed
+
+        // …which is exactly why the cancellation re-reads the invoice after claiming its lease: it is PAID, so
+        // it stands down before this decision would ever authorize a QuickBooks void.
+        expect((await db.invoice.findUnique({ where: { id: inv } }))!.status).toBe('PAID');
+        await db.quickBooksInvoiceSend.updateMany({ where: { invoice_id: inv }, data: { lease_id: null, lease_until: null, void_requested_at: null, void_requested_by: null } });
+    }, 60_000);
 });

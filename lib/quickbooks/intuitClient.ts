@@ -1091,6 +1091,36 @@ export async function updateQuickBooksInvoiceDelivery(
 }
 
 /**
+ * QB-INVOICE-CANCEL-1 — VOIDS the SAME QuickBooks invoice. QuickBooks' own cancellation: the transaction stays,
+ * under its own Id and DocNumber, with every amount zero. Nothing is deleted and nothing replaces it.
+ *
+ * Proven against the sandbox company (2026-09-23, minorversion 75). `POST /invoice?operation=void {Id, SyncToken}`
+ * answers 200 with the voided Invoice:
+ *   - Id and DocNumber unchanged; SyncToken bumped by one;
+ *   - TotalAmt and Balance 0, and EVERY line Amount 0 — the lines, their items and descriptions remain;
+ *   - PrivateNote gains "Voided"; CustomerRef, CurrencyRef, TxnDate, DueDate and EmailStatus are untouched;
+ *   - LinkedTxn stays empty: voiding creates no Payment and no credit.
+ * A stale SyncToken is refused with Fault 5010 ('stale_object'). A repeat with the SAME requestid answers the
+ * original response unchanged; a repeat with a NEW requestid voids AGAIN (bumping SyncToken and appending to
+ * PrivateNote), which is why the caller reads the invoice first and skips the write when it is already void.
+ *
+ * 'rejected' wrote nothing; 'network', 5xx 'http' and 'malformed' are AMBIGUOUS — read the invoice back.
+ */
+export async function voidQuickBooksInvoice(
+    config: QuickBooksConfig, accessToken: string, realmId: string,
+    input: { id: string; syncToken: string }, requestId: string, fetchImpl: FetchLike = fetch,
+): Promise<QuickBooksInvoiceSnapshot> {
+    if (!OBJECT_ID.test(input.id) || !/^[0-9]{1,16}$/.test(input.syncToken) || !REQUEST_ID.test(requestId)) {
+        throw new IntuitError('rejected', { faultCodes: ['local-void'] });
+    }
+    const r = await accountingJson(config, accessToken, realmId, `/invoice?operation=void&${mv}&requestid=${encodeURIComponent(requestId)}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ Id: input.id, SyncToken: input.syncToken }) }, fetchImpl);
+    const inv = invoiceFrom(r.body, r.status, r.tid);
+    if (inv.id !== input.id) throw new IntuitError('malformed', { status: r.status, intuitTid: r.tid });
+    return inv;
+}
+
+/**
  * QuickBooks' explicit send, to the invoice's own BillEmail and BillEmailCc (never a `sendTo` override).
  * A Fault (e.g. 2380: no email address) sent nothing; 'network'/5xx/'malformed' are AMBIGUOUS — read back.
  */

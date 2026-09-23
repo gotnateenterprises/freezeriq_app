@@ -71,6 +71,7 @@ describe('QB-INVOICE-1C routes · who may call them', () => {
         expect((await getInvoice(inv.id, null)).status).toBe(401);
         expect((await postInvoice(inv.id, { action: 'send' }, null)).status).toBe(401);
         expect((await postInvoice(inv.id, { action: 'recheck' }, null)).status).toBe(401);
+        expect((await postInvoice(inv.id, { action: 'cancel', confirmation: '1052' }, null)).status).toBe(401);
         expect((await getSettings(null)).status).toBe(401);
         expect((await putSettings({}, null)).status).toBe(401);
         expect((await postSettings({ action: 'create_item' }, null)).status).toBe(401);
@@ -80,6 +81,7 @@ describe('QB-INVOICE-1C routes · who may call them', () => {
             expect((await getInvoice(inv.id, session)).status).toBe(403);
             expect((await postInvoice(inv.id, { action: 'send' }, session)).status).toBe(403);
             expect((await postInvoice(inv.id, { action: 'recheck' }, session)).status).toBe(403);
+            expect((await postInvoice(inv.id, { action: 'cancel', confirmation: '1052' }, session)).status).toBe(403);
             expect((await getSettings(session)).status).toBe(403);
             expect((await putSettings({}, session)).status).toBe(403);
             expect((await postSettings({ action: 'create_item' }, session)).status).toBe(403);
@@ -90,7 +92,7 @@ describe('QB-INVOICE-1C routes · who may call them', () => {
     it('another tenant’s invoice, or a malformed id, is 404 with nothing read from or written to QuickBooks', async () => {
         const other = current.store.seedInvoice({ business_id: OTHER_BIZ, customer_id: current.store.seedOrganization(OTHER_BIZ, 'Other Org') });
         expect((await getInvoice(other.id)).status).toBe(404);
-        for (const action of ['send', 'resume', 'recheck', 'check_delivery', 'resend']) {
+        for (const action of ['send', 'resume', 'recheck', 'cancel', 'check_delivery', 'resend']) {
             expect((await postInvoice(other.id, { action, reviewToken: 'a'.repeat(64), recipientTo: RECIPIENT })).status).toBe(404);
         }
         expect((await getInvoice('..%2F..%2Fsecrets')).status).toBe(404);
@@ -105,6 +107,7 @@ describe('QB-INVOICE-1C routes · who may call them', () => {
         expect(await (await getInvoice(inv.id)).json()).toEqual({ state: 'disabled' });
         expect((await postInvoice(inv.id, { action: 'send', reviewToken: 'a'.repeat(64), recipientTo: RECIPIENT })).status).toBe(503);
         expect((await postInvoice(inv.id, { action: 'recheck' })).status).toBe(503);
+        expect((await postInvoice(inv.id, { action: 'cancel', confirmation: '1052' })).status).toBe(503);
         expect(await (await getSettings()).json()).toEqual({ state: 'disabled' });
         expect((await putSettings({ salesItemKey: 'a'.repeat(32) })).status).toBe(503);
         expect((await postSettings({ action: 'create_item' })).status).toBe(503);

@@ -44,7 +44,9 @@ describe('QB-INVOICE-1D · read-only against QuickBooks', () => {
         expect(client).not.toMatch(/select \* from Payment|from\s+Payment\s+where/i);
         expect([...client.matchAll(/readEntity\(config, accessToken, realmId, 'payment'/g)]).toHaveLength(1);
         expect(client).not.toMatch(/['"`]\/payment\b/); // no /payment create or update path
-        expect(client.match(/method:\s*'(POST|PUT|PATCH|DELETE)'/g)).toHaveLength(7); // unchanged since 1C
+        // 8 writes: the 1A/1B token, customer and item calls, 1C's invoice create, delivery update and send, and
+        // QB-INVOICE-CANCEL-1's void of that same invoice. Still not one payment write.
+        expect(client.match(/method:\s*'(POST|PUT|PATCH|DELETE)'/g)).toHaveLength(8);
     });
 
     it('the OAuth scope is still exactly accounting: no Payments scope, no Payments API', () => {

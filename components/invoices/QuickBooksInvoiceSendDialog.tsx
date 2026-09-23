@@ -22,6 +22,10 @@ import {
     INVALID_TEXT,
     PAYMENT_CHECK_EXPLAINER,
     paymentCheckMessage,
+    CANCEL_ACTION_LABEL,
+    cancelConfirmPrompt,
+    cancelExplainer,
+    RESUME_CANCEL_ACTION_LABEL,
     RECHECK_ACTION_LABEL,
     RECIPIENT_SOURCE_TEXT,
     sendDialogView,
@@ -55,6 +59,9 @@ export default function QuickBooksInvoiceSendDialog({
     const [busy, setBusy] = useState(false);
     const [recipientTo, setRecipientTo] = useState('');
     const [recipientCc, setRecipientCc] = useState('');
+    /** QB-INVOICE-CANCEL-1: the Cancel panel is opened deliberately, and needs the QuickBooks number typed in. */
+    const [cancelOpen, setCancelOpen] = useState(false);
+    const [cancelConfirmation, setCancelConfirmation] = useState('');
     /** QB-INVOICE-1D: the answer to the last "Check QuickBooks payment", shown until the dialog closes. */
     const [paymentNote, setPaymentNote] = useState<PaymentCheckMessage | null>(null);
 
@@ -89,6 +96,7 @@ export default function QuickBooksInvoiceSendDialog({
             const data = await res.json().catch(() => ({}));
             switch (data?.outcome) {
                 case 'sent': toast.success(body.action === 'resend' ? 'QuickBooks emailed the invoice again.' : 'QuickBooks emailed the invoice.'); break;
+                case 'canceled': toast.success('Invoice canceled. The QuickBooks invoice is voided and kept for your records.'); break;
                 case 'checked': toast.success('Delivery status updated from QuickBooks.'); break;
                 case 'in_progress':
                     if (body.action === 'recheck') toast.success('The QuickBooks invoice matched FreezerIQ. Continue with Resume to finish sending it.');
@@ -242,6 +250,30 @@ export default function QuickBooksInvoiceSendDialog({
                     {payload?.state === 'needs_review' && payload.problemDetail && (
                         <p className="text-xs text-slate-400 break-words">Details for review: {payload.problemDetail}</p>
                     )}
+                    {/* QB-INVOICE-CANCEL-1: opened deliberately, and confirmed by typing QuickBooks' own number. */}
+                    {view.canCancel && cancelOpen && sent && (
+                        <div className="rounded-xl border border-rose-200 dark:border-rose-900/40 bg-rose-50/60 dark:bg-rose-950/20 p-4">
+                            <p className="text-sm font-black text-rose-800 dark:text-rose-300">Cancel invoice?</p>
+                            <p className="mt-1 text-sm text-slate-700 dark:text-slate-300">{cancelExplainer(sent.docNumber)}</p>
+                            <label htmlFor="quickbooks-cancel-confirm" className="mt-3 block text-xs font-bold text-slate-600 dark:text-slate-300">
+                                {cancelConfirmPrompt(sent.docNumber)}
+                            </label>
+                            <input id="quickbooks-cancel-confirm" type="text" inputMode="numeric" maxLength={32} value={cancelConfirmation} disabled={busy}
+                                onChange={(e) => setCancelConfirmation(e.target.value)}
+                                className="mt-1 w-40 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm" />
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <button type="button" disabled={busy || cancelConfirmation.trim() !== (sent.docNumber ?? '')}
+                                    onClick={() => act({ action: 'cancel', confirmation: cancelConfirmation.trim() })}
+                                    className="px-4 py-2 rounded-xl text-sm font-black bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">
+                                    {busy ? 'Canceling…' : sent.docNumber ? `Cancel invoice and void #${sent.docNumber}` : 'Cancel invoice and void it'}
+                                </button>
+                                <button type="button" onClick={() => { setCancelOpen(false); setCancelConfirmation(''); }} disabled={busy}
+                                    className="px-3 py-2 rounded-xl text-sm font-bold text-slate-500 hover:text-slate-700 disabled:opacity-50">
+                                    Keep invoice
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <div className="px-6 py-4 bg-slate-50 dark:bg-slate-900/40 flex flex-wrap items-center justify-end gap-3">
@@ -265,6 +297,21 @@ export default function QuickBooksInvoiceSendDialog({
                             onClick={() => { if (confirm(`Have QuickBooks email the same invoice again to ${recipientTo.trim()}${recipientCc.trim() ? ` (CC ${recipientCc.trim()})` : ''}?`)) act({ action: 'resend', recipientTo, recipientCc: recipientCc.trim() || null }); }}
                             className="px-4 py-2.5 rounded-xl text-sm font-bold border border-indigo-200 text-indigo-700 dark:text-indigo-300 disabled:opacity-50">
                             Send again
+                        </button>
+                    )}
+                    {view.canCancel && !cancelOpen && (
+                        <button type="button" onClick={() => setCancelOpen(true)} disabled={busy}
+                            className="px-4 py-2.5 rounded-xl text-sm font-bold border border-rose-200 text-rose-700 dark:border-rose-900/40 dark:text-rose-300 disabled:opacity-50">
+                            {CANCEL_ACTION_LABEL}
+                        </button>
+                    )}
+                    {/* QB-INVOICE-CANCEL-1: the ONE action offered while a cancellation is unresolved. Same
+                        idempotent path as Cancel invoice, carrying no confirmation — the tenant already typed
+                        QuickBooks' number when the cancellation was recorded, before QuickBooks was touched. */}
+                    {view.canResumeCancel && (
+                        <button type="button" onClick={() => act({ action: 'cancel' })} disabled={busy}
+                            className="px-5 py-2.5 rounded-xl text-sm font-black bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">
+                            {busy ? 'Finishing…' : RESUME_CANCEL_ACTION_LABEL}
                         </button>
                     )}
                     {view.canRecheck && (

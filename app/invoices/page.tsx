@@ -27,7 +27,7 @@ import { useSession } from 'next-auth/react';
 import InvoiceComposeModal from '@/components/crm/InvoiceComposeModal';
 import EmailComposeModal from '@/components/crm/EmailComposeModal';
 import QuickBooksInvoiceSendDialog from '@/components/invoices/QuickBooksInvoiceSendDialog';
-import { invoiceRowAction } from '@/lib/quickbooks/invoiceSendView';
+import { invoiceRowAction, settlementBlockedByCancellation } from '@/lib/quickbooks/invoiceSendView';
 import UpgradeRequired from '@/components/UpgradeRequired';
 import { sumOutstandingInvoices } from '@/lib/invoiceSendTruth';
 import {
@@ -82,7 +82,12 @@ interface Invoice {
     }[];
     // QB-INVOICE-1C: present once "Send via QuickBooks" has started for this invoice. QuickBooks' own
     // invoice number appears once QuickBooks created it.
-    quickbooks_invoice_send?: { status: string; qbo_doc_number: string | null; delivery_error_type?: string | null } | null;
+    // QB-INVOICE-CANCEL-1: the two cancellation facts. Either one means this invoice may already be worth
+    // nothing in QuickBooks, so FreezerIQ does not offer to record a payment on it.
+    quickbooks_invoice_send?: {
+        status: string; qbo_doc_number: string | null; delivery_error_type?: string | null;
+        void_requested_at?: string | null; voided_at?: string | null;
+    } | null;
 }
 
 /**
@@ -1081,8 +1086,12 @@ function InvoicesContent() {
                                         {inv.quickbooks_invoice_send && (
                                             <div className="mt-1.5 text-[11px] font-medium text-slate-400">
                                                 QuickBooks{inv.quickbooks_invoice_send.qbo_doc_number ? ` #${inv.quickbooks_invoice_send.qbo_doc_number}` : ''}
-                                                {inv.quickbooks_invoice_send.status === 'sent' ? ' · emailed'
-                                                    : inv.quickbooks_invoice_send.status === 'needs_review' ? ' · needs review' : ' · in progress'}
+                                                {/* QB-INVOICE-CANCEL-1: a canceled invoice's QuickBooks copy is voided — say so, not 'emailed';
+                                                    and an unfinished cancellation says that rather than looking collectible. */}
+                                                {inv.status === 'CANCELED' ? ' · voided'
+                                                    : settlementBlockedByCancellation(inv.quickbooks_invoice_send) ? ' · cancellation pending'
+                                                        : inv.quickbooks_invoice_send.status === 'sent' ? ' · emailed'
+                                                            : inv.quickbooks_invoice_send.status === 'needs_review' ? ' · needs review' : ' · in progress'}
                                             </div>
                                         )}
                                     </td>
@@ -1120,7 +1129,10 @@ function InvoicesContent() {
                                                 actually settleable. `!== 'PAID'` also
                                                 offered it on DRAFT invoices nobody had
                                                 sent yet, and on CANCELED ones. */}
-                                            {isSettleableInvoiceStatus(inv.status) && (
+                                            {/* QB-INVOICE-CANCEL-1: and not while this invoice's QuickBooks
+                                                copy is voided, or may already have been — the settlement
+                                                transition refuses it, so nothing offers it either. */}
+                                            {isSettleableInvoiceStatus(inv.status) && !settlementBlockedByCancellation(inv.quickbooks_invoice_send) && (
                                                 <button
                                                     onClick={() => openSettleDialog(inv)}
                                                     className="p-2 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg text-slate-400 hover:text-emerald-600 transition-all shadow-sm"

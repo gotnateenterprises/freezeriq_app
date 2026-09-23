@@ -2787,6 +2787,19 @@ model QuickBooksInvoiceSend {
   problem                     String?
   problem_detail              String?
   problem_at                  DateTime?
+  /// QB-INVOICE-CANCEL-1: the DURABLE INTENT to void the linked QuickBooks invoice, committed BEFORE the
+  /// irreversible QuickBooks write and outliving both the lease and the process. While it is set and
+  /// `voided_at` is still null the cancellation is unresolved: no settlement may run, so an interrupted
+  /// cancellation can never leave QuickBooks voided and the FreezerIQ invoice paid. Cleared only when
+  /// FreezerIQ can PROVE QuickBooks was not written (Intuit rejected the void outright).
+  void_requested_at           DateTime?
+  void_requested_by           String?
+  /// QB-INVOICE-CANCEL-1: when the linked QuickBooks invoice was VOIDED by "Cancel invoice", and by whom.
+  /// Additive on purpose: `status` must keep saying the invoice was sent (it was), so the send history stays
+  /// true; this records the separate, later fact that QuickBooks' own copy was voided and the FreezerIQ
+  /// invoice was canceled. Null for every lifecycle that was never canceled.
+  voided_at                   DateTime?
+  voided_by                   String?
   started_by                  String?
   sent_by                     String?
   created_at                  DateTime                    @default(now())

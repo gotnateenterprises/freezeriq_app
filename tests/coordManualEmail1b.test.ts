@@ -96,6 +96,9 @@ describe('1. schema and migration', () => {
             // QB-INVOICE-1C: QuickBooks invoice settings + the verified send lifecycle. Additive;
             // authorized by the owner's QB-INVOICE-1C brief.
             '20260915170000_qb_invoice_1c_invoice_send',
+            // QB-INVOICE-CANCEL-1: two nullable columns recording when the linked QuickBooks invoice was
+            // voided by "Cancel invoice", and by whom. Additive; authorized by the owner's brief.
+            '20260923010000_qb_invoice_cancel_1_voided',
         ]);
     });
 });

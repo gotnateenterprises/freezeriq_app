@@ -41,7 +41,13 @@ export type ContractStage =
      * EXCEPT `balance_unpaid`, because a payment legitimately lowers the Balance (the payment check classifies the
      * Balance itself), and no delivery check, because payment evidence does not depend on who was emailed.
      */
-    | 'payment';
+    | 'payment'
+    /**
+     * QB-INVOICE-CANCEL-1: the invoice read back straight after FreezerIQ VOIDED it. A voided QuickBooks invoice
+     * deliberately no longer carries FreezerIQ's numbers — every amount is zero — so this stage has its OWN
+     * checks (`verifyVoidedQuickBooksInvoice`) and shares none of the money checks above.
+     */
+    | 'voided';
 
 export interface ExpectedQuickBooksLine {
     role: 'bundle' | 'share' | 'tax';
@@ -78,6 +84,12 @@ export interface ExpectedDelivery {
     docNumber?: string;
     /** 'sent': when FreezerIQ asked QuickBooks to send (or to apply the payment options that caused an auto-send). */
     sendRequestedAt?: Date;
+    /**
+     * 'voided' ONLY (QB-INVOICE-CANCEL-1): how many transactions QuickBooks links to the invoice, as
+     * `readQuickBooksInvoicePaymentLinks` reports them. 0 proves the void created no Payment and no credit;
+     * null means the links could not be read, and the void contract then fails closed.
+     */
+    linkedTxnCount?: number | null;
 }
 
 export interface ContractFailure {
@@ -128,12 +140,52 @@ export function quickBooksTaxIsZero(inv: QuickBooksInvoiceSnapshot): boolean {
         && inv.taxLineAmounts.every(zero);
 }
 
+/**
+ * QB-INVOICE-CANCEL-1 — the read-back contract for an invoice FreezerIQ has just VOIDED in QuickBooks.
+ *
+ * A void is the one QuickBooks change that is SUPPOSED to move the money: QuickBooks keeps the transaction and
+ * zeroes it. So this contract proves the opposite of the others — that it is still the SAME transaction (same Id,
+ * same DocNumber, same customer, same currency and date), that it is now worth nothing and therefore collects
+ * nothing (TotalAmt 0, Balance 0, every line 0, no native tax), and that voiding created no Payment or credit
+ * (QuickBooks links nothing to it). Anything unreadable — an amount that is not a whole number of cents, links
+ * that could not be read — fails closed, because FreezerIQ marks its own invoice canceled only on this proof.
+ */
+export function verifyVoidedQuickBooksInvoice(
+    inv: QuickBooksInvoiceSnapshot, expected: ExpectedQuickBooksInvoice, delivery: ExpectedDelivery,
+): ContractResult {
+    const failures: ContractFailure[] = [];
+    const check = (name: string, ok: boolean, exp?: unknown, act?: unknown) => {
+        if (!ok) failures.push({ check: name, expected: exp, actual: act });
+    };
+    const zero = (n: number | null) => wholeCents(n) && cents(n) === 0;
+
+    // ── still the same transaction ──
+    check('qbo_invoice_id', /^[0-9]{1,32}$/.test(inv.id) && (delivery.qboInvoiceId === undefined || inv.id === delivery.qboInvoiceId), delivery.qboInvoiceId, inv.id);
+    check('doc_number_present', typeof inv.docNumber === 'string' && inv.docNumber.trim().length > 0, 'QuickBooks-assigned', inv.docNumber);
+    if (delivery.docNumber !== undefined) check('doc_number_unchanged', inv.docNumber === delivery.docNumber, delivery.docNumber, inv.docNumber);
+    check('customer', inv.customerId === expected.customerId, expected.customerId, inv.customerId);
+    check('currency_usd', inv.currency === 'USD', 'USD', inv.currency);
+    check('txn_date', inv.txnDate === expected.txnDate, expected.txnDate, inv.txnDate);
+
+    // ── and it is now worth nothing: it can never be collected again ──
+    check('void_total_zero', zero(inv.totalAmt), 0, inv.totalAmt);
+    check('void_balance_zero', zero(inv.balance), 0, inv.balance);
+    check('void_lines_zero', inv.lines.every((l) => zero(l.amount)), 0, inv.lines.map((l) => l.amount));
+    check('quickbooks_tax_did_not_affect_total', quickBooksTaxIsZero(inv), 0, { totalTax: inv.totalTax, taxLines: inv.taxLineAmounts, readable: inv.taxDetailReadable });
+    // ── voiding creates no money of its own: nothing is linked to the invoice ──
+    check('void_no_linked_transaction', delivery.linkedTxnCount === 0, 0, delivery.linkedTxnCount);
+
+    return { ok: failures.length === 0, failures, deliveryErrorType: inv.delivery?.errorType ?? null };
+}
+
 export function verifyQuickBooksInvoice(
     inv: QuickBooksInvoiceSnapshot,
     expected: ExpectedQuickBooksInvoice,
     delivery: ExpectedDelivery,
     stage: ContractStage,
 ): ContractResult {
+    // A voided invoice has its own contract: none of the money checks below apply once QuickBooks has zeroed it.
+    if (stage === 'voided') return verifyVoidedQuickBooksInvoice(inv, expected, delivery);
     const failures: ContractFailure[] = [];
     const check = (name: string, ok: boolean, exp?: unknown, act?: unknown) => {
         if (!ok) failures.push({ check: name, expected: exp, actual: act });

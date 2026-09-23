@@ -298,6 +298,12 @@ let invoiceRow: any;
 let claimCount = 1;
 
 const txClient: any = {
+    // QB-INVOICE-CANCEL-1: the transition locks the invoice's QuickBooks lifecycle row (if any) before deciding.
+    // These OPS-3 invoices have no QuickBooks lifecycle, so the lock finds nothing and the release is unchanged.
+    $queryRaw: async (sql: any) => {
+        calls.push({ op: 'lifecycle.forUpdate', args: String(Array.isArray(sql) ? sql.join('?') : sql).replace(/s+/g, ' ').trim() });
+        return [];
+    },
     invoice: {
         updateMany: async (a: any) => {
             calls.push({ op: 'invoice.settle', args: a });

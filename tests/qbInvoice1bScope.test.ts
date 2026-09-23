@@ -136,6 +136,8 @@ describe('QB-INVOICE-1B · least privilege and data minimisation', () => {
             'parseLinkedTxns', 'parseQuickBooksInvoice', 'parseQuickBooksPayment', 'readCustomer', 'readQuickBooksAccount', 'readQuickBooksInvoice',
             'readQuickBooksInvoicePaymentLinks', 'readQuickBooksItem', 'readQuickBooksPayment',
             'readQuickBooksPreferences', 'readQuickBooksTerm', 'refreshAccessToken', 'revokeToken', 'sendQuickBooksInvoice', 'updateQuickBooksInvoiceDelivery',
+            // QB-INVOICE-CANCEL-1: the void of the SAME invoice — no delete, no credit memo, no payment.
+            'voidQuickBooksInvoice',
         ]);
     });
 
@@ -184,9 +186,10 @@ describe('QB-INVOICE-1B · the migration is additive', () => {
 
     it('is the 26th migration, after f8073eb’s 25 (followed only by QB-INVOICE-1C’s), and changes no existing column or row', () => {
         const dirs = readdirSync(join(ROOT, 'prisma/migrations')).filter((d) => /^\d{14}_/.test(d)).sort();
-        expect(dirs).toHaveLength(27);
+        expect(dirs).toHaveLength(28);
         expect(dirs[25]).toBe('20260913120000_qb_invoice_1b_quickbooks_links');
         expect(dirs[26]).toBe('20260915170000_qb_invoice_1c_invoice_send');
+        expect(dirs[27]).toBe('20260923010000_qb_invoice_cancel_1_voided');
         const sql = R(MIGRATION).split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
         expect(sql).not.toMatch(/\bDROP\b|\bRENAME\b|ALTER\s+COLUMN|\bUPDATE\s+"|\bDELETE\s+FROM|\bINSERT\s+INTO|\bTRUNCATE\b/i);
         // Every ALTER TABLE adds a constraint to a NEW table; the only statement on an existing table is one unique index.

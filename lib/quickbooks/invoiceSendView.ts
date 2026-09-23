@@ -31,6 +31,10 @@ const OWN_BLOCKER_TEXT: Record<Exclude<SendBlocker, keyof typeof SETTINGS_BLOCKE
     update_rejected: 'QuickBooks refused the new recipient. Check the address and try again.',
     lifecycle_unreadable: 'This invoice’s QuickBooks record could not be read. It needs an administrator’s review.',
     recheck_not_available: 'This stopped send cannot be rechecked. Only a send that stopped because the new QuickBooks invoice did not match FreezerIQ can be re-read.',
+    cancel_not_available: 'This invoice cannot be canceled. Only an invoice QuickBooks has emailed and nobody has paid can be canceled here.',
+    invoice_paid: 'This invoice is already recorded as paid, so it is not canceled. Correct the payment first.',
+    paid_in_quickbooks: 'QuickBooks shows a payment or a credit applied to this invoice, so FreezerIQ did not void it. Nothing was changed — check the invoice in QuickBooks.',
+    cancel_conflict: 'The QuickBooks invoice was voided, but this invoice changed at the same moment, so FreezerIQ did not cancel it. It needs an administrator’s review: the QuickBooks invoice is now worth nothing.',
     settings_missing: 'Set up the QuickBooks invoice settings first (Settings → Integrations).',
     not_campaign_invoice: 'Only fundraiser invoices created at closeout can be sent through QuickBooks.',
     no_lines: 'This invoice has no lines to send.',
@@ -72,6 +76,10 @@ export const PROBLEM_TEXT: Record<SendProblem, string> = {
     verification_failed_created: 'The new QuickBooks invoice did not match FreezerIQ exactly, so nothing was sent. The same QuickBooks invoice is kept for review.',
     verification_failed_recipients: 'The QuickBooks invoice’s recipients did not match what you reviewed, so nothing was sent. It needs an administrator’s review.',
     verification_failed_payment_options: 'The QuickBooks invoice did not match after its payment options were set, so nothing was sent. It needs an administrator’s review.',
+    void_rejected: 'QuickBooks refused to void the invoice, so nothing was canceled. The invoice is unchanged in both places.',
+    void_outcome_unknown: 'QuickBooks did not confirm the void, so nothing was canceled in FreezerIQ. Try Cancel invoice again — it reads QuickBooks first and never voids twice.',
+    cancel_conflict: 'The QuickBooks invoice was voided, but this invoice changed at the same moment. FreezerIQ changed nothing else; check both.',
+    verification_failed_voided: 'QuickBooks did not read back as a voided invoice, so the FreezerIQ invoice was left as it was. It needs an administrator’s review.',
     verification_failed_sent: 'QuickBooks’ record of the email did not match what FreezerIQ expected. It needs an administrator’s review.',
 };
 
@@ -89,6 +97,56 @@ export const STEP_TEXT: Record<InvoiceSendStep, string> = {
  */
 export const RECHECK_TEXT = 'Recheck QuickBooks invoice re-reads the SAME QuickBooks invoice — the one already created — and checks it against FreezerIQ again. No new invoice is created and nothing is emailed by the recheck. If it matches, the send continues where it stopped and you finish it with Resume. If it still does not match, it stays stopped.';
 export const RECHECK_ACTION_LABEL = 'Recheck QuickBooks invoice';
+
+/**
+ * QB-INVOICE-CANCEL-1 — the one way to stop collecting on an invoice QuickBooks already emailed. It promises
+ * exactly what the code does: the SAME QuickBooks invoice is voided (kept, worth nothing, never deleted and never
+ * replaced), the FreezerIQ invoice becomes Canceled, nothing is marked paid, and no held food is released.
+ */
+export const CANCEL_ACTION_LABEL = 'Cancel invoice';
+export const CANCEL_STATUSES_TEXT = 'Only an invoice QuickBooks has emailed and nobody has paid can be canceled.';
+export const cancelExplainer = (docNumber: string | null) =>
+    `FreezerIQ will void QuickBooks invoice ${docNumber ? `#${docNumber}` : 'this invoice'} and mark this invoice Canceled. `
+    + 'The same QuickBooks invoice is kept for your records — voided, worth nothing and no longer payable. '
+    + 'No replacement invoice is created, no payment is recorded, and the fundraiser’s food stays on hold. '
+    + 'Voiding a QuickBooks invoice cannot be undone.';
+export const cancelConfirmPrompt = (docNumber: string | null) =>
+    `Type ${docNumber ? `${docNumber}` : 'the QuickBooks invoice number'} to confirm.`;
+const canceledText = (docNumber: string | null) =>
+    `This invoice is canceled. QuickBooks invoice ${docNumber ? `#${docNumber}` : ''} was voided: it is kept for your records, is worth nothing and can no longer be paid. `
+    + 'No payment was recorded, and the fundraiser’s food is still on hold.';
+/** The FreezerIQ invoice statuses the dialog may offer "Cancel invoice" for (the service re-proves them). */
+const CANCELABLE_STATUSES = ['SENT', 'PENDING', 'OVERDUE'];
+
+/**
+ * QB-INVOICE-CANCEL-1 — the unresolved cancellation. FreezerIQ committed to voiding the QuickBooks invoice and
+ * recorded that decision before touching QuickBooks, but the outcome was never confirmed here — the connection
+ * dropped, or this very process stopped. The invoice must NOT look like an ordinary collectible invoice: until
+ * it is reconciled, QuickBooks' copy may already be worth nothing, so every payment action is withheld.
+ */
+export const CANCEL_PENDING_TITLE = 'Cancellation pending';
+export const CANCEL_PENDING_TEXT = 'FreezerIQ started canceling this QuickBooks invoice but did not finish confirming the result. '
+    + 'Payment actions are temporarily blocked. Choose Resume cancellation to safely check the same QuickBooks invoice and finish the cancellation.';
+export const RESUME_CANCEL_ACTION_LABEL = 'Resume cancellation';
+export const RESUME_CANCEL_TEXT = 'Resume cancellation reads the SAME QuickBooks invoice — the one already started — and finishes from wherever it stopped. '
+    + 'If QuickBooks already voided it, nothing is voided a second time. No new invoice is created, no payment is recorded, and the fundraiser’s food stays on hold.';
+
+/**
+ * Is this sent lifecycle's cancellation still unresolved? Canceled is settled (the invoice says so). Anything
+ * else with a recorded decision to void — the intent, or a void that did not verify — is pending, including a
+ * payload whose invoice status was not loaded: not knowing is a reason to withhold payment actions, not to
+ * offer them. A payload carrying neither field (an older one) is never read as pending.
+ */
+export function cancellationPending(payload: {
+    invoiceStatus?: string | null; canceledAt?: string | null; cancelPendingAt?: string | null;
+}): boolean {
+    if (payload.invoiceStatus === 'CANCELED') return false;
+    const requested = payload.cancelPendingAt ?? null;
+    const voided = payload.canceledAt ?? null;
+    // A completed cancellation whose invoice status simply was not loaded keeps reading as canceled, as before.
+    if (requested === null) return false;
+    return voided === null || (payload.invoiceStatus ?? null) !== null;
+}
 
 export const SENT_MEANING = 'Sent means QuickBooks reports it emailed the invoice. It does not mean the email was delivered, and it does not mean the invoice was paid.';
 export const SEND_EXPLAINER = 'FreezerIQ creates this invoice in QuickBooks unsent, checks every line and total against FreezerIQ, adds the recipients, and only then asks QuickBooks to email it. If anything does not match, nothing is sent and the same QuickBooks invoice is kept for review.';
@@ -118,11 +176,26 @@ export const RESEND_INTERRUPTION_DETAIL: Partial<Record<SendProblem, string>> = 
     update_outcome_unknown: 'QuickBooks did not confirm the corrected recipient, so the re-send stopped before sending.',
 };
 
-/** What the invoice row's QuickBooks action says, from the three facts the invoice list carries. */
+/** What the invoice row's QuickBooks action says, from the facts the invoice list carries. */
 export interface InvoiceRowSendState {
     status: string;
     qbo_doc_number: string | null;
     delivery_error_type?: string | null;
+    /** QB-INVOICE-CANCEL-1: FreezerIQ's durable decision to void the QuickBooks invoice, and the recorded void. */
+    void_requested_at?: Date | string | null;
+    voided_at?: Date | string | null;
+}
+
+const stamp = (x: Date | string | null | undefined) => (x == null ? null : typeof x === 'string' ? x : x.toISOString());
+
+/**
+ * QB-INVOICE-CANCEL-1 — may this invoice still be settled? An invoice whose cancellation is unresolved may
+ * already be worth nothing in QuickBooks, so the list must not offer Record Payment for it. The settlement
+ * transition refuses it anyway; this only stops FreezerIQ offering an action it will refuse.
+ */
+export function settlementBlockedByCancellation(send: InvoiceRowSendState | null | undefined): boolean {
+    if (!send) return false;
+    return stamp(send.void_requested_at) !== null || stamp(send.voided_at) !== null;
 }
 
 export interface InvoiceRowAction {
@@ -150,6 +223,10 @@ export function invoiceRowAction(send: InvoiceRowSendState | null | undefined, i
     if (!send) return invoiceStatus === QUICKBOOKS_INITIAL_SEND_STATUS ? { label: 'Review & send', tone: 'neutral' } : null;
     if (send.status === 'needs_review') return { label: 'Review QuickBooks send', tone: 'warn' };
     if (send.status !== 'sent') return { label: 'Resume QuickBooks send', tone: 'warn' };
+    // QB-INVOICE-CANCEL-1: an unresolved cancellation is what this row is about — not its delivery, not its number.
+    if (cancellationPending({ invoiceStatus, canceledAt: stamp(send.voided_at), cancelPendingAt: stamp(send.void_requested_at) })) {
+        return { label: 'Finish canceling QuickBooks invoice', tone: 'warn' };
+    }
     if (send.delivery_error_type) return { label: 'Review delivery issue', tone: 'warn' };
     return { label: send.qbo_doc_number ? `View QuickBooks invoice #${send.qbo_doc_number}` : 'View QuickBooks invoice', tone: 'ok' };
 }
@@ -166,10 +243,14 @@ export interface SendDialogView {
     canCheckPayment: boolean;
     /** A send stopped by the create-stage read-back: the SAME QuickBooks invoice may be re-read and re-checked. */
     canRecheck: boolean;
+    /** QB-INVOICE-CANCEL-1: an emailed, unpaid invoice may be canceled — voiding the SAME QuickBooks invoice. */
+    canCancel: boolean;
+    /** QB-INVOICE-CANCEL-1: a cancellation FreezerIQ began but never confirmed may be finished, idempotently. */
+    canResumeCancel: boolean;
 }
 
 const base: SendDialogView = {
-    title: '', tone: 'neutral', messages: [], canSend: false, canResume: false, canCheckDelivery: false, canResend: false, canCheckPayment: false, canRecheck: false,
+    title: '', tone: 'neutral', messages: [], canSend: false, canResume: false, canCheckDelivery: false, canResend: false, canCheckPayment: false, canRecheck: false, canCancel: false, canResumeCancel: false,
 };
 
 // ── QB-INVOICE-1D: "Check QuickBooks payment" ──────────────────────────────
@@ -267,6 +348,29 @@ export function sendDialogView(payload: InvoiceSendPayload | null): SendDialogVi
                     : `The last attempt to send it again did not complete: ${PROBLEM_TEXT[payload.lastProblem]}`);
             }
             if (payload.invoiceStatus === 'PAID') messages.push('FreezerIQ records this invoice as paid.');
+            // QB-INVOICE-CANCEL-1: an unresolved cancellation comes FIRST. QuickBooks' copy may already be void,
+            // so this invoice is not collectible: no Record Payment, no QuickBooks payment check, no Send again,
+            // and no second Cancel — only the one idempotent action that finishes what was started.
+            if (cancellationPending(payload)) {
+                return {
+                    ...base,
+                    title: CANCEL_PENDING_TITLE,
+                    tone: 'warn',
+                    messages: [CANCEL_PENDING_TEXT, RESUME_CANCEL_TEXT,
+                        ...(payload.lastProblem ? [PROBLEM_TEXT[payload.lastProblem]] : [])],
+                    canResumeCancel: !payload.busy,
+                };
+            }
+            // A canceled invoice keeps its history and offers nothing further. A payload that carries no
+            // cancellation at all (an older one, or a missing field) is NEVER read as canceled.
+            if ((payload.canceledAt ?? null) !== null || payload.invoiceStatus === 'CANCELED') {
+                return {
+                    ...base,
+                    title: payload.docNumber ? `Canceled — QuickBooks invoice ${payload.docNumber} voided` : 'Canceled — QuickBooks invoice voided',
+                    tone: 'neutral',
+                    messages: [...messages, canceledText(payload.docNumber)],
+                };
+            }
             return {
                 ...base,
                 title: payload.docNumber ? `Sent via QuickBooks — invoice ${payload.docNumber}` : 'Sent via QuickBooks',
@@ -275,6 +379,7 @@ export function sendDialogView(payload: InvoiceSendPayload | null): SendDialogVi
                 canCheckDelivery: !payload.busy,
                 canResend: !payload.busy && payload.invoiceStatus === 'SENT',
                 canCheckPayment: !payload.busy && payload.invoiceStatus === 'SENT',
+                canCancel: !payload.busy && payload.docNumber !== null && CANCELABLE_STATUSES.includes(payload.invoiceStatus ?? ''),
             };
         }
         default: return { ...base, title: 'Could not load', tone: 'bad' };

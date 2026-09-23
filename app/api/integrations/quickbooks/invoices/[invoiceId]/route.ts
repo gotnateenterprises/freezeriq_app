@@ -6,6 +6,7 @@
  * POST  {"action":"send","reviewToken":"…","recipientTo":"…","recipientCc":"…"|null}
  *       {"action":"resume"}
  *       {"action":"recheck"}                                         (re-reads the SAME invoice; never creates one)
+ *       {"action":"cancel","confirmation":"<DocNumber>"}            (voids the SAME invoice; marks this one Canceled)
  *       {"action":"check_delivery"}
  *       {"action":"resend","recipientTo":"…","recipientCc":"…"|null}
  *       {"action":"check_payment"}                                   (QB-INVOICE-1D)
@@ -30,6 +31,7 @@ import { mayManageQuickBooks } from '@/lib/quickbooks/access';
 import { resolveQuickBooksConfig } from '@/lib/quickbooks/config';
 import { intuitErrorDetail } from '@/lib/quickbooks/intuitClient';
 import {
+    cancelQuickBooksInvoice,
     checkQuickBooksInvoiceDelivery,
     getQuickBooksInvoiceSendView,
     InvoiceNotFoundError,
@@ -64,6 +66,7 @@ function paymentStatus(result: PaymentCheckResult): number {
 function actionStatus(result: SendActionResult): number {
     switch (result.outcome) {
         case 'sent': return 200;
+        case 'canceled': return 200;
         case 'in_progress': return 202;
         case 'invalid': return 400;
         case 'blocked': return result.blockers.every((b) => CONNECTION_BLOCKERS.has(b)) ? 503 : 409;
@@ -111,7 +114,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ invoice
         return json({ error: 'Invalid request' }, 400);
     }
     const action = body?.action;
-    if (action !== 'send' && action !== 'resume' && action !== 'recheck' && action !== 'check_delivery' && action !== 'resend' && action !== 'check_payment') {
+    if (action !== 'send' && action !== 'resume' && action !== 'recheck' && action !== 'cancel'
+        && action !== 'check_delivery' && action !== 'resend' && action !== 'check_payment') {
         return json({ error: 'Invalid request' }, 400);
     }
 
@@ -137,7 +141,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ invoice
                 // The one repair: re-read the SAME QuickBooks invoice. It never creates one, and never sends.
                 : action === 'recheck'
                     ? await recheckQuickBooksInvoiceCreate({ businessId, invoiceId, config, userId })
-                    : await resendQuickBooksInvoice({ businessId, invoiceId, config, userId, recipientTo: body.recipientTo, recipientCc: body.recipientCc ?? null });
+                    // Cancel: void the SAME QuickBooks invoice, then mark this one Canceled. Never creates, never pays.
+                    : action === 'cancel'
+                        ? await cancelQuickBooksInvoice({ businessId, invoiceId, config, userId, confirmation: body.confirmation })
+                        : await resendQuickBooksInvoice({ businessId, invoiceId, config, userId, recipientTo: body.recipientTo, recipientCc: body.recipientCc ?? null });
         return json(result, actionStatus(result));
     } catch (e) {
         if (e instanceof InvoiceNotFoundError) return json({ error: 'Invoice not found' }, 404);

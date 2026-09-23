@@ -223,6 +223,7 @@ describe('QB-INVOICE-1C · the invoice list shows where a QuickBooks send stands
         const { GET } = await import('@/app/api/tenant/invoices/route');
         await GET();
         expect(calls.find((c) => c.op === 'invoice.findMany')!.args.include.quickbooks_invoice_send)
-            .toEqual({ select: { status: true, qbo_doc_number: true, delivery_error_type: true } });
+            // QB-INVOICE-CANCEL-1 adds the two cancellation facts — still never a QuickBooks id.
+            .toEqual({ select: { status: true, qbo_doc_number: true, delivery_error_type: true, void_requested_at: true, voided_at: true } });
     });
 });

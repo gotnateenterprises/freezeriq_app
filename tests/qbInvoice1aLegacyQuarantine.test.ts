@@ -170,7 +170,9 @@ describe('QB-INVOICE-1A · no QuickBooks invoice can become a FreezerIQ Order', 
             const qboInvoice = /\/v3\/company\/[^'"`]*\/invoice/i.test(code) || /['"`]\/invoice\b/i.test(code);
             expect({ f, writes, qboMoney, qboInvoice }).toEqual({
                 f,
-                writes: f === 'lib/quickbooks/invoiceSend.ts' ? ['invoice.updateMany'] : [],
+                // The lifecycle owns the two FreezerIQ invoice writes QuickBooks may cause: DRAFT -> SENT after a
+                // verified send, and SENT/PENDING/OVERDUE -> CANCELED after a verified void (QB-INVOICE-CANCEL-1).
+                writes: f === 'lib/quickbooks/invoiceSend.ts' ? ['invoice.updateMany', 'invoice.updateMany'] : [],
                 qboMoney: false,
                 qboInvoice: f === 'lib/quickbooks/intuitClient.ts',
             });
@@ -186,8 +188,10 @@ describe('QB-INVOICE-1A · no QuickBooks invoice can become a FreezerIQ Order', 
             'lib/quickbooks/invoiceSend.ts: invoice.findFirst',
             'lib/quickbooks/invoiceSend.ts: invoice.findFirst',
             'lib/quickbooks/invoiceSend.ts: invoice.updateMany',
+            'lib/quickbooks/invoiceSend.ts: invoice.updateMany',
         ]);
-        // The one write, exactly: DRAFT → SENT, and nothing else on the row.
+        // QB-INVOICE-CANCEL-1 adds the second invoice write: the cancellation, pinned in qbInvoice1cScope.
+        // The send's write, exactly: DRAFT → SENT, and nothing else on the row.
         expect(strip(R('lib/quickbooks/invoiceSend.ts'))).toMatch(/tx\.invoice\.updateMany\(\{\s*where: \{ id: s\.invoiceId, business_id: s\.businessId, status: 'DRAFT' \},\s*data: \{ status: 'SENT' \},\s*\}\)/);
     });
 
@@ -201,7 +205,8 @@ describe('QB-INVOICE-1A · no QuickBooks invoice can become a FreezerIQ Order', 
         // Every path handed to the shared Accounting request builders (1B accountingRequest, 1C accountingJson):
         const entityPaths = [...client.matchAll(/(?:accountingRequest|accountingJson)\(config, accessToken, realmId,\s*`([^`]+)`/g)].map((m) => m[1].split('?')[0]);
         expect(entityPaths.sort()).toEqual([
-            '/${entityPath}/${id}', '/customer', '/customer/${customerId}', '/invoice', '/invoice', '/invoice/${qboInvoiceId}/send', '/item', '/preferences', '/query', '/query',
+            // Three POSTs to /invoice: the create, the recipients/payment-options update and QB-INVOICE-CANCEL-1's void.
+            '/${entityPath}/${id}', '/customer', '/customer/${customerId}', '/invoice', '/invoice', '/invoice', '/invoice/${qboInvoiceId}/send', '/item', '/preferences', '/query', '/query',
         ].sort());
         // By-id reads: the three setup objects, and an invoice (by the id FreezerIQ's own create returned) — read
         // twice: for the send lifecycle and, QB-INVOICE-1D, with its LinkedTxn for the payment check — plus ONE
@@ -210,7 +215,7 @@ describe('QB-INVOICE-1A · no QuickBooks invoice can become a FreezerIQ Order', 
         // The only queries: customers by name (1B) and the three setup lists (1C) — never an invoice or payment search.
         expect(client.match(/select \* from (\w+)/g)).toEqual(['select * from Customer', 'select * from Account', 'select * from Item', 'select * from Term']);
         // token, revoke, customer create (1B); item create, invoice create, invoice update, invoice send (1C)
-        expect(client.match(/method:\s*'(POST|PUT|PATCH|DELETE)'/g)).toEqual(Array(7).fill("method: 'POST'"));
+        expect(client.match(/method:\s*'(POST|PUT|PATCH|DELETE)'/g)).toEqual(Array(8).fill("method: 'POST'"));
         expect(client).not.toMatch(/method:\s*'(PUT|PATCH|DELETE)'/);
         // The one sparse update is the recipients-and-payment-options update; nothing is ever voided or deleted.
         expect(client.match(/sparse/g)).toEqual(['sparse']);

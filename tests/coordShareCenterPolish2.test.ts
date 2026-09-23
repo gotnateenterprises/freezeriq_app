@@ -288,6 +288,8 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'components/invoices/',
                 'components/settings/QuickBooksInvoiceSettingsCard.tsx',
                 'prisma/migrations/20260915170000_qb_invoice_1c_invoice_send/',
+            // QB-INVOICE-CANCEL-1's single approved migration (voided_at / voided_by), by exact path.
+            'prisma/migrations/20260923010000_qb_invoice_cancel_1_voided/',
                 // Intuit production readiness, a later separately-authorized step of the same workstream: the
                 // PUBLIC disconnect information page Intuit requires as the app's Disconnect URL. A static page
                 // and its structural test; no route, no schema, no migration, no state change.
@@ -311,6 +313,16 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
             // opens. One page; exact path.
             const QB_ORG_LINK_1 = ['app/fundraisers/[id]/page.tsx'];
             const inQbOrgLink1 = (f: string) => QB_ORG_LINK_1.includes(f);
+            // QB-INVOICE-CANCEL-1 — a later, separately-authorized phase: "Cancel invoice" voids the SAME linked
+            // QuickBooks invoice and marks the FreezerIQ invoice CANCELED. Its code under lib/quickbooks/ and
+            // app/api/integrations/quickbooks/ is covered by the QB-INVOICE-1A prefixes, its dialog by
+            // components/invoices/ and its schema hunk by prisma/schema.prisma (excluded above). These are its
+            // other files, and its one additive migration, named exactly.
+            const QB_INVOICE_CANCEL_1 = [
+                'app/invoices/page.tsx',
+                'prisma/migrations/20260923010000_qb_invoice_cancel_1_voided/',
+            ];
+            const inQbInvoiceCancel1 = (f: string) => QB_INVOICE_CANCEL_1.some((p) => (p.endsWith("/") ? f.startsWith(p) : f === p));
             // SEC-INTUIT-ATTEST-1 — a later, separately-authorized phase closing the three
             // findings that blocked the owner's Intuit App Assessment security attestation:
             // a global no-store cache policy for /api, deletion of two full-request-body
@@ -335,7 +347,7 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
             for (const f of changed) {
                 const allowed = f === SHARE_CENTER || f.startsWith('tests/')
                     || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inSecIntuitAttest1(f);
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f);
                 expect(allowed).toBe(true);
             }
             const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -345,7 +357,7 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 // phase's "presentation only" assertion. Everything else is
                 // still held to it.
                 if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inSecIntuitAttest1(f)) continue;
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f)) continue;
                 expect(f).not.toMatch(forbidden);
             }
         });
@@ -361,6 +373,8 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'prisma/migrations/20260913120000_qb_invoice_1b_quickbooks_links/',
                 // QB-INVOICE-1C's single approved migration, by exact path.
                 'prisma/migrations/20260915170000_qb_invoice_1c_invoice_send/',
+            // QB-INVOICE-CANCEL-1's single approved migration (voided_at / voided_by), by exact path.
+            'prisma/migrations/20260923010000_qb_invoice_cancel_1_voided/',
             ];
             const remaining = out.split('\n').filter((l: string) => !approvedLater.some((a) => l.includes(a))).join('\n');
             expect(remaining).not.toMatch(/prisma\/migrations\//);

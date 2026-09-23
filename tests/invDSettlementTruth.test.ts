@@ -458,7 +458,10 @@ describe('INV-D · the owner-facing dialog', () => {
     });
 
     it('offers Record Payment only for settleable invoices', () => {
-        expect(src).toContain('isSettleableInvoiceStatus(inv.status) && (');
+        // QB-INVOICE-CANCEL-1 added the second condition: an invoice whose QuickBooks copy is voided — or may
+        // already have been, because a cancellation is unresolved — is not collectible, and the shared
+        // settlement transition refuses it. The button is not offered for work FreezerIQ will refuse.
+        expect(src).toContain('isSettleableInvoiceStatus(inv.status) && !settlementBlockedByCancellation(inv.quickbooks_invoice_send) && (');
         expect(code(INVOICES_PAGE)).not.toContain("inv.status !== 'PAID' && (");
     });
 

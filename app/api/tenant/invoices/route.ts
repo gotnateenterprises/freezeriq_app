@@ -161,7 +161,14 @@ export async function GET() {
                 items: true,
                 // QB-INVOICE-1C: where a "Send via QuickBooks" lifecycle stands, QuickBooks' own number, and
                 //    whether QuickBooks reported a delivery problem — the three facts the row's action reads.
-                quickbooks_invoice_send: { select: { status: true, qbo_doc_number: true, delivery_error_type: true } },
+                // QB-INVOICE-CANCEL-1 adds the two cancellation facts: an invoice whose QuickBooks copy is (or
+                //    may already be) void must not offer Record Payment, and its row says what is unfinished.
+                quickbooks_invoice_send: {
+                    select: {
+                        status: true, qbo_doc_number: true, delivery_error_type: true,
+                        void_requested_at: true, voided_at: true,
+                    },
+                },
             },
             orderBy: { created_at: 'desc' }
         });

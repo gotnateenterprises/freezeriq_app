@@ -10,7 +10,10 @@
  *   - editing the lines, amounts, organization share or tax that QuickBooks copied. INV-C already froze those on a
  *     fundraiser invoice, but freezing them silently answers 200 to a request that asked to change them, so an
  *     invoice QuickBooks holds refuses it instead and writes nothing at all.
- * Correcting an invoice after QuickBooks has it needs a future void/repair workflow; nothing here edits QuickBooks.
+ * Correcting an invoice after QuickBooks has it still needs a future repair workflow; nothing here edits QuickBooks.
+ * The one exception is QB-INVOICE-CANCEL-1: the dedicated "Cancel invoice" action (lib/quickbooks/invoiceSend.ts)
+ * voids the SAME QuickBooks invoice and then moves this invoice to CANCELED. The generic editor still refuses every
+ * status change, so that transition can only happen through that one verified, confirmed action.
  * Recording a payment (INV-D) is unaffected, and so are due date, payment method and the other editable fields.
  *
  * Pure: routes select QUICKBOOKS_LINK_SELECT with the invoice they already read.

@@ -86,11 +86,48 @@ export async function settleInvoiceInTransaction(
     //    settlements cannot both succeed — the loser's `count` is 0 and it falls through to the caller's
     //    re-read instead of stamping its own date over the winner's. It also makes it structurally impossible
     //    to move an invoice out of PAID, DRAFT or CANCELED.
+    //
+    //    QB-INVOICE-CANCEL-1 adds EXCLUSION, not just a condition, and only for invoices QuickBooks holds.
+    //
+    //    An invoice may not become PAID once FreezerIQ has DECIDED to void its QuickBooks copy, nor once that
+    //    copy IS void, nor while a cancellation holds the lifecycle lease across its QuickBooks round trip.
+    //    Three facts, and each is refused here:
+    //
+    //      void_requested_at   the durable intent, committed BEFORE the irreversible QuickBooks write. It does
+    //                          not expire and it survives the process, so a cancellation interrupted between
+    //                          Intuit accepting the void and FreezerIQ recording it leaves this invoice
+    //                          unsettleable until a person (or a retry) reconciles it. This is the one that
+    //                          makes "QuickBooks voided + FreezerIQ PAID" unreachable rather than merely rare.
+    //      voided_at           QuickBooks' copy is void. Irreversible; nothing may ever settle it.
+    //      lease_until         a live cancellation. Concurrency only — and deliberately NOT load-bearing on its
+    //                          own, because a lease expires.
+    //
+    //    A condition alone would not be enough for the concurrency part: a settlement that began before the
+    //    lease was claimed would not see it, and could commit PAID while the cancellation was already voiding
+    //    QuickBooks. So this transaction LOCKS the lifecycle row first. The cancellation's lease claim — and its
+    //    intent write — are UPDATEs of that same row, so neither can commit while this transaction is open:
+    //      · claimed BEFORE this lock  → we see it here and refuse;
+    //      · claimed AFTER we commit   → it blocked until then, and the cancellation's own post-lease re-read of
+    //        this invoice sees PAID, so it stands down and QuickBooks is never voided.
+    //    An invoice with no QuickBooks lifecycle (every ordinary invoice) locks nothing and is unaffected.
+    const held = await tx.$queryRaw<Array<{ lease_until: Date | null; voided_at: Date | null; void_requested_at: Date | null }>>`
+        SELECT "lease_until", "voided_at", "void_requested_at" FROM "quickbooks_invoice_sends" WHERE "invoice_id" = ${invoice.id} FOR UPDATE`;
+    const now = new Date();
+    const lifecycle = held[0];
+    if (lifecycle && (lifecycle.voided_at !== null || lifecycle.void_requested_at !== null
+        || (lifecycle.lease_until !== null && lifecycle.lease_until.getTime() > now.getTime()))) {
+        return { count: 0 };
+    }
     const result = await tx.invoice.updateMany({
         where: {
             id: invoice.id,
             business_id: businessId,
             status: { in: fromStatuses as unknown as any[] },
+            OR: [
+                { quickbooks_invoice_send: null },
+                { quickbooks_invoice_send: { voided_at: null, void_requested_at: null, lease_until: null } },
+                { quickbooks_invoice_send: { voided_at: null, void_requested_at: null, lease_until: { lt: now } } },
+            ],
         },
         data: {
             status: 'PAID' as any,

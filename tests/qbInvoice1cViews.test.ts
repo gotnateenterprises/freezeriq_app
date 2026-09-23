@@ -3,13 +3,13 @@
  * and the "Send via QuickBooks" dialog.
  */
 
-import { blockerText, INVALID_TEXT, invoiceRowAction, PROBLEM_TEXT, QUICKBOOKS_INITIAL_SEND_STATUS, RECHECK_ACTION_LABEL, RECHECK_TEXT, RECIPIENT_SOURCE_TEXT, RESEND_INTERRUPTED_TEXT, RESEND_INTERRUPTION_DETAIL, SENT_MEANING, sendDialogView, STEP_TEXT } from '@/lib/quickbooks/invoiceSendView';
+import { blockerText, CANCEL_ACTION_LABEL, CANCEL_STATUSES_TEXT, cancelConfirmPrompt, cancelExplainer, cancellationPending, INVALID_TEXT, invoiceRowAction, PROBLEM_TEXT, QUICKBOOKS_INITIAL_SEND_STATUS, RECHECK_ACTION_LABEL, RECHECK_TEXT, RECIPIENT_SOURCE_TEXT, RESEND_INTERRUPTED_TEXT, RESEND_INTERRUPTION_DETAIL, RESUME_CANCEL_ACTION_LABEL, SENT_MEANING, sendDialogView, settlementBlockedByCancellation, STEP_TEXT } from '@/lib/quickbooks/invoiceSendView';
 import { helperItemPrompt, ROLE_LABELS, SETTINGS_BLOCKER_TEXT, SETTINGS_NOTICE_TEXT, SETTINGS_PROBLEM_TEXT, settingsCardSummary } from '@/lib/quickbooks/invoiceSettingsView';
 
 const ALL_BLOCKERS = [
     'not_connected', 'reconnect_required', 'quickbooks_unavailable', 'invoice_not_campaign', 'invoice_not_draft', 'invoice_not_sent', 'not_sent_via_quickbooks',
     'customer_not_linked', 'customer_link_invalid', 'timezone_invalid', 'linked_to_another_connection', 'changed_since_review', 'qbo_invoice_changed', 'update_rejected',
-    'lifecycle_unreadable', 'recheck_not_available', 'settings_missing', 'not_campaign_invoice', 'no_lines', 'too_many_lines', 'total_not_positive', 'money_invalid', 'line_does_not_reconcile',
+    'lifecycle_unreadable', 'recheck_not_available', 'cancel_not_available', 'invoice_paid', 'paid_in_quickbooks', 'settings_missing', 'not_campaign_invoice', 'no_lines', 'too_many_lines', 'total_not_positive', 'money_invalid', 'line_does_not_reconcile',
     'invoice_does_not_reconcile', 'tax_status_conflict', 'share_item_not_configured', 'tax_item_not_configured', 'description_invalid', 'date_invalid',
     ...Object.keys(SETTINGS_BLOCKER_TEXT), ...Object.keys(SETTINGS_PROBLEM_TEXT),
 ] as const;
@@ -17,6 +17,7 @@ const ALL_BLOCKERS = [
 const everyText = () => [
     ...ALL_BLOCKERS.map((b) => blockerText(b as any)), ...Object.values(PROBLEM_TEXT), ...Object.values(STEP_TEXT), SENT_MEANING,
     ...Object.values(RECIPIENT_SOURCE_TEXT), ...Object.values(INVALID_TEXT), RECHECK_TEXT, RECHECK_ACTION_LABEL,
+    CANCEL_ACTION_LABEL, CANCEL_STATUSES_TEXT, cancelExplainer('1052'), cancelConfirmPrompt('1052'),
     ...Object.values(SETTINGS_BLOCKER_TEXT), ...Object.values(SETTINGS_NOTICE_TEXT), ...Object.values(SETTINGS_PROBLEM_TEXT),
     ...Object.values(ROLE_LABELS).flatMap((r) => [r.title, r.help]),
 ];
@@ -46,7 +47,7 @@ describe('QB-INVOICE-1C · wording', () => {
 });
 
 describe('QB-INVOICE-1C · which actions the dialog offers', () => {
-    const sent = { state: 'sent', busy: false, docNumber: '1052', sentAt: '2026-09-15T19:00:30.000Z', autoSent: false, sendCount: 1, recipientTo: 'a@example.invalid', recipientCc: null, deliveryErrorType: null, deliveryCheckedAt: null, invoiceStatus: 'SENT', lastProblem: null } as const;
+    const sent = { state: 'sent', busy: false, docNumber: '1052', sentAt: '2026-09-15T19:00:30.000Z', autoSent: false, sendCount: 1, recipientTo: 'a@example.invalid', recipientCc: null, deliveryErrorType: null, deliveryCheckedAt: null, invoiceStatus: 'SENT', lastProblem: null, canceledAt: null } as const;
 
     it('ready → Send only; blocked → nothing; paused → Resume unless another request is running; stopped → nothing', () => {
         const pick = (v: ReturnType<typeof sendDialogView>) => ({ send: v.canSend, resume: v.canResume, check: v.canCheckDelivery, resend: v.canResend });
@@ -113,6 +114,75 @@ describe('QB-INVOICE-1C · which actions the dialog offers', () => {
         }
     });
 
+    /**
+     * QB-INVOICE-CANCEL-1 — the one destructive action the dialog offers, and only for an emailed, unpaid invoice.
+     * Its sentence must promise exactly what the code does, including that a void cannot be undone.
+     */
+    it('sent and unpaid → Cancel invoice; canceled → nothing at all, and the history stays', () => {
+        const offered = sendDialogView(sent);
+        expect(offered).toMatchObject({ canCancel: true, canCheckDelivery: true, canResend: true, canCheckPayment: true });
+        expect(CANCEL_ACTION_LABEL).toBe('Cancel invoice');
+        expect(cancelExplainer('1052')).toMatch(/void QuickBooks invoice #1052 and mark this invoice Canceled/);
+        expect(cancelExplainer('1052')).toMatch(/The same QuickBooks invoice is kept for your records/);
+        expect(cancelExplainer('1052')).toMatch(/No replacement invoice is created, no payment is recorded/);
+        expect(cancelExplainer('1052')).toMatch(/food stays on hold/);
+        expect(cancelExplainer('1052')).toMatch(/cannot be undone/);
+        expect(cancelConfirmPrompt('1052')).toBe('Type 1052 to confirm.');
+        // PAID, or already canceled: never offered.
+        expect(sendDialogView({ ...sent, invoiceStatus: 'PAID' }).canCancel).toBe(false);
+        expect(sendDialogView({ ...sent, busy: true }).canCancel).toBe(false);
+        expect(sendDialogView({ ...sent, docNumber: null }).canCancel).toBe(false);
+        const canceled = sendDialogView({ ...sent, invoiceStatus: 'CANCELED', canceledAt: '2026-09-23T00:00:00.000Z' });
+        expect(canceled).toMatchObject({ title: 'Canceled — QuickBooks invoice 1052 voided', tone: 'neutral', canCancel: false, canResend: false, canCheckPayment: false, canCheckDelivery: false });
+        expect(canceled.messages.join(' ')).toMatch(/QuickBooks invoice #1052 was voided: it is kept for your records, is worth nothing and can no longer be paid/);
+        expect(canceled.messages.join(' ')).toMatch(/QuickBooks emailed this invoice/); // the history is still there
+        expect(canceled.messages.join(' ')).toMatch(/No payment was recorded, and the fundraiser’s food is still on hold/);
+    });
+    /**
+     * QB-INVOICE-CANCEL-1 — the unresolved cancellation. FreezerIQ recorded its decision to void and never
+     * confirmed the outcome, so this invoice may already be worth nothing in QuickBooks. It must not read as an
+     * ordinary collectible invoice, and the only action offered is the one that finishes what was started.
+     */
+    it('an unfinished cancellation says so, withholds every payment action, and offers only Resume cancellation', () => {
+        const pending = sendDialogView({ ...sent, cancelPendingAt: '2026-09-23T00:00:00.000Z' });
+        expect(pending).toMatchObject({
+            title: 'Cancellation pending', tone: 'warn', canResumeCancel: true,
+            canCheckPayment: false, canResend: false, canCancel: false, canCheckDelivery: false, canSend: false, canResume: false, canRecheck: false,
+        });
+        expect(pending.messages.join(' ')).toMatch(/started canceling this QuickBooks invoice but did not finish confirming the result/);
+        expect(pending.messages.join(' ')).toMatch(/Payment actions are temporarily blocked/);
+        expect(pending.messages.join(' ')).toMatch(/reads the SAME QuickBooks invoice/);
+        expect(pending.messages.join(' ')).toMatch(/nothing is voided a second time/);
+        expect(RESUME_CANCEL_ACTION_LABEL).toBe('Resume cancellation');
+        // Its recorded reason is shown too, when there is one.
+        expect(sendDialogView({ ...sent, cancelPendingAt: '2026-09-23T00:00:00.000Z', lastProblem: 'verification_failed_voided' }).messages.join(' '))
+            .toMatch(/did not read back as a voided invoice/);
+        // A void FreezerIQ proved but could not finish is pending too — it is not "Canceled".
+        expect(sendDialogView({ ...sent, cancelPendingAt: '2026-09-23T00:00:00.000Z', canceledAt: '2026-09-23T00:00:01.000Z' }).title).toBe('Cancellation pending');
+        // Busy: still not collectible, just nothing to press yet.
+        expect(sendDialogView({ ...sent, busy: true, cancelPendingAt: '2026-09-23T00:00:00.000Z' }))
+            .toMatchObject({ title: 'Cancellation pending', canResumeCancel: false, canCheckPayment: false });
+        // Finished: the decision stays recorded, and the invoice reads as canceled, exactly as before.
+        expect(sendDialogView({ ...sent, invoiceStatus: 'CANCELED', cancelPendingAt: '2026-09-23T00:00:00.000Z', canceledAt: '2026-09-23T00:00:01.000Z' }).title)
+            .toBe('Canceled — QuickBooks invoice 1052 voided');
+        // And a payload that carries no cancellation at all is never read as one.
+        expect(sendDialogView(sent).canResumeCancel).toBe(false);
+        expect(cancellationPending({ invoiceStatus: 'SENT' })).toBe(false);
+    });
+    it('the invoice list withholds Record Payment on either cancellation fact, and says what is unfinished', () => {
+        expect(settlementBlockedByCancellation(null)).toBe(false);
+        expect(settlementBlockedByCancellation({ status: 'sent', qbo_doc_number: '1052' })).toBe(false);
+        expect(settlementBlockedByCancellation({ status: 'sent', qbo_doc_number: '1052', void_requested_at: new Date() })).toBe(true);
+        expect(settlementBlockedByCancellation({ status: 'sent', qbo_doc_number: '1052', voided_at: '2026-09-23T00:00:00.000Z' })).toBe(true);
+        expect(invoiceRowAction({ status: 'sent', qbo_doc_number: '1052', void_requested_at: new Date() }, 'SENT'))
+            .toEqual({ label: 'Finish canceling QuickBooks invoice', tone: 'warn' });
+        // A delivery problem no longer speaks for a row whose cancellation is unfinished.
+        expect(invoiceRowAction({ status: 'sent', qbo_doc_number: '1052', delivery_error_type: 'Undeliverable', void_requested_at: new Date() }, 'SENT')!.label)
+            .toBe('Finish canceling QuickBooks invoice');
+        // Once it IS canceled the row goes back to pointing at QuickBooks' own number.
+        expect(invoiceRowAction({ status: 'sent', qbo_doc_number: '1052', void_requested_at: new Date(), voided_at: new Date() }, 'CANCELED')!.label)
+            .toBe('View QuickBooks invoice #1052');
+    });
     it('a stopped send says nothing more is sent, the invoice is not marked Sent, and no second QuickBooks invoice is created', () => {
         expect(sendDialogView({ state: 'needs_review', docNumber: null, recipientTo: 'a@example.invalid', recipientCc: null, problem: null, problemDetail: null, recheckable: false }).messages.join(' '))
             .toMatch(/Nothing further is sent, the FreezerIQ invoice is not marked Sent, and no second QuickBooks invoice will be created/);
