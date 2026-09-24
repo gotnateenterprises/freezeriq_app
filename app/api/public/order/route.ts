@@ -12,6 +12,7 @@ import { validateSubmissionKey, buildSubmissionFingerprint } from '@/lib/orderId
 import { normalizeSlug, NO_SUCH_SLUG } from '@/lib/publicIdentity';
 import { purchaserDisplayName } from '@/lib/purchaserName';
 import { hasInvalidOrderQuantity } from '@/lib/orderQuantity';
+import { publicOrderRaisesLeadAlert } from '@/lib/fundraiserLead';
 // FR-TAX-CORRECTNESS-1: supporter food tax is calculated here, server-side,
 // from the campaign's FROZEN snapshot — never from a client-supplied amount.
 import { computeSupporterOrderTax } from '@/lib/fundraiserTax';
@@ -732,7 +733,13 @@ export async function POST(req: Request) {
 
         // Lead notification to the business owner — moved out of the transaction
         // (it previously ran between customer creation and order creation).
-        if (txResult.createdCustomer) {
+        //
+        // FR-SUPPORTER-LEAD-1: and NOT for a fundraiser supporter. Creating a customer row is not
+        // a sales enquiry, so this is gated on intent, not on "a row was written" — see
+        // publicOrderRaisesLeadAlert. A supporter of Clark, Edgar or Jasper buying a bundle used to
+        // raise the /raise-funds alert, "New Lead Captured: <supporter>" ... "via the Fundraiser",
+        // for every first-time supporter. Storefront orders are unchanged.
+        if (txResult.createdCustomer && publicOrderRaisesLeadAlert({ isCampaignOrder })) {
             try {
                 const owner = await prisma.user.findFirst({
                     where: { business_id: businessId }
@@ -743,7 +750,7 @@ export async function POST(req: Request) {
                         name: purchaserName,
                         email: customer.email,
                         phone: customer.phone,
-                        source: isCampaignOrder ? 'Fundraiser' : 'Storefront'
+                        source: 'Storefront'
                     });
                 }
             } catch (leadErr) {

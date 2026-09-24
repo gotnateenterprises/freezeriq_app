@@ -344,10 +344,19 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'app/api/integrations/square/route.ts',
             ];
             const inSecIntuitAttest1 = (f: string) => SEC_INTUIT_ATTEST_1.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
+            // FR-SUPPORTER-LEAD-1 — a later, separately-authorized phase: a supporter who orders
+            // through a fundraiser stopped raising the tenant's "New Lead Captured" sales alert.
+            // One condition on the public order route's post-commit notification plus the rule it
+            // calls. No schema, no migration, no money, no order or customer behaviour.
+            const FR_SUPPORTER_LEAD_1 = [
+                'app/api/public/order/route.ts',
+                'lib/fundraiserLead.ts',
+            ];
+            const inFrSupporterLead1 = (f: string) => FR_SUPPORTER_LEAD_1.includes(f);
             for (const f of changed) {
                 const allowed = f === SHARE_CENTER || f.startsWith('tests/')
                     || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f);
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f);
                 expect(allowed).toBe(true);
             }
             const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -357,7 +366,7 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 // phase's "presentation only" assertion. Everything else is
                 // still held to it.
                 if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f)) continue;
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f)) continue;
                 expect(f).not.toMatch(forbidden);
             }
         });

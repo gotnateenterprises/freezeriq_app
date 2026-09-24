@@ -69,6 +69,28 @@ export function fundraiserCrmCustomerFilter() {
 }
 
 /**
+ * FR-SUPPORTER-LEAD-1 — may a PUBLIC ORDER that created a new customer raise the tenant's
+ * "New Lead Captured" sales alert?
+ *
+ * Not when the order came through a fundraiser. A supporter who buys a bundle to support Clark
+ * County is a CUSTOMER of the tenant; they did not ask to run a fundraiser. The alert they were
+ * raising is the /raise-funds SALES alert, and it arrived in the tenant's own inbox reading
+ * "A new lead has been captured via the Fundraiser" — indistinguishable from a real enquiry, once
+ * per first-time supporter, on every live campaign.
+ *
+ * This is the same boundary `belongsInFundraiserCrm` above already draws for the Fundraiser CRM
+ * list, and for the same reason: having ordered is not fundraiser intent. It is stated here, beside
+ * that rule, so the two cannot drift apart.
+ *
+ * Deliberately narrow. It changes nothing about the order, the customer record, the campaign, the
+ * supporter's own confirmation e-mail or the coordinator's notification — only whether the tenant
+ * is told they have a new SALES LEAD. An ordinary storefront order is untouched and still raises it.
+ */
+export function publicOrderRaisesLeadAlert(order: { isCampaignOrder: boolean }): boolean {
+    return !order.isCampaignOrder;
+}
+
+/**
  * Pure mirror of the rule above, for tests and for any in-memory check.
  * Kept in the same file as the query fragment so the two cannot disagree.
  */
