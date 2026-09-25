@@ -25,6 +25,9 @@ import {
     campaignSelectionLockKey,
     CAMPAIGN_SELECTION_LOCK_NAMESPACE,
 } from '@/lib/campaignSelectionLock';
+// CRM-CAMPAIGN-DETAILS-1 took over the legacy-sync guard this suite protects; the two
+// tests below now call the rule directly instead of matching the old inline condition.
+import { operationalFillFromOrgProfile } from '@/lib/campaignOperationalDetails';
 
 const ROOT = process.cwd();
 const read = (p: string) => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -500,17 +503,50 @@ describe('public gates, Ready/Live and the legacy sync', () => {
         expect(code).not.toMatch(/status: 'Ready'|status: 'Live'/);
     });
 
+    /**
+     * CRM-CAMPAIGN-DETAILS-1 rewrote the MECHANISM these two tests guard, not the
+     * invariant. FR-FLOW-3 protected `delivery_time` alone, by checking
+     * `bundle_selection_status === 'selected'`. That left the other three operational
+     * fields unprotected, and it also left delivery_time unprotected on a campaign that
+     * never ran the coordinator bundle flow at all. The rule now lives in
+     * lib/campaignOperationalDetails.operationalFillFromOrgProfile and keys on the
+     * campaign's OWN value, so it covers all four and every campaign.
+     *
+     * These assertions are therefore behavioural now rather than textual: they call the
+     * real function, which is a stronger guarantee than matching the old regex was.
+     */
     it('the sync will not overwrite a coordinator-confirmed time', () => {
+        // A campaign that already states its time keeps it, whatever the blob says.
+        expect(operationalFillFromOrgProfile({
+            campaign: { delivery_date: null, delivery_time: '4:45 PM', end_date: null, pickup_location: null },
+            info: { delivery_time: '9:00 AM' },
+        }).delivery_time).toBeUndefined();
+        // And the route reaches that rule instead of pushing the blob through.
         const code = stripComments(read(SYNC_ROUTE));
-        expect(code).toMatch(/latestCampaign\.bundle_selection_status === 'selected'[\s\S]{0,80}\{\}/);
-        expect(code).toMatch(/delivery_time: fi\.delivery_time \|\| undefined/);
+        expect(code).toMatch(/operationalFillFromOrgProfile\(/);
+        expect(code).not.toMatch(/delivery_time: fi\.delivery_time/);
     });
 
     it('MUTATION: making the sync unconditional would be detectable', () => {
-        const code = read(SYNC_ROUTE);
-        const re = /\.\.\.\(latestCampaign\.bundle_selection_status === 'selected'[\s\S]*?\)/;
-        expect(code).toMatch(re);
-        expect(code.replace(re, 'delivery_time: fi.delivery_time')).not.toBe(code);
+        // The protection is no longer status-dependent, so the mutation to catch is
+        // "ignore the campaign's stored value". Proven by the pair below: identical blob,
+        // opposite outcomes, decided only by what the campaign already holds.
+        const info = { delivery_time: '9:00 AM', pickup_location: 'Old hall', delivery_date: '2026-08-01', deadline: '2026-07-20' };
+        const blank = operationalFillFromOrgProfile({
+            campaign: { delivery_date: null, delivery_time: null, end_date: null, pickup_location: null },
+            info,
+        });
+        const set = operationalFillFromOrgProfile({
+            campaign: {
+                delivery_date: new Date('2026-10-15T00:00:00.000Z'),
+                delivery_time: '4:45 PM',
+                end_date: new Date('2026-10-01T00:00:00.000Z'),
+                pickup_location: 'School gym',
+            },
+            info,
+        });
+        expect(Object.keys(blank).sort()).toEqual(['delivery_date', 'delivery_time', 'end_date', 'pickup_location']);
+        expect(set).toEqual({});
     });
 
     it('the public page prefers the campaign time and no longer fabricates one from the date', () => {

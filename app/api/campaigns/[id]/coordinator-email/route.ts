@@ -34,6 +34,7 @@ import {
     type CoordinatorAssignmentRow,
 } from '@/lib/campaignCoordinatorContact';
 import { getTenantSender } from '@/lib/email';
+import { checkCoordinatorSetupReadiness } from '@/lib/campaignOperationalDetails';
 
 interface ResolvedInvitation {
     to: string;
@@ -63,6 +64,10 @@ async function resolveInvitation(
             id: true,
             portal_token: true,
             customer_id: true,
+            // CRM-CAMPAIGN-DETAILS-1: the tenant-owned fulfilment details, read so the
+            // readiness check below can refuse an invitation that has none.
+            delivery_date: true,
+            delivery_time: true,
             customer: { select: { name: true } },
         },
     });
@@ -71,6 +76,31 @@ async function resolveInvitation(
     }
     if (!campaign.portal_token) {
         return { ok: false, status: 409, error: 'This fundraiser has no coordinator access link yet.' };
+    }
+
+    // ── CRM-CAMPAIGN-DETAILS-1: the tenant sets the date and time FIRST ──────
+    //
+    // The coordinator chooses bundles; the tenant decides when and where the food
+    // is handed over. Sending this invitation before those two exist asks the
+    // coordinator to set up a fundraiser whose fulfilment day nobody has decided —
+    // and it is how the pickup time came to be owned by the coordinator's form,
+    // which is what made a wrong one unfixable without a database edit.
+    //
+    // Placed alongside this route's existing preconditions (no access link, no
+    // coordinator, no coordinator email) and refusing the same way, with the same
+    // 409, because it is the same kind of fact: the fundraiser is not ready to be
+    // handed over yet.
+    //
+    // PROSPECTIVE BY CONSTRUCTION. It is evaluated only when a tenant asks to
+    // preview or send, so there is no new lifecycle state, no migration and no
+    // backfill, and nothing re-evaluates a campaign whose invitation already went
+    // out. All 7 Active Production campaigns already carry both values.
+    const readiness = checkCoordinatorSetupReadiness({
+        delivery_date: campaign.delivery_date,
+        delivery_time: campaign.delivery_time,
+    });
+    if (!readiness.ready) {
+        return { ok: false, status: 409, error: readiness.error };
     }
 
     // THE RECIPIENT AUTHORITY. Not the request body.

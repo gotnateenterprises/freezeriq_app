@@ -747,6 +747,12 @@ export async function GET(req: Request) {
                     end_date: true,
                     goal_amount: true,
                     bundle_goal: true,
+                    // CRM-CAMPAIGN-DETAILS-1: the tenant's operational details, so the
+                    // Edit details dialog prefills from the canonical campaign row
+                    // rather than from the organization's legacy fundraiser_info blob.
+                    delivery_date: true,
+                    delivery_time: true,
+                    pickup_location: true,
                     total_sales: true,
                     participant_label: true,
                     group_label: true,
@@ -927,6 +933,13 @@ export async function GET(req: Request) {
                             end_date: fc.end_date,
                             goal_amount: Number(fc.goal_amount || 0),
                             bundle_goal: bundleGoalValue,
+                            // CRM-CAMPAIGN-DETAILS-1: emitted raw. The dialog normalises
+                            // the dates for its date inputs with safeCalendarDateForInput,
+                            // the one helper that exists to stop a @db.Date becoming
+                            // yesterday west of Greenwich.
+                            delivery_date: (fc as any).delivery_date,
+                            delivery_time: (fc as any).delivery_time ?? null,
+                            pickup_location: (fc as any).pickup_location ?? null,
                             sales_total: Number(fc.total_sales || 0),
                             customer_id: c.id,
                             customer: { name: c.name, contact_name: (c as any).contact_name || null },

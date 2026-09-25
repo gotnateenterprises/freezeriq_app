@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { isOrgTaxStatus } from '@/lib/fundraiserTax';
+import { operationalFillFromOrgProfile } from '@/lib/campaignOperationalDetails';
 
 
 export const dynamic = 'force-dynamic';
@@ -459,9 +460,17 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
             const latestCampaign = await prisma.fundraiserCampaign.findFirst({
                 where: { customer_id: orgId },
                 orderBy: { created_at: 'desc' },
-                // FR-FLOW-3: bundle_selection_status decides whether the campaign's
-                // delivery_time is the coordinator's answer or still unset.
-                select: { id: true, closed_at: true, status: true, bundle_selection_status: true },
+                // CRM-CAMPAIGN-DETAILS-1: the four operational values are now READ
+                // before the sync, because the rule is no longer "push" but "fill only
+                // what is missing". bundle_selection_status is no longer consulted —
+                // operationalFillFromOrgProfile decides on the campaign's own value
+                // instead of on how far the coordinator got, which is both stricter
+                // and true for campaigns that never had a coordinator flow at all.
+                select: {
+                    id: true, closed_at: true, status: true,
+                    delivery_date: true, delivery_time: true,
+                    end_date: true, pickup_location: true,
+                },
             });
 
             // ── INV-A boundary ────────────────────────────────────────────────
@@ -485,12 +494,32 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
                 await prisma.fundraiserCampaign.update({
                     where: { id: latestCampaign.id },
                     data: {
-                        // Date fields
-                        delivery_date: fi.delivery_date ? new Date(fi.delivery_date) : undefined,
-                        end_date: fi.deadline ? new Date(fi.deadline) : undefined,
+                        // ── CRM-CAMPAIGN-DETAILS-1: fill, never overwrite ───────
+                        //
+                        // delivery_date, end_date, delivery_time and pickup_location
+                        // used to be pushed down UNCONDITIONALLY from this blob. That
+                        // made saving an ORGANISATION PROFILE able to revert a
+                        // campaign-level correction from stale JSON — and it was not
+                        // hypothetical: audited 2026-09-25, all 7 open campaigns
+                        // disagreed with their blob on all four fields (one held
+                        // '4:00 pm' against the blob's '3 PM').
+                        //
+                        // operationalFillFromOrgProfile returns only the fields the
+                        // campaign has no meaningful value for, so legacy initial fill
+                        // still works and a correction can no longer be undone. This is
+                        // the rule FR-FLOW-3 already applied to delivery_time, now
+                        // applied to all four and stated in one place.
+                        ...operationalFillFromOrgProfile({
+                            campaign: {
+                                delivery_date: latestCampaign.delivery_date,
+                                delivery_time: latestCampaign.delivery_time,
+                                end_date: latestCampaign.end_date,
+                                pickup_location: latestCampaign.pickup_location,
+                            },
+                            info: fi,
+                        }),
                         start_date: fi.start_date ? new Date(fi.start_date) : undefined,
                         // Text fields
-                        pickup_location: fi.pickup_location || undefined,
                         checks_payable: fi.checks_payable_to || undefined,
                         participant_label: fi.participant_label || undefined,
                         about_text: fi.about_text || undefined,
@@ -498,26 +527,12 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
                         payment_instructions: fi.payment_instructions || undefined,
                         external_payment_link: fi.external_payment_link || undefined,
                         bundle_goal: fi.bundle_goal ? Number(fi.bundle_goal) : undefined,
-                        // ── FR-FLOW-3: delivery_time, with one extra guard ──────
-                        //
-                        // Every other field above is pushed unconditionally, which
-                        // is right for values the tenant owns. delivery_time is
-                        // different: once a coordinator has SUBMITTED SETUP they
-                        // have stated the pickup time for THIS fundraiser, and a
-                        // later edit of the organization profile — a form that
-                        // targets "whichever campaign was created most recently"
-                        // and carries a stale JSON value — must not silently
-                        // overwrite it.
-                        //
-                        // So the organization value flows through only while setup
-                        // is still outstanding. After 'selected', the campaign's own
-                        // value is authoritative and the tenant changes it through
-                        // the campaign, not the org profile. This is the same
-                        // reasoning as the INV-A closed-campaign boundary directly
-                        // above, applied to logistics instead of money.
-                        ...(latestCampaign.bundle_selection_status === 'selected'
-                            ? {}
-                            : { delivery_time: fi.delivery_time || undefined }),
+                        // FR-FLOW-3's delivery_time-only guard used to live here. It is
+                        // gone because the spread above now enforces the same thing for
+                        // delivery_time and for the three fields that lacked it — and
+                        // enforces it on the campaign's own value rather than on
+                        // bundle_selection_status, so it also protects a campaign that
+                        // never ran the coordinator bundle flow.
                     },
                 });
             }

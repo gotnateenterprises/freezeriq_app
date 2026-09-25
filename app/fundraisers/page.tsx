@@ -23,6 +23,7 @@ import { AttentionStrip } from '@/components/crm2/AttentionStrip';
 import { CampaignPriorityList, type PriorityListCampaign } from '@/components/crm2/CampaignPriorityList';
 import { ArchivedCampaignList, filterArchivedCampaigns } from '@/components/crm2/ArchivedCampaignList';
 import { CampaignContextDrawer } from '@/components/crm2/CampaignContextDrawer';
+import { EditCampaignDetailsModal } from '@/components/crm2/EditCampaignDetailsModal';
 import { useDialogFocus } from '@/components/crm2/useDialogFocus';
 import type { CampaignTriage } from '@/lib/growth/nextAction';
 import { triageCampaign } from '@/lib/growth/nextAction';
@@ -58,6 +59,11 @@ interface Fundraiser {
     // Phase 7E closeout fields (may not be present until prisma generate runs)
     closed_at?: string | null;
     settlement_total?: number | null;
+    // CRM-CAMPAIGN-DETAILS-1: the tenant-owned operational details, so Edit details
+    // prefills from the canonical campaign row rather than the organization's blob.
+    delivery_date?: string | null;
+    delivery_time?: string | null;
+    pickup_location?: string | null;
     // GE-3: server-derived campaign health. Read-only; optional so any consumer
     // reading an older payload still renders.
     health?: CampaignHealth;
@@ -137,6 +143,8 @@ export default function FundraisersPage() {
 
     // ── Phase 7E-3: Closeout modal state ──────────────────────────────────
     const [closeoutTarget, setCloseoutTarget] = useState<Fundraiser | null>(null);
+    // CRM-CAMPAIGN-DETAILS-1: the campaign whose operational details are being edited.
+    const [detailsTarget, setDetailsTarget] = useState<Fundraiser | null>(null);
     const [closeoutLoading, setCloseoutLoading] = useState(false);
     const [closeoutResult, setCloseoutResult] = useState<{
         success: boolean;
@@ -579,6 +587,7 @@ export default function FundraisersPage() {
                     now={triageNow}
                     onCloseout={(c) => openCloseoutModal(c as Fundraiser)}
                     onArchive={(c) => handleArchiveCampaign(c as Fundraiser)}
+                    onEditDetails={(c) => setDetailsTarget(c as Fundraiser)}
                     onOpenDetail={setDetailCampaign}
                 />
             )}
@@ -594,6 +603,18 @@ export default function FundraisersPage() {
             onClose={() => setDetailCampaign(null)}
             onCloseout={(c) => { setDetailCampaign(null); openCloseoutModal(c as Fundraiser); }}
         />
+
+        {/* ── CRM-CAMPAIGN-DETAILS-1: the tenant's Edit details dialog. Writes the
+            CANONICAL campaign row through the existing PATCH, so the coordinator
+            portal and the supporter page pick the change up on their next read —
+            no duplicate field, no sync job. ──────────────────────────────────── */}
+        {detailsTarget && (
+            <EditCampaignDetailsModal
+                campaign={detailsTarget}
+                onClose={() => setDetailsTarget(null)}
+                onSaved={loadCampaigns}
+            />
+        )}
 
         {/* ── Phase 7E-3: closeout confirmation modal. CRM-CC-5 gives it the
             same dialog semantics and focus treatment as the Campaign Context

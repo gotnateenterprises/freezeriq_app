@@ -5,6 +5,10 @@ import { decideOrgShareChange, isOrgShareRejected } from '@/lib/fundraiserOrgSha
 import { decideBundleGoalChange, isBundleGoalRejected } from '@/lib/fundraiserMetrics';
 import { isCampaignClosed } from '@/lib/campaignBundleSelection';
 import { ACTIVE_CAMPAIGN_STATUS, decideActivationTaxSnapshot } from '@/lib/fundraiserTax';
+import {
+    decideOperationalDetailsChange,
+    isOperationalDetailsRejected,
+} from '@/lib/campaignOperationalDetails';
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
@@ -110,6 +114,48 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
             ? bundleGoalDecision.goal
             : undefined;
 
+        // ── CRM-CAMPAIGN-DETAILS-1: the tenant's operational-detail edit ──────
+        //
+        // delivery_time is newly accepted here. Its column has existed since
+        // FR-FLOW-3 and every read surface already prefers it, but only the
+        // coordinator's setup form could write it — so a wrong pickup time on a
+        // live fundraiser needed a database edit. The tenant owns the fundraiser's
+        // delivery date and time; this is their path to correct them.
+        //
+        // The other three (delivery_date, end_date, pickup_location) were already
+        // accepted but written RAW: `new Date(body.delivery_date)` on a @db.Date
+        // column, with no deadline-vs-delivery check and no closeout gate. They now
+        // go through the same decision, so the date-only handling and the existing
+        // launch rule apply to a correction exactly as they do to a launch.
+        //
+        // bundle_goal is deliberately NOT here — decideBundleGoalChange above
+        // already owns it, with the same closeout gate.
+        const detailsDecision = decideOperationalDetailsChange({
+            requested: {
+                delivery_date: body.delivery_date,
+                delivery_time: body.delivery_time,
+                end_date: body.end_date,
+                pickup_location: body.pickup_location,
+            },
+            campaign: {
+                delivery_date: (campaign as any).delivery_date ?? null,
+                delivery_time: (campaign as any).delivery_time ?? null,
+                end_date: (campaign as any).end_date ?? null,
+                pickup_location: (campaign as any).pickup_location ?? null,
+            },
+            campaignClosed: isCampaignClosed({
+                closed_at: (campaign as any).closed_at ?? null,
+                status: campaign.status,
+            }),
+        });
+        if (isOperationalDetailsRejected(detailsDecision)) {
+            return NextResponse.json(
+                { error: detailsDecision.error },
+                { status: detailsDecision.status },
+            );
+        }
+        const operationalData = detailsDecision.change ? detailsDecision.data : {};
+
         // ── FR-TAX-CORRECTNESS-1 HARDENING: the activation tax gate ─────────
         //
         // This route is the ONLY way a campaign reaches 'Active' without going
@@ -168,9 +214,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
                 name: body.name,
                 status: body.status,
                 start_date: body.start_date ? new Date(body.start_date) : undefined,
-                end_date: body.end_date ? new Date(body.end_date) : undefined,
-                delivery_date: body.delivery_date ? new Date(body.delivery_date) : undefined,
-                pickup_location: body.pickup_location ?? undefined,
+                // CRM-CAMPAIGN-DETAILS-1: end_date, delivery_date, delivery_time and
+                // pickup_location come from the validated decision above, never from
+                // the raw body. No key below repeats any of the four, so nothing can
+                // shadow them back to an unvalidated value.
+                ...operationalData,
                 checks_payable: body.checks_payable ?? undefined,
                 goal_amount: body.goal_amount ? Number(body.goal_amount) : undefined,
                 about_text: body.about_text,

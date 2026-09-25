@@ -51,6 +51,11 @@ export interface PriorityListCampaign extends CampaignForTriage {
     /** CRM-ACTIVE-STATUS-UX-1 — provider-confirmed invite-sent timestamp, for
      *  telling "invite not sent" apart from "waiting on coordinator". */
     coordinator_invite_sent_at?: string | null;
+    /** CRM-CAMPAIGN-DETAILS-1 — the tenant-owned operational details the Edit
+     *  details dialog prefills from. Carried, never rendered by this list. */
+    delivery_date?: string | null;
+    delivery_time?: string | null;
+    pickup_location?: string | null;
 }
 
 const SECTION_DOT: Record<CampaignPriority, string> = {
@@ -73,6 +78,7 @@ export function CampaignPriorityList({
     now,
     onCloseout,
     onArchive,
+    onEditDetails,
     onOpenDetail,
 }: {
     /** Already search/filter-scoped rows from the page. */
@@ -88,6 +94,8 @@ export function CampaignPriorityList({
     onCloseout: (c: PriorityListCampaign) => void;
     /** CRM-CAMPAIGN-ARCHIVE-ACTION-1 — confirms, then PATCHes status: 'Archived'. */
     onArchive: (c: PriorityListCampaign) => void;
+    /** CRM-CAMPAIGN-DETAILS-1 — opens the tenant Edit details dialog. */
+    onEditDetails?: (c: PriorityListCampaign) => void;
     /** CRM-CC-4 — opens the Campaign Context drawer for one campaign. */
     onOpenDetail?: (c: PriorityListCampaign & { triage: CampaignTriage }) => void;
 }) {
@@ -195,6 +203,7 @@ export function CampaignPriorityList({
                                         onCloseMenu={() => setOpenMenuId(null)}
                                         onCloseout={onCloseout}
                                         onArchive={onArchive}
+                                        onEditDetails={onEditDetails}
                                         onOpenDetail={onOpenDetail}
                                     />
                                 ))}
@@ -230,6 +239,7 @@ function CampaignRow({
     onCloseMenu,
     onCloseout,
     onArchive,
+    onEditDetails,
     onOpenDetail,
 }: {
     c: PriorityListCampaign & { triage: CampaignTriage };
@@ -239,6 +249,7 @@ function CampaignRow({
     onCloseMenu: () => void;
     onCloseout: (c: PriorityListCampaign) => void;
     onArchive: (c: PriorityListCampaign) => void;
+    onEditDetails?: (c: PriorityListCampaign) => void;
     onOpenDetail?: (c: PriorityListCampaign & { triage: CampaignTriage }) => void;
 }) {
     const action = c.triage.action;
@@ -270,6 +281,14 @@ function CampaignRow({
     // mystery icons. The primary action stays out of this list.
     const menuItems: { key: string; label: string; href?: string; newTab?: boolean; onClick?: () => void; warn?: boolean }[] = [];
     menuItems.push({ key: 'org', label: 'View organization', href: `/fundraisers/${c.customer_id}` });
+    // CRM-CAMPAIGN-DETAILS-1: the tenant's own correction path for the fundraiser's
+    // delivery date/time, supporter deadline, location and goal. Offered for any real
+    // campaign — including a closed one, where the dialog shows the values read-only
+    // rather than hiding them, because "what did this fundraiser say?" is a fair
+    // question after closeout. The server is what refuses the write.
+    if (!c.is_placeholder && onEditDetails) {
+        menuItems.push({ key: 'details', label: 'Edit details', onClick: () => onEditDetails(c) });
+    }
     if (!c.is_placeholder && c.business_slug) {
         menuItems.push({ key: 'public', label: 'Public order page', href: `/shop/${c.business_slug}/fundraiser/${c.id}`, newTab: true });
     }

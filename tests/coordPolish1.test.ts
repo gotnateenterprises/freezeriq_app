@@ -335,6 +335,23 @@ describe('15-18. scope stayed presentation-only', () => {
         'app/customers/page.tsx',
     ];
     const inCrmLeadD1 = (f: string) => CRM_LEAD_D1.includes(f);
+    // CRM-CAMPAIGN-DETAILS-1 — a later, separately-authorized phase. The tenant can now
+    // correct a live fundraiser's delivery date/time, supporter deadline, pickup location
+    // and bundle goal from the CRM, and the legacy organization-profile sync can no
+    // longer overwrite those corrections. One rule module, the campaign PATCH, the
+    // coordinator-invite precondition, the list projection and one dialog. No schema, no
+    // migration, no financial field.
+    const CRM_CAMPAIGN_DETAILS_1 = [
+        'lib/campaignOperationalDetails.ts',
+        'app/api/campaigns/[id]/route.ts',
+        'app/api/campaigns/[id]/coordinator-email/route.ts',
+        'app/api/campaigns/route.ts',
+        'app/api/customers/[id]/route.ts',
+        'app/fundraisers/page.tsx',
+        'components/crm2/CampaignPriorityList.tsx',
+        'components/crm2/EditCampaignDetailsModal.tsx',
+    ];
+    const inCrmCampaignDetails1 = (f: string) => CRM_CAMPAIGN_DETAILS_1.includes(f);
 
     const ALLOWED = new Set([
         'components/coordinator/ShareCenter.tsx',
@@ -411,7 +428,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // The real protection is the forbidden-path regex below, which is
             // unchanged — this only stops the check from going stale on every
             // subsequent phase that touches a regression suite.
-            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f)).toBe(true);
+            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f)).toBe(true);
         }
         // And explicitly: no path under these directories appears at all.
         const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -419,7 +436,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // FR-TAX-CORRECTNESS-1 is separately authorized to edit the
             // fundraiser money path — exempt from THIS phase's
             // "presentation only" assertion; everything else still held to it.
-            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f)) continue;
+            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f)) continue;
             expect(f).not.toMatch(forbidden);
         }
     });
