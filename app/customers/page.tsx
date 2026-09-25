@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { STATUS_LABELS, STATUS_COLORS, type CustomerStatus } from '@/lib/statusConstants';
+import { qualifiesAsCustomerCrmLead } from '@/lib/fundraiserLead';
 import UpgradeRequired from '@/components/UpgradeRequired';
 import EmailComposeModal from '@/components/crm/EmailComposeModal';
 import AddOrderModal from '@/components/AddOrderModal';
@@ -26,6 +27,11 @@ interface Customer {
     inactive_reason?: string;
     orders?: any[];
     tags?: string[];
+    /**
+     * CRM-LEAD-D1: resolved server-side by /api/customers from the raw record. Supporters stay
+     * fully visible in the People lens; they are only excluded from the LEAD surfaces.
+     */
+    is_fundraiser_supporter?: boolean;
 }
 
 export default function CustomersPage() {
@@ -275,6 +281,13 @@ function CustomersContent() {
         // Status Match
         let matchesStatus = activeStatus === 'All' || c.status === activeStatus;
 
+        // CRM-LEAD-D1: "New Leads" asks a different question from "status happens to be LEAD".
+        // A fundraiser supporter is a customer, not a sales lead, so they drop out here — and
+        // ONLY here. Every other tab and the unfiltered People lens still show them.
+        if (activeStatus === 'LEAD') {
+            matchesStatus = qualifiesAsCustomerCrmLead(c);
+        }
+
         // Special case for "In Progress" filter triggered by metric card
         if (activeStatus === 'IN_PROGRESS_VIEW') {
             matchesStatus = c.status === 'ACTIVE';
@@ -288,7 +301,9 @@ function CustomersContent() {
         weeklyRevenue: weeklyRevenue,
         inProgressOrders: inProgressOrders,
         individuals: customers.filter(c => !c.archived && c.type === 'Individual').length,
-        leads: customers.filter(c => !c.archived && c.status === 'LEAD').length
+        // CRM-LEAD-D1: same boundary as the "New Leads" filter above, so the tile and the list it
+        // opens can never disagree.
+        leads: customers.filter(c => !c.archived && qualifiesAsCustomerCrmLead(c)).length
     };
 
     return (

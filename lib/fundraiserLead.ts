@@ -105,3 +105,64 @@ export function belongsInFundraiserCrm(customer: {
         Array.isArray(customer.tags) && customer.tags.includes(FUNDRAISER_INQUIRY_TAG);
     return typeMatch || tagMatch;
 }
+
+/**
+ * CRM-LEAD-D1 — the third and last surface of the same boundary: the Customer CRM's idea of a "lead".
+ *
+ * `Customer.status` defaults to LEAD and EVERY creation path in the app hardcodes it anyway, so LEAD
+ * means "nobody has touched this record yet", NOT "this is a sales lead". The Customer CRM read it as
+ * the latter, so a supporter who bought a bundle to back a campaign was counted in the "Active Leads"
+ * tile and listed under "New Leads". At the time of the audit that was 34 of the 55 LEAD rows.
+ *
+ * The fix is deliberately a classification fix, not a data fix: supporters keep their row, their order
+ * history, their `source`, and their persisted `status`. Only the question "is this a sales lead?" is
+ * answered somewhere better than `status`.
+ */
+
+/** `source` written by /api/public/order when the order came through a campaign. Never overwritten. */
+export const FUNDRAISER_SUPPORTER_SOURCE = 'Fundraiser';
+
+/**
+ * Did this customer record come into existence by BACKING a campaign, rather than by asking to run one?
+ *
+ * Proven against Production at audit time: of the 34 rows matching this predicate, 34/34 were
+ * `direct_customer`, 34/34 owned at least one campaign order, and 0/34 carried any fundraiser intent.
+ *
+ * The intent half is expressed as `!belongsInFundraiserCrm` on purpose rather than as a bare tag check:
+ * if the fundraiser-intent boundary above is ever widened, this predicate narrows to match, and the two
+ * cannot drift apart. Note the audit's fuller predicate also excluded "owns a campaign" and "matches an
+ * inquiry by e-mail"; both excluded zero additional rows, and both need a join, so the durable
+ * `fundraiser_inquiry` tag — which the inquiry route writes on BOTH the create and the enrich-existing
+ * branch — is the signal used here.
+ *
+ * Takes the RAW database shape (`type: 'direct_customer'`), not the CRM's display shape
+ * (`type: 'Individual'`), so it can only ever be called where the real record is in hand.
+ */
+export function isFundraiserSupporter(customer: {
+    type?: unknown;
+    source?: unknown;
+    tags?: unknown;
+}): boolean {
+    return (
+        customer.type === 'direct_customer' &&
+        customer.source === FUNDRAISER_SUPPORTER_SOURCE &&
+        !belongsInFundraiserCrm(customer)
+    );
+}
+
+/**
+ * The Customer CRM's "New Leads" / "Active Leads" rule, stated once so the tile and the filtered list
+ * cannot disagree.
+ *
+ * Takes the shape `/api/customers` emits: that route resolves `is_fundraiser_supporter` from the raw
+ * record via `isFundraiserSupporter` above, because by then `type` has been mapped for display and the
+ * raw value is gone. A row without the flag is treated as not a supporter, which preserves the previous
+ * behaviour for anything this route does not classify (e.g. the synthetic customer-less order
+ * aggregates, which have no Customer record and therefore no status of their own).
+ */
+export function qualifiesAsCustomerCrmLead(row: {
+    status?: unknown;
+    is_fundraiser_supporter?: unknown;
+}): boolean {
+    return row.status === 'LEAD' && row.is_fundraiser_supporter !== true;
+}

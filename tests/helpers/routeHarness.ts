@@ -81,6 +81,11 @@ const MODELS = [
     // returns 500 — which would make every "a mark writes exactly one event"
     // assertion fail for the wrong reason, or pass for the wrong one.
     'coordinatorActionEvent',
+    // CRM-LEAD-D1: GET /api/dashboard reads these. `activity` sits inside a try/catch and would
+    // fail soft, but `productionRun.findFirst` does not — a missing model there throws a
+    // TypeError, the route returns 500, and every Recent Activity assertion fails for the wrong
+    // reason rather than reporting on the label under test.
+    'activity', 'productionRun',
 ];
 
 const METHODS = [
@@ -88,6 +93,10 @@ const METHODS = [
     // FR-FLOW-2B: the launch writes its candidate pool with createMany.
     'createMany',
     'upsert', 'count', 'delete', 'deleteMany',
+    // CRM-LEAD-D1: GET /api/dashboard aggregates order items with groupBy. A missing method is a
+    // TypeError, not an empty result, so the route 500s and every assertion downstream of it
+    // fails for the wrong reason. `aggregate` is listed alongside it for the same reason.
+    'groupBy', 'aggregate',
 ];
 
 /**
@@ -116,7 +125,9 @@ export function createPrismaMock(config: PrismaMockConfig = {}): PrismaMock {
                 calls.push({ model, method, args });
                 const key = `${model}.${method}`;
                 const fallback =
-                    method === 'findMany' ? []
+                    // groupBy returns rows, exactly as findMany does — null would make a caller
+                    // that iterates the result throw instead of seeing "nothing matched".
+                    method === 'findMany' || method === 'groupBy' ? []
                         : method === 'count' ? 0
                             // createMany returns a count, exactly as Prisma does.
                             : method === 'createMany' || method === 'updateMany' || method === 'deleteMany'

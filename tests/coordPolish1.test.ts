@@ -324,6 +324,17 @@ describe('15-18. scope stayed presentation-only', () => {
         'lib/fundraiserLead.ts',
     ];
     const inFrSupporterLead1 = (f: string) => FR_SUPPORTER_LEAD_1.includes(f);
+    // CRM-LEAD-D1 — a later, separately-authorized phase. Fundraiser supporters stop being counted
+    // and listed as sales leads in the Customer CRM. Classification only: one predicate beside the
+    // boundary it extends, the flag the customers route resolves from it, and the two surfaces that
+    // read it. No schema, no migration, no persisted status, no money, no order behaviour.
+    const CRM_LEAD_D1 = [
+        'lib/fundraiserLead.ts',
+        'app/api/customers/route.ts',
+        'app/api/dashboard/route.ts',
+        'app/customers/page.tsx',
+    ];
+    const inCrmLeadD1 = (f: string) => CRM_LEAD_D1.includes(f);
 
     const ALLOWED = new Set([
         'components/coordinator/ShareCenter.tsx',
@@ -400,7 +411,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // The real protection is the forbidden-path regex below, which is
             // unchanged — this only stops the check from going stale on every
             // subsequent phase that touches a regression suite.
-            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f)).toBe(true);
+            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f)).toBe(true);
         }
         // And explicitly: no path under these directories appears at all.
         const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -408,7 +419,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // FR-TAX-CORRECTNESS-1 is separately authorized to edit the
             // fundraiser money path — exempt from THIS phase's
             // "presentation only" assertion; everything else still held to it.
-            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f)) continue;
+            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f)) continue;
             expect(f).not.toMatch(forbidden);
         }
     });

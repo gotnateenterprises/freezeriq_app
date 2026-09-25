@@ -1,6 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { isFundraiserSupporter } from '@/lib/fundraiserLead';
 
 export async function GET(request: Request) {
     try {
@@ -90,6 +91,10 @@ export async function GET(request: Request) {
                 contact_email: org.contact_email || '', // Keep for compatibility
                 source: orgAny.source || 'Manual',
                 status: orgAny.status || 'ACTIVE',
+                // CRM-LEAD-D1: resolved here, from the RAW record, because `type` above has already
+                // been mapped to its display value and the real one is gone by the time the page
+                // sees this row. The page must never re-derive this.
+                is_fundraiser_supporter: isFundraiserSupporter(orgAny),
                 archived: orgAny.archived || false,
                 tags: orgAny.tags || [],
                 total_spend: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
@@ -138,6 +143,9 @@ export async function GET(request: Request) {
                     order_count: d.count,
                     source: d.source || 'Square',
                     status: 'ACTIVE',
+                    // No Customer record backs these — they are aggregated from orders whose
+                    // customer_id is NULL — so there is nothing to classify.
+                    is_fundraiser_supporter: false,
                     tags: [],
                     orders: d.orders
                 });

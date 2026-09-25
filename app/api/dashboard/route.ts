@@ -4,6 +4,7 @@ import { auth } from '@/auth';
 import { KitchenEngine } from '@/lib/kitchen_engine';
 import { PrismaAdapter } from '@/lib/prisma_adapter';
 import { STATUS_LABELS, type CustomerStatus } from '@/lib/statusConstants';
+import { isFundraiserSupporter } from '@/lib/fundraiserLead';
 
 export async function GET() {
     try {
@@ -319,7 +320,17 @@ export async function GET() {
         // Map Orders to Activity Format
         const orderActivities = recentOrders.map((o: any) => {
             let label = 'Pending';
-            if (o.customer?.status) {
+            if (o.customer && isFundraiserSupporter(o.customer)) {
+                // CRM-LEAD-D1: a supporter keeps status LEAD on their record (nothing ever moves a
+                // customer off the default), so the status label would read "Lead" for someone who
+                // simply bought a bundle to back a campaign. Label the fact instead of the field.
+                //
+                // Latent rather than observed: the query above already excludes source='fundraiser',
+                // so a supporter's CAMPAIGN orders never reach this feed. It is reachable only if a
+                // supporter later places a storefront order that advances past 'pending'. Zero such
+                // rows existed at the time of the fix; this keeps the label honest when one appears.
+                label = 'Fundraiser Supporter';
+            } else if (o.customer?.status) {
                 label = STATUS_LABELS[o.customer.status as CustomerStatus] || o.customer.status;
             } else {
                 // Better Fallbacks for unlinked orders
