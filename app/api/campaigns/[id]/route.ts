@@ -136,12 +136,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
                 delivery_time: body.delivery_time,
                 end_date: body.end_date,
                 pickup_location: body.pickup_location,
+                checks_payable: body.checks_payable,
             },
             campaign: {
                 delivery_date: (campaign as any).delivery_date ?? null,
                 delivery_time: (campaign as any).delivery_time ?? null,
                 end_date: (campaign as any).end_date ?? null,
                 pickup_location: (campaign as any).pickup_location ?? null,
+                checks_payable: (campaign as any).checks_payable ?? null,
             },
             campaignClosed: isCampaignClosed({
                 closed_at: (campaign as any).closed_at ?? null,
@@ -214,12 +216,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
                 name: body.name,
                 status: body.status,
                 start_date: body.start_date ? new Date(body.start_date) : undefined,
-                // CRM-CAMPAIGN-DETAILS-1: end_date, delivery_date, delivery_time and
-                // pickup_location come from the validated decision above, never from
-                // the raw body. No key below repeats any of the four, so nothing can
-                // shadow them back to an unvalidated value.
+                // CRM-CAMPAIGN-DETAILS-1: delivery_date, delivery_time, end_date,
+                // pickup_location and checks_payable come from the validated decision
+                // above, never from the raw body. No key below repeats any of the five,
+                // so nothing can shadow them back to an unvalidated value.
+                //
+                // checks_payable joined them in 1A: it was `body.checks_payable ??
+                // undefined` here, so a tenant edit bypassed the length bound and the
+                // closeout gate that the other four already had.
                 ...operationalData,
-                checks_payable: body.checks_payable ?? undefined,
                 goal_amount: body.goal_amount ? Number(body.goal_amount) : undefined,
                 about_text: body.about_text,
                 mission_text: body.mission_text,

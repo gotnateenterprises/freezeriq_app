@@ -469,7 +469,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
                 select: {
                     id: true, closed_at: true, status: true,
                     delivery_date: true, delivery_time: true,
-                    end_date: true, pickup_location: true,
+                    end_date: true, pickup_location: true, checks_payable: true,
                 },
             });
 
@@ -515,12 +515,11 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
                                 delivery_time: latestCampaign.delivery_time,
                                 end_date: latestCampaign.end_date,
                                 pickup_location: latestCampaign.pickup_location,
+                                checks_payable: latestCampaign.checks_payable,
                             },
                             info: fi,
                         }),
                         start_date: fi.start_date ? new Date(fi.start_date) : undefined,
-                        // Text fields
-                        checks_payable: fi.checks_payable_to || undefined,
                         participant_label: fi.participant_label || undefined,
                         about_text: fi.about_text || undefined,
                         mission_text: fi.mission_text || undefined,

@@ -36,6 +36,9 @@ import {
     calendarDayToDate,
     CAMPAIGN_OPERATIONAL_FIELDS,
     CAMPAIGN_FORBIDDEN_DETAIL_FIELDS,
+    CHECKS_PAYABLE_MAX,
+    DELIVERY_TIME_MAX,
+    PICKUP_LOCATION_MAX,
 } from '../lib/campaignOperationalDetails';
 import { resolveBundleGoal, DEFAULT_BUNDLE_GOAL, computeBundleUnitsFromItems } from '../lib/fundraiserMetrics';
 
@@ -131,6 +134,7 @@ describe('CRM-CAMPAIGN-DETAILS-1 / the decision', () => {
         delivery_time: '9:00 AM',
         end_date: new Date('2026-10-01T00:00:00.000Z'),
         pickup_location: 'School gym',
+        checks_payable: 'BBT4',
     };
 
     test('an empty request is not a change', () => {
@@ -474,9 +478,11 @@ describe('CRM-CAMPAIGN-DETAILS-1 / organization profile sync', () => {
     test('unrelated organization-profile behaviour is untouched', () => {
         const src = R('app/api/customers/[id]/route.ts');
         const block = src.slice(src.indexOf('if (body.fundraiser_info)'), src.indexOf('return NextResponse.json({ success: true'));
-        // start_date, checks_payable, labels, copy and the goal still sync as before.
+        // start_date, labels, copy and the goal still sync as before. checks_payable no
+        // longer appears here at all — CRM-CAMPAIGN-DETAILS-1A moved it into the
+        // fill-never-overwrite rule with the other four.
         expect(block).toContain('start_date: fi.start_date');
-        expect(block).toContain('checks_payable: fi.checks_payable_to');
+        expect(block).not.toContain('checks_payable: fi.checks_payable_to');
         expect(block).toContain('bundle_goal: fi.bundle_goal');
         // And the INV-A closed-campaign boundary above it still stands.
         expect(block).toContain('latestIsClosed');
@@ -629,24 +635,175 @@ describe('CRM-CAMPAIGN-DETAILS-1 / propagation and the goal', () => {
         // 'settlement' is deliberately absent from this list: the closed-campaign panel
         // explains that the invoice and settlement were produced from these values, and
         // that sentence is the point of the panel. What must not exist is a FIELD.
-        for (const f of ['org_share_percent', 'orgSharePercent', 'goal_amount', 'tax_rate', 'checks_payable']) {
+        //
+        // 'checks_payable' is likewise not financial in the sense that matters here — it is
+        // a payee NAME printed on the flyer and tracking sheet, bearing on no amount, rate
+        // or settlement. It IS a field, added by 1A, and the bound-input list below is what
+        // holds the real line.
+        for (const f of ['org_share_percent', 'orgSharePercent', 'goal_amount', 'tax_rate']) {
             expect(code).not.toContain(f);
         }
-        // No input is bound to anything but the five operational keys.
+        // No input is bound to anything but the six operational keys.
         const bound = code.match(/id="cd-[a-z-]+"/g)!.sort();
         expect(bound).toEqual([
-            'id="cd-bundle-goal"', 'id="cd-delivery-date"', 'id="cd-delivery-time"',
-            'id="cd-end-date"', 'id="cd-pickup-location"',
+            'id="cd-bundle-goal"', 'id="cd-checks-payable"', 'id="cd-delivery-date"',
+            'id="cd-delivery-time"', 'id="cd-end-date"', 'id="cd-pickup-location"',
         ]);
-        // And the only keys it can ever POST are the five it owns.
+        // And the only keys it can ever POST are the six it owns.
         const body = code.slice(code.indexOf('const body: Record<string, unknown> = {}'), code.indexOf('if (Object.keys(body).length'));
         expect(body.match(/body\.(\w+)/g)!.sort()).toEqual([
-            'body.bundleGoal', 'body.delivery_date', 'body.delivery_time',
-            'body.end_date', 'body.pickup_location',
+            'body.bundleGoal', 'body.checks_payable', 'body.delivery_date',
+            'body.delivery_time', 'body.end_date', 'body.pickup_location',
         ]);
     });
 
     test('calendarDayToDate produces the UTC midnight a @db.Date column expects', () => {
         expect(calendarDayToDate('2026-11-03').toISOString()).toBe('2026-11-03T00:00:00.000Z');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// CRM-CAMPAIGN-DETAILS-1A — checks_payable joins the protected set
+//
+// Found by the controlled live acceptance, not by a test: saving the organization
+// Fundraiser Setup form rewrote campaign 302becf7's payee from 'BBT4' to 'The Best Brew
+// Test 4'. Root cause is an FR-FLOW-3 scope gap — the coordinator writes checks_payable
+// in the SAME `setupValues` spread as delivery_time (app/api/coordinator/bundle-selection),
+// so it is coordinator-owned in exactly the same way, but only delivery_time was guarded.
+// The organization form defaults the key to `customer.name`, which is what turned a stale
+// value into an actively wrong one.
+// ---------------------------------------------------------------------------
+describe('CRM-CAMPAIGN-DETAILS-1A / checks_payable', () => {
+    const campaignWith = (checks: string | null) => ({
+        delivery_date: new Date('2026-10-15T00:00:00.000Z'),
+        delivery_time: '4:00 PM',
+        end_date: new Date('2026-10-01T00:00:00.000Z'),
+        pickup_location: 'School gym',
+        checks_payable: checks,
+    });
+
+    test('A: an established payee survives the organization form offering the org name', () => {
+        // The exact live case: campaign 'BBT4', form 'The Best Brew Test 4'.
+        const out = operationalFillFromOrgProfile({
+            campaign: campaignWith('BBT4'),
+            info: { checks_payable_to: 'The Best Brew Test 4' },
+        });
+        expect(out.checks_payable).toBeUndefined();
+        expect(out).toEqual({});
+    });
+
+    test('B: a blank payee is still filled from the organization form', () => {
+        expect(operationalFillFromOrgProfile({
+            campaign: { ...campaignWith(null), delivery_date: null, delivery_time: null, end_date: null, pickup_location: null },
+            info: { checks_payable_to: 'Shelbyville Band Boosters' },
+        }).checks_payable).toBe('Shelbyville Band Boosters');
+        // whitespace-only counts as blank, so a legacy '' row can still be filled
+        expect(operationalFillFromOrgProfile({
+            campaign: campaignWith('   '),
+            info: { checks_payable_to: 'Shelbyville Band Boosters' },
+        }).checks_payable).toBe('Shelbyville Band Boosters');
+    });
+
+    test('C: with all five established, an unrelated organization save changes nothing', () => {
+        const out = operationalFillFromOrgProfile({
+            campaign: campaignWith('BBT4'),
+            info: {
+                delivery_date: '2026-08-01', delivery_time: '3 PM',
+                deadline: '2026-07-20', pickup_location: 'Old church hall',
+                checks_payable_to: 'The Best Brew Test 4',
+            },
+        });
+        expect(out).toEqual({});
+    });
+
+    test('C: and each of the five is still protected independently', () => {
+        const out = operationalFillFromOrgProfile({
+            campaign: { ...campaignWith('BBT4'), end_date: null, pickup_location: null },
+            info: {
+                delivery_date: '2026-08-01', delivery_time: '3 PM',
+                deadline: '2026-07-20', pickup_location: 'Old church hall',
+                checks_payable_to: 'The Best Brew Test 4',
+            },
+        });
+        expect(out.checks_payable).toBeUndefined();
+        expect(out.delivery_time).toBeUndefined();
+        expect(out.delivery_date).toBeUndefined();
+        expect((out.end_date as Date).toISOString()).toBe('2026-07-20T00:00:00.000Z');
+        expect(out.pickup_location).toBe('Old church hall');
+    });
+
+    test('the tenant can still change it — through the campaign, with the coordinator bound', () => {
+        const d = decideOperationalDetailsChange({
+            requested: { checks_payable: '  Band Boosters  ' },
+            campaign: campaignWith('BBT4'),
+            campaignClosed: false,
+        });
+        expect((d as any).data).toEqual({ checks_payable: 'Band Boosters' });
+        // Cleared by an empty value, like the other free-text fields.
+        expect((decideOperationalDetailsChange({
+            requested: { checks_payable: '' }, campaign: campaignWith('BBT4'), campaignClosed: false,
+        }) as any).data.checks_payable).toBeNull();
+        // Bounded by the COORDINATOR's own limit, not a second number.
+        expect(decideOperationalDetailsChange({
+            requested: { checks_payable: 'x'.repeat(CHECKS_PAYABLE_MAX + 1) },
+            campaign: campaignWith('BBT4'), campaignClosed: false,
+        })).toMatchObject({ rejected: true, status: 400 });
+        expect(decideOperationalDetailsChange({
+            requested: { checks_payable: 'x'.repeat(CHECKS_PAYABLE_MAX) },
+            campaign: campaignWith('BBT4'), campaignClosed: false,
+        })).toMatchObject({ change: true });
+    });
+
+    test('the tenant edit is gated by closeout like every other operational field', () => {
+        expect(decideOperationalDetailsChange({
+            requested: { checks_payable: 'Anything' },
+            campaign: campaignWith('BBT4'),
+            campaignClosed: true,
+        })).toMatchObject({ rejected: true, status: 409 });
+    });
+
+    test('the length bounds are the coordinator module\'s, not new numbers', () => {
+        const src = R('lib/campaignOperationalDetails.ts');
+        expect(src).toContain("from './coordinatorSetup'");
+        expect(src).not.toMatch(/MAX_LENGTH\s*=\s*\d/);
+        // and the tenant is never stricter than the coordinator
+        expect(DELIVERY_TIME_MAX).toBe(80);
+        expect(PICKUP_LOCATION_MAX).toBe(300);
+        expect(CHECKS_PAYABLE_MAX).toBe(120);
+    });
+
+    test('D: no financial field is reachable through the payee edit', async () => {
+        const { mock } = await patchCampaign({ checks_payable: 'Band Boosters' });
+        const data = writtenData(mock)!;
+        expect(data.checks_payable).toBe('Band Boosters');
+        for (const f of [
+            'org_share_percent', 'goal_amount', 'total_sales', 'settlement_total',
+            'tax_status', 'tax_rate_percent', 'closed_at', 'status',
+        ]) {
+            expect(data[f]).toBeUndefined();
+        }
+        for (const key of [
+            'order.update', 'order.updateMany', 'orderItem.update', 'orderItem.updateMany',
+            'invoice.update', 'invoice.create', 'invoice.updateMany',
+        ]) {
+            expect(mock.callsTo(key)).toHaveLength(0);
+        }
+    });
+
+    test('D: the route reads it from the validated decision, never the raw body', () => {
+        const src = R('app/api/campaigns/[id]/route.ts');
+        // It is handed to the decision...
+        const requested = src.slice(src.indexOf('const detailsDecision'), src.indexOf('campaign: {'));
+        expect(requested).toContain('checks_payable: body.checks_payable,');
+        // ...and the update block gets it only through operationalData, never raw.
+        const update = src.slice(src.indexOf('prisma.fundraiserCampaign.update'));
+        expect(update).toContain('...operationalData,');
+        expect(update).not.toContain('checks_payable:');
+    });
+
+    test('the coordinator remains a legitimate writer — that path is untouched', () => {
+        const coord = R('app/api/coordinator/bundle-selection/route.ts');
+        expect(coord).toContain('...(setupValues ?? {})');
+        expect(R('lib/coordinatorSetup.ts')).toContain('checks_payable: checks.value');
     });
 });

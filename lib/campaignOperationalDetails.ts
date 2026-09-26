@@ -38,11 +38,22 @@
 
 import { calendarDateOfDateOnlyValue } from './tenantTimezone';
 import { checkOrderDeadline } from './fundraiserLaunch';
+import {
+    CHECKS_PAYABLE_MAX,
+    DELIVERY_TIME_MAX,
+    PICKUP_LOCATION_MAX,
+} from './coordinatorSetup';
 
-/** How long a pickup time may be. Real answers are "4:45 PM" or "3–5 PM", never prose. */
-export const DELIVERY_TIME_MAX_LENGTH = 60;
-/** How long a pickup location may be. Long enough for a full street address. */
-export const PICKUP_LOCATION_MAX_LENGTH = 300;
+/**
+ * Length bounds come from lib/coordinatorSetup.ts, the module the COORDINATOR's own setup
+ * form validates against — not from new numbers invented here.
+ *
+ * This module first carried its own (60 for the time, 300 for the location), which made the
+ * tenant's editor STRICTER than the coordinator's form for delivery_time: a coordinator
+ * could store a 70-character pickup window that the tenant would then be unable to correct
+ * or even re-save. One bound per field, owned by one module.
+ */
+export { CHECKS_PAYABLE_MAX, DELIVERY_TIME_MAX, PICKUP_LOCATION_MAX };
 
 /**
  * The operational fields this editor owns. Named as a list so a test can assert the
@@ -53,6 +64,15 @@ export const CAMPAIGN_OPERATIONAL_FIELDS = [
     'delivery_time',
     'end_date',
     'pickup_location',
+    // CRM-CAMPAIGN-DETAILS-1A: added after the live acceptance caught the org-profile save
+    // rewriting it. `checks_payable` is COORDINATOR-OWNED in exactly the way delivery_time
+    // is — app/api/coordinator/bundle-selection writes both from the same `setupValues`
+    // spread, in the same transaction — but FR-FLOW-3 guarded only delivery_time, so this
+    // one kept being pushed from the organization blob. Worse than a stale value: the org
+    // form defaults the key to `customer.name`, so saving it for any unrelated reason
+    // replaced a coordinator's stated payee with the organization's raw name
+    // ('BBT4' -> 'The Best Brew Test 4', observed live 2026-09-25).
+    'checks_payable',
 ] as const;
 
 /**
@@ -85,7 +105,6 @@ export const CAMPAIGN_FORBIDDEN_DETAIL_FIELDS = [
     'closed_by',
     'tax_status',
     'tax_rate_percent',
-    'checks_payable',
     'status',
     'portal_token',
     'public_token',
@@ -115,6 +134,7 @@ export interface CampaignOperationalState {
     delivery_time: string | null;
     end_date: Date | string | null;
     pickup_location: string | null;
+    checks_payable: string | null;
 }
 
 export interface CampaignOperationalPatch {
@@ -122,6 +142,7 @@ export interface CampaignOperationalPatch {
     delivery_time?: string | null;
     end_date?: Date;
     pickup_location?: string | null;
+    checks_payable?: string | null;
 }
 
 export type OperationalDetailsDecision =
@@ -184,17 +205,16 @@ export function decideOperationalDetailsChange(input: {
         delivery_time?: unknown;
         end_date?: unknown;
         pickup_location?: unknown;
+        checks_payable?: unknown;
     };
     campaign: CampaignOperationalState;
     campaignClosed: boolean;
 }): OperationalDetailsDecision {
     const { requested, campaign, campaignClosed } = input;
 
-    const touches =
-        requested.delivery_date !== undefined ||
-        requested.delivery_time !== undefined ||
-        requested.end_date !== undefined ||
-        requested.pickup_location !== undefined;
+    const touches = CAMPAIGN_OPERATIONAL_FIELDS.some(
+        (f) => (requested as Record<string, unknown>)[f] !== undefined,
+    );
 
     if (!touches) return { change: false };
 
@@ -267,59 +287,42 @@ export function decideOperationalDetailsChange(input: {
         }
     }
 
-    /* Delivery / pickup time — free text by design (FR-FLOW-3): "4:45 PM", "3–5 PM" */
-    if (requested.delivery_time !== undefined) {
-        if (requested.delivery_time === null || requested.delivery_time === '') {
-            data.delivery_time = null;
-        } else if (typeof requested.delivery_time !== 'string') {
-            return {
-                change: false,
-                rejected: true,
-                status: 400,
-                error: 'Enter the delivery or pickup time as text, for example 4:00 PM.',
-            };
-        } else {
-            const trimmed = requested.delivery_time.trim();
-            if (trimmed === '') {
-                data.delivery_time = null;
-            } else if (trimmed.length > DELIVERY_TIME_MAX_LENGTH) {
-                return {
-                    change: false,
-                    rejected: true,
-                    status: 400,
-                    error: `Keep the delivery or pickup time under ${DELIVERY_TIME_MAX_LENGTH} characters.`,
-                };
-            } else {
-                data.delivery_time = trimmed;
-            }
-        }
-    }
+    /* The three free-text fields, all handled by one rule: trim, an empty value clears,
+       anything longer than the coordinator's own bound is refused. Stated once rather than
+       three times so they cannot drift into three different notions of "valid text". */
+    const TEXT_FIELDS = [
+        { key: 'delivery_time', max: DELIVERY_TIME_MAX, label: 'delivery or pickup time', hint: ', for example 4:00 PM' },
+        { key: 'pickup_location', max: PICKUP_LOCATION_MAX, label: 'delivery or pickup location', hint: '' },
+        { key: 'checks_payable', max: CHECKS_PAYABLE_MAX, label: 'name checks are payable to', hint: '' },
+    ] as const;
 
-    /* Delivery / pickup location */
-    if (requested.pickup_location !== undefined) {
-        if (requested.pickup_location === null || requested.pickup_location === '') {
-            data.pickup_location = null;
-        } else if (typeof requested.pickup_location !== 'string') {
+    for (const f of TEXT_FIELDS) {
+        const value = (requested as Record<string, unknown>)[f.key];
+        if (value === undefined) continue;
+        if (value === null || value === '') {
+            data[f.key] = null;
+            continue;
+        }
+        if (typeof value !== 'string') {
             return {
                 change: false,
                 rejected: true,
                 status: 400,
-                error: 'Enter the delivery or pickup location as text.',
+                error: `Enter the ${f.label} as text${f.hint}.`,
+            };
+        }
+        const trimmed = value.trim();
+        if (trimmed === '') {
+            data[f.key] = null;
+        } else if (trimmed.length > f.max) {
+            return {
+                change: false,
+                rejected: true,
+                status: 400,
+                error: `Keep the ${f.label} under ${f.max} characters.`,
             };
         } else {
-            const trimmed = requested.pickup_location.trim();
-            if (trimmed === '') {
-                data.pickup_location = null;
-            } else if (trimmed.length > PICKUP_LOCATION_MAX_LENGTH) {
-                return {
-                    change: false,
-                    rejected: true,
-                    status: 400,
-                    error: `Keep the delivery or pickup location under ${PICKUP_LOCATION_MAX_LENGTH} characters.`,
-                };
-            } else {
-                data.pickup_location = trimmed;
-            }
+            data[f.key] = trimmed;
         }
     }
 
@@ -335,6 +338,8 @@ export interface OrgProfileOperationalInfo {
     /** The blob calls the supporter deadline `deadline`; the campaign calls it end_date. */
     deadline?: unknown;
     pickup_location?: unknown;
+    /** And it calls the payee `checks_payable_to`; the campaign calls it checks_payable. */
+    checks_payable_to?: unknown;
 }
 
 /**
@@ -369,16 +374,26 @@ export function operationalFillFromOrgProfile(input: {
         const day = normalizeCalendarDay(info.deadline);
         if (day) out.end_date = calendarDayToDate(day);
     }
-    if (!hasMeaningfulValue(campaign.delivery_time)) {
-        if (typeof info.delivery_time === 'string' && info.delivery_time.trim() !== '') {
-            out.delivery_time = info.delivery_time.trim().slice(0, DELIVERY_TIME_MAX_LENGTH);
-        }
-    }
-    if (!hasMeaningfulValue(campaign.pickup_location)) {
-        if (typeof info.pickup_location === 'string' && info.pickup_location.trim() !== '') {
-            out.pickup_location = info.pickup_location.trim().slice(0, PICKUP_LOCATION_MAX_LENGTH);
-        }
-    }
+    const fillText = (
+        stored: string | null,
+        offered: unknown,
+        max: number,
+        into: 'delivery_time' | 'pickup_location' | 'checks_payable',
+    ) => {
+        if (hasMeaningfulValue(stored)) return;
+        if (typeof offered !== 'string') return;
+        const trimmed = offered.trim();
+        if (trimmed === '') return;
+        out[into] = trimmed.slice(0, max);
+    };
+
+    fillText(campaign.delivery_time, info.delivery_time, DELIVERY_TIME_MAX, 'delivery_time');
+    fillText(campaign.pickup_location, info.pickup_location, PICKUP_LOCATION_MAX, 'pickup_location');
+    // CRM-CAMPAIGN-DETAILS-1A. This line is the fix: the sync used to write
+    // `checks_payable: fi.checks_payable_to || undefined` unconditionally, and the
+    // organization form defaults that key to the organization's own name, so an unrelated
+    // save replaced the coordinator's stated payee. Now it only ever FILLS a blank.
+    fillText(campaign.checks_payable, info.checks_payable_to, CHECKS_PAYABLE_MAX, 'checks_payable');
 
     return out;
 }

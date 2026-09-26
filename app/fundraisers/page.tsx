@@ -64,6 +64,7 @@ interface Fundraiser {
     delivery_date?: string | null;
     delivery_time?: string | null;
     pickup_location?: string | null;
+    checks_payable?: string | null;
     // GE-3: server-derived campaign health. Read-only; optional so any consumer
     // reading an older payload still renders.
     health?: CampaignHealth;

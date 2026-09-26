@@ -56,6 +56,7 @@ export interface PriorityListCampaign extends CampaignForTriage {
     delivery_date?: string | null;
     delivery_time?: string | null;
     pickup_location?: string | null;
+    checks_payable?: string | null;
 }
 
 const SECTION_DOT: Record<CampaignPriority, string> = {

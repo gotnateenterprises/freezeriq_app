@@ -12,11 +12,14 @@
  * coordinator-confirmed `delivery_time`. So the correction needed a database edit.
  *
  * WHAT IT DELIBERATELY IS NOT
- * Not a campaign builder. Five operational fields, no financial ones. `org_share_percent`
+ * Not a campaign builder. Six operational fields, no financial ones. `org_share_percent`
  * and `goal_amount` are reachable through the same PATCH route but stay out of here:
  * the share carries a role gate AND a closeout gate, and a "details" dialog that quietly
  * carried either would undo that design. The server enforces this too — the route only
- * reads the five keys below out of the body for this purpose.
+ * reads the six keys below out of the body for this purpose.
+ *
+ * "Checks payable to" is not financial in that sense: it is a payee NAME printed on the
+ * flyer, packet and tracking sheet, with no bearing on any amount, rate or settlement.
  *
  * DATES
  * `delivery_date` and `end_date` are `@db.Date`. `safeCalendarDateForInput` is the
@@ -44,6 +47,7 @@ export interface EditableCampaignDetails {
     delivery_time?: string | null;
     end_date?: string | Date | null;
     pickup_location?: string | null;
+    checks_payable?: string | null;
     bundle_goal?: number | null;
     closed_at?: string | Date | null;
     status?: string | null;
@@ -82,6 +86,7 @@ export function EditCampaignDetailsModal({
             delivery_time: campaign.delivery_time ?? '',
             end_date: safeCalendarDateForInput(campaign.end_date ?? null),
             pickup_location: campaign.pickup_location ?? '',
+            checks_payable: campaign.checks_payable ?? '',
             bundle_goal: campaign.bundle_goal != null ? String(campaign.bundle_goal) : '',
         }),
         [campaign],
@@ -105,6 +110,7 @@ export function EditCampaignDetailsModal({
         if (form.delivery_time !== initial.delivery_time) body.delivery_time = form.delivery_time;
         if (form.end_date !== initial.end_date) body.end_date = form.end_date;
         if (form.pickup_location !== initial.pickup_location) body.pickup_location = form.pickup_location;
+        if (form.checks_payable !== initial.checks_payable) body.checks_payable = form.checks_payable;
         if (form.bundle_goal !== initial.bundle_goal) body.bundleGoal = form.bundle_goal;
 
         if (Object.keys(body).length === 0) {
@@ -133,6 +139,7 @@ export function EditCampaignDetailsModal({
             if ('delivery_time' in body) note('Delivery / pickup time', initial.delivery_time, form.delivery_time);
             if ('end_date' in body) note('Supporter order deadline', initial.end_date, form.end_date);
             if ('pickup_location' in body) note('Delivery / pickup location', initial.pickup_location, form.pickup_location);
+            if ('checks_payable' in body) note('Checks payable to', initial.checks_payable, form.checks_payable);
             if ('bundleGoal' in body) {
                 note(
                     'Fundraiser goal',
@@ -225,6 +232,7 @@ export function EditCampaignDetailsModal({
                             <Row label="Delivery / pickup time" value={initial.delivery_time} />
                             <Row label="Supporter order deadline" value={initial.end_date} />
                             <Row label="Delivery / pickup location" value={initial.pickup_location} />
+                            <Row label="Checks payable to" value={initial.checks_payable} />
                             <Row label="Fundraiser goal" value={`${resolveBundleGoal(initial.bundle_goal)} bundles`} />
                         </dl>
                         <div className="flex justify-end">
@@ -281,6 +289,29 @@ export function EditCampaignDetailsModal({
                                 placeholder="School gym parking lot"
                                 value={form.pickup_location}
                                 onChange={(e) => set('pickup_location', e.target.value)}
+                                className={inputClass}
+                            />
+                        </Field>
+
+                        {/* CRM-CAMPAIGN-DETAILS-1A. Added because protecting the field
+                            without it would have stranded the tenant: the organization
+                            Fundraiser Setup form was their ONLY way to set a campaign's
+                            payee, and once the sync stops overwriting an established
+                            value, that path can no longer change one. That is the exact
+                            shape of the bug this whole feature exists to fix — a value
+                            only the coordinator could set — so it would have been
+                            recreated on a new field. */}
+                        <Field
+                            label="Checks payable to"
+                            htmlFor="cd-checks-payable"
+                            hint="Who supporters should make paper checks out to."
+                        >
+                            <input
+                                id="cd-checks-payable"
+                                type="text"
+                                placeholder={campaign.name || 'Organization name'}
+                                value={form.checks_payable}
+                                onChange={(e) => set('checks_payable', e.target.value)}
                                 className={inputClass}
                             />
                         </Field>
