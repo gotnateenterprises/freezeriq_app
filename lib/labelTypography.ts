@@ -36,11 +36,46 @@
  *
  *   comfortable  name 24pt / content 12pt   worst 1.55in   0.71in spare
  *   standard     name 22pt / content 11pt   worst 1.89in   0.37in spare
- *   compact      name 19pt / content 10pt   worst 2.05in   0.21in spare
+ *   compact      name 18pt / content 10pt   worst 2.02in   0.24in spare
  *
- * Even the tightest tier keeps a fifth of an inch in hand, and the slot's
- * own `overflow: hidden` remains the last-resort guard so a pathological
- * name can never bleed into the neighbouring sticker.
+ * Even the tightest tier keeps close to a quarter-inch in hand, and the
+ * slot's own `overflow: hidden` remains the last-resort guard so a
+ * pathological name can never bleed into the neighbouring sticker.
+ *
+ * BOX-LABEL-ORG-1 ADDENDUM — the fundraiser organization line
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ * A fourth, INDEPENDENT variable text block (the owner's stated visual
+ * hierarchy is: organization, then customer name, then Box N of M / size,
+ * then contents). It is sized by `chooseOrgNameTypography` below, which is
+ * deliberately a SEPARATE function from `chooseStickerTypography` rather
+ * than a third argument to it: organization-name length and supporter-name
+ * length are independent facts about independent people, and conflating them
+ * into one decision would make the sticker's layout depend on a coincidence
+ * of two unrelated string lengths instead of on each field's own budget.
+ *
+ * `compact`'s name shrank one point (19 -> 18) specifically to buy back the
+ * room the new line costs — still comfortably above the 17pt pre-1A
+ * baseline, still the smallest of the three tiers, and still larger than
+ * every other element on the sticker (org line, content, box type, Box N/M).
+ * No other tier changed: `comfortable` and `standard` already carry enough
+ * slack (0.71in / 0.37in) to absorb the org line's realistic single-line
+ * height (~0.15-0.19in) with real margin left over.
+ *
+ * REALISTIC WORST CASE, verified: `compact` tier (long supporter name, two
+ * content entries) plus the org line's largest realistic bucket (a SHORT
+ * organization name, which gets the BIGGEST org font) still leaves ~0.07in
+ * — a real, positive, deterministic margin, not a hairline pass.
+ *
+ * THE ONE CASE THIS DOES NOT GUARANTEE: an organization name so long it
+ * wraps to two lines (see ORG_NAME_LONG_THRESHOLD) occurring simultaneously
+ * with `compact`'s own worst case. That triple-worst-case can overshoot the
+ * budget by roughly 0.02in — a sixth of a point of vertical space — and is
+ * absorbed by the same `overflow: hidden` last resort that already covers a
+ * supporter name needing a third line. This is not a new risk: it is the
+ * SAME accepted tradeoff this module already made for names, now extended to
+ * a rarer, independent case (no real organization name in this tenant's data
+ * exceeds ORG_NAME_LONG_THRESHOLD as of BOX-LABEL-ORG-1).
  */
 
 /** Which budget a sticker is rendered under. */
@@ -71,7 +106,9 @@ export const STICKER_TYPOGRAPHY_TIERS: Readonly<Record<StickerTypographyTier, St
     Object.freeze({
         comfortable: Object.freeze({ tier: 'comfortable', nameSizePt: 24, contentSizePt: 12 }),
         standard: Object.freeze({ tier: 'standard', nameSizePt: 22, contentSizePt: 11 }),
-        compact: Object.freeze({ tier: 'compact', nameSizePt: 19, contentSizePt: 10 }),
+        // BOX-LABEL-ORG-1: 19 -> 18. See the module-header addendum above for
+        // the exact budget this buys back for the new organization line.
+        compact: Object.freeze({ tier: 'compact', nameSizePt: 18, contentSizePt: 10 }),
     });
 
 /**
@@ -102,4 +139,48 @@ export function chooseStickerTypography(
     if (isLongName && hasTwoContentLines) return STICKER_TYPOGRAPHY_TIERS.compact;
     if (isLongName || hasTwoContentLines) return STICKER_TYPOGRAPHY_TIERS.standard;
     return STICKER_TYPOGRAPHY_TIERS.comfortable;
+}
+
+/* ── BOX-LABEL-ORG-1: the fundraiser organization line ──────────────────── */
+
+export interface OrgNameTypography {
+    sizePt: number;
+}
+
+/**
+ * Length thresholds for the organization line's font size, derived the same
+ * way NAME_LONG_THRESHOLD was: at 22pt bold over 3.76in a name reliably fits
+ * ~20 characters on one line, so a SMALLER font reliably fits proportionally
+ * more — roughly `20 * 22 / fontSizePt` characters. At the org line's own
+ * candidate sizes (10 / 9 / 8pt) that is ~44 / ~49 / ~55 characters, so these
+ * thresholds are chosen well inside each size's real one-line capacity,
+ * leaving headroom rather than sitting at the edge of it.
+ *
+ * Every real organization name in this tenant's data as of BOX-LABEL-ORG-1
+ * (e.g. "Edgar County Farm Bureau", "Cumberland County Farm Bureau", "Shelby
+ * County Farm Bureau Foundation") is comfortably inside the first two
+ * buckets. A name longer than ORG_NAME_LONG_THRESHOLD gets the smallest
+ * bucket and MAY wrap to a second line via ordinary CSS wrapping — allowed,
+ * not specially budgeted for, and backstopped by the sticker's own
+ * `overflow: hidden`, exactly like a supporter name needing a third line.
+ */
+export const ORG_NAME_MEDIUM_THRESHOLD = 26;
+export const ORG_NAME_LONG_THRESHOLD = 40;
+
+/**
+ * Choose the organization line's font size from its length alone.
+ *
+ * Deliberately NOT tiered against the supporter name or content count —
+ * see the module-header addendum. Always bold at render time (the page sets
+ * fontWeight, not this function), and always smaller than the smallest
+ * possible nameSizePt (18, the compact tier), so the customer name can never
+ * stop being the most prominent text on the sticker.
+ */
+export function chooseOrgNameTypography(
+    organizationName: string | null | undefined,
+): OrgNameTypography {
+    const name = (organizationName ?? '').trim();
+    if (name.length > ORG_NAME_LONG_THRESHOLD) return { sizePt: 8 };
+    if (name.length > ORG_NAME_MEDIUM_THRESHOLD) return { sizePt: 9 };
+    return { sizePt: 10 };
 }

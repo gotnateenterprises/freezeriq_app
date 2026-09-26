@@ -27,13 +27,20 @@ import { buildPhysicalBoxManifest } from '@/lib/physicalBoxPacking';
  *
  * MINIMAL RESPONSE
  *
- * Only the four printed facts plus traceability ids leave this route. The
- * select list below deliberately omits `phone`, `delivery_address`,
- * `participant_name` and the Customer relation entirely — the existing
- * /api/production/dashboard route uses `include`, which ships every Order
- * scalar (supporter phone and address included) to the browser. That is
+ * Only the printed facts plus traceability ids leave this route. The select
+ * list below deliberately omits `phone`, `delivery_address`,
+ * `participant_name` and the ORDER'S OWN Customer relation entirely — the
+ * existing /api/production/dashboard route uses `include`, which ships every
+ * Order scalar (supporter phone and address included) to the browser. That is
  * pre-existing and out of OPS-6's scope to change, but this new path does not
  * repeat it: what is never fetched cannot be leaked.
+ *
+ * BOX-LABEL-ORG-1 adds exactly one thing to that select list: the CAMPAIGN's
+ * own organization name (`campaign.customer.name`) — a different relation
+ * entirely from the order's own Customer, and the organization's own public
+ * name, not a contact detail. It exists to answer "which fundraiser does
+ * this box belong to?" on a delivery day carrying several organizations'
+ * boxes at once.
  *
  * READ-ONLY
  *
@@ -89,6 +96,17 @@ export async function POST(request: Request) {
                 first_name: true,
                 last_name: true,
                 customer_name: true,
+                // BOX-LABEL-ORG-1: the campaign's OWNING organization, resolved
+                // independently for each order — never a batch-wide "current
+                // fundraiser" — so a mixed print run of several organizations'
+                // boxes resolves each one correctly. Null for a storefront
+                // order, which has no campaign at all.
+                campaign: {
+                    select: {
+                        name: true,
+                        customer: { select: { name: true } },
+                    },
+                },
                 items: {
                     select: {
                         id: true,
@@ -116,10 +134,25 @@ export async function POST(request: Request) {
         const foundIds = new Set(orders.map((o) => o.id));
         const unavailableCount = orderIds.filter((id) => !foundIds.has(id)).length;
 
+        // BOX-LABEL-ORG-1: an EXPLICIT mapping, not a blind cast, because the
+        // campaign's organization now arrives nested (`campaign.customer.name`)
+        // while BoxManifestOrder wants it flat (`campaign_organization_name`).
+        // A cast would let that name mismatch compile clean and silently
+        // resolve to undefined on every order.
+        const boxManifestOrders: BoxManifestOrder[] = orders.map((o) => ({
+            id: o.id,
+            first_name: o.first_name,
+            last_name: o.last_name,
+            customer_name: o.customer_name,
+            campaign_organization_name: o.campaign?.customer?.name ?? null,
+            campaign_name: o.campaign?.name ?? null,
+            items: o.items,
+        }));
+
         // OPS-6A: the response is PHYSICAL BOXES, not purchased bundles. One
         // box = one printed label, and a paired Serves-2 box is ONE of each
         // even though it holds two purchases.
-        const manifest = buildPhysicalBoxManifest(orders as unknown as BoxManifestOrder[]);
+        const manifest = buildPhysicalBoxManifest(boxManifestOrders);
 
         return NextResponse.json({
             boxes: manifest.boxes,

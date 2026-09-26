@@ -379,11 +379,19 @@ describe('16-20. supporter', () => {
             expect(s).not.toMatch(/delivery_address|street|postal|zip/i);
         }
         // The emitted purchase shape carries no contact data.
+        //
+        // BOX-LABEL-ORG-1: 'organizationName' is here on purpose — it is the
+        // fundraiser ORGANIZATION's own public name (e.g. "Edgar County Farm
+        // Bureau"), never a contact detail, so its addition does not weaken
+        // this assertion's actual guarantee. JANE() is a storefront-style
+        // fixture with no campaign, so it also proves the field degrades to
+        // null rather than fabricating a value.
         const p = purchases(JANE())[0];
         expect(Object.keys(p).sort()).toEqual([
-            'bundleName', 'instanceIndex', 'orderId', 'orderItemId',
+            'bundleName', 'instanceIndex', 'orderId', 'orderItemId', 'organizationName',
             'sequence', 'servingTier', 'supporterName', 'variantSize',
         ]);
+        expect(p.organizationName).toBeNull();
         expect(JSON.stringify(p)).not.toMatch(/@|address|phone/i);
     });
 
@@ -616,7 +624,28 @@ describe('26-30. privacy', () => {
         const select = s.slice(s.indexOf('select:'), s.indexOf('orderBy: { id:'));
         expect(select).toMatch(/first_name/);
         expect(select).toMatch(/customer_name/);
-        expect(select).not.toMatch(/phone|delivery_address|participant_name|customer:/);
+
+        // BOX-LABEL-ORG-1: `campaign: { select: { name, customer: { name } } }`
+        // is a DIFFERENT relation from the order's own Customer — the
+        // campaign's owning ORGANIZATION, narrowed to its public name only —
+        // and is exactly what this phase intentionally adds. Cut that one
+        // sub-object out before checking for the order's own contact-bearing
+        // relation, so this assertion keeps proving what it always proved
+        // (no phone/address/participant_name, and no UNNARROWED customer
+        // relation) without being defeated by the field it now legitimately
+        // contains.
+        const campaignSelectStart = select.indexOf('campaign: {');
+        const itemsSelectStart = select.indexOf('items: {');
+        expect(campaignSelectStart).toBeGreaterThan(-1);
+        expect(itemsSelectStart).toBeGreaterThan(campaignSelectStart);
+        const campaignBlock = select.slice(campaignSelectStart, itemsSelectStart);
+        const withoutCampaignBlock = select.slice(0, campaignSelectStart) + select.slice(itemsSelectStart);
+
+        expect(withoutCampaignBlock).not.toMatch(/phone|delivery_address|participant_name|customer:/);
+        // And the campaign's organization is narrowed to a name, never a
+        // contact detail, phone or address.
+        expect(campaignBlock).toMatch(/customer:\s*\{\s*select:\s*\{\s*name:\s*true\s*\}\s*\}/);
+        expect(campaignBlock).not.toMatch(/phone|delivery_address|email/i);
     });
 });
 

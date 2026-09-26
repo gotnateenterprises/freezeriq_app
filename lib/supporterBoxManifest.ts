@@ -109,6 +109,28 @@ export interface BoxManifestOrder {
     last_name: string | null;
     /** Order-time combined name scalar, written on every order. Fallback. */
     customer_name: string | null;
+    /**
+     * BOX-LABEL-ORG-1 — the fundraiser ORGANIZATION this order's campaign
+     * belongs to: `Order.campaign.customer.name`. Optional and nullable
+     * because a storefront order has no campaign at all, and because several
+     * existing fixtures construct a `BoxManifestOrder` with no knowledge of
+     * this field — both must resolve to "no organization line", never a
+     * missing-property error or a fabricated value.
+     *
+     * Deliberately NOT `Order.customer` (the order's own individual/CRM
+     * relation) — that is a different Customer row entirely and this module
+     * does not accept it at all, for the same reason resolveSupporterName
+     * below never reads it.
+     */
+    campaign_organization_name?: string | null;
+    /**
+     * Documented FALLBACK ONLY, per the owner's ruling: the campaign's own
+     * display name, used when the organization name is unavailable (a
+     * campaign whose organization record was renamed/removed, or a legacy
+     * row with no organization link at all). Never used when the
+     * organization name is present, and never invented from `campaign_id`.
+     */
+    campaign_name?: string | null;
     items: BoxManifestOrderItem[];
 }
 
@@ -129,6 +151,14 @@ export interface PurchasedBundleInstance {
     /** 0-based instance within its OrderItem. Traceability, not display. */
     instanceIndex: number;
     supporterName: string;
+    /**
+     * BOX-LABEL-ORG-1 — the fundraiser organization this instance's order
+     * belongs to (resolveOrganizationName below), or the campaign-name
+     * fallback, or null for a non-fundraiser order. Unlike supporterName,
+     * a missing organization NEVER blocks the order — it is an optional
+     * identifier, not purchase truth.
+     */
+    organizationName?: string | null;
     bundleName: string;
     /** Presentation-ready: "Serves 2" / "Serves 5". */
     servingTier: string;
@@ -220,6 +250,42 @@ export function resolveSupporterName(order: BoxManifestOrder): string | null {
 
     const scalar = (order?.customer_name ?? '').trim();
     if (scalar && !isPlaceholderName(scalar)) return scalar;
+
+    return null;
+}
+
+/**
+ * BOX-LABEL-ORG-1 — which fundraiser organization does this order's box
+ * belong to?
+ *
+ * The kitchen's problem this answers: on a delivery day carrying several
+ * fundraiser organizations' boxes at once, the supporter name alone does not
+ * say WHICH ORGANIZATION'S delivery stop a box goes to. `Order.campaign_id`
+ * is the SERVER-authoritative link (set once, at order time, never by the
+ * client — see app/api/public/order/route.ts), so tracing
+ * campaign -> campaign.customer (the organization) is the canonical path.
+ *
+ * PRECEDENCE:
+ *   1. campaign_organization_name — Order.campaign.customer.name. The real
+ *      organization's own name (e.g. "Edgar County Farm Bureau").
+ *   2. campaign_name — the campaign's own display name. A documented
+ *      fallback ONLY: used when the organization link is unavailable (a
+ *      legacy campaign, or an organization record that was renamed/removed).
+ *      Never invented, never guessed from campaign_id.
+ *
+ * Returns null for any order with no usable value here — a storefront order
+ * (no campaign at all), or, in principle, a fundraiser campaign whose
+ * organization AND display name are both blank. A null NEVER blocks the
+ * order: unlike resolveSupporterName, this identifies which stop a box goes
+ * to, not who owns it, and a box with no organization line simply prints
+ * exactly as it always has.
+ */
+export function resolveOrganizationName(order: BoxManifestOrder): string | null {
+    const organization = (order?.campaign_organization_name ?? '').trim();
+    if (organization) return organization;
+
+    const campaign = (order?.campaign_name ?? '').trim();
+    if (campaign) return campaign;
 
     return null;
 }
@@ -362,6 +428,13 @@ export function buildPurchasedInstances(
         };
     }
 
+    // BOX-LABEL-ORG-1: resolved once per order, from THIS order's own campaign
+    // — never a shared or "current fundraiser" value — so a batch mixing
+    // several organizations' boxes cannot bleed one order's organization
+    // into another's. Optional: unlike supporterName, a null here never
+    // blocks the order.
+    const organizationName = resolveOrganizationName(order);
+
     const eligible = orderedItems(order.items).filter(isBoxEligibleItem);
 
     if (eligible.length === 0) {
@@ -406,6 +479,7 @@ export function buildPurchasedInstances(
                 orderId: order.id,
                 orderItemId: item.id,
                 instanceIndex,
+                organizationName,
                 supporterName,
                 bundleName,
                 servingTier,

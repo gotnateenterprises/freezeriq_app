@@ -120,6 +120,18 @@ export interface PhysicalBox {
     /** Total physical boxes for the SOURCE ORDER. */
     boxTotal: number;
     supporterName: string;
+    /**
+     * BOX-LABEL-ORG-1 — the fundraiser organization this box's order belongs
+     * to, or null for a non-fundraiser order. Every box from the same order
+     * carries the identical value, because it is resolved once per order in
+     * lib/supporterBoxManifest.ts and never recomputed per box.
+     *
+     * Optional so the many existing `PhysicalBox` literals across this
+     * codebase's own tests (constructed before this field existed) remain
+     * valid — see tests/packingSlip1.test.ts. A box with no organization
+     * simply prints exactly as it always has.
+     */
+    organizationName?: string | null;
     /** The purchased instances travelling in this box. Never empty. */
     contents: PurchasedBundleInstance[];
 }
@@ -135,6 +147,8 @@ export interface BoxContentLine {
 export interface OrderPackingResult {
     orderId: string;
     supporterName: string;
+    /** BOX-LABEL-ORG-1 — see PhysicalBox.organizationName. */
+    organizationName?: string | null;
     boxes: PhysicalBox[];
     purchasedBundleCount: number;
     physicalBoxCount: number;
@@ -193,6 +207,12 @@ export function packInstancesIntoBoxes(
 
     const orderId = ordered[0].orderId;
     const supporterName = ordered[0].supporterName;
+    // BOX-LABEL-ORG-1: read from the FIRST instance only, deliberately — every
+    // instance in `ordered` came from buildPurchasedInstances for this ONE
+    // order, so they all already carry the identical value. There is no
+    // cross-order merge here (packing never crosses a source Order), so this
+    // can never mix two campaigns' organizations onto one box.
+    const organizationName = ordered[0].organizationName ?? null;
 
     const groups: { boxType: PhysicalBoxType; contents: PurchasedBundleInstance[] }[] = [];
 
@@ -222,6 +242,7 @@ export function packInstancesIntoBoxes(
         boxNumber: index + 1,
         boxTotal,
         supporterName,
+        organizationName,
         contents: g.contents,
     }));
 }
@@ -246,6 +267,7 @@ export function packOrder(
         result: {
             orderId: order.id,
             supporterName: purchased.instances[0].supporterName,
+            organizationName: purchased.instances[0].organizationName ?? null,
             boxes,
             purchasedBundleCount: purchased.instances.length,
             physicalBoxCount: boxes.length,

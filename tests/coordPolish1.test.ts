@@ -352,6 +352,20 @@ describe('15-18. scope stayed presentation-only', () => {
         'components/crm2/EditCampaignDetailsModal.tsx',
     ];
     const inCrmCampaignDetails1 = (f: string) => CRM_CAMPAIGN_DETAILS_1.includes(f);
+    // BOX-LABEL-ORG-1 — a later, separately-authorized phase. The fundraiser
+    // organization's name now prints above the customer name on the outer-box
+    // label, so a delivery day carrying several organizations' boxes can be
+    // sorted correctly. Resolved once per order from Order.campaign.customer,
+    // never blocking, never a shared/global value across a mixed print run.
+    // No schema, no migration, no financial or lifecycle field.
+    const BOX_LABEL_ORG_1 = [
+        'lib/supporterBoxManifest.ts',
+        'lib/physicalBoxPacking.ts',
+        'lib/labelTypography.ts',
+        'app/api/production/box-labels/route.ts',
+        'app/production/box-labels/page.tsx',
+    ];
+    const inBoxLabelOrg1 = (f: string) => BOX_LABEL_ORG_1.includes(f);
 
     const ALLOWED = new Set([
         'components/coordinator/ShareCenter.tsx',
@@ -428,7 +442,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // The real protection is the forbidden-path regex below, which is
             // unchanged — this only stops the check from going stale on every
             // subsequent phase that touches a regression suite.
-            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f)).toBe(true);
+            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f)).toBe(true);
         }
         // And explicitly: no path under these directories appears at all.
         const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -436,7 +450,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // FR-TAX-CORRECTNESS-1 is separately authorized to edit the
             // fundraiser money path — exempt from THIS phase's
             // "presentation only" assertion; everything else still held to it.
-            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f)) continue;
+            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f)) continue;
             expect(f).not.toMatch(forbidden);
         }
     });

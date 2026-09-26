@@ -15,7 +15,7 @@ import {
 } from '@/lib/physicalBoxPacking';
 import type { BlockedBoxOrder } from '@/lib/supporterBoxManifest';
 import { chooseBrandHeader, isLogoSettling, type TenantLogoStatus } from '@/lib/tenantLogo';
-import { chooseStickerTypography } from '@/lib/labelTypography';
+import { chooseStickerTypography, chooseOrgNameTypography } from '@/lib/labelTypography';
 import {
     OL600_SHEET,
     FIRST_SLOT,
@@ -109,6 +109,17 @@ const LOGO_SETTLE_TIMEOUT_MS = 2500;
  * The logo is re-sized for this medium rather than inheriting the 4x6 value:
  * 1.05in on a 2.5in-tall sticker would have dominated the supporter name,
  * which is the primary operational identifier.
+ *
+ * BOX-LABEL-ORG-1 — the fundraiser organization line
+ *
+ * On a delivery day carrying several fundraiser organizations at once, the
+ * supporter name alone does not say which organization's stop a box belongs
+ * to. When `box.organizationName` is present (a fundraiser order; null for a
+ * storefront order), it renders ABOVE the supporter name — bold, compact,
+ * sized by chooseOrgNameTypography — so the printed hierarchy is
+ * organization, then customer, then Box N of M / size, then contents. See
+ * lib/labelTypography.ts's module-header addendum for the exact space
+ * budget this required from the `compact` tier.
  */
 const LOGO_MAX_HEIGHT_IN = '0.55in';
 const LOGO_MAX_WIDTH_IN = '1.70in';
@@ -580,6 +591,15 @@ export default function BoxLabelsPage() {
                                     >
                                         {slot.label ? (
                                             <div className="min-w-0">
+                                                {/* BOX-LABEL-ORG-1: same field the sticker
+                                                    prints, shown here too so the operator
+                                                    can spot-check it on screen before
+                                                    committing label stock. */}
+                                                {slot.label.organizationName && (
+                                                    <div className="text-[10px] font-bold uppercase tracking-wide text-indigo-600 dark:text-indigo-400 truncate">
+                                                        {slot.label.organizationName}
+                                                    </div>
+                                                )}
                                                 <div className="flex items-baseline justify-between gap-2">
                                                     <span className="font-bold text-slate-900 dark:text-white truncate">
                                                         {slot.label.supporterName}
@@ -760,6 +780,25 @@ export default function BoxLabelsPage() {
                                                 Box {box.boxNumber} of {box.boxTotal}
                                             </div>
                                         </div>
+
+                                        {/* BOX-LABEL-ORG-1: which fundraiser/delivery
+                                            stop this box belongs to, ABOVE the
+                                            supporter name per the owner's stated
+                                            hierarchy. Absent entirely for a
+                                            non-fundraiser order — never rendered as
+                                            an empty line, "null" or "undefined" — and
+                                            independently resolved per box, so a print
+                                            run mixing several organizations' boxes
+                                            can never show the wrong one. */}
+                                        {box.organizationName && (
+                                            <div style={{
+                                                fontSize: `${chooseOrgNameTypography(box.organizationName).sizePt}pt`,
+                                                fontWeight: 800, lineHeight: 1.1, letterSpacing: '0.01em',
+                                                marginBottom: '0.02in', wordBreak: 'break-word',
+                                            }}>
+                                                {box.organizationName}
+                                            </div>
+                                        )}
 
                                         {/* The primary operational identifier: whose
                                             box is this, readable from several feet

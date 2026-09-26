@@ -742,10 +742,16 @@ describe('41-45. privacy', () => {
             expect(s).not.toMatch(/\bphone\b/i);
         }
         // The emitted box carries exactly the printable facts plus traceability.
+        //
+        // BOX-LABEL-ORG-1: 'organizationName' is here on purpose — the
+        // fundraiser ORGANIZATION's own public name, never a contact detail.
+        // FIXTURE_A() has no campaign, so this also proves the field
+        // degrades to null instead of fabricating a value.
         const [box] = packed(FIXTURE_A()).boxes;
         expect(Object.keys(box).sort()).toEqual([
-            'boxNumber', 'boxTotal', 'boxType', 'contents', 'orderId', 'supporterName',
+            'boxNumber', 'boxTotal', 'boxType', 'contents', 'orderId', 'organizationName', 'supporterName',
         ]);
+        expect(box.organizationName).toBeNull();
         expect(JSON.stringify(box)).not.toMatch(/@|address|phone/i);
     });
 

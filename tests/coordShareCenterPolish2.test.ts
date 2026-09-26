@@ -380,10 +380,23 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'components/crm2/EditCampaignDetailsModal.tsx',
             ];
             const inCrmCampaignDetails1 = (f: string) => CRM_CAMPAIGN_DETAILS_1.includes(f);
+            // BOX-LABEL-ORG-1 — a later, separately-authorized phase: the fundraiser
+            // organization's name now prints above the customer name on the outer-box
+            // label. Resolved once per order from Order.campaign.customer, never
+            // blocking, never a shared value across a mixed print run. No schema, no
+            // migration, no financial or lifecycle field.
+            const BOX_LABEL_ORG_1 = [
+                'lib/supporterBoxManifest.ts',
+                'lib/physicalBoxPacking.ts',
+                'lib/labelTypography.ts',
+                'app/api/production/box-labels/route.ts',
+                'app/production/box-labels/page.tsx',
+            ];
+            const inBoxLabelOrg1 = (f: string) => BOX_LABEL_ORG_1.includes(f);
             for (const f of changed) {
                 const allowed = f === SHARE_CENTER || f.startsWith('tests/')
                     || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f);
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f);
                 expect(allowed).toBe(true);
             }
             const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -393,7 +406,7 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 // phase's "presentation only" assertion. Everything else is
                 // still held to it.
                 if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f)) continue;
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f)) continue;
                 expect(f).not.toMatch(forbidden);
             }
         });
