@@ -251,9 +251,21 @@ describe('3. general storefront: public tenant API composes the authority', () =
         expect(src).toMatch(/branding\.business_name/);
     });
 
-    it('storefront metadata (page title) uses the same fixed endpoint', () => {
+    it('storefront metadata (page title) uses the ONE authority — no independent resolver', () => {
+        // PREVIEW-METADATA-ISOLATION-1 (a later, separately-authorized phase)
+        // superseded the mechanism this test originally asserted: generateMetadata
+        // used to reach this SAME authority indirectly, via an HTTP self-fetch to
+        // '/api/public/tenant/<slug>' resolved through NEXT_PUBLIC_APP_URL — which,
+        // on a Vercel Preview deployment, is Production's URL, so Preview's page
+        // <title> was rendered from Production's live data. It now calls
+        // customerFacingBusinessName() directly, on a business resolved from THIS
+        // deployment's own database — still the ONE authority this test exists to
+        // pin down, reached more directly, with no environment leak. See
+        // tests/previewMetadataIsolation1.test.ts for the full defect/fix proof.
         const src = strip(read('app/shop/[slug]/page.tsx'));
-        expect(src).toMatch(/api\/public\/tenant\//);
+        expect(src).not.toMatch(/api\/public\/tenant\//);
+        expect(src).toMatch(/from ['"]@\/lib\/tenantBrand['"]/);
+        expect(src).toMatch(/customerFacingBusinessName\(/);
     });
 });
 

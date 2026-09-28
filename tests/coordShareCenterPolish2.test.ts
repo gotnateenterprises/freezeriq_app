@@ -419,10 +419,20 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'docs/ai/ENVIRONMENT.md',
             ];
             const inPreviewDbIsolation1 = (f: string) => PREVIEW_DB_ISOLATION_1.includes(f);
+            // PREVIEW-METADATA-ISOLATION-1 — a later, separately-authorized phase: the
+            // storefront page's generateMetadata() self-fetched this app's own public API
+            // through NEXT_PUBLIC_APP_URL (Production's URL in every environment), leaking a
+            // real Production tenant's metadata into Preview. Fixed by reading directly from
+            // this deployment's own database, matching the sibling metadata functions. No
+            // schema, no migration, no canonical/OG URL change, no storefront body/checkout change.
+            const PREVIEW_METADATA_ISOLATION_1 = [
+                'app/shop/[slug]/page.tsx',
+            ];
+            const inPreviewMetadataIsolation1 = (f: string) => PREVIEW_METADATA_ISOLATION_1.includes(f);
             for (const f of changed) {
                 const allowed = f === SHARE_CENTER || f.startsWith('tests/')
                     || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f);
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f);
                 expect(allowed).toBe(true);
             }
             const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -432,7 +442,7 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 // phase's "presentation only" assertion. Everything else is
                 // still held to it.
                 if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f)) continue;
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f)) continue;
                 expect(f).not.toMatch(forbidden);
             }
         });
