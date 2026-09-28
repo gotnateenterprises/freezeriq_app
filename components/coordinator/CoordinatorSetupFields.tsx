@@ -150,9 +150,18 @@ export function CoordinatorSetupFields({
                         disabled={disabled}
                         value={values.paymentInstructions}
                         onChange={(e) => onChange({ paymentInstructions: e.target.value })}
-                        placeholder="Cash or check at pickup."
+                        placeholder="Please add your specific payment instructions here"
                         className={inputCls}
                     />
+                    {/* COORDINATOR-SUPPORTER-POLISH-1: an example, not a default — it is
+                        never written to `values.paymentInstructions` and is shown only
+                        while the field is genuinely empty, exactly like a placeholder. */}
+                    {!values.paymentInstructions && (
+                        <p className="mt-1 text-xs text-slate-400">
+                            Example: Payment is due to the coordinator within 3 days. Venmo @____, checks
+                            payable to ____, or contact ____ with payment questions.
+                        </p>
+                    )}
                 </div>
 
                 <div>

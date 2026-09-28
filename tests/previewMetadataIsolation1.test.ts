@@ -247,8 +247,16 @@ describe('D. canonical and public OpenGraph URL behavior is unchanged (none was 
 // ═════════════════════════════════════════════════════════════════════════════
 describe('F. storefront body, checkout, and the public tenant API route are untouched', () => {
     it('this phase changed exactly one file (plus its own tests and the scope ledgers)', () => {
-        const out = execSync('git status --porcelain', { cwd: ROOT, encoding: 'utf8' });
-        const changed = out.split('\n').filter(Boolean).map((l) => l.slice(3).trim());
+        // COORDINATOR-SUPPORTER-POLISH-1 (a later, separately-authorized phase)
+        // legitimately touches app/coordinator/portal/page.tsx too, so this can no
+        // longer be a LIVE `git status --porcelain` check — that would fail every
+        // later phase that ever touches any file this phase also touched, forever.
+        // Pinned instead to the FROZEN historical range this phase actually shipped
+        // in (baseline..c5e813a, this phase's own commit) — still exactly as
+        // strict about what PREVIEW-METADATA-ISOLATION-1 itself changed, but
+        // correctly indifferent to any unrelated work that lands afterward.
+        const out = execSync('git diff --name-only cfaffaf9d01e069f145d5dfc01f71f5f1be9905d c5e813ab578104c64c2b493b2ca0619dec1d4fd6', { cwd: ROOT, encoding: 'utf8' });
+        const changed = out.split('\n').filter(Boolean).map((l) => l.trim());
         const allowed = new Set([PAGE_PATH, 'tests/previewMetadataIsolation1.test.ts', 'tests/coordPolish1.test.ts', 'tests/coordShareCenterPolish2.test.ts', 'tests/tenantBrandAuthority2.test.ts']);
         for (const f of changed) {
             expect({ f, allowed: allowed.has(f) }).toEqual({ f, allowed: true });
