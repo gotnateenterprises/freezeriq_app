@@ -1,4 +1,13 @@
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { deploymentTier, isPreviewSafetyTier } from "@/lib/deploymentTier";
+
+/**
+ * PREVIEW-DB-ISOLATION-1: Preview deployments share the Production media
+ * bucket's credentials. Their uploads are kept under this prefix so they are
+ * identifiable and removable, and can never sit among (or be mistaken for)
+ * Production media. Production and local keys are unchanged.
+ */
+export const PREVIEW_MEDIA_PREFIX = "preview/";
 
 const region = process.env.S3_REGION || "auto"; // "auto" is often used for Cloudflare R2
 const accessKeyId = process.env.S3_ACCESS_KEY_ID || "";
@@ -37,9 +46,11 @@ export async function uploadToS3(fileBuffer: Buffer, fileName: string, contentTy
         return `/uploads/${uniqueFileName}`;
     }
 
+    const objectKey = (isPreviewSafetyTier(deploymentTier()) ? PREVIEW_MEDIA_PREFIX : "") + uniqueFileName;
+
     const command = new PutObjectCommand({
         Bucket: bucketName,
-        Key: uniqueFileName,
+        Key: objectKey,
         Body: fileBuffer,
         ContentType: contentType,
         // ACL: 'public-read', // Uncomment if your bucket allows ACLs
@@ -53,14 +64,14 @@ export async function uploadToS3(fileBuffer: Buffer, fileName: string, contentTy
     if (publicDomain) {
         // publicDomain should ideally be like https://pub-xyz.r2.dev or a custom domain
         const baseUrl = publicDomain.endsWith('/') ? publicDomain.slice(0, -1) : publicDomain;
-        return `${baseUrl}/${uniqueFileName}`;
+        return `${baseUrl}/${objectKey}`;
     }
 
     // Fallback standard AWS S3 format
     if (endpoint) {
         const baseUrl = endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint;
-        return `${baseUrl}/${bucketName}/${uniqueFileName}`;
+        return `${baseUrl}/${bucketName}/${objectKey}`;
     }
 
-    return `https://${bucketName}.s3.${region}.amazonaws.com/${uniqueFileName}`;
+    return `https://${bucketName}.s3.${region}.amazonaws.com/${objectKey}`;
 }

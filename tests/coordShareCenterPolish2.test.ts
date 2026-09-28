@@ -393,10 +393,36 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'app/production/box-labels/page.tsx',
             ];
             const inBoxLabelOrg1 = (f: string) => BOX_LABEL_ORG_1.includes(f);
+            // PREVIEW-DB-ISOLATION-1 — a later, separately-authorized phase: Vercel Preview
+            // got its own database. One shared deployment-tier helper, every Resend client
+            // built through a Preview sink redirect, Preview media uploads under a prefix, the
+            // fake-fixture seeder and its CLI, and the docs. No schema, no migration, no money;
+            // Production and local sends are unchanged.
+            const PREVIEW_DB_ISOLATION_1 = [
+                'lib/deploymentTier.ts',
+                'lib/emailSafety.ts',
+                'lib/previewFixtures.ts',
+                'lib/previewDbSeedCli.ts',
+                'lib/quickbooks/config.ts',
+                'lib/s3.ts',
+                'lib/email.ts',
+                'lib/drift_alert.ts',
+                'lib/inquiryAcknowledgement.ts',
+                'lib/outreachProvider.ts',
+                'app/api/campaigns/[id]/coordinator-email/route.ts',
+                'app/api/documents/send/route.ts',
+                'app/api/email/send/route.ts',
+                'app/api/opportunities/[id]/respond/route.ts',
+                'app/api/production/generate-po/route.ts',
+                'app/api/tenant/invoices/[id]/send/route.ts',
+                'docs/ai/PREVIEW_ENVIRONMENT.md',
+                'docs/ai/ENVIRONMENT.md',
+            ];
+            const inPreviewDbIsolation1 = (f: string) => PREVIEW_DB_ISOLATION_1.includes(f);
             for (const f of changed) {
                 const allowed = f === SHARE_CENTER || f.startsWith('tests/')
                     || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f);
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f);
                 expect(allowed).toBe(true);
             }
             const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -406,7 +432,7 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 // phase's "presentation only" assertion. Everything else is
                 // still held to it.
                 if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f)) continue;
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f)) continue;
                 expect(f).not.toMatch(forbidden);
             }
         });

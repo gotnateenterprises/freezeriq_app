@@ -9,6 +9,11 @@
  * tenant's row at a sandbox company. And a developer machine running with
  * Production Intuit keys would reach real books from uncommitted code.
  *
+ * (PREVIEW-DB-ISOLATION-1 later gave Preview its own database — see
+ * docs/ai/PREVIEW_ENVIRONMENT.md. The rule below is unchanged: Preview holds no
+ * QuickBooks keys, and a Preview built before that change still points at
+ * Production.)
+ *
  * So every QuickBooks entry point asks this module first, and it answers from
  * the DEPLOYMENT, not from anything in the request:
  *
@@ -36,6 +41,12 @@
 
 import { findProductionTargets } from '@/lib/devEnvGuard';
 import { integrationTokenKeyConfigured } from '@/lib/integrationTokenCrypto';
+// PREVIEW-DB-ISOLATION-1: the tier function now lives in lib/deploymentTier.ts,
+// shared with the other Preview safety rules; re-exported so callers are unchanged.
+import { deploymentTier, type DeploymentTier } from '@/lib/deploymentTier';
+
+export { deploymentTier };
+export type { DeploymentTier };
 
 export const QUICKBOOKS_PROVIDER = 'quickbooks';
 
@@ -70,7 +81,6 @@ const PRODUCTION_CALLBACK_HOSTS = ['www.freezeriqapp.com'];
 const LOCAL_CALLBACK_HOSTS = ['localhost', '127.0.0.1'];
 
 export type QuickBooksEnvironment = 'sandbox' | 'production';
-export type DeploymentTier = 'local' | 'preview' | 'production' | 'unknown';
 
 export type QuickBooksDisabledReason =
     | 'preview_deployment'
@@ -98,21 +108,6 @@ export interface QuickBooksConfig {
 export type QuickBooksConfigResult =
     | { enabled: true; config: QuickBooksConfig }
     | { enabled: false; reason: QuickBooksDisabledReason };
-
-/**
- * Which deployment this process is. VERCEL_ENV is set by Vercel on every
- * deployment; its absence on a Vercel host is treated as unknown, not as local.
- */
-export function deploymentTier(env: NodeJS.ProcessEnv = process.env): DeploymentTier {
-    const vercelEnv = env.VERCEL_ENV;
-    if (vercelEnv === 'preview') return 'preview';
-    if (vercelEnv === 'production') return 'production';
-    if (vercelEnv === 'development') return 'local'; // `vercel dev` on a developer machine
-    if (vercelEnv) return 'unknown';
-    if (env.VERCEL) return 'unknown';
-    if (env.NODE_ENV === 'development' || env.NODE_ENV === 'test') return 'local';
-    return 'unknown';
-}
 
 /**
  * The exact redirect URI, or null. Exactness matters twice over: Intuit compares

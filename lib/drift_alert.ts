@@ -253,8 +253,8 @@ async function sendEmail(payload: DriftAlertPayload, to: string): Promise<void> 
             return;
         }
 
-        const { Resend } = await import('resend');
-        const resend = new Resend(apiKey);
+        const { createResendClient } = await import('@/lib/emailSafety');
+        const resend = createResendClient(apiKey);
 
         const severityEmoji = payload.severity === 'CRITICAL' ? '🚨' : '⚠️';
         const subject = `${severityEmoji} FreezerIQ Drift Alert: ${payload.type}`;

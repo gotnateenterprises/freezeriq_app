@@ -366,6 +366,33 @@ describe('15-18. scope stayed presentation-only', () => {
         'app/production/box-labels/page.tsx',
     ];
     const inBoxLabelOrg1 = (f: string) => BOX_LABEL_ORG_1.includes(f);
+    // PREVIEW-DB-ISOLATION-1 — a later, separately-authorized phase. Vercel Preview now has its
+    // own database, so its safety no longer rests on "Preview is Production". One shared
+    // deployment-tier helper (moved out of the QuickBooks config, which re-exports it), every
+    // Resend client built through a Preview sink redirect, Preview media uploads kept under a
+    // prefix, the fake-fixture seeder and its CLI, and the docs. No schema, no migration, no
+    // money, no order behaviour; Production and local sends are unchanged.
+    const PREVIEW_DB_ISOLATION_1 = [
+        'lib/deploymentTier.ts',
+        'lib/emailSafety.ts',
+        'lib/previewFixtures.ts',
+        'lib/previewDbSeedCli.ts',
+        'lib/quickbooks/config.ts',
+        'lib/s3.ts',
+        'lib/email.ts',
+        'lib/drift_alert.ts',
+        'lib/inquiryAcknowledgement.ts',
+        'lib/outreachProvider.ts',
+        'app/api/campaigns/[id]/coordinator-email/route.ts',
+        'app/api/documents/send/route.ts',
+        'app/api/email/send/route.ts',
+        'app/api/opportunities/[id]/respond/route.ts',
+        'app/api/production/generate-po/route.ts',
+        'app/api/tenant/invoices/[id]/send/route.ts',
+        'docs/ai/PREVIEW_ENVIRONMENT.md',
+        'docs/ai/ENVIRONMENT.md',
+    ];
+    const inPreviewDbIsolation1 = (f: string) => PREVIEW_DB_ISOLATION_1.includes(f);
 
     const ALLOWED = new Set([
         'components/coordinator/ShareCenter.tsx',
@@ -442,7 +469,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // The real protection is the forbidden-path regex below, which is
             // unchanged — this only stops the check from going stale on every
             // subsequent phase that touches a regression suite.
-            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f)).toBe(true);
+            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f)).toBe(true);
         }
         // And explicitly: no path under these directories appears at all.
         const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -450,7 +477,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // FR-TAX-CORRECTNESS-1 is separately authorized to edit the
             // fundraiser money path — exempt from THIS phase's
             // "presentation only" assertion; everything else still held to it.
-            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f)) continue;
+            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f)) continue;
             expect(f).not.toMatch(forbidden);
         }
     });

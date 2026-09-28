@@ -4,6 +4,12 @@
 > Do not read, modify, or copy `.env` files unless explicitly asked.
 > This document describes the *contract* — what variables must exist and their purpose.
 
+> [!IMPORTANT]
+> **FUTURE AGENT RULE: NEVER assume Preview points to Production. Verify environment before mutating acceptance.**
+> Since PREVIEW-DB-ISOLATION-1 (2026-09-27) Vercel Preview has its own database with fake fixtures, but a
+> deployment keeps the variables it was built with — a Preview built before the cutover still uses Production.
+> How to tell, what Preview may and may not reach, and how to reseed: [PREVIEW_ENVIRONMENT.md](PREVIEW_ENVIRONMENT.md).
+
 ## Variable Categories
 
 ### Auth
@@ -17,6 +23,9 @@
 |----------|-------|---------|
 | `DATABASE_URL` | Platform | Supabase Postgres connection string |
 | `DIRECT_URL` | Platform | Direct Postgres connection (bypasses pooler) |
+
+On Vercel each has two entries: production + development → the Production database; preview → the separate
+Preview database. Builds never migrate. See [PREVIEW_ENVIRONMENT.md](PREVIEW_ENVIRONMENT.md).
 
 ### Platform Billing (Stripe)
 | Variable | Owner | Purpose |
@@ -35,7 +44,7 @@
 |----------|-------|---------|
 | `SQUARE_APP_ID` | Platform | Square Developer app ID (OAuth + Web Payments SDK) |
 | `SQUARE_APP_SECRET` | Platform | Square Developer app secret (OAuth token exchange) |
-| `SQUARE_ENVIRONMENT` | Platform | `sandbox` or `production` |
+| `SQUARE_ENVIRONMENT` | Platform | `sandbox` or `production`. Vercel Preview has its own entry, `sandbox` |
 | `SQUARE_WEBHOOK_SIGNATURE_KEY` | Platform | Webhook subscription signature key from Square Developer Console |
 | `SQUARE_WEBHOOK_NOTIFICATION_URL` | Platform | Webhook notification endpoint URL (must match Square subscription) |
 
@@ -60,6 +69,10 @@
 |----------|-------|---------|
 | `RESEND_API_KEY` | Platform | Transactional email sending |
 
+Every Resend client is built by `createResendClient()` in `lib/emailSafety.ts` — never `new Resend()`. On a
+Preview (or unidentifiable) deployment it redirects every send to Resend's test sink `delivered@resend.dev`;
+Production and local development are unchanged.
+
 ### AI
 | Variable | Owner | Purpose |
 |----------|-------|---------|
@@ -83,7 +96,7 @@
 | `INTEGRATION_TOKEN_KEY` | Platform | Dedicated AES-256-GCM key material for integration credentials at rest: 32+ characters, no commas or newlines (a key containing either is refused). No fallback to any other secret |
 | `INTEGRATION_TOKEN_KEY_PREVIOUS` | Platform | Optional, comma-separated retired keys, read-only; at most 4 are read (any beyond that are ignored). Replacing `INTEGRATION_TOKEN_KEY` without listing the old key here makes every stored QuickBooks connection unreadable. Rows move to the new key only when their access_token column is rewritten (connect/reconnect, successful refresh, any disconnect/revoked/expired tombstone); idle connections, transient refresh failures and already-disconnected rows do not. Follow the procedure in `docs/ai/QUICKBOOKS_INTEGRATION.md` ("Encryption-key rotation") |
 
-The QuickBooks connector is **always disabled on Vercel Preview** (`VERCEL_ENV=preview`), because Preview shares the Production database. Never add `QBO_*` variables to the Preview environment. See `lib/quickbooks/config.ts`.
+The QuickBooks connector is **always disabled on Vercel Preview** (`VERCEL_ENV=preview`). This rule predates PREVIEW-DB-ISOLATION-1, when Preview shared the Production database; it still stands, because a Preview built before that cutover still does and no Preview has QuickBooks keys. Never add `QBO_*` variables to the Preview environment. The deployment tier comes from `lib/deploymentTier.ts`; see `lib/quickbooks/config.ts`.
 
 ## Rules
 1. Missing secrets must fail loudly in production paths

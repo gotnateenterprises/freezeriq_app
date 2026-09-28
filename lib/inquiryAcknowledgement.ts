@@ -198,8 +198,8 @@ export async function attemptInquiryAcknowledgement(
                 : undefined
         );
 
-        const { Resend } = await import('resend');
-        const resend = new Resend(process.env.RESEND_API_KEY);
+        const { createResendClient } = await import('@/lib/emailSafety');
+        const resend = createResendClient(process.env.RESEND_API_KEY);
         const sender = await getTenantSender(businessId);
 
         let data: Awaited<ReturnType<typeof resend.emails.send>>;

@@ -1,9 +1,9 @@
 
 import { NextResponse } from 'next/server';
-import { Resend } from 'resend';
+import { createResendClient } from '@/lib/emailSafety';
 import { EMAIL_TEMPLATES } from '@/lib/emailTemplates';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = createResendClient(process.env.RESEND_API_KEY);
 
 // FR-ACCEPTANCE-1C: the stock bodies moved to lib/emailTemplates.ts so they can
 // be rendered and read by a test. See that file for why they had to change.

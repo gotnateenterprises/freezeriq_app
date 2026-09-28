@@ -1,4 +1,6 @@
-import { Resend } from 'resend';
+// PREVIEW-DB-ISOLATION-1: the one Resend constructor — on a Preview deployment
+// every send is redirected to the Resend test sink (lib/emailSafety.ts).
+import { createResendClient } from '@/lib/emailSafety';
 // FR-ACCEPTANCE-2A.1 — one subject sanitiser, not two. lib/emailTemplates.ts
 // imports nothing at all (deliberately, so its bodies stay testable without a
 // mail provider), so this dependency runs one way and cannot cycle.
@@ -13,7 +15,7 @@ import { checkPaymentLink } from '@/lib/coordinatorSetup';
 // amount due.
 import { supporterAmountDue } from '@/lib/fundraiserTax';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = createResendClient(process.env.RESEND_API_KEY);
 
 // Platform-level sender (invites, password resets, etc.)
 const FROM_EMAIL = process.env.EMAIL_FROM || 'onboarding@resend.dev';

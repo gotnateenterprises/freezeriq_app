@@ -28,7 +28,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
-import { Resend } from 'resend';
+import { createResendClient } from '@/lib/emailSafety';
 import {
     decideInvoiceSendStatus,
     isLiveEmailConfigured,
@@ -121,7 +121,7 @@ export async function POST(
             try {
                 const { getTenantSender } = await import('@/lib/email');
                 const sender = await getTenantSender(businessId);
-                const resend = new Resend(process.env.RESEND_API_KEY);
+                const resend = createResendClient(process.env.RESEND_API_KEY);
 
                 const processed = attachments.map((att: any) =>
                     typeof att?.content === 'string'

@@ -99,8 +99,8 @@ export class ResendOutreachProvider implements OutreachEmailProvider {
         }
 
         try {
-            const { Resend } = await import('resend');
-            const resend = new Resend(process.env.RESEND_API_KEY);
+            const { createResendClient } = await import('@/lib/emailSafety');
+            const resend = createResendClient(process.env.RESEND_API_KEY);
 
             const { data, error } = await resend.emails.send({
                 from: input.from,

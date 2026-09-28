@@ -694,7 +694,12 @@ describe('ADVERSARIAL: exactly one invitation, enforced by the database', () => 
     });
 
     it('losing the claim stops BEFORE the provider, and distinguishes sent from unresolved', () => {
-        const lost = post.slice(post.indexOf('if (claim.count === 0)'), post.indexOf('const { Resend }'));
+        // PREVIEW-DB-ISOLATION-1: the provider is now built by createResendClient
+        // (lib/emailSafety.ts) rather than `new Resend`; the slice still ends where
+        // the provider is first constructed, and must find that point.
+        const providerAt = post.indexOf('const { createResendClient }');
+        expect(providerAt).toBeGreaterThan(post.indexOf('if (claim.count === 0)'));
+        const lost = post.slice(post.indexOf('if (claim.count === 0)'), providerAt);
         expect(lost).toMatch(/alreadySent: true/);
         expect(lost).toMatch(/unresolved: true/);
         expect(lost).toMatch(/status: 409/);

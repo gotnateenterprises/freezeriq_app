@@ -36,7 +36,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
-import { Resend } from 'resend';
+import { createResendClient } from '@/lib/emailSafety';
 import { EMAIL_TEMPLATES, safeSubject } from '@/lib/emailTemplates';
 import { resolveTenantBrand } from '@/lib/tenantBrand';
 import { htmlToEditableText, editableTextToEmailHtml } from '@/lib/plainTextEmail';
@@ -224,7 +224,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         try {
             const { getTenantSender } = await import('@/lib/email');
             const sender = await getTenantSender(businessId);
-            const resend = new Resend(process.env.RESEND_API_KEY);
+            const resend = createResendClient(process.env.RESEND_API_KEY);
             const data = await resend.emails.send({
                 from: sender.from,
                 to: [recipient],

@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
-import { Resend } from 'resend';
+import { createResendClient } from '@/lib/emailSafety';
 import { parse } from 'json2csv';
 
 // Initialize Resend
 // We will use a fallback logic so the app won't crash if the key isn't provided yet
-const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder');
+const resend = createResendClient(process.env.RESEND_API_KEY || 're_placeholder');
 
 export async function POST(req: Request) {
     try {

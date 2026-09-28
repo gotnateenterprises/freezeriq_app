@@ -1,9 +1,9 @@
 
 import { NextResponse } from 'next/server';
-import { Resend } from 'resend';
+import { createResendClient } from '@/lib/emailSafety';
 import DocumentEmail from '@/components/emails/DocumentEmail';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = createResendClient(process.env.RESEND_API_KEY);
 
 export async function POST(req: Request) {
     try {
