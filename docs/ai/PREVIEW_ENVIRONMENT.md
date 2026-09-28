@@ -3,7 +3,7 @@
 > [!CAUTION]
 > **FUTURE AGENT RULE: NEVER assume Preview points to Production — or that it doesn't. Verify environment before mutating acceptance.**
 > A Vercel deployment keeps the environment variables it was **built** with. Preview deployments created
-> before the cutover on **2026-09-27** still read and write the **Production** database. Before any
+> before the cutover at **2026-09-27 22:59 UTC** still read and write the **Production** database. Before any
 > mutating test on a Preview URL, prove which database that exact deployment uses (see
 > [Verify a deployment's database](#verify-a-deployments-database)). If you cannot prove it, do not mutate.
 
@@ -41,8 +41,8 @@ lost `preview`. Env changes apply to **new** deployments only.
 
 Use the fixed fake campaign id — it exists only in the Preview database:
 
-1. The deployment must have been **created after** the 2026-09-27 cutover (`vercel inspect <url>` or the
-   dashboard). Anything older is Production-backed.
+1. The deployment must have been **created after** the cutover, 2026-09-27 22:59 UTC (`vercel inspect <url>`
+   or the dashboard). Anything older is Production-backed.
 2. Open `<deployment-url>/shop/preview-test-tenant/fundraiser/7e57f000-0000-4000-8000-000000000010`.
    It renders **"Preview Test Active Fundraiser"** only on the Preview database; on Production the tenant
    does not exist.
@@ -99,8 +99,10 @@ Builds never migrate (`prisma generate && next build`). Preview does not change 
 
 ## Residual risks
 
-- **Old Preview deployments** built before 2026-09-27 still use the Production database, Production email
-  recipients and Production Square mode. Do not use them for mutating acceptance.
+- **Old Preview deployments** built before 2026-09-27 22:59 UTC still use the Production database,
+  Production email recipients and Production Square mode. Do not use them for mutating acceptance.
+- **Links point at Production.** `NEXT_PUBLIC_APP_URL` is the Production domain in every environment, so
+  links inside Preview emails (and the Square OAuth redirect) open Production, not the Preview deployment.
 - **Branches without `lib/emailSafety.ts`** (cut from a commit before PREVIEW-DB-ISOLATION-1) send Preview
   email unredirected. The Preview database contains only sink addresses, so this reaches no real person
   unless a tester types a real address. The guard reaches every future branch once this phase is on the
