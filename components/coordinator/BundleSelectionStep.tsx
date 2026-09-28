@@ -90,8 +90,14 @@ interface BundleSelectionStepProps {
     /**
      * Called after the server confirms a successful selection so the parent
      * page can reveal the normal ordering workflow.
+     *
+     * COORDINATOR-SUPPORTER-POLISH-1: `justCompleted=true` on ONLY the fresh,
+     * this-instant POST-success path (below) — never from the GET-on-mount
+     * paths, which fire identically for a returning coordinator whose setup
+     * was already done. The parent uses this to show a one-time "you're live"
+     * message without inventing a second notion of "is setup done".
      */
-    onSelectionComplete: () => void;
+    onSelectionComplete: (justCompleted?: boolean) => void;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -291,7 +297,9 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
                     completed: true,
                     error: null,
                 }));
-                onSelectionComplete();
+                // This request just now turned setup on — the one case that is
+                // genuinely "fresh" rather than "server already had this."
+                onSelectionComplete(true);
                 return;
             }
 

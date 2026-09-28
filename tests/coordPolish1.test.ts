@@ -415,13 +415,27 @@ describe('15-18. scope stayed presentation-only', () => {
     // components/crm2/CampaignPriorityList.tsx and app/fundraisers/page.tsx are already
     // allowed above; only these three are new to this file's ledger. No schema, no
     // migration, no campaign data change, no change to "On pace" health scoring or to
-    // the supporter-facing order deadline this phase aligns with.
+    // the supporter-facing order deadline this phase aligns with. This phase is now
+    // part of Production baseline 35578df, which COORDINATOR-SUPPORTER-POLISH-1 was
+    // forward-integrated onto — both phases' entries stay registered here.
     const CRM_DEADLINE_TIMEZONE_1 = [
         'lib/campaignBundleSelection.ts',
         'lib/growth/nextAction.ts',
         'lib/growth/campaignContextUi.ts',
     ];
     const inCrmDeadlineTimezone1 = (f: string) => CRM_DEADLINE_TIMEZONE_1.includes(f);
+    // COORDINATOR-SUPPORTER-POLISH-1 — a later, separately-authorized phase: three
+    // contained UX polish items (a payment-instructions example/helper, a one-time
+    // "you're live" message after coordinator setup, and a fundraiser-lead CTA on the
+    // supporter success screen). app/coordinator/portal/page.tsx and FundraiserClient.tsx
+    // are already in ALLOWED above; only these two are new to this file's ledger. No
+    // schema, no migration, no payment/lead-classification logic change — copy and a
+    // single ephemeral boolean only.
+    const COORDINATOR_SUPPORTER_POLISH_1 = [
+        'components/coordinator/CoordinatorSetupFields.tsx',
+        'components/coordinator/BundleSelectionStep.tsx',
+    ];
+    const inCoordinatorSupporterPolish1 = (f: string) => COORDINATOR_SUPPORTER_POLISH_1.includes(f);
 
     const ALLOWED = new Set([
         'components/coordinator/ShareCenter.tsx',
@@ -498,7 +512,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // The real protection is the forbidden-path regex below, which is
             // unchanged — this only stops the check from going stale on every
             // subsequent phase that touches a regression suite.
-            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f)).toBe(true);
+            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inCoordinatorSupporterPolish1(f)).toBe(true);
         }
         // And explicitly: no path under these directories appears at all.
         const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -506,7 +520,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // FR-TAX-CORRECTNESS-1 is separately authorized to edit the
             // fundraiser money path — exempt from THIS phase's
             // "presentation only" assertion; everything else still held to it.
-            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f)) continue;
+            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inCoordinatorSupporterPolish1(f)) continue;
             expect(f).not.toMatch(forbidden);
         }
     });
