@@ -21,6 +21,8 @@ import {
     hasCampaignInvoice,
     type CampaignInvoiceDisplay,
 } from './campaignLifecycle';
+import { hasCampaignEndedForTenant } from '@/lib/campaignBundleSelection';
+import { formatCalendarDateShortValue } from '@/lib/calendarDate';
 
 /**
  * Presentation lifecycle:
@@ -45,10 +47,10 @@ export function detailLifecycle(c: CampaignForTriage, now: Date): CampaignDetail
     // sent, paid or settled externally.
     if (triage.priority === 'completed' || triage.priority === 'awaiting_payment') return 'completed';
     if (triage.priority === 'upcoming') return 'upcoming';
-    if (c.status === 'Active' && c.end_date) {
-        const end = new Date(c.end_date);
-        if (!Number.isNaN(end.getTime()) && end.getTime() < now.getTime()) return 'ended_open';
-    }
+    // CRM-DEADLINE-TIMEZONE-1: the tenant's own calendar day, not a UTC
+    // instant — see hasCampaignEndedForTenant() for why a raw
+    // `new Date(end_date).getTime() < now.getTime()` was wrong.
+    if (c.status === 'Active' && c.end_date && hasCampaignEndedForTenant(c, now)) return 'ended_open';
     return 'active';
 }
 
@@ -111,11 +113,20 @@ export function detailSections(c: CampaignForTriage, now: Date): DetailSections 
 /**
  * The drawer's date line. Plain words; an ended campaign reads as a fact, not
  * an error. Missing dates yield null — never a "No date" placeholder.
+ *
+ * CRM-DEADLINE-TIMEZONE-1 fixed two independent bugs here:
+ *   - "Ended" vs "Ends" used a raw UTC-instant comparison (see
+ *     hasCampaignEndedForTenant() for why that was wrong);
+ *   - the DIGITS came from `end.toLocaleDateString()` with no timeZone
+ *     option — the exact display bug lib/calendarDate.ts (FR-RETENTION-3C /
+ *     FR-COORD-ROUTING-DATE-1) already exists to prevent everywhere else. A
+ *     date-only end_date must render the same calendar day in every
+ *     timezone; formatCalendarDateShortValue() reads it from the UTC
+ *     fields directly rather than through the machine's local zone.
  */
 export function detailDateLine(c: CampaignForTriage, now: Date): string | null {
     if (!c.end_date) return null;
-    const end = new Date(c.end_date);
-    if (Number.isNaN(end.getTime())) return null;
-    const fmt = end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    return end.getTime() < now.getTime() ? `Ended ${fmt}` : `Ends ${fmt}`;
+    const fmt = formatCalendarDateShortValue(c.end_date);
+    if (!fmt) return null;
+    return hasCampaignEndedForTenant(c, now) ? `Ended ${fmt}` : `Ends ${fmt}`;
 }

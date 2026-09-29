@@ -429,10 +429,24 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'app/shop/[slug]/page.tsx',
             ];
             const inPreviewMetadataIsolation1 = (f: string) => PREVIEW_METADATA_ISOLATION_1.includes(f);
+            // CRM-DEADLINE-TIMEZONE-1 — a later, separately-authorized phase: the
+            // Fundraiser CRM's "has this deadline passed?" decision used a raw
+            // UTC-instant comparison against a date-only end_date; fixed with one
+            // shared calendar-day helper and Business.timezone threaded onto the
+            // existing campaign row. app/api/campaigns/route.ts,
+            // CampaignPriorityList.tsx and app/fundraisers/page.tsx are already
+            // allowed elsewhere in this file's ledger; only these three are new.
+            // No schema, no migration, no campaign data change.
+            const CRM_DEADLINE_TIMEZONE_1 = [
+                'lib/campaignBundleSelection.ts',
+                'lib/growth/nextAction.ts',
+                'lib/growth/campaignContextUi.ts',
+            ];
+            const inCrmDeadlineTimezone1 = (f: string) => CRM_DEADLINE_TIMEZONE_1.includes(f);
             for (const f of changed) {
                 const allowed = f === SHARE_CENTER || f.startsWith('tests/')
                     || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f);
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f);
                 expect(allowed).toBe(true);
             }
             const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -442,7 +456,7 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 // phase's "presentation only" assertion. Everything else is
                 // still held to it.
                 if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f)) continue;
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f)) continue;
                 expect(f).not.toMatch(forbidden);
             }
         });

@@ -35,6 +35,7 @@ import type { CampaignPriority } from '@/lib/growth/nextAction';
 import { coordinatorAccessPath } from '@/lib/fundraiserUrls';
 import { describeCampaignInvoice, resolveCampaignInvoiceState } from '@/lib/growth/campaignLifecycle';
 import { formatCalendarDateShortValue } from '@/lib/calendarDate';
+import { hasCampaignEndedForTenant } from '@/lib/campaignBundleSelection';
 
 export interface PriorityListCampaign extends CampaignForTriage {
     id: string;
@@ -276,7 +277,11 @@ function CampaignRow({
 
     const end = c.end_date ? new Date(c.end_date) : null;
     const endValid = end && !Number.isNaN(end.getTime());
-    const ended = endValid && end!.getTime() < now.getTime();
+    // CRM-DEADLINE-TIMEZONE-1: the tenant's own calendar day, not a UTC
+    // instant — see hasCampaignEndedForTenant() for why a raw
+    // `end.getTime() < now.getTime()` showed "Ended" hours before the
+    // tenant's local deadline day had even arrived.
+    const ended = endValid && hasCampaignEndedForTenant(c, now);
 
     // Every capability the old table exposed, preserved — just not as five
     // mystery icons. The primary action stays out of this list.

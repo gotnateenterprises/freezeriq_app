@@ -47,6 +47,9 @@ interface Fundraiser {
         contact_name?: string | null;
     };
     business_slug: string;
+    /** CRM-DEADLINE-TIMEZONE-1 — required for the calendar-day-correct
+     *  "has this deadline passed?" decision; see hasCampaignEndedForTenant(). */
+    business_timezone?: string | null;
     is_placeholder?: boolean;
     portal_token?: string;
     held_order_count?: number;

@@ -102,7 +102,11 @@ describe('2. grouping files campaigns without re-deciding priority', () => {
 
     it('ended-with-held-orders campaigns join needs_attention even when health was fine', () => {
         const endedHeld: CampaignForTriage & { id: string } = {
-            id: 'e', status: 'Active', end_date: days(-2), held_order_count: 4, health: 'on_pace',
+            // CRM-DEADLINE-TIMEZONE-1: business_timezone required for
+            // hasCampaignEndedForTenant() to ever read "ended" — it fails
+            // closed toward "not ended" otherwise.
+            id: 'e', status: 'Active', end_date: days(-2), business_timezone: 'America/Chicago',
+            held_order_count: 4, health: 'on_pace',
         };
         const sections = groupCampaignsByPriority([endedHeld, onPace('p')], NOW);
         expect(sections[0].priority).toBe('needs_attention');

@@ -31,6 +31,11 @@ const reason = (code: CampaignHealthReason['code']): CampaignHealthReason => ({
 const active = (over: Partial<CampaignForTriage> = {}): CampaignForTriage => ({
     status: 'Active',
     end_date: days(10),
+    // CRM-DEADLINE-TIMEZONE-1: hasCampaignEndedForTenant() fails closed toward
+    // "not ended" without a business_timezone, so every existing "N days past
+    // its end date" fixture here needs one to keep testing what it always
+    // meant to test. See lib/campaignBundleSelection.ts's hasCampaignEndedForTenant.
+    business_timezone: 'America/Chicago',
     held_order_count: 0,
     health: 'on_pace',
     health_reasons: [],

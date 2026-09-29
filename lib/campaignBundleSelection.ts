@@ -230,6 +230,58 @@ export function isCampaignPastOrderDeadline(
   return tenantToday > endCalendarDate;
 }
 
+/**
+ * CRM-DEADLINE-TIMEZONE-1 — has this campaign's deadline day itself fully
+ * passed, in the tenant's own calendar? The same calendar-day question as
+ * isCampaignPastOrderDeadline() above, built on the exact same primitives —
+ * `tenantToday > endCalendarDate`, never an instant comparison — so a
+ * date-only end_date parsed as UTC midnight can never look "ended" hours
+ * before the tenant's local day has even reached it.
+ *
+ * THREE tenant-CRM call sites (components/crm2/CampaignPriorityList.tsx,
+ * lib/growth/nextAction.ts, lib/growth/campaignContextUi.ts) used to each
+ * write their own `new Date(end_date).getTime() < now.getTime()` — an
+ * instant comparison against a UTC-midnight value, which for an
+ * America/Chicago tenant (UTC-5 in September) starts claiming "Ended" at
+ * 7:00 PM local the evening BEFORE the deadline date, and stays wrong
+ * through the entire deadline day. This is the one place that comparison
+ * now lives.
+ *
+ * FAIL-CLOSED DIRECTION DELIBERATELY DIFFERS FROM isCampaignPastOrderDeadline():
+ * that function protects MONEY — an unresolvable timezone must not leave a
+ * fundraiser silently open for orders forever, so it fails toward "past
+ * deadline" (blocks new orders). This function protects ATTENTION — a
+ * still-running, otherwise-healthy campaign must not suddenly read as
+ * "Ended" to the tenant merely because its timezone is missing or invalid,
+ * which could cause a live fundraiser to be ignored or closed out early. So
+ * this fails the other way: toward "not yet ended". Same posture
+ * (a misconfigured tenant must never fail SILENTLY), opposite boolean,
+ * because the two functions guard against opposite harms.
+ *
+ * `businessTimeZone` is read from the SAME campaign object as `end_date` —
+ * every consumer already carries `business_timezone` on the row it already
+ * has (threaded once, in app/api/campaigns/route.ts), so no call site needs
+ * a second lookup or a second parameter.
+ */
+export function hasCampaignEndedForTenant(
+  campaign: {
+    end_date?: Date | string | null;
+    business_timezone?: string | null;
+  },
+  now: Date = new Date()
+): boolean {
+  if (!campaign.end_date) return false; // no deadline at all — never "ended" by this rule
+
+  const endCalendarDate = calendarDateOfDateOnlyValue(campaign.end_date);
+  if (!endCalendarDate) return false; // unparseable — never claim ended
+
+  if (!campaign.business_timezone) return false; // no zone — fail closed toward "not ended"
+  const tenantToday = calendarDateInTimeZone(campaign.business_timezone, now);
+  if (!tenantToday) return false; // unusable zone — fail closed toward "not ended"
+
+  return tenantToday > endCalendarDate;
+}
+
 // ── Candidate-family resolution ───────────────────────────────────────────────
 
 /**

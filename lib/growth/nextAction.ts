@@ -31,6 +31,7 @@
 
 import type { CampaignHealth, CampaignHealthReason } from './health';
 import { classifyCampaignLifecycle, describeCampaignInvoice } from './campaignLifecycle';
+import { hasCampaignEndedForTenant } from '@/lib/campaignBundleSelection';
 
 /** Mirrors isCampaignClosed() in app/fundraisers/page.tsx — keep in sync. */
 export const CLOSED_FAMILY = ['Closed', 'Settled', 'Completed', 'Archived'] as const;
@@ -83,6 +84,11 @@ export interface CampaignForTriage {
     is_placeholder?: boolean;
     closed_at?: string | null;
     end_date?: string | null;
+    /** CRM-DEADLINE-TIMEZONE-1 — required to answer "has the deadline day
+     *  itself passed?" correctly; see hasCampaignEndedForTenant(). Absent
+     *  degrades safely: hasCampaignEndedForTenant() fails closed toward
+     *  "not yet ended" rather than guessing a zone. */
+    business_timezone?: string | null;
     held_order_count?: number;
     portal_token?: string | null;
     health?: CampaignHealth;
@@ -148,13 +154,17 @@ const isClosedFamily = (c: CampaignForTriage): boolean =>
 export const isArchivedForDashboard = (c: CampaignForTriage): boolean =>
     c.status === 'Archived' || c.organization_archived === true;
 
-/** The window has passed and orders are still held hostage to closeout. */
+/**
+ * The window has passed and orders are still held hostage to closeout.
+ *
+ * CRM-DEADLINE-TIMEZONE-1: "passed" is the tenant's own calendar day, not a
+ * UTC instant — see hasCampaignEndedForTenant() for why a raw
+ * `new Date(end_date).getTime() < now.getTime()` was wrong.
+ */
 export function hasEndedWithHeldOrders(c: CampaignForTriage, now: Date): boolean {
     if (isClosedFamily(c) || c.status !== 'Active') return false;
     if (!c.end_date) return false;
-    const end = new Date(c.end_date);
-    if (Number.isNaN(end.getTime())) return false;
-    return end.getTime() < now.getTime() && (c.held_order_count ?? 0) > 0;
+    return hasCampaignEndedForTenant(c, now) && (c.held_order_count ?? 0) > 0;
 }
 
 const hasReason = (c: CampaignForTriage, code: CampaignHealthReason['code']): boolean =>

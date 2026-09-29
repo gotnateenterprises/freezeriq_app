@@ -701,9 +701,15 @@ export async function GET(req: Request) {
             // Fetch Business Slug for Public URL construction
             const business = await prisma.business.findUnique({
                 where: { id: session.user.businessId },
-                select: { slug: true }
+                select: { slug: true, timezone: true }
             });
             const businessSlug = business?.slug || 'demo';
+            // CRM-DEADLINE-TIMEZONE-1: threaded onto every campaign row below so
+            // the CRM's "has this deadline day passed?" decision (previously a
+            // bare UTC-instant comparison) can use the tenant's own calendar
+            // day, exactly like the supporter-facing order deadline already
+            // does. One lookup, reused — no per-component refetch.
+            const businessTimezone = business?.timezone ?? null;
             // GE-3: one clock for the whole response, so two campaigns in the
             // same payload can never disagree about what "today" is.
             const healthNow = new Date();
@@ -947,6 +953,7 @@ export async function GET(req: Request) {
                             customer: { name: c.name, contact_name: (c as any).contact_name || null },
                             is_placeholder: false,
                             business_slug: businessSlug,
+                            business_timezone: businessTimezone,
                             participant_label: (fc as any).participant_label || 'Seller',
                             group_label: (fc as any).group_label,
                             is_group_enabled: (fc as any).is_group_enabled,
@@ -1015,6 +1022,7 @@ export async function GET(req: Request) {
                         customer: { name: c.name, contact_name: (c as any).contact_name || null },
                         is_placeholder: true,
                         business_slug: businessSlug,
+                        business_timezone: businessTimezone,
                         goal_amount: 0,
                         bundle_goal: 0,
                         sales_total: 0,

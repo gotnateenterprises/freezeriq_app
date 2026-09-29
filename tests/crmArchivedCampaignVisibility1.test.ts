@@ -45,6 +45,50 @@ const NOW = new Date('2026-08-30T12:00:00.000Z');
 const days = (n: number) => new Date(NOW.getTime() + n * 86_400_000).toISOString();
 
 // ═════════════════════════════════════════════════════════════════════════════
+// Route-level mocks for THIS FILE, shared by every describe block below.
+//
+// jest.mock is file-scoped and hoisted, not describe-scoped: two separate
+// jest.mock('@/lib/db', ...) calls in one file silently collide -- the
+// second overrides the first for the WHOLE file, not just its own describe
+// block. So both routes' Prisma surfaces live on one combined `db` here,
+// declared once.
+//
+// CRM-DEADLINE-TIMEZONE-1: this block must come BEFORE the first describe()
+// below, not after. lib/growth/nextAction.ts now imports
+// lib/campaignBundleSelection.ts (for hasCampaignEndedForTenant), which
+// imports @/lib/db -- so the "triageCampaign" describe block's top-level
+// require('@/lib/growth/nextAction') is what first triggers @/lib/db to load.
+// describe() callbacks run synchronously at collection time, top-to-bottom,
+// so a require() inside an EARLIER describe block executes before a LATER
+// `const db = {...}` in the same file has run. Under this project's es5
+// compile target, `const` downlevels to `var`, so that earlier closure
+// silently captured `undefined` instead of throwing -- surfacing as every
+// mocked route seeing prisma.<model> as undefined. Declaring the mocks once,
+// up front, makes the load order correct no matter which describe block ends
+// up importing @/lib/db first.
+// ═════════════════════════════════════════════════════════════════════════════
+const TENANT_A = 'biz-aaaa-1111';
+const mockAuth = jest.fn();
+jest.mock('@/auth', () => ({ auth: () => mockAuth() }));
+
+const db: any = {
+    business: { findUnique: jest.fn(async () => ({ slug: 'test-biz' })) },
+    customer: {
+        findMany: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(async () => ({})),
+    },
+    fundraiserCampaign: {
+        findMany: jest.fn(),
+        findFirst: jest.fn(async () => null),
+        update: jest.fn(),
+    },
+    invoice: { groupBy: jest.fn(async () => []) },
+    fundraiserOpportunity: { groupBy: jest.fn(async () => []) },
+};
+jest.mock('@/lib/db', () => ({ prisma: db }));
+
+// ═════════════════════════════════════════════════════════════════════════════
 // PART F — the seven required fixtures, at the real classification boundary.
 // ═════════════════════════════════════════════════════════════════════════════
 describe('triageCampaign: archive outranks every operational classification', () => {
@@ -213,36 +257,6 @@ describe('summarizeAttention: archived campaigns never inflate the attention str
         expect(s).toEqual({ needsAttention: 1, heldOrders: 3, heldValue: 450 });
     });
 });
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Route-level mocks for THIS FILE, shared by both describe blocks below.
-//
-// jest.mock is file-scoped and hoisted, not describe-scoped: two separate
-// jest.mock('@/lib/db', ...) calls in one file silently collide -- the
-// second overrides the first for the WHOLE file, not just its own describe
-// block. So both routes' Prisma surfaces live on one combined `db` here,
-// declared once.
-// ═════════════════════════════════════════════════════════════════════════════
-const TENANT_A = 'biz-aaaa-1111';
-const mockAuth = jest.fn();
-jest.mock('@/auth', () => ({ auth: () => mockAuth() }));
-
-const db: any = {
-    business: { findUnique: jest.fn(async () => ({ slug: 'test-biz' })) },
-    customer: {
-        findMany: jest.fn(),
-        findUnique: jest.fn(),
-        update: jest.fn(async () => ({})),
-    },
-    fundraiserCampaign: {
-        findMany: jest.fn(),
-        findFirst: jest.fn(async () => null),
-        update: jest.fn(),
-    },
-    invoice: { groupBy: jest.fn(async () => []) },
-    fundraiserOpportunity: { groupBy: jest.fn(async () => []) },
-};
-jest.mock('@/lib/db', () => ({ prisma: db }));
 
 // ═════════════════════════════════════════════════════════════════════════════
 // /api/campaigns GET now exposes organization_archived (Customer.archived),
