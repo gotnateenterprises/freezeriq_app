@@ -36,18 +36,36 @@ const page = strip(raw);
 // ═════════════════════════════════════════════════════════════════════════════
 describe('A. locked positioning copy', () => {
     it.each([
-        'The fundraiser families actually look forward to.',
+        'Raise money with something families already need: dinner.',
+        'a night off from cooking',
         'Raise more. Stress less.',
-        'Everybody has to eat.',
         'Why a food fundraiser works',
+        'Dinner is different.',
         'not just donating',
-        'Order from the couch in about two minutes',
-        'One place instead of a shoebox of forms',
-        'Turn every bundle sold into support for your organization.',
-        'Built to be shared',
+        'less like asking for a donation and more like offering',
+        'to ordered in just a few taps.',
+        'Spend your time promoting the fundraiser, not sorting through paperwork.',
+        'shoebox of forms',
+        'Turn dinner into support for your organization.',
+        'One fundraiser. A lot more ways to reach people.',
+        'Built to be shared. Designed to help your fundraiser reach more people.',
         'Three steps, start to finish',
+        'Keep the momentum going',
     ])('says: %s', (phrase) => {
         expect(page).toContain(phrase);
+    });
+
+    it('the three steps read Set it up / Share it / Keep the momentum going — "Cheer it on" is retired', () => {
+        expect(page).toMatch(/title: 'Set it up'/);
+        expect(page).toMatch(/title: 'Share it'/);
+        expect(page).toMatch(/title: 'Keep the momentum going'/);
+        expect(page).not.toMatch(/Cheer it on/);
+    });
+
+    it('names every share channel the owner listed: text, social, email, group chats, QR codes', () => {
+        for (const label of ["'Text'", "'Social media'", "'Email'", "'Group chats'", "'QR code on a flyer'"]) {
+            expect(page).toContain(label);
+        }
     });
 
     it('closes the steps with the owner-approved reassurance line', () => {
