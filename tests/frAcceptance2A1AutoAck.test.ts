@@ -451,8 +451,8 @@ describe('recipient and brand', () => {
         const s = makeStore(); useStore(s); goLive();
         await ack();
         const { html, subject } = send.mock.calls[0][0];
-        expect(html).toContain("we'd love to help");
-        expect(html).toContain('final orders are due two weeks before the delivery date');
+        expect(html).toContain("we'd love to help you get one started");
+        expect(html).toContain('Final orders are due two weeks before delivery');
         expect(html).not.toMatch(/\d+\s*%/);
         expect(subject).toContain('Oak Ridge PTO');
     });

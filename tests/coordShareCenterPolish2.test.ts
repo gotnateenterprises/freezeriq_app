@@ -469,10 +469,18 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'components/coordinator/BundleSelectionStep.tsx',
             ];
             const inCoordinatorSupporterPolish1 = (f: string) => COORDINATOR_SUPPORTER_POLISH_1.includes(f);
+            // FUNDRAISER-INQUIRY-AUTORESPONSE-COPY-1 — a later, separately-authorized
+            // phase: copy replacement only on the EXISTING, already-live requester
+            // autoresponder (lib/emailTemplates.ts's lead_intro). No schema/migration,
+            // no change to lead creation, routing, or Reply-To resolution.
+            const FUNDRAISER_INQUIRY_AUTORESPONSE_COPY_1 = [
+                'lib/emailTemplates.ts',
+            ];
+            const inFundraiserInquiryAutoresponseCopy1 = (f: string) => FUNDRAISER_INQUIRY_AUTORESPONSE_COPY_1.includes(f);
             for (const f of changed) {
                 const allowed = f === SHARE_CENTER || f.startsWith('tests/')
                     || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f);
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f);
                 expect(allowed).toBe(true);
             }
             const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -482,7 +490,7 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 // phase's "presentation only" assertion. Everything else is
                 // still held to it.
                 if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f)) continue;
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f)) continue;
                 expect(f).not.toMatch(forbidden);
             }
         });

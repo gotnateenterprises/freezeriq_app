@@ -146,25 +146,28 @@ describe('the lead autoresponder', () => {
 
     it('uses the owner-approved meal paragraph verbatim', () => {
         const { html } = render(TENANT);
-        expect(html).toContain('A meal fundraiser is an easy way to raise money by offering families something they already need');
-        expect(html).toContain('We handle the meal prep, freezing, packing, and delivery to your organization, and your team simply sorts and distributes the orders at the designated pickup time and location.');
+        expect(html).toContain('Our meal fundraisers are designed to be simple: your supporters get something families already need');
+        expect(html).toContain('We handle the meal prep, freezing, packing, and delivery. You focus on sharing the fundraiser and getting your community involved.');
     });
 
-    it('the old meal paragraph is gone', () => {
+    it('the old meal paragraphs are gone', () => {
         const { html } = render(TENANT);
         expect(html).not.toContain('families are going to eat dinner anyway');
         expect(html).not.toContain('your volunteers hand out boxes');
+        expect(html).not.toContain('A meal fundraiser is an easy way to raise money');
+        expect(html).not.toContain('your team simply sorts and distributes the orders');
     });
 
     it('uses the owner-approved delivery-date paragraph, naming Tue/Wed/Thu', () => {
         const { html } = render(TENANT);
-        expect(html).toContain('Most of the fundraiser timeline is built around the delivery date');
+        expect(html).toContain('Everything starts with your delivery/pickup date');
         expect(html).toMatch(/Tuesday, Wednesday, or Thursday/);
-        expect(html).toMatch(/day, date, and time/);
     });
 
     it('the old delivery intro is gone', () => {
-        expect(render(TENANT).html).not.toContain('Almost everything else follows from the delivery day');
+        const { html } = render(TENANT);
+        expect(html).not.toContain('Almost everything else follows from the delivery day');
+        expect(html).not.toContain('Most of the fundraiser timeline is built around the delivery date');
     });
 
     it('still asks for BOTH a preferred and a backup date', () => {
@@ -175,22 +178,21 @@ describe('the lead autoresponder', () => {
 
     it('carries the owner-approved final-orders and invoice paragraph', () => {
         const { html } = render(TENANT);
-        expect(html).toContain('final orders are due two weeks before the delivery date');
-        // FR-ACCEPTANCE-2A.1: "agreed", matching the public page's wording. The
-        // share is a per-campaign number nobody has set yet when this goes out.
-        expect(html).toContain('keeps its agreed fundraising percentage off the top');
+        expect(html).toContain('Final orders are due two weeks before delivery');
+        // FUNDRAISER-INQUIRY-AUTORESPONSE-COPY-1: "agreed", matching the public
+        // page's wording. The share is a per-campaign number nobody has set yet
+        // when this goes out.
+        expect(html).toContain("Your organization keeps its agreed fundraising percentage");
         expect(html).toContain('payment due upon receipt');
     });
 
-    it('says when orders reach us, and anchors the invoice to the DEADLINE', () => {
+    it('anchors the invoice to the DEADLINE, not a handover', () => {
         // FR-ACCEPTANCE-2A.1. The old wording — "shortly after final orders are
         // received" — read as though someone had to hand orders over before
-        // anything happened. Online and coordinator-panel orders arrive
-        // continuously; the invoice is triggered by the deadline, not by a
+        // anything happened. The invoice is triggered by the deadline, not by a
         // handover that never occurs.
         const { html } = render(TENANT);
-        expect(html).toContain('Orders submitted online or entered through the coordinator panel are received by us as they come in');
-        expect(html).toContain('invoice for the remaining balance shortly after the order deadline');
+        expect(html).toContain("we'll invoice the remaining balance shortly after the order deadline");
         expect(html).not.toContain('shortly after final orders are received');
     });
 
@@ -199,8 +201,8 @@ describe('the lead autoresponder', () => {
         // first-person-singular voice puts words in the mouth of whichever
         // individual happens to own the sending address.
         const { html } = render(TENANT);
-        expect(html).toContain("we'd love to help");
-        expect(html).toMatch(/we'll check what's open/);
+        expect(html).toContain("we'd love to help you get one started");
+        expect(html).toContain("We'll take it from there.");
         // The trailing apostrophe-space guards "I'd"/"I'll" while leaving
         // legitimate capital-I words ("If", "It") alone.
         expect(html).not.toMatch(/\bI(['’]|\s)(d|ll|m|ve)\b/);
@@ -214,9 +216,8 @@ describe('the lead autoresponder', () => {
 
     it('asks who will coordinate — the owner-approved wording', () => {
         const { html } = render(TENANT);
-        expect(html).toContain('Who will be the main contact/coordinator for the fundraiser?');
-        expect(html).toContain('their name, email address, and phone number');
-        expect(html).toContain('If that will be you, just let us know.');
+        expect(html).toContain("We'll also need the name, email address, and phone number of the person who will be the main fundraiser coordinator.");
+        expect(html).toContain("If that's you, just let us know.");
     });
 
     it('the coordinator question assigns nobody — it only asks', () => {

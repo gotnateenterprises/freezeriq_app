@@ -450,6 +450,16 @@ describe('15-18. scope stayed presentation-only', () => {
         'components/coordinator/BundleSelectionStep.tsx',
     ];
     const inCoordinatorSupporterPolish1 = (f: string) => COORDINATOR_SUPPORTER_POLISH_1.includes(f);
+    // FUNDRAISER-INQUIRY-AUTORESPONSE-COPY-1 — a later, separately-authorized
+    // phase: copy replacement only on the EXISTING, already-live requester
+    // autoresponder (lib/emailTemplates.ts's lead_intro). No new send path,
+    // no schema/migration, no change to lead creation, routing, or Reply-To
+    // resolution — lib/inquiryAcknowledgement.ts and the intake route are
+    // deliberately untouched.
+    const FUNDRAISER_INQUIRY_AUTORESPONSE_COPY_1 = [
+        'lib/emailTemplates.ts',
+    ];
+    const inFundraiserInquiryAutoresponseCopy1 = (f: string) => FUNDRAISER_INQUIRY_AUTORESPONSE_COPY_1.includes(f);
 
     const ALLOWED = new Set([
         'components/coordinator/ShareCenter.tsx',
@@ -526,7 +536,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // The real protection is the forbidden-path regex below, which is
             // unchanged — this only stops the check from going stale on every
             // subsequent phase that touches a regression suite.
-            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f)).toBe(true);
+            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f)).toBe(true);
         }
         // And explicitly: no path under these directories appears at all.
         const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -534,7 +544,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // FR-TAX-CORRECTNESS-1 is separately authorized to edit the
             // fundraiser money path — exempt from THIS phase's
             // "presentation only" assertion; everything else still held to it.
-            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f)) continue;
+            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f)) continue;
             expect(f).not.toMatch(forbidden);
         }
     });

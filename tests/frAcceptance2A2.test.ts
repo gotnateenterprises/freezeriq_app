@@ -71,36 +71,52 @@ describe('firstNameOf', () => {
 // PART A — the autoresponder's "what happens after that" copy
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('the approved item-2 wording', () => {
+describe('the approved item-2/item-3 wording (FUNDRAISER-INQUIRY-AUTORESPONSE-COPY-1)', () => {
     const TENANT: TemplateTenant = { name: 'Freezer Chef' };
     const render = (name = 'Kaleb Hacker') => EMAIL_TEMPLATES.lead_intro(name, 'Oak Ridge PTO', TENANT);
 
-    it('carries the exact owner-approved sentence', () => {
+    it('carries the exact owner-approved sentences for items 2 and 3', () => {
         const { html } = render();
         expect(html).toContain(
-            'You get everything you need to run and share it</strong> — your own coordinator dashboard to track orders as they come in, download and print flyers and order forms, and share your custom online ordering page with supporters.'
+            "You'll receive your own online supporter ordering page, a shareable link and QR code, plus tools to help you spread the word by text, email, social media, flyers, and group chats."
         );
+        expect(html).toContain(
+            'Everything you need to keep the fundraiser moving is in one place&mdash;your shareable ordering link and QR code, printable materials, supporter orders and contact information, payment tracking, goal progress, and pickup-day organization.'
+        );
+        expect(html).toContain('Less paperwork. Less chasing. More time to share the fundraiser and build momentum.');
     });
 
     it('the old wording is gone', () => {
         const { html } = render();
         expect(html).not.toContain('flyers and order forms, your own online order page, and a coordinator dashboard for watching orders arrive in real time');
+        expect(html).not.toContain('You get everything you need to run and share it');
     });
 
     it('claims nothing the platform cannot do — every noun maps to a real coordinator-portal feature', () => {
-        // Flyer download (flyerHref/flyerAsset), the ShareCenter, and the public
-        // /shop/[slug]/fundraiser/[id] ordering page are the three things named
-        // here, and all three exist in app/coordinator/portal/page.tsx.
+        // The public ordering page and the ShareCenter (shareable link) are
+        // named in item 2, and all three Coordinator Panel claims in item 3 —
+        // the printable QR code, payment tracking ("Mark paid"), and printable
+        // materials ("Printable Tracker") — map to real coordinator components.
         const portal = read('app/coordinator/portal/page.tsx');
         expect(portal).toMatch(/flyerHref/);
         expect(portal).toMatch(/ShareCenter/);
         expect(portal).toMatch(/\/shop\/\$\{slug\}\/fundraiser\/\$\{campaign\.id\}/);
+
+        const shareCenter = read('components/coordinator/ShareCenter.tsx');
+        expect(shareCenter).toContain('Printable QR Code');
+
+        const recentOrders = read('components/coordinator/RecentOrders.tsx');
+        expect(recentOrders).toMatch(/onMarkPaid/);
+        expect(recentOrders).toContain("'Mark paid'");
+
+        const quietLinks = read('components/coordinator/QuietLinks.tsx');
+        expect(quietLinks).toContain('Printable Tracker');
     });
 
-    it('preserves every other approved 2A.1 paragraph untouched', () => {
+    it('preserves every other approved paragraph untouched', () => {
         const { html } = render();
-        expect(html).toContain('final orders are due two weeks before the delivery date');
-        expect(html).toContain('keeps its agreed fundraising percentage off the top');
+        expect(html).toContain('Final orders are due two weeks before delivery');
+        expect(html).toContain("Your organization keeps its agreed fundraising percentage");
         expect(html).toContain('payment due upon receipt');
         expect(html).toMatch(/preferred date/i);
         expect(html).toMatch(/backup date/i);

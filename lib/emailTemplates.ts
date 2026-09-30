@@ -142,8 +142,14 @@ export const EMAIL_TEMPLATES = {
      * breath because delivery days are finite and a single preferred date turns
      * into another round of email when it is taken.
      *
-     * It promises no percentage, no delivery weekday, and no unloading time.
-     * Those are the tenant's to set and the platform cannot vouch for them.
+     * FUNDRAISER-INQUIRY-AUTORESPONSE-COPY-1 (owner-approved, superseding the
+     * FR-ACCEPTANCE-2A / 2A.1 / 2A.2 paragraphs this replaced): still promises
+     * no FIXED percentage and no personal sign-off — "agreed fundraising
+     * percentage" remains a per-campaign number nobody has set yet when this
+     * goes out, and the voice stays the business's, never one named person's.
+     * The delivery weekday (Tue/Wed/Thu) and the two-week order deadline ARE
+     * named — they are true platform-wide operational facts, confirmed against
+     * the live product (see the test file's header), not a guess.
      */
     'lead_intro': (name: string, orgName?: string, tenant?: TemplateTenant) => {
         const org = escapeHtml(orgName || 'your organization');
@@ -154,32 +160,40 @@ export const EMAIL_TEMPLATES = {
         // notification). Only this greeting reads a shortened form of it.
         const greetingName = firstNameOf(name) || 'there';
         return {
-            subject: safeSubject(`Let's get ${orgName || 'your group'} a fundraiser date`),
+            subject: safeSubject(`Let's get ${orgName || 'your group'} on the fundraiser calendar`),
             html: `
             <p>Hi ${escapeHtml(greetingName)}!</p>
-            <p>Thank you for asking about a fundraiser for <strong>${org}</strong> — we'd love to help.</p>
-            <p>A meal fundraiser is an easy way to raise money by offering families something they already need&mdash;dinner. We handle the meal prep, freezing, packing, and delivery to your organization, and your team simply sorts and distributes the orders at the designated pickup time and location.</p>
+            <p>Thanks for reaching out about a fundraiser for <strong>${org}</strong> — we'd love to help you get one started.</p>
+            <p>Our meal fundraisers are designed to be simple: your supporters get something families already need&mdash;dinner&mdash;while every bundle sold helps support your organization.</p>
+            <p>We handle the meal prep, freezing, packing, and delivery. You focus on sharing the fundraiser and getting your community involved.</p>
 
-            <h3>The next step is picking a date</h3>
-            <p>Most of the fundraiser timeline is built around the delivery date, so that&rsquo;s the first thing we need to settle. Our preferred delivery days are Tuesday, Wednesday, or Thursday&mdash;please choose the day, date, and time that works best for your organization.</p>
+            <h3>The first step: let's pick your date</h3>
+            <p>Everything starts with your delivery/pickup date. Our preferred delivery days are Tuesday, Wednesday, or Thursday. Just send us:</p>
             <ul>
-                <li><strong>A preferred date</strong> — the delivery or pickup day that suits ${org} best.</li>
-                <li><strong>A backup date</strong> — delivery days fill up, and having a second option usually saves a week of back-and-forth.</li>
+                <li><strong>Your preferred date and time</strong></li>
+                <li><strong>A backup date and time</strong></li>
             </ul>
+            <p>Dates can fill up, so having a second choice usually helps us get everything confirmed quickly.</p>
 
             <h3>Who will coordinate the fundraiser?</h3>
-            <p>Who will be the main contact/coordinator for the fundraiser? Please send us their name, email address, and phone number. If that will be you, just let us know.</p>
+            <p>We'll also need the name, email address, and phone number of the person who will be the main fundraiser coordinator. <strong>If that's you, just let us know.</strong></p>
 
-            <h3>What happens after that</h3>
+            <h3>Then we make the rest simple</h3>
             <ol>
-                <li><strong>We confirm the details</strong> — your date, your delivery location, and what your organization earns.</li>
-                <li><strong>You get everything you need to run and share it</strong> — your own coordinator dashboard to track orders as they come in, download and print flyers and order forms, and share your custom online ordering page with supporters.</li>
-                <li><strong>Final orders and payment</strong> — final orders are due two weeks before the delivery date. Orders submitted online or entered through the coordinator panel are received by us as they come in. Your organization keeps its agreed fundraising percentage off the top, and we&rsquo;ll send an invoice for the remaining balance shortly after the order deadline, with payment due upon receipt.</li>
-                <li><strong>Delivery day</strong> — we bring the meals to you and your families collect them.</li>
+                <li><strong>We confirm your fundraiser.</strong> We'll finalize your date, pickup/delivery location, and your organization's fundraising percentage.</li>
+                <li><strong>We give you everything you need to share it.</strong> You'll receive your own online supporter ordering page, a shareable link and QR code, plus tools to help you spread the word by text, email, social media, flyers, and group chats. Supporters can order right from their phones and easily share the fundraiser with friends, family, coworkers, and others&mdash;helping your reach grow beyond the people you see every day.</li>
+                <li><strong>Your Coordinator Panel becomes your fundraiser home base.</strong> Everything you need to keep the fundraiser moving is in one place&mdash;your shareable ordering link and QR code, printable materials, supporter orders and contact information, payment tracking, goal progress, and pickup-day organization. As orders come in, the panel keeps everything together for you, so you can see who ordered, what they ordered, who has paid, and what still needs attention. When pickup day arrives, your order information is already organized into the tracking tools you need for distribution. <strong>Less paperwork. Less chasing. More time to share the fundraiser and build momentum.</strong></li>
+                <li><strong>We prepare everything for pickup day.</strong> Final orders are due two weeks before delivery. Your organization keeps its agreed fundraising percentage, and we'll invoice the remaining balance shortly after the order deadline, with payment due upon receipt. Then we prepare, freeze, pack, and deliver the meals to your organization for distribution.</li>
             </ol>
 
-            <p><strong>Which dates are you thinking about?</strong><br>
-            Just reply with a preferred day and a backup, and we'll check what's open.</p>
+            <h3>Ready to get a date on the calendar?</h3>
+            <p>Just hit <strong>reply</strong> and send us:</p>
+            <ol>
+                <li><strong>Your preferred delivery date and time</strong></li>
+                <li><strong>Your backup date and time</strong></li>
+                <li><strong>Your coordinator's name, email, and phone number</strong> &mdash; or simply tell us it will be you</li>
+            </ol>
+            <p><strong>We'll take it from there.</strong></p>
 
             ${signature(tenant)}
         `,
