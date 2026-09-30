@@ -215,11 +215,17 @@ describe('PAYMENT — no unsupported cash/check/pickup/Venmo assumption', () => 
         expect(fallback).not.toMatch(/pickup/i);
     });
 
-    it('the literal "Cash or check at pickup." string exists ONLY as the coordinator\'s own setup-form placeholder, never as supporter-facing fallback copy', () => {
+    it('the coordinator setup form never assumes a specific payment method, and never as supporter-facing fallback copy either', () => {
+        // COORDINATOR-SUPPORTER-POLISH-1 superseded this test's original pin: the
+        // coordinator's own placeholder used to read "Cash or check at pickup." —
+        // itself a specific-method assumption, just a coordinator-facing one
+        // rather than a supporter-facing one. It now prompts for the
+        // coordinator's OWN specific instructions instead of guessing one.
         const setupFields = read('components/coordinator/CoordinatorSetupFields.tsx');
-        expect(setupFields).toContain('placeholder="Cash or check at pickup."');
+        expect(setupFields).toContain('placeholder="Please add your specific payment instructions here"');
+        expect(setupFields).not.toContain('Cash or check at pickup');
         // And critically: FundraiserClient must not contain that literal string
-        // anywhere as a hardcoded fallback.
+        // anywhere as a hardcoded fallback either.
         expect(fc).not.toContain('Cash or check at pickup');
     });
 

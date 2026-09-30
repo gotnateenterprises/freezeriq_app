@@ -247,48 +247,22 @@ describe('D. canonical and public OpenGraph URL behavior is unchanged (none was 
 // ═════════════════════════════════════════════════════════════════════════════
 describe('F. storefront body, checkout, and the public tenant API route are untouched', () => {
     it('this phase changed exactly one file (plus its own tests and the scope ledgers)', () => {
-        const out = execSync('git status --porcelain', { cwd: ROOT, encoding: 'utf8' });
-        const changed = out.split('\n').filter(Boolean).map((l) => l.slice(3).trim());
-        // CRM-DEADLINE-TIMEZONE-1 — a later, separately-authorized phase: the
-        // Fundraiser CRM's "has this deadline passed?" comparison was a raw
-        // UTC instant against a date-only end_date; fixed with one shared
-        // calendar-day helper and Business.timezone threaded onto the
-        // existing campaign row. No schema/migration, no campaign data
-        // change, no Production deploy. This assertion is scoped to THIS
-        // phase (PREVIEW-METADATA-ISOLATION-1) never regressing beyond its
-        // own one file, not to every later phase staying empty-handed.
-        const CRM_DEADLINE_TIMEZONE_1 = [
-            'app/api/campaigns/route.ts',
-            'app/fundraisers/page.tsx',
-            'components/crm2/CampaignPriorityList.tsx',
-            'lib/campaignBundleSelection.ts',
-            'lib/growth/campaignContextUi.ts',
-            'lib/growth/nextAction.ts',
-            'tests/crmArchivedCampaignVisibility1.test.ts',
-            'tests/growthCampaignContextUi.test.ts',
-            'tests/growthCampaignSections.test.ts',
-            'tests/growthNextAction.test.ts',
-            'tests/crmDeadlineTimezone1.test.ts',
-        ];
-        // RAISE-FUNDS-MARKETING-1 — a later, separately-authorized phase (the
-        // public "[Tenant] Fundraisers" marketing page). Same reasoning as above:
-        // this assertion is about THIS phase never regressing beyond its one file.
-        const RAISE_FUNDS_MARKETING_1 = [
-            'app/shop/[slug]/raise-funds/page.tsx',
-            'tests/raiseFundsMarketing1.test.ts',
-            'tests/frAcceptance2A.test.ts',
-            'app/shop/[slug]/raise-funds/sample/page.tsx',
-            'lib/sampleFundraiser.ts',
-            'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx',
-            'tests/raiseFundsSamplePage.test.ts',
-            'tests/privacyDisclosure1.test.ts',
-        ];
-        const allowed = new Set([
-            PAGE_PATH, 'tests/previewMetadataIsolation1.test.ts', 'tests/coordPolish1.test.ts',
-            'tests/coordShareCenterPolish2.test.ts', 'tests/tenantBrandAuthority2.test.ts',
-            ...CRM_DEADLINE_TIMEZONE_1,
-            ...RAISE_FUNDS_MARKETING_1,
-        ]);
+        // Three later, separately-authorized phases — CRM-DEADLINE-TIMEZONE-1,
+        // COORDINATOR-SUPPORTER-POLISH-1 (which touches
+        // app/coordinator/portal/page.tsx) and RAISE-FUNDS-MARKETING-1 (the
+        // /raise-funds page, its sample route, and FundraiserClient's sampleMode)
+        // — each touch their own unrelated files, so this can no longer be a LIVE
+        // `git status --porcelain` check. That
+        // would fail every later phase that ever touches any file this phase
+        // also touched, forever, and would need a hand-maintained exemption list
+        // growing on every subsequent phase. Pinned instead to the FROZEN
+        // historical range this phase actually shipped in (baseline..c5e813a,
+        // this phase's own commit) — still exactly as strict about what
+        // PREVIEW-METADATA-ISOLATION-1 itself changed, but correctly indifferent
+        // to any unrelated work that lands afterward, on any branch.
+        const out = execSync('git diff --name-only cfaffaf9d01e069f145d5dfc01f71f5f1be9905d c5e813ab578104c64c2b493b2ca0619dec1d4fd6', { cwd: ROOT, encoding: 'utf8' });
+        const changed = out.split('\n').filter(Boolean).map((l) => l.trim());
+        const allowed = new Set([PAGE_PATH, 'tests/previewMetadataIsolation1.test.ts', 'tests/coordPolish1.test.ts', 'tests/coordShareCenterPolish2.test.ts', 'tests/tenantBrandAuthority2.test.ts']);
         for (const f of changed) {
             expect({ f, allowed: allowed.has(f) }).toEqual({ f, allowed: true });
         }

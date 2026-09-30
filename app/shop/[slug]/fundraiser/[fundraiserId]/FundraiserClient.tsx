@@ -815,14 +815,31 @@ export default function FundraiserClient({
                             </p>
                         </div>
 
-                        {/* FounderNote (tenant variant — founder identity is not in the data,
-                            so the tenant display name signs the approved thank-you note) */}
+                        {/* FounderNote → fundraiser-lead CTA (COORDINATOR-SUPPORTER-POLISH-1).
+                            This replaced a generic "come shop our storefront" closing note
+                            with an invitation to start the supporter's OWN fundraiser —
+                            the intentional-inquiry destination this whole flow exists to
+                            feed. Tenant-safe and campaign-safe: {tenantName} is the same
+                            resolved brand authority used throughout this file, and the link
+                            is the SAME /shop/{slug}/raise-funds path already used by
+                            StorefrontFooter.tsx and StorefrontClient.tsx's own "Raise Funds
+                            With Us" CTA — no new destination, no per-org/per-campaign
+                            hardcoding.
+                            LEAD-CLASSIFICATION SAFETY: this is a PLAIN navigation link —
+                            no onClick, no fetch, no side effect. A person becomes a
+                            fundraiser lead only by intentionally submitting the
+                            /raise-funds form (app/api/public/fundraiser-request/route.ts);
+                            rendering or clicking this link does neither. This supporter's
+                            OWN order still cannot raise the "New Lead Captured" alert
+                            either way — FR-SUPPORTER-LEAD-1's publicOrderRaisesLeadAlert()
+                            in app/api/public/order/route.ts already gates that on
+                            isCampaignOrder, unrelated to and unmodified by this CTA. */}
                         <div style={{ margin: '0 0 .9rem', background: '#fff', border: '1px solid #eee2d6', borderRadius: 20, padding: '1rem 1.05rem', display: 'flex', gap: '.8rem' }}>
                             <span style={{ width: 44, height: 44, borderRadius: 99, flex: 'none', background: 'linear-gradient(135deg,#eccfd4,#e5b8c1)', display: 'grid', placeItems: 'center', fontSize: '1.2rem' }} aria-hidden="true">👩‍🍳</span>
                             <p style={{ margin: 0, fontFamily: SERIF, fontStyle: 'italic', fontSize: '.82rem', color: '#5d463d', lineHeight: 1.5 }}>
-                                "Thank you for supporting {thanks.orgName || campaign.organization_name} — and if your freezer ever needs a refill after the fundraiser, we're here all year."
+                                "Looking to raise funds for your school, church, team, or other organization? We'd love to help."
                                 <span style={{ display: 'block', marginTop: '.3rem', fontFamily: 'system-ui,sans-serif', fontStyle: 'normal', fontSize: '.66rem', fontWeight: 700, color: '#9a8075' }}>
-                                    — {tenantName} · <a href={`/shop/${slug}`} style={{ color: 'inherit' }}><u>visit our storefront →</u></a>
+                                    — {tenantName} · <a href={`/shop/${slug}/raise-funds`} style={{ color: 'inherit' }}><u>Click here to learn more about starting a fundraiser →</u></a>
                                 </span>
                             </p>
                         </div>

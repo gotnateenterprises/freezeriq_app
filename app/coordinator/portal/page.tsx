@@ -27,7 +27,8 @@ import {
     X,
     Settings,
     Trash2,
-    RotateCcw
+    RotateCcw,
+    ExternalLink
 } from 'lucide-react';
 import type { CoordinatorActionSummary } from '@/app/api/coordinator-actions/summary/route';
 import { format } from 'date-fns';
@@ -61,10 +62,18 @@ export default function CoordinatorPortal() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     // CB-3: true once bundle selection is confirmed by the server (or not required)
     const [bundleSelectionDone, setBundleSelectionDone] = useState(false);
+    // COORDINATOR-SUPPORTER-POLISH-1: true only for the exact request/response
+    // that JUST submitted setup successfully — never on a returning visit where
+    // the server reports selection as already done. Deliberately plain React
+    // state, not persisted: a refresh naturally clears it, which is correct —
+    // the "you're live" banner is a one-time acknowledgement of the action that
+    // just happened, not a standing status the portal must remember forever.
+    const [justCompletedSetup, setJustCompletedSetup] = useState(false);
     // CB-3-FIX-B: stable callback prevents the child's useCallback(fetchSelectionState)
     // from re-running every time the parent re-renders after setBundleSelectionDone(true).
-    const handleBundleSelectionComplete = useCallback(() => {
+    const handleBundleSelectionComplete = useCallback((justCompleted?: boolean) => {
         setBundleSelectionDone(true);
+        if (justCompleted) setJustCompletedSetup(true);
     }, []);
     const [showOrderModal, setShowOrderModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -881,6 +890,43 @@ export default function CoordinatorPortal() {
                 {/* Phase content deferred until selection is confirmed.
                     CB-3 provides UX deferral only — CB-5 adds the server-side order gate. */}
                 {bundleSelectionDone && (<>
+                {/* COORDINATOR-SUPPORTER-POLISH-1: a one-time "you're live" message,
+                    shown only for the exact submission that just turned setup on
+                    (see handleBundleSelectionComplete / justCompletedSetup above) —
+                    never on a returning visit. The link reuses the SAME
+                    server-resolved order URL as Copy Link / ShareCenter (shareUrl,
+                    derived from getShopOrderUrl() below), so it can never point
+                    anywhere other than THIS campaign's own supporter page —
+                    tenant-safe and campaign-safe by construction, never hardcoded. */}
+                {justCompletedSetup && (
+                    <div
+                        className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 space-y-2"
+                        role="status"
+                    >
+                        <div className="flex items-start justify-between gap-3">
+                            <p className="text-base font-black text-emerald-900 leading-snug">
+                                🎉 Congratulations! Your Coordinator Panel and customer ordering page are now live.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={() => setJustCompletedSetup(false)}
+                                aria-label="Dismiss"
+                                className="shrink-0 text-emerald-400 hover:text-emerald-600 transition-colors"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+                        <a
+                            href={shareUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-sm font-bold text-emerald-700 underline decoration-2 underline-offset-2 hover:text-emerald-800"
+                        >
+                            Click here to see what your supporters will see when you share your fundraiser
+                            <ExternalLink size={13} aria-hidden="true" />
+                        </a>
+                    </div>
+                )}
                 {/* Business Logo */}
                 {campaign.customer?.business?.logo_url && (
                     <div className="flex flex-col items-center justify-center pt-1 mb-0">
@@ -1581,10 +1627,19 @@ function SettingsModal({ isOpen, onClose, initialData }: { isOpen: boolean; onCl
                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Payment Instructions</label>
                         <textarea
                             className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 min-h-[100px]"
-                            placeholder="Please send checks payable to..."
+                            placeholder="Please add your specific payment instructions here"
                             value={formData.paymentInstructions}
                             onChange={e => setFormData({ ...formData, paymentInstructions: e.target.value })}
                         />
+                        {/* COORDINATOR-SUPPORTER-POLISH-1: an example, not a default — it is
+                            never written to formData.paymentInstructions and is shown only
+                            while the field is genuinely empty, exactly like a placeholder. */}
+                        {!formData.paymentInstructions && (
+                            <p className="text-xs text-slate-400 mt-1 ml-1">
+                                Example: Payment is due to the coordinator within 3 days. Venmo @____, checks
+                                payable to ____, or contact ____ with payment questions.
+                            </p>
+                        )}
                     </div>
 
                     <button
