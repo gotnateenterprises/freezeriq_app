@@ -283,16 +283,22 @@ describe('the public fundraiser page', () => {
         expect(page).not.toMatch(/10 days before delivery/);
     });
 
-    it('states the owner-approved two-week final-orders contract', () => {
-        expect(page).toMatch(/two weeks before delivery/);
-        expect(page).toMatch(/payment due upon receipt/);
+    // RAISE-FUNDS-MARKETING-1 (owner-locked direction): the public page leads
+    // with benefits and carries NO operational program terms. The two-week
+    // final-orders contract and the payment-due wording this test used to
+    // require on the page now belong in the tenant's follow-up to an inquiry,
+    // where they can be current and specific. The CONTRACT itself is unchanged
+    // — only where it is communicated. tests/raiseFundsMarketing1.test.ts pins
+    // the full list of terms that must stay off the page.
+    it('carries no operational program terms — those moved to the inquiry follow-up', () => {
+        expect(page).not.toMatch(/two weeks before delivery/);
+        expect(page).not.toMatch(/payment due upon receipt/);
     });
 
-    it('Set Deadlines & Promote names all three things the tenant provides', () => {
-        const step = page.slice(page.indexOf("title: 'Set Deadlines & Promote'"), page.indexOf("title: 'Set Deadlines & Promote'") + 400);
-        expect(step).toMatch(/marketing materials/i);
-        expect(step).toMatch(/coordinator panel/i);
-        expect(step).toMatch(/ordering page/i);
+    it('still names the three things the tenant provides: a shareable page, an ordering page, a Coordinator Panel', () => {
+        expect(page).toMatch(/personalized fundraiser page/i);
+        expect(page).toMatch(/coordinator panel/i);
+        expect(page).toMatch(/ordering page/i);
     });
 });
 

@@ -270,10 +270,19 @@ describe('F. storefront body, checkout, and the public tenant API route are unto
             'tests/growthNextAction.test.ts',
             'tests/crmDeadlineTimezone1.test.ts',
         ];
+        // RAISE-FUNDS-MARKETING-1 — a later, separately-authorized phase (the
+        // public "[Tenant] Fundraisers" marketing page). Same reasoning as above:
+        // this assertion is about THIS phase never regressing beyond its one file.
+        const RAISE_FUNDS_MARKETING_1 = [
+            'app/shop/[slug]/raise-funds/page.tsx',
+            'tests/raiseFundsMarketing1.test.ts',
+            'tests/frAcceptance2A.test.ts',
+        ];
         const allowed = new Set([
             PAGE_PATH, 'tests/previewMetadataIsolation1.test.ts', 'tests/coordPolish1.test.ts',
             'tests/coordShareCenterPolish2.test.ts', 'tests/tenantBrandAuthority2.test.ts',
             ...CRM_DEADLINE_TIMEZONE_1,
+            ...RAISE_FUNDS_MARKETING_1,
         ]);
         for (const f of changed) {
             expect({ f, allowed: allowed.has(f) }).toEqual({ f, allowed: true });
