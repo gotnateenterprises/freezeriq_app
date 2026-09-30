@@ -7,6 +7,7 @@ import {
     isBundleContentsError,
     type ResolvedBundleContent,
 } from '@/lib/bundleContents';
+import { buildBundleUpdateData } from '@/lib/bundleUpdate';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
     const session = await auth();
@@ -49,11 +50,22 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     const { id } = await params;
     try {
         // Ownership check before mutation
-        const existing = await prisma.bundle.findUnique({ where: { id }, select: { business_id: true } });
+        const existing = await prisma.bundle.findUnique({ where: { id }, select: { business_id: true, catalog_id: true } });
         if (!existing) return NextResponse.json({ error: 'Bundle not found' }, { status: 404 });
         if (existing.business_id !== session.user.businessId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
         const data = await req.json();
+
+        const update = buildBundleUpdateData(data, { catalog_id: existing.catalog_id ?? null });
+        if (!update.ok) return NextResponse.json({ error: update.error }, { status: update.status });
+
+        if (update.catalogIdToVerify) {
+            const catalog = await prisma.catalog.findFirst({
+                where: { id: update.catalogIdToVerify, business_id: session.user.businessId },
+                select: { id: true },
+            });
+            if (!catalog) return NextResponse.json({ error: 'Catalog not found' }, { status: 400 });
+        }
 
         // BUNDLE-PERSISTENCE-FIX. The whole intended set is resolved and proven
         // owned BEFORE the transaction opens, so a payload this server cannot
@@ -81,27 +93,10 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
         // Transaction to update bundle and syncing contents
         const result = await prisma.$transaction(async (tx) => {
-            // 1. Update Bundle Info
+            // 1. Update Bundle Info — only the columns this request actually sent.
             const updatedBundle = await tx.bundle.update({
                 where: { id },
-                data: {
-                    name: data.name,
-                    sku: data.sku,
-                    description: data.description,
-                    serving_tier: data.serving_tier,
-                    is_active: data.is_active,
-                    show_on_storefront: data.show_on_storefront,
-                    order_cutoff_date: data.order_cutoff_date ? new Date(data.order_cutoff_date) : null,
-                    price: data.price ? Number(data.price) : null,
-                    catalog_id: data.catalog_id || null, // Ensure null if empty string
-                    // BUNDLE-MEDIA-1: was never written despite the editor
-                    // sending it. `undefined` (key absent) is left as `undefined`
-                    // so Prisma skips the column rather than clearing an
-                    // existing image on a caller that doesn't send it — an
-                    // explicit '' is the deliberate "clear the image" signal
-                    // and becomes null, matching Acceptance D.
-                    image_url: data.image_url === undefined ? undefined : (data.image_url || null)
-                }
+                data: update.data,
             });
 
             // 2. Sync Contents if provided — using the set validated above, so

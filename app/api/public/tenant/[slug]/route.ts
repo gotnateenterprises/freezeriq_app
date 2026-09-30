@@ -5,6 +5,7 @@ import { PUBLIC_BUNDLE_VISIBILITY } from '@/lib/storefrontEligibility';
 import { normalizeSlug, NO_SUCH_SLUG } from '@/lib/publicIdentity';
 import { isValidIanaTimeZone } from '@/lib/tenantTimezone';
 import { customerFacingBusinessName } from '@/lib/tenantBrand';
+import { normalizeStrictServingTier } from '@/lib/serving_multipliers';
 
 /**
  * Safely coerce a JSONB field from $queryRaw into a plain JS array.
@@ -260,8 +261,8 @@ export async function GET(
                 storefrontConfig
             },
             bundles: safeBundlesRaw.map((b: any) => {
-                const tierLower = (b.serving_tier || '').toLowerCase();
-                const isServes2 = tierLower.includes('couple') || tierLower.includes('serves 2') || tierLower === 'couple';
+                // STOREFRONT-1A: the shared tier authority, so a stored 'serves_2' is not shown the $125 fallback.
+                const isServes2 = normalizeStrictServingTier(b.serving_tier) === 'serves_2';
                 const price = b.price ? Number(b.price) : (isServes2 ? 60.00 : 125.00);
 
                 const safeContents: any[] = Array.isArray(b.contents) ? b.contents : [];

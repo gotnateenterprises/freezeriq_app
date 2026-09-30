@@ -153,9 +153,21 @@ export async function POST(req: Request) {
         const dbBundles = bundleIds.length > 0
             ? await prisma.bundle.findMany({
                 where: { id: { in: bundleIds }, business_id: business.id },
-                select: { id: true, name: true, image_url: true, serving_tier: true }
+                select: { id: true, name: true, image_url: true, serving_tier: true, price: true }
             })
             : [];
+
+        // STOREFRONT-1A: refused before any order row exists. buildBundlePriceMap reads a
+        // NULL price as 0, so an unpriced bundle would otherwise be charged $0.
+        const unpricedNames = dbBundles
+            .filter((b: any) => b.price == null || !(Number(b.price) > 0))
+            .map((b: any) => b.name);
+        if (unpricedNames.length > 0) {
+            return NextResponse.json({
+                error: `${unpricedNames.join(', ')} ${unpricedNames.length === 1 ? 'is' : 'are'} not available to order online right now. Please remove ${unpricedNames.length === 1 ? 'it' : 'them'} from your bag.`,
+            }, { status: 400 });
+        }
+
         const bundleDisplayMap = new Map(dbBundles.map((b: any) => [b.id, { name: b.name, image_url: b.image_url }]));
 
         // FULFILLMENT-CONTINUITY-1 — the menu defines what was sold.
