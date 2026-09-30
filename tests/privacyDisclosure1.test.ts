@@ -125,7 +125,10 @@ describe('PRIVACY-DISCLOSURE-1: supporter order form disclosure', () => {
     });
 
     it('12. the component still exports the same default function signature (no breaking prop changes for historical campaigns)', () => {
-        expect(src).toMatch(/export default function FundraiserClient\(\{\s*\n\s*business,\s*\n\s*campaign,\s*\n\s*bundleProgress,\s*\n\s*orderMode,\s*\n\s*slug,\s*\n\s*fundraiserId\s*\n\}: any\)/);
+        // RAISE-FUNDS-MARKETING-1 added ONE optional, defaulted prop (sampleMode
+        // = false) for the /raise-funds/sample demo. Every existing caller is
+        // unaffected; the six original props are still required, in order.
+        expect(src).toMatch(/export default function FundraiserClient\(\{\s*\n\s*business,\s*\n\s*campaign,\s*\n\s*bundleProgress,\s*\n\s*orderMode,\s*\n\s*slug,\s*\n\s*fundraiserId,(\s*\n\s*\/\/[^\n]*)*\s*\n\s*sampleMode = false\s*\n\}: any\)/);
     });
 });
 

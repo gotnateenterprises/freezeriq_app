@@ -430,6 +430,10 @@ describe('15-18. scope stayed presentation-only', () => {
     // no migration, no API/route/lead-classification change.
     const RAISE_FUNDS_MARKETING_1 = [
         'app/shop/[slug]/raise-funds/page.tsx',
+        // The "See a sample ordering page" demo: a read-only route rendering the
+        // real supporter component (already in ALLOWED) in sample mode.
+        'app/shop/[slug]/raise-funds/sample/page.tsx',
+        'lib/sampleFundraiser.ts',
     ];
     const inRaiseFundsMarketing1 = (f: string) => RAISE_FUNDS_MARKETING_1.includes(f);
 

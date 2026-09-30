@@ -277,6 +277,11 @@ describe('F. storefront body, checkout, and the public tenant API route are unto
             'app/shop/[slug]/raise-funds/page.tsx',
             'tests/raiseFundsMarketing1.test.ts',
             'tests/frAcceptance2A.test.ts',
+            'app/shop/[slug]/raise-funds/sample/page.tsx',
+            'lib/sampleFundraiser.ts',
+            'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx',
+            'tests/raiseFundsSamplePage.test.ts',
+            'tests/privacyDisclosure1.test.ts',
         ];
         const allowed = new Set([
             PAGE_PATH, 'tests/previewMetadataIsolation1.test.ts', 'tests/coordPolish1.test.ts',

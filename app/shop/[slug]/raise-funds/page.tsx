@@ -252,8 +252,11 @@ export default function RaiseFundsPage() {
                         <button type="button" onClick={scrollToForm} className={primaryButtonCls} style={{ backgroundColor: primaryColor }}>
                             Start a fundraiser <ArrowRight size={20} />
                         </button>
-                        <Link href={`/shop/${slug}`} className="inline-flex items-center justify-center px-8 py-4 rounded-xl font-bold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-                            See the ordering page
+                        {/* A RELATIVE, tenant-scoped path: the browser resolves it against
+                            whichever deployment served this page, so a Preview visitor stays
+                            on that Preview and a Production visitor stays on Production. */}
+                        <Link href={`/shop/${slug}/raise-funds/sample`} className="inline-flex items-center justify-center px-8 py-4 rounded-xl font-bold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                            See a sample ordering page
                         </Link>
                     </div>
                     <p className="text-sm text-slate-500 dark:text-slate-400">

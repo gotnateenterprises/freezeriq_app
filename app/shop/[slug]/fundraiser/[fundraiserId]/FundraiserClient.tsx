@@ -117,7 +117,11 @@ export default function FundraiserClient({
     bundleProgress,
     orderMode,
     slug,
-    fundraiserId
+    fundraiserId,
+    // RAISE-FUNDS-MARKETING-1: set ONLY by /shop/[slug]/raise-funds/sample.
+    // The real fundraiser route never passes it, so for every real campaign
+    // this is false and nothing below behaves differently.
+    sampleMode = false
 }: any) {
 
     const { totalBundlesSold, bundleGoal } = bundleProgress as FundraiserProgressResult;
@@ -300,6 +304,10 @@ export default function FundraiserClient({
         && !submitting;
 
     const submitOrder = async () => {
+        // RAISE-FUNDS-MARKETING-1: the sample page can never place an order.
+        // This is the first statement — before the submission key, before the
+        // fetch — so no request of any kind leaves the browser in sample mode.
+        if (sampleMode) return;
         if (!canSubmit) return;
         setSubmitting(true);
         setSubmitError(null);
@@ -1103,6 +1111,11 @@ export default function FundraiserClient({
                                 >
                                     {submitting ? 'Placing your order…' : 'Place my order →'}
                                 </button>
+                                {sampleMode && (
+                                    <p role="status" style={{ margin: '.5rem 0 0', textAlign: 'center', fontSize: '.7rem', fontWeight: 700, color: primaryColor }}>
+                                        Sample only. This is a sample ordering page. Your supporters will be able to submit their order here during your fundraiser.
+                                    </p>
+                                )}
                                 {submitError && (
                                     <p role="alert" style={{ margin: '.5rem 0 0', textAlign: 'center', fontSize: '.7rem', fontWeight: 700, color: primaryColor }}>{submitError}</p>
                                 )}

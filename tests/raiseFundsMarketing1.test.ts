@@ -208,10 +208,11 @@ describe('E. inquiry form unchanged (FR-FUNNEL-1 / FR-ACCEPTANCE-1)', () => {
         expect(website).toMatch(/inputMode="url"/);
     });
 
-    it('the hero CTA scrolls to the form; the only other link is the tenant\'s own ordering page', () => {
+    it('the hero CTA scrolls to the form; the second CTA opens the sample supporter page', () => {
         expect(page).toContain('id="contact-form"');
         expect(page).toMatch(/onClick=\{scrollToForm\}/);
-        expect(page).toMatch(/href=\{`\/shop\/\$\{slug\}`\}/);
+        // tests/raiseFundsSamplePage.test.ts pins the sample route itself.
+        expect(page).toMatch(/href=\{`\/shop\/\$\{slug\}\/raise-funds\/sample`\}/);
         // Exactly two network calls in the file: the public tenant read and the
         // inquiry submit. Nothing in the marketing sections fetches or creates
         // anything — a visitor becomes a lead only by submitting the form.

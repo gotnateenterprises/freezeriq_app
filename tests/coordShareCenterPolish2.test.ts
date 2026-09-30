@@ -450,6 +450,9 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
             // No schema, no migration, no API/route/lead-classification change.
             const RAISE_FUNDS_MARKETING_1 = [
                 'app/shop/[slug]/raise-funds/page.tsx',
+                // The read-only "See a sample ordering page" demo route.
+                'app/shop/[slug]/raise-funds/sample/page.tsx',
+                'lib/sampleFundraiser.ts',
             ];
             const inRaiseFundsMarketing1 = (f: string) => RAISE_FUNDS_MARKETING_1.includes(f);
             for (const f of changed) {
