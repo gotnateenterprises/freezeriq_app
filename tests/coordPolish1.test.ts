@@ -472,6 +472,26 @@ describe('15-18. scope stayed presentation-only', () => {
         'app/api/public/tenant/[slug]/route.ts',
     ];
     const inStorefrontCustomerExperience1a = (f: string) => STOREFRONT_CUSTOMER_EXPERIENCE_1A.includes(f);
+    // STOREFRONT-CUSTOMER-EXPERIENCE-1B — a later, separately-authorized phase: the tenant chooses
+    // which live fundraisers the public storefront's Active Fundraisers section lists. One additive
+    // column with a backfill that keeps exactly today's listing (migration 29), the discovery query
+    // filter, the campaign PATCH/create/launch field, the Edit details and launch toggles, and a CRM
+    // indicator. Discovery only: no ordering, closeout, invoice, tax or coordinator file reads it.
+    const STOREFRONT_CUSTOMER_EXPERIENCE_1B = [
+        'prisma/schema.prisma',
+        'prisma/migrations/20260930120000_storefront_1b_fundraiser_listed_on_storefront/',
+        'lib/fundraiserStorefrontListing.ts',
+        'app/api/campaigns/[id]/route.ts',
+        'app/api/campaigns/route.ts',
+        'app/api/opportunities/[id]/launch/route.ts',
+        'app/api/public/tenant/[slug]/route.ts',
+        'app/shop/[slug]/StorefrontClient.tsx',
+        'components/crm2/EditCampaignDetailsModal.tsx',
+        'components/crm2/StartFundraiserWizard.tsx',
+        'components/crm2/LaunchFundraiserDialog.tsx',
+        'components/crm2/CampaignPriorityList.tsx',
+    ];
+    const inStorefrontCustomerExperience1b = (f: string) => STOREFRONT_CUSTOMER_EXPERIENCE_1B.includes(f);
 
     const ALLOWED = new Set([
         'components/coordinator/ShareCenter.tsx',
@@ -548,7 +568,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // The real protection is the forbidden-path regex below, which is
             // unchanged — this only stops the check from going stale on every
             // subsequent phase that touches a regression suite.
-            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f) || inStorefrontCustomerExperience1a(f)).toBe(true);
+            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f) || inStorefrontCustomerExperience1a(f) || inStorefrontCustomerExperience1b(f)).toBe(true);
         }
         // And explicitly: no path under these directories appears at all.
         const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -556,7 +576,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // FR-TAX-CORRECTNESS-1 is separately authorized to edit the
             // fundraiser money path — exempt from THIS phase's
             // "presentation only" assertion; everything else still held to it.
-            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f) || inStorefrontCustomerExperience1a(f)) continue;
+            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f) || inStorefrontCustomerExperience1a(f) || inStorefrontCustomerExperience1b(f)) continue;
             expect(f).not.toMatch(forbidden);
         }
     });
@@ -574,6 +594,8 @@ describe('15-18. scope stayed presentation-only', () => {
             'prisma/migrations/20260915170000_qb_invoice_1c_invoice_send/',
             // QB-INVOICE-CANCEL-1's single approved migration (voided_at / voided_by), by exact path.
             'prisma/migrations/20260923010000_qb_invoice_cancel_1_voided/',
+            // STOREFRONT-CUSTOMER-EXPERIENCE-1B's single approved migration (listed_on_storefront), by exact path.
+            'prisma/migrations/20260930120000_storefront_1b_fundraiser_listed_on_storefront/',
         ];
         const remaining = out.split('\n').filter((l) => !approvedLater.some((a) => l.includes(a))).join('\n');
         expect(remaining).not.toMatch(/prisma\/migrations\//);

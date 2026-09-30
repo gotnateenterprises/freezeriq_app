@@ -12,6 +12,7 @@ import {
 } from '@/lib/orgShareForm';
 import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
 import { DEFAULT_BUNDLE_GOAL } from '@/lib/fundraiserMetrics';
+import { STOREFRONT_LISTING_HELP, STOREFRONT_LISTING_LABEL } from '@/lib/fundraiserStorefrontListing';
 
 type Prefill = { customerId?: string; orgName?: string; goal?: number };
 
@@ -174,6 +175,8 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
         isSuperAdmin: (session?.user as any)?.isSuperAdmin === true,
     });
     const [orgShare, setOrgShare] = useState(ORG_SHARE_DEFAULT_INPUT);
+    // STOREFRONT-CUSTOMER-EXPERIENCE-1B: every new fundraiser starts unlisted.
+    const [listedOnStorefront, setListedOnStorefront] = useState(false);
 
     // FR-TAX-1: tax treatment for this campaign. Prefilled from the selected
     // organization's recorded status and the tenant's default rate (fetched
@@ -359,6 +362,8 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                     // is never recomputed from live values afterwards.
                     taxStatus: taxStatus,
                     taxRatePercent: taxStatus === 'TAXABLE' ? taxRate : undefined,
+                    // STOREFRONT-CUSTOMER-EXPERIENCE-1B: public storefront listing only.
+                    listedOnStorefront,
                     // INV-A: present only for an authorized ADMIN/super-admin
                     // with a non-blank value; everyone else omits the key and
                     // the database default (20.00) applies.
@@ -716,6 +721,25 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                         <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
                             <input id="wiz-leaderboard" type="checkbox" className="rounded border-slate-300" />
                             Show a team leaderboard on the public scoreboard
+                        </label>
+
+                        {/* STOREFRONT-CUSTOMER-EXPERIENCE-1B: off by default. Listing
+                            is discovery only; the direct link works either way. */}
+                        <label htmlFor="wiz-listed-on-storefront" className="flex cursor-pointer items-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                            <input
+                                id="wiz-listed-on-storefront"
+                                type="checkbox"
+                                className="mt-0.5 rounded border-slate-300"
+                                checked={listedOnStorefront}
+                                onChange={e => setListedOnStorefront(e.target.checked)}
+                                aria-describedby="wiz-listed-on-storefront-help"
+                            />
+                            <span>
+                                {STOREFRONT_LISTING_LABEL}
+                                <span id="wiz-listed-on-storefront-help" className="mt-0.5 block text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                                    {STOREFRONT_LISTING_HELP}
+                                </span>
+                            </span>
                         </label>
 
                         {/* CB-4: Candidate pool builder — eligible families (server-validated S5+S2 pairs) */}

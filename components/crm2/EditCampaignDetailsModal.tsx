@@ -32,12 +32,18 @@
  * Free text, not a time picker, because `delivery_time` is a String by design (FR-FLOW-3):
  * real fundraisers say "4:45 PM", "3–5 PM" or "TBD", and a pickup window is not a clock
  * reading.
+ *
+ * STOREFRONT LISTING (STOREFRONT-CUSTOMER-EXPERIENCE-1B)
+ * Whether the public storefront's Active Fundraisers section lists this fundraiser. Discovery
+ * only — the direct link keeps working either way. A closed fundraiser is never listed, so
+ * its stored choice is shown read-only there.
  */
 
 import { useMemo, useState } from 'react';
 import { CalendarClock, Loader2, Check } from 'lucide-react';
 import { safeCalendarDateForInput } from '@/lib/tenantTimezone';
 import { resolveBundleGoal, DEFAULT_BUNDLE_GOAL } from '@/lib/fundraiserMetrics';
+import { STOREFRONT_LISTING_HELP, STOREFRONT_LISTING_LABEL } from '@/lib/fundraiserStorefrontListing';
 import { useDialogFocus } from './useDialogFocus';
 
 export interface EditableCampaignDetails {
@@ -51,6 +57,7 @@ export interface EditableCampaignDetails {
     bundle_goal?: number | null;
     closed_at?: string | Date | null;
     status?: string | null;
+    listed_on_storefront?: boolean | null;
 }
 
 /** Mirrors lib/campaignBundleSelection CLOSED_STATUSES for the read-only presentation. */
@@ -93,6 +100,9 @@ export function EditCampaignDetailsModal({
     );
 
     const [form, setForm] = useState(initial);
+    // A boolean beside the text form, so the shared string setter stays string-only.
+    const initialListed = campaign.listed_on_storefront === true;
+    const [listed, setListed] = useState(initialListed);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [applied, setApplied] = useState<AppliedChange[] | null>(null);
@@ -112,6 +122,7 @@ export function EditCampaignDetailsModal({
         if (form.pickup_location !== initial.pickup_location) body.pickup_location = form.pickup_location;
         if (form.checks_payable !== initial.checks_payable) body.checks_payable = form.checks_payable;
         if (form.bundle_goal !== initial.bundle_goal) body.bundleGoal = form.bundle_goal;
+        if (listed !== initialListed) body.listed_on_storefront = listed;
 
         if (Object.keys(body).length === 0) {
             onClose();
@@ -146,6 +157,9 @@ export function EditCampaignDetailsModal({
                     `${resolveBundleGoal(initial.bundle_goal)} bundles`,
                     `${resolveBundleGoal(form.bundle_goal)} bundles`,
                 );
+            }
+            if ('listed_on_storefront' in body) {
+                note(STOREFRONT_LISTING_LABEL, initialListed ? 'On' : 'Off', listed ? 'On' : 'Off');
             }
             setApplied(changes);
             onSaved?.();
@@ -234,6 +248,7 @@ export function EditCampaignDetailsModal({
                             <Row label="Delivery / pickup location" value={initial.pickup_location} />
                             <Row label="Checks payable to" value={initial.checks_payable} />
                             <Row label="Fundraiser goal" value={`${resolveBundleGoal(initial.bundle_goal)} bundles`} />
+                            <Row label={STOREFRONT_LISTING_LABEL} value={initialListed ? 'On' : 'Off'} />
                         </dl>
                         <div className="flex justify-end">
                             <button onClick={onClose} className="px-6 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700">
@@ -332,6 +347,28 @@ export function EditCampaignDetailsModal({
                                 className={inputClass}
                             />
                         </Field>
+
+                        <label
+                            htmlFor="cd-listed-on-storefront"
+                            className="flex items-start gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 cursor-pointer"
+                        >
+                            <input
+                                id="cd-listed-on-storefront"
+                                type="checkbox"
+                                checked={listed}
+                                onChange={(e) => setListed(e.target.checked)}
+                                aria-describedby="cd-listed-on-storefront-help"
+                                className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <span className="space-y-1">
+                                <span className="block text-sm font-black text-slate-700 dark:text-slate-300">
+                                    {STOREFRONT_LISTING_LABEL}
+                                </span>
+                                <span id="cd-listed-on-storefront-help" className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+                                    {STOREFRONT_LISTING_HELP}
+                                </span>
+                            </span>
+                        </label>
 
                         {error && (
                             <p role="alert" className="rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 px-3 py-2 text-sm font-bold text-rose-700 dark:text-rose-400">

@@ -643,17 +643,20 @@ describe('CRM-CAMPAIGN-DETAILS-1 / propagation and the goal', () => {
         for (const f of ['org_share_percent', 'orgSharePercent', 'goal_amount', 'tax_rate']) {
             expect(code).not.toContain(f);
         }
-        // No input is bound to anything but the six operational keys.
+        // No input is bound to anything but the six operational keys, plus
+        // STOREFRONT-CUSTOMER-EXPERIENCE-1B's storefront listing toggle and its help text —
+        // a discovery flag, bearing on no amount, rate or settlement.
         const bound = code.match(/id="cd-[a-z-]+"/g)!.sort();
         expect(bound).toEqual([
             'id="cd-bundle-goal"', 'id="cd-checks-payable"', 'id="cd-delivery-date"',
-            'id="cd-delivery-time"', 'id="cd-end-date"', 'id="cd-pickup-location"',
+            'id="cd-delivery-time"', 'id="cd-end-date"', 'id="cd-listed-on-storefront"',
+            'id="cd-listed-on-storefront-help"', 'id="cd-pickup-location"',
         ]);
-        // And the only keys it can ever POST are the six it owns.
+        // And the only keys it can ever POST are the six it owns, plus the listing flag.
         const body = code.slice(code.indexOf('const body: Record<string, unknown> = {}'), code.indexOf('if (Object.keys(body).length'));
         expect(body.match(/body\.(\w+)/g)!.sort()).toEqual([
             'body.bundleGoal', 'body.checks_payable', 'body.delivery_date',
-            'body.delivery_time', 'body.end_date', 'body.pickup_location',
+            'body.delivery_time', 'body.end_date', 'body.listed_on_storefront', 'body.pickup_location',
         ]);
     });
 

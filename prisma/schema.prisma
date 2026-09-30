@@ -803,6 +803,14 @@ model FundraiserCampaign {
   // reason it is barred from touching org_share_percent.
   tax_status            OrgTaxStatus?
   tax_rate_percent      Decimal?   @db.Decimal(5, 2)
+  // ── STOREFRONT-CUSTOMER-EXPERIENCE-1B: public storefront discovery ─────────
+  // Whether the storefront's public "Active Fundraisers" section may list this
+  // campaign. Discovery ONLY: the direct fundraiser link, supporter ordering, the
+  // coordinator portal, the scoreboard, closeout, invoices and QuickBooks never
+  // read it. Default false, so a new campaign is unlisted until the tenant turns
+  // it on; the migration marked TRUE only the campaigns listed when it ran.
+  listed_on_storefront  Boolean    @default(false)
+  // ─────────────────────────────────────────────────────────────────────────
   documents             Document[]
   // FR-RETENTION-0R: campaign history must survive normal organization lifecycle.
   // Restrict (was Cascade) — deleting an organization that owns campaigns is refused

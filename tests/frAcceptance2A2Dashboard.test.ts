@@ -352,7 +352,7 @@ describe('this patch changed presentation only', () => {
         //       quickbooks_invoice_links (business_id, invoice_id); no existing column or row
         //       changes, no backfill. Applying it to Production is gated on owner review and
         //       must precede the code that queries the new tables.
-        expect(migrations).toHaveLength(28);
+        expect(migrations).toHaveLength(29);
         expect(migrations[15]).toBe('20260823010000_fr_acceptance_2a2_human_followup');
         expect(migrations[16]).toBe('20260825000000_inv_d_settlement_truth');
         expect(migrations[17]).toBe('20260826000000_m18_outreach_batch_campaign_ownership');
@@ -367,6 +367,9 @@ describe('this patch changed presentation only', () => {
         expect(migrations[26]).toBe('20260915170000_qb_invoice_1c_invoice_send');
         // QB-INVOICE-CANCEL-1: two nullable columns on quickbooks_invoice_sends (voided_at, voided_by).
         expect(migrations[27]).toBe('20260923010000_qb_invoice_cancel_1_voided');
+        // STOREFRONT-CUSTOMER-EXPERIENCE-1B: fundraiser_campaigns.listed_on_storefront (discovery only), with a
+        // backfill that keeps exactly today's storefront listing. Authorized by the owner's 1A+1B brief.
+        expect(migrations[28]).toBe('20260930120000_storefront_1b_fundraiser_listed_on_storefront');
     });
 
     it('the acknowledgement and follow-up contracts are untouched', () => {

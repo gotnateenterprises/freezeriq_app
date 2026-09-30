@@ -9,6 +9,7 @@ import {
     decideOperationalDetailsChange,
     isOperationalDetailsRejected,
 } from '@/lib/campaignOperationalDetails';
+import { decideStorefrontListingChange, isStorefrontListingRejected } from '@/lib/fundraiserStorefrontListing';
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
@@ -114,6 +115,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
             ? bundleGoalDecision.goal
             : undefined;
 
+        // ── STOREFRONT-CUSTOMER-EXPERIENCE-1B: public storefront listing ──────
+        // Discovery only — no ordering, money or lifecycle rule reads it — so it
+        // carries no closeout gate: a closed campaign is never listed whatever
+        // this says. Omission leaves the stored value untouched.
+        const listingDecision = decideStorefrontListingChange(body.listed_on_storefront);
+        if (isStorefrontListingRejected(listingDecision)) {
+            return NextResponse.json({ error: listingDecision.error }, { status: listingDecision.status });
+        }
+
         // ── CRM-CAMPAIGN-DETAILS-1: the tenant's operational-detail edit ──────
         //
         // delivery_time is newly accepted here. Its column has existed since
@@ -212,6 +222,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
                     : {}),
                 ...(bundleGoalValue !== undefined
                     ? { bundle_goal: bundleGoalValue }
+                    : {}),
+                ...(listingDecision.change
+                    ? { listed_on_storefront: listingDecision.listed }
                     : {}),
                 name: body.name,
                 status: body.status,

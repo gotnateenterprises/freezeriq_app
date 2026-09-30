@@ -28,6 +28,7 @@ import { mintCoordinatorPortalToken } from '@/lib/coordinatorPortalToken';
 import { resolveEligibleBundleFamilies } from '@/lib/campaignBundleSelection';
 import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
 import { decideOrgShareChange, isOrgShareRejected } from '@/lib/fundraiserOrgShare';
+import { decideStorefrontListingChange, isStorefrontListingRejected } from '@/lib/fundraiserStorefrontListing';
 import { DEFAULT_BUNDLE_GOAL } from '@/lib/fundraiserMetrics';
 import { resolveCampaignTaxSnapshot } from '@/lib/fundraiserTax';
 import {
@@ -272,6 +273,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
             return NextResponse.json({ error: shareDecision.error }, { status: shareDecision.status });
         }
 
+        // ── STOREFRONT-CUSTOMER-EXPERIENCE-1B: public storefront listing ──────
+        // Discovery only. Omitted leaves the column default: not listed.
+        const listingDecision = decideStorefrontListingChange(body?.listedOnStorefront);
+        if (isStorefrontListingRejected(listingDecision)) {
+            return NextResponse.json({ error: listingDecision.error }, { status: listingDecision.status });
+        }
+
         // ── FR-TAX-1: resolve the campaign's frozen tax treatment ─────────────
         const launchTaxBusiness = await prisma.business.findUnique({
             where: { id: businessId },
@@ -320,6 +328,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
                         tax_status: launchTaxSnapshot.status as any,
                         tax_rate_percent: launchTaxSnapshot.ratePercent,
                         ...(shareDecision.change ? { org_share_percent: shareDecision.percent } : {}),
+                        ...(listingDecision.change ? { listed_on_storefront: listingDecision.listed } : {}),
                     },
                     select: { id: true },
                 });

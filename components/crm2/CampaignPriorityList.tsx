@@ -36,6 +36,7 @@ import { coordinatorAccessPath } from '@/lib/fundraiserUrls';
 import { describeCampaignInvoice, resolveCampaignInvoiceState } from '@/lib/growth/campaignLifecycle';
 import { formatCalendarDateShortValue } from '@/lib/calendarDate';
 import { hasCampaignEndedForTenant } from '@/lib/campaignBundleSelection';
+import { STOREFRONT_LISTING_CHIP } from '@/lib/fundraiserStorefrontListing';
 
 export interface PriorityListCampaign extends CampaignForTriage {
     id: string;
@@ -58,6 +59,8 @@ export interface PriorityListCampaign extends CampaignForTriage {
     delivery_time?: string | null;
     pickup_location?: string | null;
     checks_payable?: string | null;
+    /** STOREFRONT-CUSTOMER-EXPERIENCE-1B — the tenant's public-listing choice. */
+    listed_on_storefront?: boolean;
 }
 
 const SECTION_DOT: Record<CampaignPriority, string> = {
@@ -282,6 +285,11 @@ function CampaignRow({
     // `end.getTime() < now.getTime()` showed "Ended" hours before the
     // tenant's local deadline day had even arrived.
     const ended = endValid && hasCampaignEndedForTenant(c, now);
+    // STOREFRONT-CUSTOMER-EXPERIENCE-1B: display only. Shown when the public Active
+    // Fundraisers list would actually include this row, so the chip never claims a
+    // listing the storefront would not show (closed, awaiting setup, or past deadline).
+    const onStorefront = c.listed_on_storefront === true && c.status === 'Active' && !c.closed_at
+        && c.bundle_selection_status !== 'pending' && !ended;
 
     // Every capability the old table exposed, preserved — just not as five
     // mystery icons. The primary action stays out of this list.
@@ -356,6 +364,11 @@ function CampaignRow({
                     {c.customer.name}
                     {c.customer.contact_name ? ` · ${c.customer.contact_name}` : ''}
                 </p>
+                {onStorefront && (
+                    <span className="mt-1 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
+                        {STOREFRONT_LISTING_CHIP}
+                    </span>
+                )}
             </div>
 
             {/* HOW IS IT DOING — one primary signal per row */}

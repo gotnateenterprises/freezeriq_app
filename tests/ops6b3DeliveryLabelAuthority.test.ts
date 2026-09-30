@@ -278,6 +278,8 @@ describe('PRESERVATION', () => {
             '20260915170000_qb_invoice_1c_invoice_send',
             // QB-INVOICE-CANCEL-1 (owner-authorized, additive): voided_at / voided_by on the send lifecycle.
             '20260923010000_qb_invoice_cancel_1_voided',
+            // STOREFRONT-CUSTOMER-EXPERIENCE-1B (owner-authorized, additive): fundraiser_campaigns.listed_on_storefront.
+            '20260930120000_storefront_1b_fundraiser_listed_on_storefront',
         ]);
     });
 });

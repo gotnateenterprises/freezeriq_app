@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Rocket, Copy, Check, Lock, UserPlus, Mail, Send, X, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { AWAITING_COORDINATOR_SETUP_LABEL } from '@/lib/campaignDisplayStage';
+import { STOREFRONT_LISTING_HELP, STOREFRONT_LISTING_LABEL } from '@/lib/fundraiserStorefrontListing';
 
 interface CoordinatorCandidate {
     orgContactId: string;
@@ -92,6 +93,8 @@ export function LaunchFundraiserDialog({
     const [orgShare, setOrgShare] = useState('20');
     const [picked, setPicked] = useState<Set<string>>(new Set());
     const [selectionLimit, setSelectionLimit] = useState(2);
+    // STOREFRONT-CUSTOMER-EXPERIENCE-1B: every new fundraiser starts unlisted.
+    const [listedOnStorefront, setListedOnStorefront] = useState(false);
 
     useEffect(() => {
         let alive = true;
@@ -154,6 +157,7 @@ export function LaunchFundraiserDialog({
                     orgSharePercent: orgShare,
                     candidateFamilyIds: [...picked],
                     selectionLimit,
+                    listedOnStorefront,
                 }),
             });
             const data = await res.json();
@@ -171,7 +175,7 @@ export function LaunchFundraiserDialog({
         } finally {
             setBusy(false);
         }
-    }, [busy, opportunityId, name, endDate, orgContactId, orgShare, picked, selectionLimit, onLaunched]);
+    }, [busy, opportunityId, name, endDate, orgContactId, orgShare, picked, selectionLimit, listedOnStorefront, onLaunched]);
 
     /**
      * FR-ACCEPTANCE-2A — save a new organization contact, then refresh the picker.
@@ -644,6 +648,25 @@ export function LaunchFundraiserDialog({
                                 Exactly this many, from the {familyCount} option{familyCount === 1 ? '' : 's'} selected above.
                             </p>
                         </div>
+
+                        {/* STOREFRONT-CUSTOMER-EXPERIENCE-1B: off by default. Listing is
+                            discovery only; the direct link works either way. */}
+                        <label htmlFor="lf-listed-on-storefront" className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">
+                            <input
+                                id="lf-listed-on-storefront"
+                                type="checkbox"
+                                className="mt-0.5"
+                                checked={listedOnStorefront}
+                                onChange={(e) => setListedOnStorefront(e.target.checked)}
+                                aria-describedby="lf-listed-on-storefront-help"
+                            />
+                            <span>
+                                <span className="block text-xs font-bold text-slate-500">{STOREFRONT_LISTING_LABEL}</span>
+                                <span id="lf-listed-on-storefront-help" className="mt-0.5 block text-[11px] text-slate-400">
+                                    {STOREFRONT_LISTING_HELP}
+                                </span>
+                            </span>
+                        </label>
 
                         <div className="flex flex-col items-end gap-2">
                             {blockingReason && (

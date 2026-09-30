@@ -61,11 +61,7 @@ interface Fundraiser {
     name: string;
     about_text: string | null;
     mission_text: string | null;
-    payment_instructions: string | null;
-    external_payment_link: string | null;
     end_date: string;
-    goal_amount: number | null;
-    total_sales: number;
     customer: {
         name: string;
     };

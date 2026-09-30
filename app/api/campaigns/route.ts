@@ -16,6 +16,7 @@ import {
     isCampaignTaxOverrideRejected,
 } from '@/lib/fundraiserTax';
 import { decideOrgShareChange, isOrgShareRejected } from '@/lib/fundraiserOrgShare';
+import { decideStorefrontListingChange, isStorefrontListingRejected } from '@/lib/fundraiserStorefrontListing';
 import { evaluateCampaignHealth } from '@/lib/growth/health';
 import {
   evaluateConversion,
@@ -102,6 +103,9 @@ interface CreateCampaignBody {
   // every pre-FR-TAX-1 caller, which then gets the resolved default.
   taxStatus?: 'UNKNOWN' | 'TAXABLE' | 'TAX_EXEMPT' | null;
   taxRatePercent?: number | string | null;
+  // STOREFRONT-CUSTOMER-EXPERIENCE-1B: list this fundraiser in the public storefront's
+  // Active Fundraisers section. Omitted means the column default: not listed.
+  listedOnStorefront?: boolean;
 }
 
 /**
@@ -230,6 +234,13 @@ export async function POST(req: Request) {
         const orgSharePercentValue: number | undefined = orgShareDecision.change
             ? orgShareDecision.percent
             : undefined;
+
+        // STOREFRONT-CUSTOMER-EXPERIENCE-1B: discovery only. Omitted leaves the
+        // column default, so a new fundraiser is unlisted unless the tenant says so.
+        const listingDecision = decideStorefrontListingChange(body.listedOnStorefront);
+        if (isStorefrontListingRejected(listingDecision)) {
+            return NextResponse.json({ error: listingDecision.error }, { status: listingDecision.status });
+        }
 
         attemptedOpportunityId = opportunityId ?? null;
         attemptedBusinessId = businessId;
@@ -626,6 +637,10 @@ export async function POST(req: Request) {
                             ...(orgSharePercentValue !== undefined
                                 ? { org_share_percent: orgSharePercentValue }
                                 : {}),
+                            // STOREFRONT-CUSTOMER-EXPERIENCE-1B: when omitted, the DB default (false) applies.
+                            ...(listingDecision.change
+                                ? { listed_on_storefront: listingDecision.listed }
+                                : {}),
                         },
                     });
 
@@ -782,6 +797,9 @@ export async function GET(req: Request) {
                     tax_rate_percent: true,
                     bundle_selection_status: true,
                     bundle_selection_at: true,
+                    // STOREFRONT-CUSTOMER-EXPERIENCE-1B: the stored listing choice, for
+                    // the Edit details toggle and the CRM "On storefront" indicator.
+                    listed_on_storefront: true,
                     // CRM-ACTIVE-STATUS-UX-1: the durable, provider-confirmed
                     // "invite actually sent" timestamp, so the Active card can
                     // distinguish "coordinator invite not sent" from "waiting on
@@ -1004,6 +1022,9 @@ export async function GET(req: Request) {
                             // show a real workflow status instead of "No signal yet".
                             bundle_selection_status: (fc as any).bundle_selection_status ?? null,
                             coordinator_invite_sent_at: (fc as any).primary_coordinator?.setup_email_sent_at ?? null,
+                            // STOREFRONT-CUSTOMER-EXPERIENCE-1B — display only; the change
+                            // goes through PATCH /api/campaigns/[id].
+                            listed_on_storefront: (fc as any).listed_on_storefront === true,
                             // CRM-ARCHIVED-CAMPAIGN-VISIBILITY-1 — `c` (Customer) is
                             // already fetched in full above with no select
                             // restriction, so `archived` needs no new query. This is

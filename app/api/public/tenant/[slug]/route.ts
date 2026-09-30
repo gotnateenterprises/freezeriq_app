@@ -154,9 +154,11 @@ export async function GET(
         // never reach the query and break the whole storefront payload.
         console.log(`[Storefront API] Fetching active fundraisers for business ${business.id}`);
         const tenantZone = business.timezone;
+        // STOREFRONT-CUSTOMER-EXPERIENCE-1B: payment instructions, the payment link and
+        // the goal and sales totals are no longer selected. The Active Fundraisers card
+        // shows none of them, and they are not listing data to send to every visitor.
         const fundraisers: any[] = !isValidIanaTimeZone(tenantZone) ? [] : await prisma.$queryRaw`
-            SELECT fc.id, fc.name, fc.about_text, fc.mission_text, fc.payment_instructions, 
-                   fc.external_payment_link, fc.end_date, fc.goal_amount, fc.total_sales,
+            SELECT fc.id, fc.name, fc.about_text, fc.mission_text, fc.end_date,
                    fc.participant_label,
                    c.name as customer_customer_name
             FROM fundraiser_campaigns fc
@@ -180,6 +182,14 @@ export async function GET(
             -- still awaiting the coordinator's bundle selection cannot take an
             -- order, so it does not belong in the public list.
             AND fc.bundle_selection_status <> 'pending'
+            -- STOREFRONT-CUSTOMER-EXPERIENCE-1B: the tenant chooses which live
+            -- fundraisers this public list advertises. Discovery ONLY — the direct
+            -- fundraiser link and ordering never read this flag.
+            AND fc.listed_on_storefront = true
+            -- A closed-out campaign is never advertised, whatever its status says.
+            AND fc.closed_at IS NULL
+            -- Soonest deadline first; name, then id, make the order deterministic.
+            ORDER BY fc.end_date ASC, fc.name ASC, fc.id ASC
         `;
         // Handle potential column name mismatch in raw query
         fundraisers.forEach(f => {

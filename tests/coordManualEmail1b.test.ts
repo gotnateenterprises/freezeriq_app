@@ -99,6 +99,9 @@ describe('1. schema and migration', () => {
             // QB-INVOICE-CANCEL-1: two nullable columns recording when the linked QuickBooks invoice was
             // voided by "Cancel invoice", and by whom. Additive; authorized by the owner's brief.
             '20260923010000_qb_invoice_cancel_1_voided',
+            // STOREFRONT-CUSTOMER-EXPERIENCE-1B: fundraiser_campaigns.listed_on_storefront, backfilled to keep
+            // exactly today's storefront listing. Additive; authorized by the owner's 1A+1B brief.
+            '20260930120000_storefront_1b_fundraiser_listed_on_storefront',
         ]);
     });
 });
