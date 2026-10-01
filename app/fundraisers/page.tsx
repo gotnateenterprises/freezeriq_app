@@ -27,7 +27,7 @@ import { EditCampaignDetailsModal } from '@/components/crm2/EditCampaignDetailsM
 import { useDialogFocus } from '@/components/crm2/useDialogFocus';
 import type { CampaignTriage } from '@/lib/growth/nextAction';
 import { triageCampaign } from '@/lib/growth/nextAction';
-import { classifyCampaignLifecycle, resolveCampaignInvoiceState } from '@/lib/growth/campaignLifecycle';
+import { classifyCampaignLifecycle, invoiceStatusesAfterCloseout, resolveCampaignInvoiceState } from '@/lib/growth/campaignLifecycle';
 import type { CampaignHealth, CampaignHealthReason } from '@/lib/growth/health';
 import { FOOD_TAX_DEFAULT_APPLIED } from '@/lib/fundraiserCloseoutMath';
 import { resolveCloseoutTaxRate, formatTaxRate } from '@/lib/fundraiserTax';
@@ -62,6 +62,8 @@ interface Fundraiser {
     // Phase 7E closeout fields (may not be present until prisma generate runs)
     closed_at?: string | null;
     settlement_total?: number | null;
+    // FR-HISTORY-1: the campaign's invoice statuses, sent by /api/campaigns.
+    invoice_statuses?: string[] | null;
     // CRM-CAMPAIGN-DETAILS-1: the tenant-owned operational details, so Edit details
     // prefills from the canonical campaign row rather than the organization's blob.
     delivery_date?: string | null;
@@ -280,10 +282,18 @@ export default function FundraisersPage() {
                     message: data.error || 'Failed to close campaign. Please try again.'
                 });
             } else {
-                // Update local list so the row immediately reflects Closed status
+                // Update local list so the row immediately reflects Closed status.
+                // COORD-CLOSED-PORTAL-1: and the invoice closeout just created, so
+                // the row never offers "Create invoice" for it before a reload.
                 setFundraisers(prev => prev.map(f =>
                     f.id === closeoutTarget.id
-                        ? { ...f, status: 'Closed', closed_at: data.closed_at, settlement_total: data.settlement_total }
+                        ? {
+                            ...f,
+                            status: 'Closed',
+                            closed_at: data.closed_at,
+                            settlement_total: data.settlement_total,
+                            invoice_statuses: invoiceStatusesAfterCloseout(f.invoice_statuses, data),
+                        }
                         : f
                 ));
                 setCloseoutResult({

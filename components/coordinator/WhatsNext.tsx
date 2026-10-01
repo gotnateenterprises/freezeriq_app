@@ -13,10 +13,12 @@ export function WhatsNext({
         <section className="bg-white border border-slate-200 rounded-2xl p-4">
             <h3 className="text-base font-black text-slate-900 mb-1">What happens next</h3>
             {isClosed ? (
-                // Phase 7E-4: closed-state copy — warm, clear, no payment language
+                // Phase 7E-4: closed-state copy — warm, clear. COORD-CLOSED-PORTAL-1:
+                // closeout holds orders until the fundraiser's invoice is paid (OPS-3),
+                // so this no longer claims they went straight to the kitchen.
                 <>
                     <Step n="✓" done title={`${tenantName} has closed your campaign`}
-                        body="Orders are locked in and sent to the kitchen." />
+                        body="Orders are locked in. They're released for production once the fundraiser's invoice has been paid." />
                     {settlementTotal !== undefined && settlementTotal > 0 && (
                         <Step n="✓" done
                             title={`Final campaign total: $${settlementTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}

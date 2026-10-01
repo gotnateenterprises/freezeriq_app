@@ -477,10 +477,25 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'lib/emailTemplates.ts',
             ];
             const inFundraiserInquiryAutoresponseCopy1 = (f: string) => FUNDRAISER_INQUIRY_AUTORESPONSE_COPY_1.includes(f);
+            // COORD-CLOSED-PORTAL-1 — a later, separately-authorized fix: after the first real closeout the
+            // coordinator portal showed only "Unable to load bundle options", because bundle selection
+            // (whose API refuses a closed campaign) gated the whole page. A closed campaign now skips it and
+            // opens the read-only Complete phase; the pickup sheet keeps its bundle columns after closeout;
+            // the closed copy no longer claims orders went to the kitchen; and the Campaigns row carries the
+            // invoice closeout just created. No schema, no migration, no closeout/invoice/tax/payment change.
+            const COORD_CLOSED_PORTAL_1 = [
+                'lib/coordinatorPortalGate.ts',
+                'app/coordinator/portal/page.tsx',
+                'components/coordinator/WhatsNext.tsx',
+                'app/api/tracker/pickup-sheet/route.ts',
+                'lib/growth/campaignLifecycle.ts',
+                'app/fundraisers/page.tsx',
+            ];
+            const inCoordClosedPortal1 = (f: string) => COORD_CLOSED_PORTAL_1.includes(f);
             for (const f of changed) {
                 const allowed = f === SHARE_CENTER || f.startsWith('tests/')
                     || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f);
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f) || inCoordClosedPortal1(f);
                 expect(allowed).toBe(true);
             }
             const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -490,7 +505,7 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 // phase's "presentation only" assertion. Everything else is
                 // still held to it.
                 if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f)) continue;
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f) || inCoordClosedPortal1(f)) continue;
                 expect(f).not.toMatch(forbidden);
             }
         });

@@ -49,6 +49,7 @@ import { QuietLinks } from '@/components/coordinator/QuietLinks';
 import { DeliveryPrep } from '@/components/coordinator/DeliveryPrep';
 import { WhatsNext } from '@/components/coordinator/WhatsNext';
 import { BundleSelectionStep } from '@/components/coordinator/BundleSelectionStep';
+import { coordinatorPortalGate } from '@/lib/coordinatorPortalGate';
 import { PreviousSupporters } from '@/components/coordinator/PreviousSupporters';
 import { LogoutButton } from '@/components/coordinator/LogoutButton';
 import Confetti from 'react-confetti';
@@ -717,10 +718,15 @@ export default function CoordinatorPortal() {
     // Derived from the closeout endpoint fields (Phase 7E-2). Takes priority
     // over all date-based phase logic so a tenant-closed campaign is always
     // shown as complete regardless of its end_date.
-    const isClosed: boolean =
-        Boolean(campaign.closed_at) ||
-        campaign.status === 'Closed' ||
-        campaign.status === 'Settled';
+    //
+    // COORD-CLOSED-PORTAL-1: the same gate also decides whether bundle selection
+    // renders. A closed campaign skips it — its API refuses a closed campaign by
+    // design — and goes straight to the read-only Complete phase.
+    const {
+        isClosed,
+        showBundleSelection,
+        contentReady: portalContentReady,
+    } = coordinatorPortalGate(campaign, bundleSelectionDone);
     // Keep the polling guards in sync during render.
     // Once the server says closed, the background refresh stops (nothing new
     // can arrive); while a modal or composer is open, the poll holds off so it
@@ -882,14 +888,18 @@ export default function CoordinatorPortal() {
                     Shown before phase content when selection is required.
                     Legacy (not_required) campaigns: component calls onSelectionComplete()
                     immediately and renders null, so nothing changes for them.
+                    COORD-CLOSED-PORTAL-1: never rendered once the campaign is closed.
                 ═══════════════════════════════════════════════ */}
-                <BundleSelectionStep
-                    onSelectionComplete={handleBundleSelectionComplete}
-                />
+                {showBundleSelection && (
+                    <BundleSelectionStep
+                        onSelectionComplete={handleBundleSelectionComplete}
+                    />
+                )}
 
-                {/* Phase content deferred until selection is confirmed.
+                {/* Phase content deferred until selection is confirmed — or, for a
+                    closed campaign, shown straight away as the read-only Complete phase.
                     CB-3 provides UX deferral only — CB-5 adds the server-side order gate. */}
-                {bundleSelectionDone && (<>
+                {portalContentReady && (<>
                 {/* COORDINATOR-SUPPORTER-POLISH-1: a one-time "you're live" message,
                     shown only for the exact submission that just turned setup on
                     (see handleBundleSelectionComplete / justCompletedSetup above) —
@@ -948,8 +958,12 @@ export default function CoordinatorPortal() {
                 {isClosed && (
                     <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 space-y-0.5">
                         <p className="text-[13px] font-black text-amber-900">🔒 Campaign Closed</p>
+                        {/* COORD-CLOSED-PORTAL-1: closeout holds orders until the fundraiser's
+                            invoice is paid (OPS-3), so "sent to the kitchen" was no longer true.
+                            Says whose invoice without implying the coordinator owes it. */}
                         <p className="text-xs text-amber-800 font-medium leading-relaxed">
-                            Orders have been sent to the kitchen. Contact {tenantName || 'the organizer'} for any late changes.
+                            Ordering is closed. Orders are released for production once the fundraiser&apos;s invoice
+                            has been paid. Contact {tenantName || 'the organizer'} for any late changes.
                             No more order edits can be made from this portal.
                         </p>
                         {settlementTotal !== null && settlementTotal > 0 && (
@@ -1165,10 +1179,15 @@ export default function CoordinatorPortal() {
                                 className="flex-1 rounded-xl border border-slate-200 bg-slate-50 py-2 text-center text-xs font-semibold text-slate-700">
                                 📦 Pickup spreadsheet
                             </button>
-                            <button onClick={handleDownloadTracker}
-                                className="flex-1 rounded-xl border border-slate-200 bg-slate-50 py-2 text-center text-xs font-semibold text-slate-700">
-                                📥 Order tracker
-                            </button>
+                            {/* COORD-CLOSED-PORTAL-1: the order tracker is a blank order-taking
+                                sheet, and /api/tracker/download refuses it once ordering has
+                                closed — so it is offered only while ordering is still open. */}
+                            {campaign.orderMode?.allowed === true && (
+                                <button onClick={handleDownloadTracker}
+                                    className="flex-1 rounded-xl border border-slate-200 bg-slate-50 py-2 text-center text-xs font-semibold text-slate-700">
+                                    📥 Order tracker
+                                </button>
+                            )}
                         </div>
                     </section>
                     {/* FR-COORD-123: pickup-day guidance — the SAME order list,
@@ -1196,7 +1215,8 @@ export default function CoordinatorPortal() {
             {/* ── Sticky Action Bar ── */}
             {/* CB-3: ActionBar deferred until bundle selection is confirmed. */}
             {/* Phase 7E-4: isClosed forces phase=complete so ActionBar shows read-only copy */}
-            {bundleSelectionDone && (
+            {/* COORD-CLOSED-PORTAL-1: same gate as the phase content above */}
+            {portalContentReady && (
                 <ActionBar
                     phase={campaignPhase}
                     onAddOrder={() => { if (!isClosed) setShowOrderModal(true); }}

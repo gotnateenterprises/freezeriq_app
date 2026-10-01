@@ -102,6 +102,23 @@ export async function GET(req: Request) {
             orderBy: { created_at: 'asc' }
         });
 
+        // COORD-CLOSED-PORTAL-1: once a campaign is closed it is no longer orderable,
+        // so orderMode names no bundles and the sheet had no quantity columns — every
+        // supporter counted zero boxes on exactly the day the sheet is used. Each
+        // bundle a released order actually contains gets its own column (by name),
+        // so a released line is never dropped from the counts.
+        const knownBundleIds = new Set(bundles.map((b) => b.id));
+        const orderedBundles = new Map<string, string>();
+        for (const order of orders) {
+            for (const item of order.items) {
+                if (item.bundle && !knownBundleIds.has(item.bundle.id)) orderedBundles.set(item.bundle.id, item.bundle.name);
+            }
+        }
+        bundles = [
+            ...bundles,
+            ...[...orderedBundles].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
+        ];
+
         // --- Helper: shorten a bundle name for column headers ---
         const shortenBundleName = (name: string): string => {
             // e.g. "Q1 - Comfort Foods (Serves a Family of 4)" → "Q1 - Comfort Foods\n(Family)"

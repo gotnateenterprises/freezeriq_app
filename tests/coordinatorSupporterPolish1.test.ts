@@ -128,7 +128,10 @@ describe('B. one-time "you\'re live" message after coordinator setup', () => {
 
     it('the banner renders INSIDE the existing bundleSelectionDone gate — never before it, never as a second top-level gate', () => {
         // Same anchor tests/frCoord123LaunchSteps.test.ts uses for LaunchSteps.
-        const gateIdx = portal.indexOf('{bundleSelectionDone && (<>');
+        // COORD-CLOSED-PORTAL-1 renamed the gate: portalContentReady is
+        // `isClosed || bundleSelectionDone`, and this banner only follows a fresh
+        // selection, which a closed campaign can never make.
+        const gateIdx = portal.indexOf('{portalContentReady && (<>');
         expect(gateIdx).toBeGreaterThan(-1);
         expect(bannerIdx).toBeGreaterThan(gateIdx);
         expect(logoIdx).toBeGreaterThan(bannerIdx);

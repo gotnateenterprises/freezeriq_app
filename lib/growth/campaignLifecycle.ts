@@ -130,6 +130,29 @@ export function readInvoiceStatuses(c: CampaignLifecycleInput): string[] | null 
     return null;
 }
 
+/**
+ * COORD-CLOSED-PORTAL-1 — a Campaigns list row's invoice statuses after a successful
+ * closeout, from the closeout response itself.
+ *
+ * Closeout creates the campaign's invoice, but the row it patched still said "no invoice"
+ * until the next full load, so the row offered "Create invoice" for a campaign that had just
+ * been invoiced. The response's own status is authoritative and is added to what the row
+ * already knew. A response that names an invoice without its status (the concurrent-closeout
+ * path) leaves the state unknown — which never offers "Create invoice" — rather than guessing.
+ */
+export function invoiceStatusesAfterCloseout(
+    previous: readonly (string | null | undefined)[] | null | undefined,
+    response: { invoice_id?: string | null; invoice_status?: string | null },
+): string[] | null {
+    const known = Array.isArray(previous) ? previous.filter((s): s is string => typeof s === 'string') : null;
+    if (typeof response.invoice_status === 'string' && response.invoice_status !== '') {
+        const prior = known ?? [];
+        return prior.includes(response.invoice_status) ? prior : [...prior, response.invoice_status];
+    }
+    if (response.invoice_id) return null;
+    return known;
+}
+
 /** Does a campaign-linked invoice exist at all? */
 export function hasCampaignInvoice(c: CampaignLifecycleInput): boolean {
     return (readInvoiceStatuses(c) ?? []).length > 0;

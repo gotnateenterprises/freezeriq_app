@@ -111,7 +111,10 @@ describe('FR-COORD-123 · Step 1 — setup truth', () => {
         // LaunchSteps sits inside the bundleSelectionDone gate and reads it as
         // Step 1's truth — the flag is set only by the server-confirmed
         // selection state (BundleSelectionStep onSelectionComplete).
-        const gate = portal.indexOf('{bundleSelectionDone && (<>');
+        // COORD-CLOSED-PORTAL-1 renamed the gate to portalContentReady
+        // (`isClosed || bundleSelectionDone`); LaunchSteps never renders in the
+        // Complete phase a closed campaign shows, so it still waits for setup.
+        const gate = portal.indexOf('{portalContentReady && (<>');
         const mount = portal.indexOf('<LaunchSteps');
         expect(gate).toBeGreaterThan(-1);
         expect(mount).toBeGreaterThan(gate);
