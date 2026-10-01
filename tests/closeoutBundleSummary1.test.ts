@@ -628,9 +628,13 @@ describe('F. coordinator portal — bundle totals above Recent orders', () => {
 // G. Scope — presentation only
 // ═════════════════════════════════════════════════════════════════════════════
 describe('G. scope: no calculation, invoice, tax, settlement, QuickBooks, order or schema file touched', () => {
-    it('the working tree leaves every money and data path alone', () => {
+    // Pinned to THIS phase's own commit range. It first read the live working tree, which made every
+    // later phase that legitimately edits one of these paths (COORD-CLOSEOUT-PICKUP-1 changes two
+    // coordinator routes and lib/coordinatorSupporterOrders.ts) fail it until committed.
+    const PHASE_COMMIT = '7172b6872618f31e13b233d6432341067117be12';
+    it('the phase commit leaves every money and data path alone', () => {
         const out = execSync([
-            'git status --porcelain --',
+            `git diff --name-only ${BASELINE} ${PHASE_COMMIT} --`,
             'app/api',
             'lib/fundraiserCloseoutMath.ts lib/fundraiserTax.ts lib/pricing.ts lib/quickbooks',
             'lib/invoiceSettlement.ts lib/invoiceSettlementTransition.ts lib/invoiceSendTruth.ts',

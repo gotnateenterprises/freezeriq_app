@@ -22,13 +22,37 @@
  * prints an empty box, so a volunteer can still tick it by hand at the table.
  * It never prints "UNPAID": no order carries evidence that a supporter did not
  * pay, only whether the coordinator has recorded that they did.
+ *
+ * COORD-CLOSEOUT-PICKUP-1: closeout, not invoice payment, makes this the final
+ * list. The page now says which it is — not final yet, or the final list with
+ * its production-release state — in a screen-only callout plus one compact
+ * printed line, so the paper stays usable on pickup day.
  */
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Printer } from 'lucide-react';
-import { formatServingTier } from '@/lib/coordinatorSupporterOrders';
+import {
+    formatServingTier,
+    PICKUP_DOCUMENT_STATUS_COPY,
+    type PickupDocumentState,
+} from '@/lib/coordinatorSupporterOrders';
 import type { GroupPaymentSummary } from '@/lib/supporterPayment';
+
+/** The one printed line: final list or not, and the production-release state. */
+const PRINTED_STATUS: Readonly<Record<PickupDocumentState, string>> = {
+    not_final: 'Not final — ordering is still open.',
+    final_pending_release: 'Final order list — food not yet released to production.',
+    final_released: 'Final order list — food released to production.',
+    final_empty: 'Final order list — no orders were placed.',
+};
+
+const STATUS_TONE: Readonly<Record<PickupDocumentState, string>> = {
+    not_final: 'border-slate-200 bg-slate-50 text-slate-700',
+    final_pending_release: 'border-amber-200 bg-amber-50 text-amber-900',
+    final_released: 'border-emerald-200 bg-emerald-50 text-emerald-900',
+    final_empty: 'border-slate-200 bg-slate-50 text-slate-700',
+};
 
 interface ManifestItem {
     quantity: number;
@@ -60,6 +84,9 @@ interface Manifest {
         pickup_location: string | null;
         payment_instructions: string | null;
     };
+    /** COORD-CLOSEOUT-PICKUP-1. Optional so a response from before this field
+     *  existed still renders. */
+    document?: { final: boolean; state: PickupDocumentState };
     groups: ManifestGroup[];
     supporterCount: number;
     totalBundles: number;
@@ -126,6 +153,7 @@ export default function PickupTrackerPage() {
 
     const { campaign, groups } = manifest;
     const deliveryDate = formatDeliveryDate(campaign.delivery_date);
+    const documentState = manifest.document?.state ?? null;
 
     return (
         <div className="min-h-screen bg-slate-50 print:bg-white">
@@ -142,6 +170,15 @@ export default function PickupTrackerPage() {
             </div>
 
             <div className="mx-auto max-w-4xl bg-white p-6 print:max-w-none print:p-0">
+                {/* COORD-CLOSEOUT-PICKUP-1 — screen-only: what this list is. The
+                    printed sheet carries the one-line version in its header. */}
+                {documentState && (
+                    <div role="status" data-document-state={documentState}
+                        className={`no-print mb-4 rounded-xl border px-4 py-3 text-[13px] font-semibold leading-relaxed ${STATUS_TONE[documentState]}`}>
+                        {PICKUP_DOCUMENT_STATUS_COPY[documentState]}
+                    </div>
+                )}
+
                 {/* ── Campaign header ─────────────────────────────────────── */}
                 <header className="border-b-2 border-slate-900 pb-3">
                     <h1 className="text-2xl font-black text-slate-900">
@@ -167,6 +204,13 @@ export default function PickupTrackerPage() {
                         {' · '}<strong>{manifest.totalBundles}</strong> bundle{manifest.totalBundles === 1 ? '' : 's'}
                         {' · '}Printed {formatGeneratedAt(manifest.generatedAt)}
                     </p>
+                    {/* COORD-CLOSEOUT-PICKUP-1: the final list and the production
+                        release are separate facts; one small line keeps both. */}
+                    {documentState && (
+                        <p className="mt-1 text-[12px] font-bold text-slate-800" data-printed-status={documentState}>
+                            {PRINTED_STATUS[documentState]}
+                        </p>
+                    )}
                     {campaign.payment_instructions && (
                         <p className="mt-1 text-[12px] text-slate-600">
                             <strong>Payment:</strong> {campaign.payment_instructions}
@@ -185,9 +229,12 @@ export default function PickupTrackerPage() {
 
                 {/* ── Supporter rows ───────────────────────────────────────── */}
                 {groups.length === 0 ? (
-                    <p className="py-8 text-sm text-slate-500">
-                        No released orders yet. Orders appear here once this fundraiser&apos;s invoice
-                        has been recorded as paid and the food is released for production.
+                    // COORD-CLOSEOUT-PICKUP-1: closeout, not invoice payment, fills
+                    // this list — so an empty list says which side of closeout it is on.
+                    <p className="py-8 text-sm text-slate-500" data-empty-state={documentState ?? 'unknown'}>
+                        {manifest.document?.final
+                            ? 'No orders were placed in this fundraiser.'
+                            : 'Your final pickup list fills in with every order as soon as this fundraiser closes. Until then, new orders appear in Recent orders on your portal.'}
                     </p>
                 ) : (
                     <ul className="mt-1">

@@ -10,12 +10,16 @@
  * ACTOR: fundraiser coordinator
  * SCOPE: the ONE campaign their session is bound to
  *
- * WHAT THIS IS NOT: the live order tracker. That surface shows every supporter
- * COMMITMENT, including orders still held while the organisation's invoice is
- * unpaid. This one is a FULFILMENT document — it answers "what food is here to
- * hand over today" — so it shows only work the paid-invoice release has let
- * through. The two sets differ on purpose while a fundraiser is still held; see
- * isPickupEligibleOrder in lib/coordinatorSupporterOrders.ts.
+ * WHAT IT LISTS (COORD-CLOSEOUT-PICKUP-1, owner ruling 2026-10-01): closeout
+ * unlocks the pickup documents; invoice payment still unlocks production.
+ *   closed campaign  every non-canceled order — the final, locked list the
+ *                    organization's invoice was computed from, held or not. The
+ *                    coordinator reconciles it BEFORE the invoice is paid.
+ *   open campaign    released work only, as before: there is no final list yet,
+ *                    and the portal's live order list covers ordering in flight.
+ * The rule is isPickupDocumentOrder / pickupDocumentOrderWhere in
+ * lib/coordinatorSupporterOrders.ts, shared with the XLSX sheet. Listing a held
+ * order does not release it: this route only reads.
  *
  * Every field a supporter row carries, and the rule deciding whether an email
  * is truthfully theirs, is owned by lib/coordinatorSupporterOrders.ts and shared
@@ -24,11 +28,13 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
-import { PRODUCTION_ORDER_EXCLUSIONS } from '@/lib/productionIntake';
+import { isCampaignClosed } from '@/lib/campaignBundleSelection';
 import {
     SUPPORTER_ORDER_SELECT,
     groupSupporterRows,
-    isPickupEligibleOrder,
+    isPickupDocumentOrder,
+    pickupDocumentOrderWhere,
+    pickupDocumentState,
 } from '@/lib/coordinatorSupporterOrders';
 import { planAllowsCoordinatorPortal } from '@/app/api/coordinator/route';
 
@@ -45,6 +51,9 @@ export async function GET(req: Request) {
                 id: true,
                 name: true,
                 customer_id: true,
+                // COORD-CLOSEOUT-PICKUP-1: closeout is what makes this list final.
+                status: true,
+                closed_at: true,
                 delivery_date: true,
                 delivery_time: true,
                 pickup_location: true,
@@ -70,25 +79,26 @@ export async function GET(req: Request) {
             return NextResponse.json({ error: 'Portal unavailable (Plan Restriction)' }, { status: 403 });
         }
 
+        // The canonical closed-campaign authority (contract §11), from the
+        // campaign row itself: closed_at, or a closed-family status.
+        const closed = isCampaignClosed({ closed_at: campaign.closed_at, status: String(campaign.status) });
+
+        // Never a canceled order. Closed: the final locked set, held or not.
+        // Open: released work only — the shared production exclusions, composed
+        // rather than restated. One where-clause for both pickup documents.
         const rows = await prisma.order.findMany({
-            where: {
-                campaign_id: campaign.id,
-                canceled_at: null,
-                // The shared production/fulfilment exclusions: never a held
-                // order, never a canceled one, never an abandoned pre-payment
-                // checkout. Composed, not restated.
-                AND: [...PRODUCTION_ORDER_EXCLUSIONS],
-            },
+            where: pickupDocumentOrderWhere(campaign.id, { closed }),
             orderBy: { created_at: 'asc' },
             select: SUPPORTER_ORDER_SELECT,
         });
 
         // Second line of defence. The where clause above is the primary gate;
         // re-checking each row in memory means a future change to that clause
-        // cannot silently put unreleased food on a pickup sheet.
-        const eligible = rows.filter((r) => isPickupEligibleOrder(r as any));
+        // cannot silently put a canceled order — or, before closeout, unreleased
+        // food — on a pickup sheet.
+        const listed = rows.filter((r) => isPickupDocumentOrder(r as any, { closed }));
 
-        const groups = groupSupporterRows(eligible as any, campaign.customer_id);
+        const groups = groupSupporterRows(listed as any, campaign.customer_id);
 
         const totalBundles = groups.reduce(
             (sum, g) => sum + g.items.reduce((n, i) => n + Number(i.quantity || 0), 0),
@@ -107,6 +117,13 @@ export async function GET(req: Request) {
                 delivery_time: campaign.delivery_time,
                 pickup_location: campaign.pickup_location,
                 payment_instructions: campaign.payment_instructions,
+            },
+            // COORD-CLOSEOUT-PICKUP-1: what this document is — not final, or the
+            // final list with its production-release state, derived from the
+            // listed orders' own statuses (no invoice is read).
+            document: {
+                final: closed,
+                state: pickupDocumentState({ closed }, listed as any),
             },
             groups,
             supporterCount: groups.length,

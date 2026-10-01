@@ -43,10 +43,10 @@
  * campaign from the coordinator session (lib/coordinatorSession.ts). This
  * module shapes rows that the caller has already proven it may read.
  *
- * Not a production-eligibility rule. Whether an order may be COOKED — and
- * therefore whether it belongs on a day-of pickup manifest — is
- * lib/productionIntake.ts. See isPickupEligibleOrder below, which composes it
- * rather than restating it.
+ * Not a production-eligibility rule. Whether an order may be COOKED is
+ * lib/productionIntake.ts. Which orders a pickup DOCUMENT lists is
+ * isPickupDocumentOrder below (COORD-CLOSEOUT-PICKUP-1): every non-canceled order
+ * once the campaign is closed, released work only before that.
  *
  * DELIBERATELY PURE
  *
@@ -55,7 +55,7 @@
  * `select` below is a plain object literal for the same reason.
  */
 
-import { isProductionEligibleOrder } from './productionIntake';
+import { isProductionEligibleOrder, PRODUCTION_ORDER_EXCLUSIONS } from './productionIntake';
 // FR-TAX-CORRECTNESS-1: the one derivation of what a supporter owes. Pure —
 // this module's no-prisma rule is preserved (fundraiserTax imports only
 // roundCents from fundraiserCloseoutMath, which is equally pure).
@@ -217,7 +217,15 @@ export function toSupporterOrder(
 // ── Pickup eligibility ───────────────────────────────────────────────────────
 
 /**
- * May this order appear on a DAY-OF PICKUP manifest?
+ * Has this order's food been released — and so, BEFORE closeout, may it appear
+ * on a pickup document?
+ *
+ * COORD-CLOSEOUT-PICKUP-1 narrowed this to OPEN campaigns. Once a campaign is
+ * closed, the pickup documents list every non-canceled order, held ones
+ * included, because the coordinator reconciles that final list before the
+ * organization pays its invoice — see isPickupDocumentOrder below. The text that
+ * follows still describes the open-campaign rule, and still describes what food
+ * actually exists.
  *
  * THE LIVE TRACKER AND THE PICKUP TRACKER ARE DIFFERENT SETS, ON PURPOSE.
  *
@@ -252,6 +260,84 @@ export function isPickupEligibleOrder(
 ): boolean {
     return isProductionEligibleOrder(order);
 }
+
+// ── Pickup documents ─────────────────────────────────────────────────────────
+
+/**
+ * COORD-CLOSEOUT-PICKUP-1 — which orders the coordinator's pickup DOCUMENTS
+ * list: the printable pickup tracker and the XLSX pickup sheet.
+ *
+ * Owner ruling, 2026-10-01: CLOSEOUT unlocks the pickup documents; INVOICE
+ * PAYMENT still unlocks production. They are two separate gates. The real
+ * workflow is close -> coordinator reconciles the final list -> organization
+ * pays its invoice -> food is released, so the document has to exist BEFORE the
+ * payment that isPickupEligibleOrder above waits for.
+ *
+ *   campaign closed  every non-canceled order: closeout's own inclusion rule,
+ *                    i.e. exactly the locked set the organization's invoice was
+ *                    computed from — held or released alike. Closeout already
+ *                    froze it: add, cancel, restore and bundle changes are all
+ *                    refused once a campaign is closed.
+ *   campaign open    unchanged: released work only (isPickupEligibleOrder). The
+ *                    order set can still change, so no final document exists
+ *                    yet; the portal's live order list is the surface for that.
+ *
+ * Listing an order changes nothing about it. Whether food may be COOKED is still
+ * lib/productionIntake.ts alone: a held order on this list stays held, and only
+ * the paid-invoice transition releases it.
+ */
+export function isPickupDocumentOrder(
+    order: { status?: string | null; source?: string | null; canceled_at?: Date | string | null } | null | undefined,
+    campaign: { closed: boolean },
+): boolean {
+    if (!order || order.canceled_at != null) return false;
+    if (campaign.closed) return true;
+    return isPickupEligibleOrder(order);
+}
+
+/**
+ * The Prisma `where` both pickup documents query with. One definition, so the
+ * printed tracker and the spreadsheet cannot disagree about who is on the list.
+ * isPickupDocumentOrder is the in-memory second line of defence over it.
+ */
+export function pickupDocumentOrderWhere(campaignId: string, campaign: { closed: boolean }) {
+    return campaign.closed
+        ? { campaign_id: campaignId, canceled_at: null }
+        : { campaign_id: campaignId, canceled_at: null, AND: [...PRODUCTION_ORDER_EXCLUSIONS] };
+}
+
+/**
+ * What a pickup document may truthfully say about itself.
+ *
+ *   not_final               ordering is still open; this is not the final list
+ *   final_pending_release   closed; at least one listed order is still held, so
+ *                           its food has not been released to production
+ *   final_released          closed; every listed order has been released
+ *   final_empty             closed with no orders at all
+ *
+ * Derived from order statuses only — never from an invoice. Some closed
+ * campaigns' held orders have no invoice, or a canceled one, so the copy states
+ * the release rule rather than claiming an invoice exists or is pending.
+ */
+export type PickupDocumentState = 'not_final' | 'final_pending_release' | 'final_released' | 'final_empty';
+
+export function pickupDocumentState(
+    campaign: { closed: boolean },
+    orders: ReadonlyArray<{ status?: string | null } | null | undefined>,
+): PickupDocumentState {
+    if (!campaign.closed) return 'not_final';
+    const listed = orders.filter(Boolean);
+    if (listed.length === 0) return 'final_empty';
+    return listed.some((o) => o!.status === 'fundraiser_hold') ? 'final_pending_release' : 'final_released';
+}
+
+/** One wording for both documents. */
+export const PICKUP_DOCUMENT_STATUS_COPY: Readonly<Record<PickupDocumentState, string>> = {
+    not_final: 'Ordering is still open, so this is not the final pickup list. It fills in with every order as soon as the fundraiser closes.',
+    final_pending_release: 'Fundraiser closed — final orders are shown below. Food has not yet been released to production; it is released when the organization’s invoice is paid.',
+    final_released: 'Fundraiser closed — final orders are shown below. Food has been released to production.',
+    final_empty: 'Fundraiser closed — no orders were placed.',
+};
 
 // ── Grouping ─────────────────────────────────────────────────────────────────
 

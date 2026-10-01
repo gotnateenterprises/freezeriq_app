@@ -276,20 +276,28 @@ describe('11–15. delivery documents', () => {
         expect(sheet.type).toContain('spreadsheetml');
     });
 
-    it('13. while the invoice is unpaid, held orders appear on neither document', async () => {
+    // COORD-CLOSEOUT-PICKUP-1 (owner ruling, October 1, 2026) SUPERSEDED the rule this test used to
+    // lock ("while the invoice is unpaid, held orders appear on neither document"). Closeout now
+    // populates the pickup documents; invoice payment still releases production. The full matrix
+    // lives in tests/coordCloseoutPickup1.test.ts.
+    it('13. while the invoice is unpaid, a closed campaign\'s held orders appear on BOTH documents — and stay held', async () => {
         const held = [supporterOrder('o-1', 'cust-1'), supporterOrder('o-2', 'cust-2', { paid: true })];
         useMock(docMock(held));
         const tracker = await pickupTracker();
-        expect(tracker.body.groups).toEqual([]);
-        expect(tracker.body.supporterCount).toBe(0);
+        expect(tracker.body.supporterCount).toBe(2);
+        expect(tracker.body.document).toEqual({ final: true, state: 'final_pending_release' });
         const trackerWhere = mock.firstCall('order.findMany')!.args.where;
-        expect(JSON.stringify(trackerWhere.AND)).toContain('fundraiser_hold');
+        expect(trackerWhere).toEqual({ campaign_id: CLOSED, canceled_at: null });
+        expect(mock.calls.every((c) => /^(find|count|aggregate|groupBy)/.test(c.method) && !String(c.model).startsWith('$execute'))).toBe(true);
 
-        useMock(docMock([]));
-        await pickupSheet();
-        expect(JSON.stringify(mock.firstCall('order.findMany')!.args.where.AND)).toContain('fundraiser_hold');
-        // The page explains the empty list instead of looking broken.
-        expect(read('app/coordinator/portal/pickup-tracker/page.tsx')).toContain('No released orders yet.');
+        useMock(docMock(held));
+        const sheet = await pickupSheet();
+        expect(mock.firstCall('order.findMany')!.args.where).toEqual({ campaign_id: CLOSED, canceled_at: null });
+        expect(sheet.rowValues(5).slice(0, 2)).toEqual([1, 'Supporter cust-1']);
+        expect(sheet.rowValues(6).slice(0, 2)).toEqual([2, 'Supporter cust-2']);
+        expect(mock.calls.every((c) => /^(find|count|aggregate|groupBy)/.test(c.method) && !String(c.model).startsWith('$execute'))).toBe(true);
+        // The old empty-list copy is gone: it named invoice payment as what fills the list.
+        expect(read('app/coordinator/portal/pickup-tracker/page.tsx')).not.toContain('No released orders yet.');
     });
 
     it('14. once the invoice is paid and orders are released, both documents list them', async () => {
@@ -306,10 +314,11 @@ describe('11–15. delivery documents', () => {
         const sheet = await pickupSheet();
         expect(sheet.status).toBe(200);
         // Closed campaigns are not orderable, so these columns come from the released orders themselves.
-        expect(sheet.header).toEqual(['#', 'Customer', 'Phone', 'Keto Fall 2026\n(Serves 2)', 'Keto Fall 2026\n(Serves 5)', 'Total\nBundles']);
-        expect(sheet.rowValues(5)).toEqual([1, 'Supporter cust-1', '217-555-0100', '', 2, 2]);
-        expect(sheet.rowValues(6)).toEqual([2, 'Supporter cust-2', '217-555-0100', 1, '', 1]);
-        expect(sheet.rowValues(7)).toEqual(['', 'TOTALS', '', 1, 2, 3]);
+        // COORD-CLOSEOUT-PICKUP-1 appended Amount Due and Payment; every earlier column is unchanged.
+        expect(sheet.header).toEqual(['#', 'Customer', 'Phone', 'Keto Fall 2026\n(Serves 2)', 'Keto Fall 2026\n(Serves 5)', 'Total\nBundles', 'Amount\nDue', 'Payment']);
+        expect(sheet.rowValues(5)).toEqual([1, 'Supporter cust-1', '217-555-0100', '', 2, 2, 125, 'Payment not marked']);
+        expect(sheet.rowValues(6)).toEqual([2, 'Supporter cust-2', '217-555-0100', 1, '', 1, 125, 'Payment not marked']);
+        expect(sheet.rowValues(7)).toEqual(['', 'TOTALS', '', 1, 2, 3, 250, '0 of 2 marked paid']);
     });
 
     it('14b. an open legacy campaign\'s sheet keeps its catalog columns exactly as before', async () => {
@@ -324,8 +333,8 @@ describe('11–15. delivery documents', () => {
         });
         useMock(m);
         const sheet = await pickupSheet();
-        expect(sheet.header).toEqual(['#', 'Customer', 'Phone', 'Keto Fall 2026\n(Serves 5)', 'Comfort Classics\n(Serves 5)', 'Total\nBundles']);
-        expect(sheet.rowValues(5)).toEqual([1, 'Supporter cust-1', '217-555-0100', 1, '', 1]);
+        expect(sheet.header).toEqual(['#', 'Customer', 'Phone', 'Keto Fall 2026\n(Serves 5)', 'Comfort Classics\n(Serves 5)', 'Total\nBundles', 'Amount\nDue', 'Payment']);
+        expect(sheet.rowValues(5)).toEqual([1, 'Supporter cust-1', '217-555-0100', 1, '', 1, 125, 'Payment not marked']);
     });
 
     it('15. supporter payment marks: Paid, partly marked and not marked stay correct, and marking still works after closeout', async () => {

@@ -320,6 +320,43 @@ URL, query string or body.
 > covers name, email and phone, so no disclosure change is required for those
 > three; adding address WOULD exceed it.
 
+## 9.1 Pickup documents — COORD-CLOSEOUT-PICKUP-1 amendment (owner-locked October 1, 2026)
+
+The real workflow is: the fundraiser closes → the final order list is locked →
+the coordinator reconciles the pickup sheet → the organization pays its invoice
+→ only then is the food released. The coordinator needs the document BEFORE that
+payment, so the pickup documents have their own gate:
+
+```
+campaign closeout   → pickup documents become the FINAL list:
+                      every non-canceled order of the campaign, held or released
+invoice PAID        → food released to production (§5 — unchanged)
+```
+
+- **Closeout populates the pickup documents; invoice payment releases
+  production.** Two separate gates. Neither implies the other.
+- The pickup documents are the printable pickup tracker
+  (`/coordinator/portal/pickup-tracker`) and the XLSX pickup sheet
+  (`/api/tracker/pickup-sheet`). Both use one rule, so they cannot disagree.
+- A closed campaign's documents list exactly closeout's own inclusion rule
+  (`campaign_id` + `canceled_at IS NULL`) — the set the organization's invoice
+  was computed from. A canceled order never appears.
+- Before closeout the documents keep listing released work only and say they are
+  not final. The portal's live order list is the surface while ordering is open.
+- The documents state the production-release state from the listed orders' own
+  statuses. They never claim an invoice exists or is pending, because some
+  closed campaigns' held orders have no invoice or a canceled one.
+- Opening, printing or downloading a document is read-only. It never changes
+  `Order.status`, releases an order, touches an invoice, records a payment,
+  touches QuickBooks or sends email.
+- §13 Rule 1 is unaffected. Pickup documents are coordinator documents, not
+  kitchen, label or production surfaces; a held order listed on one stays held.
+- Supporter payment marks stay editable after closeout. The documents show the
+  latest marks and each order's amount due (`supporterAmountDue`). The XLSX stays
+  one row per order, so a supporter's orders keep their own payment state.
+- Authority: `lib/coordinatorSupporterOrders.ts` — `isPickupDocumentOrder`,
+  `pickupDocumentOrderWhere`, `pickupDocumentState`.
+
 ---
 
 # SECTION 10 — HISTORICAL DATA RESTRICTIONS
@@ -348,6 +385,7 @@ Do not re-derive these. Import them.
 | Is this fundraiser or customer delivery? | `lib/delivery/orderClassification.ts` |
 | Order status + legal transitions | `lib/orderStatus.ts` |
 | Is the campaign closed? | `lib/campaignBundleSelection.ts` — `CLOSED_STATUSES`, `isCampaignClosed` |
+| Which orders does a coordinator pickup document list? | `lib/coordinatorSupporterOrders.ts` — `isPickupDocumentOrder`, `pickupDocumentOrderWhere` (§9.1) |
 | What price? | `lib/pricing.ts` — `buildBundlePriceMap` (sensitive core file) |
 | Fundraiser production batch | `lib/fundraiserProductionBatch.ts` |
 
@@ -427,6 +465,7 @@ what changed stays visible.
 | `lib/orderStatus.ts` §11 note | Same stale closeout attribution | Same correction. |
 | `CLAUDE.md`, `docs/ai/UI_REDESIGN_SPEC.md` | Lock `app/api/coordinator/[token]/route.ts` and `app/coordinator/[token]/page.tsx` | Both were renamed away; the live surfaces are `app/api/coordinator/route.ts` and `app/coordinator/portal/page.tsx`. |
 | `docs/FUNDRAISER_ARCHITECTURE.md` | Supporters pay externally then receive a magic link | Contradicts the shipped self-serve order path. |
+| COORD-FULFILLMENT-2 (pickup tracker and XLSX headers, `tests/coordFulfillment2.test.ts`) | A pickup document is a fulfilment document, so it lists released work only — held orders appear once the invoice is paid | True only BEFORE closeout. Since COORD-CLOSEOUT-PICKUP-1 a closed campaign's pickup documents list its final, non-canceled order set, held or released (§9.1). Production release is unchanged (§5). |
 | §4.5 of this document (QB-INVOICE-1A amendment — in effect; owner-accepted September 13, 2026) | "the Square and QBO importers keep their existing compatibility behaviour" | The QBO importer is RETIRED. It turned the newest QuickBooks invoices — unpaid ones included — into `production_ready` Orders, which contradicts HARD RULE 1. No QuickBooks record creates, releases or changes an Order. A QuickBooks connection, its health, or any QuickBooks invoice or payment state never releases fundraiser food: release remains `Invoice.status = 'PAID'` (§5). The Square importer is unchanged by this amendment. |
 
 ---
