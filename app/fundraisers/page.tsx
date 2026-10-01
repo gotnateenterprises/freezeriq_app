@@ -29,8 +29,10 @@ import type { CampaignTriage } from '@/lib/growth/nextAction';
 import { triageCampaign } from '@/lib/growth/nextAction';
 import { classifyCampaignLifecycle, invoiceStatusesAfterCloseout, resolveCampaignInvoiceState } from '@/lib/growth/campaignLifecycle';
 import type { CampaignHealth, CampaignHealthReason } from '@/lib/growth/health';
-import { FOOD_TAX_DEFAULT_APPLIED } from '@/lib/fundraiserCloseoutMath';
+import { FOOD_TAX_DEFAULT_APPLIED, type AggregatedLine } from '@/lib/fundraiserCloseoutMath';
 import { resolveCloseoutTaxRate, formatTaxRate } from '@/lib/fundraiserTax';
+import { bundleSummaryFromCloseoutLines } from '@/lib/bundleSummary';
+import { BundleSummaryTable } from '@/components/invoices/BundleSummaryTable';
 
 interface Fundraiser {
     id: string;
@@ -172,6 +174,10 @@ export default function FundraisersPage() {
             tax_amount: number;
             total_due: number;
         };
+        // CLOSEOUT-BUNDLE-SUMMARY-1: the bundle lines the server froze onto the
+        // same draft invoice — the response's own `lines`, never a re-read of
+        // the orders. Absent on an idempotent retry, which returns none.
+        lines?: AggregatedLine[];
     } | null>(null);
 
     /**
@@ -301,7 +307,8 @@ export default function FundraisersPage() {
                     message: 'Campaign closed successfully.',
                     settlement_total: data.settlement_total,
                     promoted_order_count: data.promoted_order_count,
-                    financials: data.financials
+                    financials: data.financials,
+                    lines: Array.isArray(data.lines) ? data.lines : undefined,
                 });
             }
         } catch (e: any) {
@@ -367,6 +374,12 @@ export default function FundraisersPage() {
     /** Two-decimal currency for the closeout summary. */
     const money = (v: number) =>
         Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    // CLOSEOUT-BUNDLE-SUMMARY-1: what the frozen figures were made of, from the
+    // closeout response's own lines. Null when the response carried no lines.
+    const closeoutBundleSummary = closeoutResult?.success
+        ? bundleSummaryFromCloseoutLines(closeoutResult.lines)
+        : null;
 
     // CRM-CC-1: one clock per render so every row is triaged consistently.
     const triageNow = new Date();
@@ -647,7 +660,7 @@ export default function FundraisersPage() {
                 <div
                     ref={closeoutDialog.panelRef}
                     tabIndex={-1}
-                    className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in fade-in zoom-in duration-200 focus:outline-none"
+                    className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto p-8 animate-in fade-in zoom-in duration-200 focus:outline-none"
                 >
 
                     {/* Header */}
@@ -724,6 +737,15 @@ export default function FundraisersPage() {
                                 </div>
                             )}
                         </div>
+                    )}
+
+                    {/* CLOSEOUT-BUNDLE-SUMMARY-1 — below the financial summary, outside
+                        it: the same draft invoice's bundle lines, one row per bundle and
+                        serving size. Presentation only — nothing here is recomputed, and
+                        the figures above are untouched. The invoices page shows the same
+                        table later from the invoice's frozen items. */}
+                    {closeoutBundleSummary && (
+                        <BundleSummaryTable summary={closeoutBundleSummary} className="mb-6" />
                     )}
 
                     {/* Result state — error */}

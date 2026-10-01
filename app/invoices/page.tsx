@@ -18,7 +18,8 @@ import {
     Tag,
     Info,
     RotateCcw,
-    Link2
+    Link2,
+    Package
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Link from 'next/link';
@@ -27,6 +28,7 @@ import { useSession } from 'next-auth/react';
 import InvoiceComposeModal from '@/components/crm/InvoiceComposeModal';
 import EmailComposeModal from '@/components/crm/EmailComposeModal';
 import QuickBooksInvoiceSendDialog from '@/components/invoices/QuickBooksInvoiceSendDialog';
+import InvoiceBundleSummaryDialog from '@/components/invoices/InvoiceBundleSummaryDialog';
 import { invoiceRowAction, settlementBlockedByCancellation } from '@/lib/quickbooks/invoiceSendView';
 import UpgradeRequired from '@/components/UpgradeRequired';
 import { sumOutstandingInvoices } from '@/lib/invoiceSendTruth';
@@ -79,6 +81,10 @@ interface Invoice {
         quantity: number;
         unit_price: number;
         total: number;
+        // CLOSEOUT-BUNDLE-SUMMARY-1: already in the GET response (items: true);
+        // the Bundle Summary groups the frozen lines by them.
+        bundle_id?: string | null;
+        variant_size?: string | null;
     }[];
     // QB-INVOICE-1C: present once "Send via QuickBooks" has started for this invoice. QuickBooks' own
     // invoice number appears once QuickBooks created it.
@@ -156,6 +162,8 @@ function InvoicesContent() {
     // ── QB-INVOICE-1C: the "Send via QuickBooks" dialog. Tenant admins acting as themselves only
     //    (the QuickBooks routes enforce the same rule).
     const [quickBooksInvoice, setQuickBooksInvoice] = useState<Invoice | null>(null);
+    // ── CLOSEOUT-BUNDLE-SUMMARY-1: the read-only Bundle Summary of a fundraiser invoice.
+    const [bundleSummaryInvoice, setBundleSummaryInvoice] = useState<Invoice | null>(null);
     const mayUseQuickBooks = session?.user?.role === 'ADMIN' && !(session?.user as any)?.isViewingAsTenant;
 
     const userPlan = (session?.user as any)?.plan;
@@ -899,6 +907,15 @@ function InvoicesContent() {
                 />
             )}
 
+            {/* CLOSEOUT-BUNDLE-SUMMARY-1: built from this invoice's frozen items only —
+                the list response already carries them, so nothing is fetched. */}
+            {bundleSummaryInvoice && (
+                <InvoiceBundleSummaryDialog
+                    invoice={bundleSummaryInvoice}
+                    onClose={() => setBundleSummaryInvoice(null)}
+                />
+            )}
+
             {isComposeOpen && (
                 <InvoiceComposeModal
                     isOpen={isComposeOpen}
@@ -1124,6 +1141,20 @@ function InvoicesContent() {
                                                 </button>
                                             );
                                         })()}
+                                        {/* CLOSEOUT-BUNDLE-SUMMARY-1: always visible (not in the hover-only
+                                            group below, which a phone never reveals). Fundraiser invoices
+                                            only — their lines are the frozen closeout bundle lines. */}
+                                        {inv.campaign_id && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setBundleSummaryInvoice(inv)}
+                                                className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition-all hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
+                                                title="Bundle Summary"
+                                            >
+                                                <Package className="w-3.5 h-3.5 shrink-0" />
+                                                <span>Bundles</span>
+                                            </button>
+                                        )}
                                         <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                             {/* INV-D: offered only for invoices that are
                                                 actually settleable. `!== 'PAID'` also

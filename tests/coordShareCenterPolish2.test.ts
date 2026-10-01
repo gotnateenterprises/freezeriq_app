@@ -492,10 +492,25 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 'app/fundraisers/page.tsx',
             ];
             const inCoordClosedPortal1 = (f: string) => COORD_CLOSED_PORTAL_1.includes(f);
+            // CLOSEOUT-BUNDLE-SUMMARY-1 — a later, separately-authorized, presentation-only phase: a
+            // Bundle Summary under the closeout modal's financial summary (from the response's own
+            // lines), a read-only one on fundraiser invoices (from their frozen items), and bundle
+            // totals above the coordinator's Recent orders (from the full order list). No schema, no
+            // migration, no API route, no closeout/invoice/tax/settlement/QuickBooks change.
+            const CLOSEOUT_BUNDLE_SUMMARY_1 = [
+                'lib/bundleSummary.ts',
+                'components/invoices/BundleSummaryTable.tsx',
+                'components/invoices/InvoiceBundleSummaryDialog.tsx',
+                'components/coordinator/BundleTotalsCard.tsx',
+                'app/coordinator/portal/page.tsx',
+                'app/fundraisers/page.tsx',
+                'app/invoices/page.tsx',
+            ];
+            const inCloseoutBundleSummary1 = (f: string) => CLOSEOUT_BUNDLE_SUMMARY_1.includes(f);
             for (const f of changed) {
                 const allowed = f === SHARE_CENTER || f.startsWith('tests/')
                     || FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f) || inCoordClosedPortal1(f);
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f) || inCoordClosedPortal1(f) || inCloseoutBundleSummary1(f);
                 expect(allowed).toBe(true);
             }
             const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -505,7 +520,7 @@ describe('COORD-SHARE-CENTER-POLISH-2', () => {
                 // phase's "presentation only" assertion. Everything else is
                 // still held to it.
                 if (FR_TAX_CORRECTNESS_1.includes(f) || FR_SUPPORTER_PAYMENT_STATUS_1.includes(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f)
-                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f) || inCoordClosedPortal1(f)) continue;
+                    || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f) || inCoordClosedPortal1(f) || inCloseoutBundleSummary1(f)) continue;
                 expect(f).not.toMatch(forbidden);
             }
         });

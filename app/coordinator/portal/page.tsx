@@ -45,6 +45,8 @@ import { ProgressHero } from '@/components/coordinator/ProgressHero';
 import { LaunchSteps } from '@/components/coordinator/LaunchSteps';
 import { ShareCenter } from '@/components/coordinator/ShareCenter';
 import { RecentOrders } from '@/components/coordinator/RecentOrders';
+// CLOSEOUT-BUNDLE-SUMMARY-1: bundle totals over the FULL order list, above Recent orders.
+import { BundleTotalsCard } from '@/components/coordinator/BundleTotalsCard';
 import { QuietLinks } from '@/components/coordinator/QuietLinks';
 import { DeliveryPrep } from '@/components/coordinator/DeliveryPrep';
 import { WhatsNext } from '@/components/coordinator/WhatsNext';
@@ -1082,6 +1084,12 @@ export default function CoordinatorPortal() {
                         onOpenAi={() => setShowAiPanel(true)}
                         aiRemaining={aiRemaining}
                     />
+                    {/* CLOSEOUT-BUNDLE-SUMMARY-1: the whole list, never RecentOrders' preview. */}
+                    <BundleTotalsCard
+                        orders={activeOrders}
+                        isClosed={isClosed}
+                        totalSales={campaign.total_sales}
+                    />
                     <RecentOrders
                         orders={activeOrders}
                         onCancel={(id) => setCancelOrderId(id)}
@@ -1132,6 +1140,11 @@ export default function CoordinatorPortal() {
                         onOpenAi={() => setShowAiPanel(true)}
                         aiRemaining={aiRemaining}
                         aiLabel='✨ Write a "last chance" message'
+                    />
+                    <BundleTotalsCard
+                        orders={activeOrders}
+                        isClosed={isClosed}
+                        totalSales={campaign.total_sales}
                     />
                     <RecentOrders
                         orders={activeOrders}
@@ -1196,6 +1209,12 @@ export default function CoordinatorPortal() {
                     <div className="rounded-xl bg-indigo-50 px-4 py-2.5 text-[13px] font-semibold text-indigo-800">
                         📋 Ordering is closed — use the order list below as your pickup-day guide.
                     </div>
+                    {/* CLOSEOUT-BUNDLE-SUMMARY-1: "Final bundle totals" once closed out. */}
+                    <BundleTotalsCard
+                        orders={activeOrders}
+                        isClosed={isClosed}
+                        totalSales={campaign.total_sales}
+                    />
                     {/* Phase 7E-4: read-only orders — cancel hidden when campaign is closed */}
                     <RecentOrders
                         orders={activeOrders}
