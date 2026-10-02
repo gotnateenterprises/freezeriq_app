@@ -36,9 +36,9 @@ export class IngestionDBAdapter implements DB {
         //
         // SEC-DATA-INTEGRITY-1: only identifiers this order actually carries
         // (lib/importCustomerMatch.ts). The email branch used to be
-        // `email ? {…} : {}`, and `{}` matches every row — so a synced Square order
-        // with no email address (the caller passes '') was linked to whichever
-        // customer in the tenant the database returned first.
+        // `email ? {…} : {}` — a literal empty OR branch for every Square order
+        // without an email (the caller passes ''). Prisma 5.22 ignores it, so the
+        // lookup fell back to the name; it no longer depends on that.
         const matchers: Prisma.CustomerWhereInput[] = [];
         const matchName = presentIdentifier(name);
         if (matchName) matchers.push({ name: { equals: matchName, mode: 'insensitive' } });

@@ -2,18 +2,26 @@
  * SEC-DATA-INTEGRITY-1 — which identifiers an imported or synced row may be
  * matched to an existing customer on.
  *
- * ── THE DEFECT THIS EXISTS TO PREVENT ───────────────────────────────────────
+ * ── WHAT THE OLD LOOKUPS DID ────────────────────────────────────────────────
  *
- * Prisma DROPS `undefined` from a where-clause. A match branch written as
+ * They were one findFirst over an OR whose email branch was written as
  *
  *     { contact_email: email ? email : undefined }     // or:  email ? {…} : {}
  *
- * therefore becomes `{}` when the row carries no email — and `{}` matches EVERY
- * row. Inside an OR that silently turned "this customer, by id or by email" into
- * "any customer in the tenant", and the importer then overwrote (or attached a
- * new fundraiser to, or linked a synced order to) whichever customer the
- * database happened to return first. app/api/training/route.ts documents the
- * same Prisma behaviour, found by SEC-PUBLIC-ROUTE-1.
+ * Prisma drops `undefined`, so for a row with no email that branch is `{}`.
+ * MEASURED on Postgres with the Prisma client this repo ships (5.22.0, for
+ * SEC-DATA-INTEGRITY-1): an empty branch INSIDE an OR is ignored — `OR [x, {}]`
+ * behaves exactly like `OR [x]`, and `OR [{}]` matches nothing. (At the TOP
+ * level the same `undefined` removes the condition and matches every row: the
+ * class of bug SEC-PUBLIC-ROUTE-1 fixed.) So a blank email did not, in practice,
+ * match an arbitrary customer — but the lookup's correctness rested on
+ * undocumented handling of an empty branch, which is not a contract.
+ *
+ * What did go wrong is the other half of that OR: findFirst over several
+ * identifiers returns whichever matching row the database hands back first.
+ * When the external id named one customer and the email another — or several
+ * customers shared the email — the import overwrote (or attached a fundraiser
+ * to) one of them arbitrarily.
  *
  * ── THE RULE ────────────────────────────────────────────────────────────────
  *

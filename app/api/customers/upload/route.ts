@@ -88,12 +88,14 @@ export async function POST(req: NextRequest) {
             // Upsert Logic — SEC-DATA-INTEGRITY-1: match only on identifiers this
             // row actually carries (lib/importCustomerMatch.ts).
             //
-            // This used to be ONE findFirst over OR [external_id, contact_email]
-            // with the email branch written as `email ? email : undefined`. A row
-            // with a Square id but no email turned that branch into `{}`, the OR
-            // matched every customer in the tenant, and the update below then
-            // overwrote whichever one came back first — its name, contact details,
-            // address and external id.
+            // This used to be ONE findFirst over OR [external_id, contact_email],
+            // the email branch written as `email ? email : undefined`. Two faults:
+            // a blank email left an empty OR branch whose meaning was Prisma's to
+            // decide (5.22 happens to ignore it), and findFirst over two
+            // identifiers overwrote whichever customer came back first when the
+            // Square id named one customer and the email another, or several
+            // customers shared the email — their name, contact details, address
+            // and external id.
             //
             // The external id stays the strong identity and is checked first (it is
             // unique across the whole table). Email is the fallback, and only when it

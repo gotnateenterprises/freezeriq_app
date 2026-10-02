@@ -3,13 +3,14 @@
  * matching that only ever uses identifiers a row actually carries.
  *
  * These tests run the REAL route handlers against a small in-memory database
- * that evaluates where-clauses the way Prisma does. In particular it DROPS
- * `undefined`: `{ contact_email: undefined }` and `{}` match every row, so an OR
- * holding one matches everything — exactly the behaviour the import defects
- * exploited, and the reason a plain recording double could not show them.
+ * that evaluates where-clauses the way Prisma 5.22 does — MEASURED on Postgres
+ * for this phase: `undefined` is dropped, so at the TOP level `{ x: undefined }`
+ * is `{}` and matches every row, while an empty branch INSIDE an OR is ignored
+ * (`OR [x, {}]` is just `OR [x]`, and `OR [{}]` / `OR []` match nothing).
  * findFirst returns the first matching row in insertion order (the database's
- * "whichever came back first"), and external_id is unique across the WHOLE
- * customers and orders tables, as it is in Postgres.
+ * "whichever came back first"), which is how an OR over two identifiers that
+ * name two different customers overwrote one of them arbitrarily. external_id is
+ * unique across the WHOLE customers and orders tables, as it is in Postgres.
  */
 
 jest.mock('@/lib/db', () => ({ get prisma() { return (global as any).__secDb.client; } }));
@@ -51,12 +52,17 @@ function fieldMatches(value: any, cond: any): boolean {
     return true;
 }
 
+/** A where-object with at least one defined condition (Prisma drops undefined values). */
+const hasCondition = (w: any) => !isNullish(w) && Object.values(w).some((v) => v !== undefined);
+
 function matches(row: Row, where: any): boolean {
     if (isNullish(where)) return true;
     for (const [key, cond] of Object.entries(where)) {
-        if (cond === undefined) continue; // Prisma drops undefined — `{ x: undefined }` is `{}`
+        if (cond === undefined) continue; // Prisma drops undefined — a top-level `{ x: undefined }` is `{}`
         if (key === 'OR') {
-            if (!Array.isArray(cond) || !cond.some((c) => matches(row, c))) return false; // OR [] matches nothing
+            // Measured (Prisma 5.22, Postgres): an empty branch inside OR is ignored, and an OR with no
+            // non-empty branch — `OR []`, `OR [{}]` — matches nothing.
+            if (!Array.isArray(cond) || !cond.some((c) => hasCondition(c) && matches(row, c))) return false;
         } else if (key === 'AND') {
             if (!(Array.isArray(cond) ? cond : [cond]).every((c) => matches(row, c))) return false;
         } else if (key === 'NOT') {
@@ -334,10 +340,12 @@ describe('B. POST /api/customers/upload — only identifiers a row carries can m
     const HEADER = 'First Name,Last Name,Email Address,Phone Number,Square Customer ID';
     const seed = () => ({
         customer: [
-            // First row in the table: the customer a wildcard match lands on.
             { id: 'a-first', business_id: A, name: 'Alice First', contact_name: 'Alice First', contact_email: 'alice@a.test', external_id: 'SQ-ALICE', type: 'direct_customer' },
             { id: 'a-dup-1', business_id: A, name: 'Dup One', contact_email: 'dup@a.test', type: 'direct_customer' },
             { id: 'a-dup-2', business_id: A, name: 'Dup Two', contact_email: 'dup@a.test', type: 'direct_customer' },
+            // Seeded BEFORE the external-id holder, so an OR over both identifiers returns it first.
+            { id: 'a-email-holder', business_id: A, name: 'Email Holder', contact_email: 'holder@a.test', type: 'direct_customer' },
+            { id: 'a-ext-holder', business_id: A, name: 'External Id Holder', contact_email: 'other@a.test', external_id: 'SQ-HOLDER', type: 'direct_customer' },
             { id: 'b-carol', business_id: B, name: 'Carol B', contact_email: 'carol@b.test', external_id: 'SQ-CAROL', type: 'direct_customer' },
             { id: 'b-shared', business_id: B, name: 'Shared B', contact_email: 'shared@x.test', type: 'direct_customer' },
         ],
@@ -348,7 +356,7 @@ describe('B. POST /api/customers/upload — only identifiers a row carries can m
         return { status: res.status, body: await res.json() };
     };
     const snapshot = (db: ReturnType<typeof createMemoryDb>, ids: string[]) => ids.map((id) => JSON.stringify(db.get('customer', id)));
-    const ALL_SEEDED = ['a-first', 'a-dup-1', 'a-dup-2', 'b-carol', 'b-shared'];
+    const ALL_SEEDED = ['a-first', 'a-dup-1', 'a-dup-2', 'a-email-holder', 'a-ext-holder', 'b-carol', 'b-shared'];
 
     it('external id + email: a genuinely new row creates, nothing existing changes', async () => {
         const db = useDb(seed()); tenantA();
@@ -359,7 +367,18 @@ describe('B. POST /api/customers/upload — only identifiers a row carries can m
         expect(db.tables.customer.find((c) => c.external_id === 'SQ-NEW-1')).toMatchObject({ business_id: A, contact_email: 'new1@a.test' });
     });
 
-    it('external id only (blank email): creates a new customer — never overwrites an arbitrary one', async () => {
+    it('external id names one customer and the email another: updates the external-id customer only', async () => {
+        const db = useDb(seed()); tenantA();
+        const emailHolderBefore = JSON.stringify(db.get('customer', 'a-email-holder'));
+        const { status } = await run(['Holder,Row,holder@a.test,555,SQ-HOLDER']);
+        expect(status).toBe(200);
+        // The old single OR returned whichever matching row came back first — here the email holder.
+        expect(JSON.stringify(db.get('customer', 'a-email-holder'))).toBe(emailHolderBefore);
+        expect(db.get('customer', 'a-ext-holder')).toMatchObject({ name: 'Holder Row', external_id: 'SQ-HOLDER' });
+        expect(db.tables.customer).toHaveLength(7);
+    });
+
+    it('external id only (blank email): looked up by the external id alone, created new, no empty branch sent', async () => {
         const db = useDb(seed()); tenantA();
         const before = snapshot(db, ALL_SEEDED);
         const { status } = await run(['New,Two,,555,SQ-NEW-2']);
@@ -369,7 +388,7 @@ describe('B. POST /api/customers/upload — only identifiers a row carries can m
         assertNoWildcardBranches(db.queries);
     });
 
-    it('external id only, with the email column absent entirely: same — no arbitrary match', async () => {
+    it('external id only, with the email column absent entirely: same — no empty branch, nothing existing changes', async () => {
         const db = useDb(seed()); tenantA();
         const before = snapshot(db, ALL_SEEDED);
         const { POST } = require('@/app/api/customers/upload/route');
@@ -394,7 +413,7 @@ describe('B. POST /api/customers/upload — only identifiers a row carries can m
         const db = useDb(seed()); tenantA();
         await run(['Alice,Renamed,alice@a.test,555,']);
         expect(db.get('customer', 'a-first')).toMatchObject({ name: 'Alice Renamed', source: 'Square CSV' });
-        expect(db.tables.customer).toHaveLength(5);
+        expect(db.tables.customer).toHaveLength(7);
     });
 
     it('neither identifier: always a new customer, and no lookup is run at all', async () => {
@@ -402,7 +421,7 @@ describe('B. POST /api/customers/upload — only identifiers a row carries can m
         const before = snapshot(db, ALL_SEEDED);
         await run(['Nobody,Known,,555,']);
         expect(snapshot(db, ALL_SEEDED)).toEqual(before);
-        expect(db.tables.customer).toHaveLength(6);
+        expect(db.tables.customer).toHaveLength(8);
         expect(db.queries.filter((q) => q.model === 'customer')).toEqual([]);
     });
 
@@ -410,7 +429,7 @@ describe('B. POST /api/customers/upload — only identifiers a row carries can m
         const db = useDb(seed()); tenantA();
         await run(['Alice,Updated,,555,SQ-ALICE']);
         expect(db.get('customer', 'a-first')).toMatchObject({ name: 'Alice Updated', external_id: 'SQ-ALICE' });
-        expect(db.tables.customer).toHaveLength(5);
+        expect(db.tables.customer).toHaveLength(7);
     });
 
     it('duplicate email within the tenant: skipped and reported, neither duplicate changes', async () => {
@@ -418,7 +437,7 @@ describe('B. POST /api/customers/upload — only identifiers a row carries can m
         const before = snapshot(db, ALL_SEEDED);
         const { body } = await run(['Dup,Row,dup@a.test,555,SQ-NEW-DUP']);
         expect(snapshot(db, ALL_SEEDED)).toEqual(before);
-        expect(db.tables.customer).toHaveLength(5);
+        expect(db.tables.customer).toHaveLength(7);
         expect(body.message).toContain('Skipped 1');
         expect(body.logs.join(' ')).toContain('more than one existing customer has that email address');
     });
@@ -460,7 +479,7 @@ describe('C. POST /api/fundraisers/upload — a fundraiser attaches only to the 
     const seed = () => ({
         business: [{ id: A, default_food_tax_percent: 1 }],
         customer: [
-            // First row in the table: the organization a wildcard match lands on.
+            // First row in the table: what findFirst over several matches hands back first.
             { id: 'org-alpha', business_id: A, name: 'Alpha Org', contact_email: 'alpha@org.test', type: 'fundraiser_org' },
             { id: 'org-twin-1', business_id: A, name: 'Twin Org', contact_email: 'twin1@org.test', type: 'fundraiser_org' },
             { id: 'org-twin-2', business_id: A, name: 'Twin Org', contact_email: 'twin2@org.test', type: 'fundraiser_org' },
@@ -476,7 +495,7 @@ describe('C. POST /api/fundraisers/upload — a fundraiser attaches only to the 
     };
     const campaignsOf = (db: ReturnType<typeof createMemoryDb>, orgId: string) => db.tables.fundraiserCampaign.filter((c) => c.customer_id === orgId);
 
-    it('new organization with a blank email: a NEW organization gets the fundraiser — never an unrelated one', async () => {
+    it('new organization with a blank email: a NEW organization gets the fundraiser, no empty branch sent', async () => {
         const db = useDb(seed());
         const { status } = await run(['Brand New PTA,Spring,Jo,,555']);
         expect(status).toBe(200);
@@ -568,7 +587,7 @@ describe('Sibling. lib/ingestion_db — a synced order links only to a matching 
     });
     const adapter = () => { const { IngestionDBAdapter } = require('@/lib/ingestion_db'); return new IngestionDBAdapter(A); };
 
-    it('an order with no email address never links to an arbitrary customer', async () => {
+    it('an order with no email address is matched by name alone — no empty branch is sent', async () => {
         const db = useDb(seed());
         const found = await adapter().createOrg('Someone New', '');
         expect(found.id).not.toBe('a-first');

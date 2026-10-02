@@ -150,9 +150,11 @@ export async function POST(req: NextRequest) {
             //
             // SEC-DATA-INTEGRITY-1: and only identifiers this row actually carries
             // (lib/importCustomerMatch.ts). The email branch used to be
-            // `email ? {…} : undefined`; a row with no email turned it into `{}`,
-            // the OR matched every customer in the tenant, and the fundraiser below
-            // could be attached to an unrelated organization. The name is always
+            // `email ? {…} : undefined`, leaving an empty OR branch for a row with
+            // no email (Prisma 5.22 happens to ignore it); and findFirst over name
+            // OR email attached the fundraiser below to whichever organization came
+            // back first when the name named one organization and the email
+            // another, or two organizations shared the name. The name is always
             // present (a blank-named row was skipped above); the email joins only
             // when there is one. More than one distinct match gives no basis for
             // choosing, so that row is skipped and reported rather than guessed.
