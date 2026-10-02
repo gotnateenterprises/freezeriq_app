@@ -86,6 +86,12 @@ const MODELS = [
     // TypeError, the route returns 500, and every Recent Activity assertion fails for the wrong
     // reason rather than reporting on the label under test.
     'activity', 'productionRun',
+    // FR-ORG-DASHBOARD-1A: the organization dashboard reads the previous-supporter
+    // audience (marketingPreference) and the recorded outreach history. A model
+    // missing here would make the loader throw and the route answer 500, so every
+    // tenant-scoping assertion would fail — or pass — for the wrong reason.
+    'marketingPreference', 'outreachRecipientOrg', 'outreachBatch', 'emailDeliveryAttempt',
+    'rebookingSubmissionRevisionOrg', 'seasonalOffering',
 ];
 
 const METHODS = [

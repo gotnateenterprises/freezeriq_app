@@ -36,13 +36,11 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 import {
-    derivePreviousSupporters,
     describePreviousSupporters,
     maskSupporterEmail,
-    normalizeSupporterEmail,
 } from '@/lib/previousSupporters';
+import { loadPreviousSupporterAudience } from '@/lib/previousSupporterAudience';
 import { buildInviteDraft } from '@/lib/previousSupporterInvite';
-import { evaluateSuppression } from '@/lib/outreachSend';
 import { resolveTenantBrand } from '@/lib/tenantBrand';
 import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
 import { validateInviteMessage, renderInviteEmail } from '@/lib/previousSupporterInvite';
@@ -154,73 +152,25 @@ async function loadCampaignContext(campaignId: string) {
     };
 }
 
-/** The audience, recomputed from durable data every time it is asked for. */
+/**
+ * The audience, recomputed from durable data every time it is asked for.
+ *
+ * FR-ORG-DASHBOARD-1A: the assembly (prior campaigns, organizations, orders,
+ * email-address opt-outs through evaluateSuppression) moved, unchanged, into
+ * lib/previousSupporterAudience.ts so the tenant's organization dashboard counts
+ * email-ready supporters through this exact path rather than a copy of it.
+ *
+ * The current campaign is excluded by id: someone who ordered today is a
+ * current supporter, not a previous one.
+ */
 async function computeAudience(input: {
     businessId: string; organizationCustomerId: string; campaignId: string;
 }) {
-    const { businessId, organizationCustomerId, campaignId } = input;
-
-    // ── PRIOR campaigns of THIS organization only ───────────────────────
-    // The current campaign is excluded by id: someone who ordered today is a
-    // current supporter, not a previous one.
-    const priorCampaigns = await prisma.fundraiserCampaign.findMany({
-        where: { customer_id: organizationCustomerId, id: { not: campaignId } },
-        select: { id: true },
-    });
-    const priorCampaignIds = priorCampaigns.map((c) => c.id);
-
-    // Every organization in this tenant. An organization is never a supporter.
-    const organizationRows = await prisma.fundraiserCampaign.findMany({
-        where: { customer: { business_id: businessId } },
-        select: { customer_id: true },
-        distinct: ['customer_id'],
-    });
-    const organizationCustomerIds = new Set(organizationRows.map((r) => r.customer_id));
-
-    const orders = priorCampaignIds.length
-        ? await prisma.order.findMany({
-            where: { campaign_id: { in: priorCampaignIds }, canceled_at: null },
-            select: {
-                id: true, campaign_id: true, canceled_at: true, customer_id: true,
-                customer_name: true, phone: true, email: true,
-                customer: {
-                    select: {
-                        id: true, business_id: true, contact_email: true,
-                        contact_phone: true, name: true,
-                    },
-                },
-            },
-        })
-        : [];
-
-    // ── Durable opt-out truth, re-read every time ───────────────────────
-    // Decided by evaluateSuppression — the SAME rule checkSuppressionAtSend
-    // applies — rather than by this route's own guess.
-    const now = new Date();
-    const prefs = await prisma.marketingPreference.findMany({
-        where: { business_id: businessId, scope: 'email_address', normalized_email: { not: null } },
-        select: { scope: true, status: true, effective_until: true, normalized_email: true },
-    });
-    const byEmail = new Map<string, typeof prefs>();
-    for (const pr of prefs) {
-        const key = normalizeSupporterEmail(pr.normalized_email);
-        if (!key) continue;
-        if (!byEmail.has(key)) byEmail.set(key, []);
-        byEmail.get(key)!.push(pr);
-    }
-    const suppressedEmails = new Set(
-        [...byEmail.entries()]
-            .filter(([, rows]) => evaluateSuppression(rows, now).suppressed)
-            .map(([email]) => email),
-    );
-
-    return derivePreviousSupporters({
-        businessId,
-        organizationCustomerId,
-        priorCampaignIds,
-        organizationCustomerIds,
-        orders,
-        suppressedEmails,
+    return loadPreviousSupporterAudience(prisma, {
+        businessId: input.businessId,
+        organizationCustomerId: input.organizationCustomerId,
+        excludeCampaignId: input.campaignId,
+        now: new Date(),
     });
 }
 

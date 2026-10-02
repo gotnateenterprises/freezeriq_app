@@ -471,14 +471,24 @@ describe('FR-REBOOK-2 · coordinator authority (shipped source)', () => {
         expect((post.match(/body\?\./g) ?? [])).toHaveLength(2);
     });
 
+    // FR-ORG-DASHBOARD-1A moved the audience assembly, unchanged, into
+    // lib/previousSupporterAudience.ts so the organization dashboard counts
+    // through the SAME path. These contracts now follow it there, and also pin
+    // that the route hands it the coordinator's own scope.
+    const audience = strip(R('lib/previousSupporterAudience.ts'));
+
     it('scopes prior campaigns to the coordinator\'s own organization', () => {
-        expect(route).toContain('customer_id: organizationCustomerId');
-        expect(route).toContain('id: { not: campaignId }');
+        expect(audience).toContain('customer_id: organizationCustomerId,');
+        expect(audience).toContain('...(excludeCampaignId ? { id: { not: excludeCampaignId } } : {})');
+        expect(route).toContain('organizationCustomerId: input.organizationCustomerId,');
+        expect(route).toContain('excludeCampaignId: input.campaignId,');
     });
 
     it('passes the tenant id through to the derivation', () => {
-        expect(route).toContain('businessId,');
-        expect(route).toContain('derivePreviousSupporters({');
+        expect(route).toContain('businessId: input.businessId,');
+        expect(audience).toContain('return derivePreviousSupporters(await loadPreviousSupporterAudienceInputs(db, args));');
+        const returned = audience.slice(audience.indexOf('return {', audience.indexOf('const suppressedEmails')));
+        expect(returned.slice(0, returned.indexOf('};'))).toContain('businessId,');
     });
 
     it('exposes GET and the armed send POST, with no direct provider call', () => {
@@ -520,16 +530,20 @@ describe('FR-REBOOK-2 · coordinator authority (shipped source)', () => {
     });
 
     it('re-reads durable opt-out truth at view time, through the SEND rule', () => {
-        expect(route).toContain('marketingPreference.findMany');
-        expect(route).toContain('suppressedEmails');
+        expect(audience).toContain('marketingPreference.findMany');
+        expect(audience).toContain('suppressedEmails');
         // OUTREACH-PREFERENCE-DISPLAY-1: this route used to decide suppression
         // itself with `status: { not: 'subscribed' }`, which ignored
         // effective_until and so let an ELAPSED pause exclude a supporter the
         // send path considered perfectly reachable. It now consumes
         // evaluateSuppression — the same function checkSuppressionAtSend uses.
-        expect(route).toContain('evaluateSuppression(rows, now)');
-        expect(route).toContain('effective_until: true');
-        expect(route).not.toContain("status: { not: 'subscribed' }");
+        expect(audience).toContain('evaluateSuppression(rows, now)');
+        expect(audience).toContain('effective_until: true');
+        expect(audience).not.toContain("status: { not: 'subscribed' }");
+        // Re-read on every request with its own clock, never cached.
+        expect(route).toContain('now: new Date(),');
+        // And the route keeps no second copy of the assembly.
+        expect(route).not.toContain('marketingPreference.findMany');
     });
 
     it('states the send capability with a machine code, derived per request', () => {

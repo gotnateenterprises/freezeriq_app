@@ -502,6 +502,28 @@ describe('15-18. scope stayed presentation-only', () => {
         'docs/ai/FUNDRAISER_FULFILLMENT_CONTRACT.md',
     ];
     const inCoordCloseoutPickup1 = (f: string) => COORD_CLOSEOUT_PICKUP_1.includes(f);
+    // FR-ORG-DASHBOARD-1A — a later, separately-authorized phase: the fundraiser organization
+    // page becomes a read-only mini-dashboard (one new read route), plus a purpose-built
+    // Discard Draft route for an EMPTY tenant-created opportunity. The Previous Supporters
+    // audience assembly moved, unchanged, into a shared loader both surfaces call. No schema,
+    // no migration, no closeout/invoice/tax/settlement/QuickBooks/payment change. Entries
+    // ending in '/' are whole new directories (git status lists them that way).
+    const FR_ORG_DASHBOARD_1A = [
+        'app/fundraisers/[id]/page.tsx',
+        'app/fundraisers/page.tsx',
+        'app/api/coordinator/previous-supporters/route.ts',
+        'app/api/customers/[id]/fundraiser-dashboard/',
+        'app/api/opportunities/[id]/discard-draft/',
+        'components/crm2/orgDashboard/',
+        'lib/organizationDashboard.ts',
+        'lib/organizationDashboardData.ts',
+        'lib/opportunityDraftDiscard.ts',
+        'lib/previousSupporterAudience.ts',
+        'docs/ai/QUICKBOOKS_INTEGRATION.md',
+        'docs/ai/CRM_REDESIGN_HANDOFF.md',
+        'docs/ai/ORGANIZATION_DASHBOARD.md',
+    ];
+    const inFrOrgDashboard1a = (f: string) => FR_ORG_DASHBOARD_1A.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
 
     const ALLOWED = new Set([
         'components/coordinator/ShareCenter.tsx',
@@ -578,7 +600,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // The real protection is the forbidden-path regex below, which is
             // unchanged — this only stops the check from going stale on every
             // subsequent phase that touches a regression suite.
-            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f) || inCoordClosedPortal1(f) || inCloseoutBundleSummary1(f) || inCoordCloseoutPickup1(f)).toBe(true);
+            expect(ALLOWED.has(f) || f.startsWith('tests/') || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f) || inCoordClosedPortal1(f) || inCloseoutBundleSummary1(f) || inCoordCloseoutPickup1(f) || inFrOrgDashboard1a(f)).toBe(true);
         }
         // And explicitly: no path under these directories appears at all.
         const forbidden = /^(prisma\/migrations|app\/api\/|lib\/kitchen_engine|lib\/cost_engine|lib\/deliveryPackaging|lib\/physicalBoxPacking|app\/delivery|app\/production|app\/api\/checkout|app\/api\/webhooks|app\/api\/invoices|lib\/pricing)/;
@@ -586,7 +608,7 @@ describe('15-18. scope stayed presentation-only', () => {
             // FR-TAX-CORRECTNESS-1 is separately authorized to edit the
             // fundraiser money path — exempt from THIS phase's
             // "presentation only" assertion; everything else still held to it.
-            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f) || inCoordClosedPortal1(f) || inCloseoutBundleSummary1(f) || inCoordCloseoutPickup1(f)) continue;
+            if (ALLOWED.has(f) || inQbInvoice1a(f) || inQbInvoice1b(f) || inQbInvoice1c(f) || inQbInvoice1d(f) || inQbOrgLink1(f) || inQbInvoiceCancel1(f) || inSecIntuitAttest1(f) || inFrSupporterLead1(f) || inCrmLeadD1(f) || inCrmCampaignDetails1(f) || inBoxLabelOrg1(f) || inPreviewDbIsolation1(f) || inPreviewMetadataIsolation1(f) || inCrmDeadlineTimezone1(f) || inRaiseFundsMarketing1(f) || inCoordinatorSupporterPolish1(f) || inFundraiserInquiryAutoresponseCopy1(f) || inCoordClosedPortal1(f) || inCloseoutBundleSummary1(f) || inCoordCloseoutPickup1(f) || inFrOrgDashboard1a(f)) continue;
             expect(f).not.toMatch(forbidden);
         }
     });

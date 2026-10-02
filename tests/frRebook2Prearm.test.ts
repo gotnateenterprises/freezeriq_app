@@ -381,8 +381,13 @@ describe('OUTREACH-PREFERENCE-DISPLAY-1 · display agrees with send', () => {
         const send = strip(R('lib/outreachSend.ts'));
         expect(send).toContain('export function evaluateSuppression(');
         expect(send).toContain('return evaluateSuppression(prefs, now);');
+        // FR-ORG-DASHBOARD-1A: the Previous Supporters audience is assembled in
+        // ONE shared loader (the coordinator route and the organization dashboard
+        // both call it), so the consumer of the send rule is that loader.
+        const audience = strip(R('lib/previousSupporterAudience.ts'));
+        expect(audience).toContain('evaluateSuppression(rows, now)');
         const route = strip(R('app/api/coordinator/previous-supporters/route.ts'));
-        expect(route).toContain('evaluateSuppression(rows, now)');
+        expect(route).toContain('return loadPreviousSupporterAudience(prisma, {');
     });
 });
 
@@ -412,12 +417,15 @@ describe('OUTREACH-PREFERENCE-DISPLAY-1 · Previous Supporters honours the same 
     it('the computed suppressed set is actually fed into the derivation', () => {
         // Computing it and then not passing it would leave every opted-out
         // supporter counted as reachable, with no test noticing.
-        const route = strip(R('app/api/coordinator/previous-supporters/route.ts'));
-        const call = route.slice(route.indexOf('derivePreviousSupporters({'));
-        const args = call.slice(0, call.indexOf('        });'));
+        // FR-ORG-DASHBOARD-1A: the derivation's inputs are now returned by the
+        // shared loader, and the derivation consumes exactly that object.
+        const audience = strip(R('lib/previousSupporterAudience.ts'));
+        const returned = audience.slice(audience.indexOf('return {', audience.indexOf('const suppressedEmails')));
+        const args = returned.slice(0, returned.indexOf('};'));
         expect(args).toContain('suppressedEmails,');
         expect(args).not.toContain('new Set<string>()');
         expect(args).not.toContain('suppressedEmails: new Set');
+        expect(audience).toContain('return derivePreviousSupporters(await loadPreviousSupporterAudienceInputs(db, args));');
     });
 
     it('an elapsed pause must NOT appear in the suppressed set', () => {
@@ -425,10 +433,13 @@ describe('OUTREACH-PREFERENCE-DISPLAY-1 · Previous Supporters honours the same 
         expect(evaluateSuppression(
             [{ scope: 'email_address', status: 'paused', effective_until: new Date('2026-02-01T00:00:00Z') }], NOW,
         ).suppressed).toBe(false);
+        // The old shape — every non-subscribed row suppresses — must be gone,
+        // from the route and from the shared loader it now delegates to.
         const route = strip(R('app/api/coordinator/previous-supporters/route.ts'));
-        // The old shape — every non-subscribed row suppresses — must be gone.
+        const audience = strip(R('lib/previousSupporterAudience.ts'));
         expect(route).not.toContain("status: { not: 'subscribed' }");
-        expect(route).toContain('effective_until: true');
+        expect(audience).not.toContain("status: { not: 'subscribed' }");
+        expect(audience).toContain('effective_until: true');
     });
 });
 

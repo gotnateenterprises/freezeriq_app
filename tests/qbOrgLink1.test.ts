@@ -93,14 +93,17 @@ afterAll(() => { (global as any).fetch = ORIGINAL_FETCH; process.env = ORIGINAL_
 describe('QB-ORG-LINK-1 · the organization profile renders the existing card (1, 4)', () => {
     const page = strip(R(ORG_PAGE));
 
-    it('1. imports the ONE existing component and renders it in the Overview tab with the organization’s own id', () => {
+    it('1. imports the ONE existing component and renders it once, in Organization Details, with the organization’s own id', () => {
         expect(R(ORG_PAGE)).toContain(CARD_IMPORT);
         expect(page.split(CARD_ELEMENT)).toHaveLength(2); // exactly once
-        const overview = page.slice(page.indexOf("activeTab === 'overview' && ("), page.indexOf("activeTab === 'campaigns' && ("));
-        expect(overview).toContain('<FundraiserOverview');
-        expect(overview).toContain(CARD_ELEMENT);
-        // The default tab is Overview, so the card is on screen when Customer CRM → Organizations opens the page.
-        expect(page).toMatch(/useState\(searchParams\.get\('tab'\) \|\| 'overview'\)/);
+        // FR-ORG-DASHBOARD-1A retired the page's tabs. The card is handed to the
+        // Organization Details section, which renders it unconditionally — so it is
+        // on screen whenever Customer CRM → Organizations opens the page, exactly as
+        // the old default Overview tab guaranteed.
+        expect(page).toMatch(/quickBooks=\{\s*<QuickBooksCustomerLinkCard customerId=\{customer\.id\} \/>\s*\}/);
+        expect(page).not.toContain('activeTab');
+        const details = strip(R('components/crm2/orgDashboard/OrganizationDetailsSection.tsx'));
+        expect(details).toMatch(/\n\s*\{quickBooks\}\n/);
     });
 
     it('4. the id it passes is the organization id that campaigns, their invoices and the link all carry', () => {
@@ -228,11 +231,20 @@ describe('QB-ORG-LINK-1 · one implementation, and the People page keeps its car
         expect(overview).toContain(CARD_ELEMENT);
     });
 
-    it('9. the organization page’s own tabs and header are unchanged', () => {
+    it('9. the organization page keeps its header and documents; its legacy tabs are retired (FR-ORG-DASHBOARD-1A)', () => {
         const page = strip(R(ORG_PAGE));
-        expect(page).toMatch(/activeTab === 'campaigns' && \(\s*<FundraisersTab\s+customerId=\{customer\.id\}/);
-        expect(page).toContain("{activeTab === 'documents' && <DocumentsTab customer={customer} />}");
-        expect(page).toContain('<CampaignCard');
-        expect(page).toContain("import { PipelineStepper } from '@/components/crm2/PipelineStepper';");
+        // The organization's identity header and its own profile read are unchanged.
+        expect(page).toContain('Fundraiser Organization');
+        expect(page).toContain('fetch(`/api/customers/${id}`, { cache: \'no-store\' })');
+        // Documents are still on the page, through the Organization Details section.
+        expect(page).toContain('<OrganizationDetailsSection');
+        expect(strip(R('components/crm2/orgDashboard/OrganizationDetailsSection.tsx'))).toContain('<DocumentsTab customer={customer} />');
+        // The per-campaign editor tab and the CustomerStatus stepper are no longer rendered here;
+        // campaign work opens the Campaign Context drawer instead.
+        expect(page).not.toContain('<FundraisersTab');
+        expect(page).not.toContain('PipelineStepper');
+        expect(page).toContain('<CampaignHistoryList');
+        // The People page keeps its own tabs, untouched.
+        expect(strip(R(PEOPLE_PAGE))).toMatch(/<FundraisersTab\b/);
     });
 });

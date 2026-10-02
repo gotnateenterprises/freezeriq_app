@@ -243,6 +243,10 @@ function CampaignProgress({ c }: { c: any }) {
 
 ## CRM-2 — Organization profile
 
+> **Superseded on the organization page by FR-ORG-DASHBOARD-1A** — see
+> `docs/ai/ORGANIZATION_DASHBOARD.md`. The page no longer renders `PipelineStepper` or
+> `CampaignCard`; both files remain in the repository. The CRM-2 notes below are kept as history.
+
 **Files:** `app/fundraisers/[id]/page.tsx` (render layer; keep `fetchCustomer`, save handlers, tabs data intact) + new `components/crm2/PipelineStepper.tsx`, `components/crm2/CampaignCard.tsx`.
 
 ### `components/crm2/PipelineStepper.tsx`

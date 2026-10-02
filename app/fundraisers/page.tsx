@@ -244,6 +244,22 @@ export default function FundraisersPage() {
 
     useEffect(() => { loadCampaigns(); }, [loadCampaigns]);
 
+    // FR-ORG-DASHBOARD-1A — `?campaign=<id>` opens that campaign's Context drawer.
+    // The organization page's "View campaign" and "Open fundraiser" land here, so
+    // deeper campaign work stays in the one drawer that already does it rather
+    // than being copied onto the organization page. Applied once, after the list
+    // loads; an id that is not in this tenant's list simply opens nothing.
+    const campaignParam = searchParams.get('campaign');
+    const [campaignDeepLinkHandled, setCampaignDeepLinkHandled] = useState(false);
+    useEffect(() => {
+        if (campaignDeepLinkHandled || !campaignParam || isLoading) return;
+        setCampaignDeepLinkHandled(true);
+        const target = fundraisers.find((f) => f.id === campaignParam && !f.is_placeholder);
+        if (!target) return;
+        setActiveTab('campaigns');
+        setDetailCampaign({ ...target, triage: triageCampaign(target, new Date()) });
+    }, [campaignParam, campaignDeepLinkHandled, fundraisers, isLoading]);
+
     /**
      * FR-ACCEPTANCE-2A.2 — the Leads badge, independent of which tab is open.
      *
