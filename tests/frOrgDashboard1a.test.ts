@@ -779,6 +779,28 @@ describe('MARKETING · recorded activity only', () => {
         const loader = code('lib/organizationDashboardData.ts');
         expect((loader.match(/is_test: false/g) ?? []).length).toBe(2);
     });
+
+    it('36b. an invitation is dated by when it was sent, not by when its row was claimed', async () => {
+        const { loadOrganizationDashboardInput } = await import('@/lib/organizationDashboardData');
+        const m = createPrismaMock({
+            results: {
+                'customer.findFirst': { id: ORG, name: 'Maple Grove Youth Group', archived: false },
+                'business.findUnique': { timezone: 'America/Chicago' },
+                'outreachBatch.findMany': [{ id: 'pb1', campaign_id: A, campaign: { name: 'Fall 2026 Fundraiser' } }],
+                'emailDeliveryAttempt.groupBy': [
+                    { outreach_batch_id: 'pb1', status: 'accepted', _count: { _all: 2 }, _max: { accepted_at: d('2026-09-18T16:30:00Z'), failed_at: null, skipped_at: null, created_at: d('2026-10-02T00:30:00Z') } },
+                    { outreach_batch_id: 'pb1', status: 'failed', _count: { _all: 1 }, _max: { accepted_at: null, failed_at: d('2026-09-18T16:31:00Z'), skipped_at: null, created_at: d('2026-10-02T00:30:00Z') } },
+                ],
+            },
+        });
+        const loaded = await loadOrganizationDashboardInput(m.client, { businessId: BIZ, organizationId: ORG, now: NOW });
+        expect(loaded.ok).toBe(true);
+        const p = (loaded as any).input.marketing.previousSupporters[0];
+        expect(p).toMatchObject({ accepted: 2, failed: 1, skipped: 0, queued: 0 });
+        expect(new Date(p.lastActivityAt).toISOString()).toBe('2026-09-18T16:31:00.000Z');
+        // The groupBy itself is tenant-scoped and excludes test sends.
+        expect(m.firstCall('emailDeliveryAttempt.groupBy')!.args.where).toEqual({ business_id: BIZ, outreach_batch_id: { in: ['pb1'] }, is_test: false });
+    });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

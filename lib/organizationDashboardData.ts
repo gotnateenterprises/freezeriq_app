@@ -307,12 +307,15 @@ async function loadMarketingActivity(
         const count = (status: string) => rows
             .filter((g) => String(g.status) === status)
             .reduce((sum, g) => sum + Number(g?._count?._all ?? 0), 0);
-        const lastActivity = rows
-            .flatMap((g) => [g?._max?.accepted_at, g?._max?.failed_at, g?._max?.skipped_at, g?._max?.created_at])
+        // When it was SENT (or failed, or was skipped) — the outcome timestamps. A row's
+        // created_at is only the claim, so it dates the entry only when no outcome exists.
+        const latestOf = (keys: string[]) => rows
+            .flatMap((g) => keys.map((k) => g?._max?.[k]))
             .filter(Boolean)
             .map((d: any) => new Date(d))
             .filter((d) => !Number.isNaN(d.getTime()))
             .sort((x, y) => y.getTime() - x.getTime())[0] ?? null;
+        const lastActivity = latestOf(['accepted_at', 'failed_at', 'skipped_at']) ?? latestOf(['created_at']);
         return {
             batchId: b.id,
             campaignName: b.campaign?.name ?? 'Fundraiser',
