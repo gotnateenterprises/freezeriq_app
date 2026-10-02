@@ -215,9 +215,20 @@ export async function POST(req: NextRequest) {
             });
             targetCustomerId = existingCustomer?.id;
         } else {
-            existingCustomer = await prisma.customer.findUnique({
-                where: { id: targetCustomerId }
+            // SEC-DATA-INTEGRITY-1: a customer_id from the request is only a
+            // claim. Unscoped, it linked this tenant's new order to ANY tenant's
+            // customer and copied that customer's delivery address into the order
+            // returned below. It must name a customer of this business — and be a
+            // plain id, since findFirst would also accept a filter object here.
+            if (typeof targetCustomerId !== 'string') {
+                return NextResponse.json({ error: 'Invalid customer' }, { status: 400 });
+            }
+            existingCustomer = await prisma.customer.findFirst({
+                where: { id: targetCustomerId, business_id: session.user.businessId }
             });
+            if (!existingCustomer) {
+                return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+            }
         }
 
         // Create Order

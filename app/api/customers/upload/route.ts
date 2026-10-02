@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
+import { presentIdentifier, resolveImportCustomerMatch } from '@/lib/importCustomerMatch';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,6 +45,7 @@ export async function POST(req: NextRequest) {
         const logs: string[] = [];
         let createdCount = 0;
         let updatedCount = 0;
+        let skippedCount = 0;
 
         // Map column indices
         const idx = {
@@ -83,19 +85,42 @@ export async function POST(req: NextRequest) {
             if (idx.zip !== -1 && cols[idx.zip]) addrParts.push(cols[idx.zip]);
             const address = addrParts.join(', ');
 
-            // Upsert Logic
-            // First check by external_id
-            let existing = null;
+            // Upsert Logic — SEC-DATA-INTEGRITY-1: match only on identifiers this
+            // row actually carries (lib/importCustomerMatch.ts).
+            //
+            // This used to be ONE findFirst over OR [external_id, contact_email]
+            // with the email branch written as `email ? email : undefined`. A row
+            // with a Square id but no email turned that branch into `{}`, the OR
+            // matched every customer in the tenant, and the update below then
+            // overwrote whichever one came back first — its name, contact details,
+            // address and external id.
+            //
+            // The external id stays the strong identity and is checked first (it is
+            // unique across the whole table). Email is the fallback, and only when it
+            // names exactly ONE customer here: two customers sharing an address give
+            // no basis for choosing which to overwrite, so that row is skipped and
+            // reported. A row with no identifier at all is still always new, exactly
+            // as before.
+            let existing: { id: string } | null = null;
             if (externalId) {
                 existing = await prisma.customer.findFirst({
-                    where: {
-                        business_id: businessId,
-                        OR: [
-                            { external_id: externalId },
-                            { contact_email: email && email.length > 0 ? email : undefined }
-                        ]
-                    }
+                    where: { business_id: businessId, external_id: externalId },
+                    select: { id: true },
                 });
+                const matchEmail = presentIdentifier(email);
+                if (!existing && matchEmail) {
+                    const byEmail = resolveImportCustomerMatch(await prisma.customer.findMany({
+                        where: { business_id: businessId, contact_email: matchEmail },
+                        select: { id: true },
+                        take: 2,
+                    }));
+                    if (byEmail.kind === 'ambiguous') {
+                        skippedCount++;
+                        logs.push(`Skipped "${fullName}": more than one existing customer has that email address, so none of them was updated.`);
+                        continue;
+                    }
+                    if (byEmail.kind === 'one') existing = byEmail.customer;
+                }
             }
 
             if (existing) {
@@ -132,8 +157,9 @@ export async function POST(req: NextRequest) {
 
         return NextResponse.json({
             success: true,
-            message: `Imported ${createdCount} new, Updated ${updatedCount} customers.`,
-            logs: [`Successfully processed ${dataLines.length} rows.`]
+            message: `Imported ${createdCount} new, Updated ${updatedCount} customers.`
+                + (skippedCount > 0 ? ` Skipped ${skippedCount} (see log).` : ''),
+            logs: [`Successfully processed ${dataLines.length} rows.`, ...logs]
         });
 
     } catch (e: any) {

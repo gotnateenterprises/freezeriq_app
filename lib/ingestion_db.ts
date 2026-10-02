@@ -1,6 +1,8 @@
 
+import { Prisma } from '@prisma/client';
 import { prisma } from './db';
 import { Uuid } from '../types';
+import { presentIdentifier } from './importCustomerMatch';
 
 export interface DB {
     findOrgByName(name: string): Promise<{ id: Uuid } | null>;
@@ -30,17 +32,28 @@ export class IngestionDBAdapter implements DB {
     }
 
     async createOrg(name: string, email?: string) {
-        // Check for existing customer by name/email/business
-        const existing = await prisma.customer.findFirst({
-            where: {
-                OR: [
-                    { name: { equals: name, mode: 'insensitive' } },
-                    email ? { contact_email: { equals: email, mode: 'insensitive' } } : {}
-                ],
-                business_id: this.businessId
-            },
-            select: { id: true }
-        });
+        // Check for existing customer by name/email/business.
+        //
+        // SEC-DATA-INTEGRITY-1: only identifiers this order actually carries
+        // (lib/importCustomerMatch.ts). The email branch used to be
+        // `email ? {…} : {}`, and `{}` matches every row — so a synced Square order
+        // with no email address (the caller passes '') was linked to whichever
+        // customer in the tenant the database returned first.
+        const matchers: Prisma.CustomerWhereInput[] = [];
+        const matchName = presentIdentifier(name);
+        if (matchName) matchers.push({ name: { equals: matchName, mode: 'insensitive' } });
+        const matchEmail = presentIdentifier(email);
+        if (matchEmail) matchers.push({ contact_email: { equals: matchEmail, mode: 'insensitive' } });
+
+        const existing = matchers.length > 0
+            ? await prisma.customer.findFirst({
+                where: {
+                    OR: matchers,
+                    business_id: this.businessId
+                },
+                select: { id: true }
+            })
+            : null;
 
         if (existing) return existing;
 
@@ -62,6 +75,15 @@ export class IngestionDBAdapter implements DB {
             where: { external_id: order.external_id }
         });
 
+        // SEC-DATA-INTEGRITY-1: external_id is unique across ALL tenants, so the
+        // row found above may belong to another business. The update below rewrites
+        // that order's customer link, status and total — it may only ever touch
+        // this business's own order. A foreign (or unowned) row is refused, never
+        // adopted; this sync stops with a clear error instead of rewriting it.
+        if (exists && exists.business_id !== this.businessId) {
+            throw new Error(`Order ${order.external_id} already exists outside this business, so it was not modified.`);
+        }
+
         if (exists) {
             // Delete existing line items to ensure fresh sync
             await prisma.orderItem.deleteMany({
@@ -69,7 +91,7 @@ export class IngestionDBAdapter implements DB {
             });
 
             const updated = await prisma.order.update({
-                where: { external_id: order.external_id },
+                where: { id: exists.id },
                 data: {
                     total_amount: order.total_amount || 0,
                     status: order.status,

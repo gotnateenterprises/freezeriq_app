@@ -259,7 +259,9 @@ describe('6. fundraiser CSV import — tenant isolation', () => {
         const { POST } = await import('@/app/api/fundraisers/upload/route');
         await POST(formRequest(csv) as any);
 
-        const call = mock.firstCall('customer.findFirst');
+        // SEC-DATA-INTEGRITY-1 made this lookup a findMany (it must tell "one
+        // match" from "more than one"); the tenant scope it carries is unchanged.
+        const call = mock.firstCall('customer.findMany');
         expect(call).toBeDefined();
         // The exact defect: `business_id` was commented out of this where.
         expect(call!.args.where.business_id).toBe(TENANT_A);
@@ -269,10 +271,10 @@ describe('6. fundraiser CSV import — tenant isolation', () => {
         // The double returns a foreign row ONLY if the query is unscoped.
         useMock(createPrismaMock({
             results: {
-                'customer.findFirst': (args: any) =>
+                'customer.findMany': (args: any) =>
                     args?.where?.business_id === TENANT_A
-                        ? null
-                        : { id: 'foreign-cust', business_id: TENANT_B, contact_email: null },
+                        ? []
+                        : [{ id: 'foreign-cust', business_id: TENANT_B, contact_email: null }],
             },
         }));
         useSession({ user: { email: 'a@a.com', businessId: TENANT_A } });

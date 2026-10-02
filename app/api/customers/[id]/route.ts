@@ -285,6 +285,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
         if (!session?.user?.businessId) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
+        const businessId = session.user.businessId;
 
         const { id } = await params;
         const body = await req.json();
@@ -381,9 +382,17 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
             orgId = org.id;
 
-            // 2. Link existing orders to this new Org
+            // 2. Link existing orders to this new Org.
+            //
+            // SEC-DATA-INTEGRITY-1: the ORDER mutation carries the tenant itself.
+            // The organization above was found or created inside this business, but
+            // that proves nothing about the orders: customer_name is free text, so
+            // without business_id here this claimed EVERY tenant's unlinked orders
+            // that happened to share the name. An order with no business_id belongs
+            // to no tenant provably, and is therefore never claimed either.
+            // (app/api/customers/[id]/status/route.ts already scoped its copy.)
             await prisma.order.updateMany({
-                where: { customer_name: name, customer_id: null },
+                where: { customer_name: name, customer_id: null, business_id: businessId },
                 data: { customer_id: org.id }
             });
 

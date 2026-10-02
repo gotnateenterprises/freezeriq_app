@@ -1,9 +1,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { mintCoordinatorPortalToken } from '@/lib/coordinatorPortalToken';
 import { resolveCampaignTaxSnapshot } from '@/lib/fundraiserTax';
+import { presentIdentifier, resolveImportCustomerMatch } from '@/lib/importCustomerMatch';
 
 export const dynamic = 'force-dynamic';
 
@@ -88,6 +90,7 @@ export async function POST(req: NextRequest) {
         let createdOrgs = 0;
         let createdCampaigns = 0;
         let updatedOrgs = 0;
+        let skippedRows = 0;
 
         // Map column indices - Flexible matching
         const findIdx = (keywords: string[]) => headers.findIndex(h => keywords.some(k => h.includes(k)));
@@ -144,15 +147,35 @@ export async function POST(req: NextRequest) {
             //
             // business_id is derived from the authenticated session above and is
             // never taken from the request.
-            let customer = await prisma.customer.findFirst({
+            //
+            // SEC-DATA-INTEGRITY-1: and only identifiers this row actually carries
+            // (lib/importCustomerMatch.ts). The email branch used to be
+            // `email ? {…} : undefined`; a row with no email turned it into `{}`,
+            // the OR matched every customer in the tenant, and the fundraiser below
+            // could be attached to an unrelated organization. The name is always
+            // present (a blank-named row was skipped above); the email joins only
+            // when there is one. More than one distinct match gives no basis for
+            // choosing, so that row is skipped and reported rather than guessed.
+            const orgMatchers: Prisma.CustomerWhereInput[] = [
+                { name: { equals: orgName, mode: 'insensitive' } },
+            ];
+            const matchEmail = presentIdentifier(email);
+            if (matchEmail) {
+                orgMatchers.push({ contact_email: { equals: matchEmail, mode: 'insensitive' } });
+            }
+            const orgMatch = resolveImportCustomerMatch(await prisma.customer.findMany({
                 where: {
                     business_id: businessId,
-                    OR: [
-                        { name: { equals: orgName, mode: 'insensitive' } },
-                        { contact_email: email && email.length > 0 ? { equals: email, mode: 'insensitive' } : undefined }
-                    ],
-                }
-            });
+                    OR: orgMatchers,
+                },
+                take: 2,
+            }));
+            if (orgMatch.kind === 'ambiguous') {
+                skippedRows++;
+                logs.push(`Skipped "${orgName}": more than one existing organization matches its name or email, so no fundraiser was attached.`);
+                continue;
+            }
+            let customer = orgMatch.kind === 'one' ? orgMatch.customer : null;
 
             if (customer) {
                 // Update basic info if missing
@@ -242,7 +265,8 @@ export async function POST(req: NextRequest) {
 
         return NextResponse.json({
             success: true,
-            message: `Import complete: ${createdOrgs} New Orgs, ${updatedOrgs} Updated Orgs, ${createdCampaigns} New Campaigns.`,
+            message: `Import complete: ${createdOrgs} New Orgs, ${updatedOrgs} Updated Orgs, ${createdCampaigns} New Campaigns.`
+                + (skippedRows > 0 ? ` Skipped ${skippedRows} (see log).` : ''),
             logs
         });
 
