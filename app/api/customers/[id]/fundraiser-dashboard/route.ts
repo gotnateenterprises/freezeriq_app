@@ -48,9 +48,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
             return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
         }
 
-        return NextResponse.json(buildOrganizationDashboard(loaded.input, now), {
-            headers: { 'Cache-Control': 'no-store' },
-        });
+        // No route-level Cache-Control: next.config.js pins one policy for every /api/*
+        // response, and tests/secIntuitAttest1 keeps route literals from drifting from it.
+        return NextResponse.json(buildOrganizationDashboard(loaded.input, now));
     } catch (e: unknown) {
         console.error('[FUNDRAISER_DASHBOARD_GET]', e);
         return NextResponse.json({ error: 'Failed to load the organization dashboard' }, { status: 500 });
