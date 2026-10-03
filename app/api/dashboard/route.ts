@@ -49,13 +49,14 @@ export async function GET() {
             select: { google_calendar_url: true }
         });
 
-        // 1. Metrics - Active Orders (Now Customers in Production)
-        const activeOrdersCount = await prisma.customer.count({
-            where: {
-                status: 'PRODUCTION',
-                business_id: businessId
-            }
-        });
+        // 1. Metrics - "Weekly In Progress" (metrics.activeOrders) counts ORDERS: the
+        //    in-progress, non-fundraiser orders created in the last 7 days, computed
+        //    below as inProgressThisWeek. It has never counted organizations.
+        //
+        //    DATA-CLEANUP-1B.2: a count of organizations at CRM stage PRODUCTION used
+        //    to be computed here and then discarded. It reached no tile, yet it counted
+        //    ARCHIVED organizations and read like the tile's source, so it is removed
+        //    rather than corrected — nothing on this dashboard needs organizations.
 
         // 2. Weekly Revenue (Chart Data) & Weekly In-Progress Orders
         const now = new Date();

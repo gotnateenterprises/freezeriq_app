@@ -275,11 +275,17 @@ export class PrismaAdapter implements DBAdapter {
                 //    and ordinary-customer behaviour that depends on it is
                 //    proven unchanged in tests/ops3ProductionIntakeHold.test.ts.
                 //    It is narrowed by ORDER state, not removed.
+                //
+                //    DATA-CLEANUP-1B.2: and by the organization's own state. An
+                //    ARCHIVED customer is not an active operational one, whatever
+                //    stage its record was parked at when it was archived, so the
+                //    stage alone no longer pulls its orders in. Its orders still
+                //    reach the kitchen through the status allowlist, like anyone's.
                 business_id: this.businessId,
                 canceled_at: null,
                 OR: [
                     { status: { in: [...PRODUCTION_INTAKE_STATUSES] as any } },
-                    { customer: { status: 'PRODUCTION' } }
+                    { customer: { status: 'PRODUCTION', archived: false } }
                 ],
                 AND: [...PRODUCTION_ORDER_EXCLUSIONS]
             },

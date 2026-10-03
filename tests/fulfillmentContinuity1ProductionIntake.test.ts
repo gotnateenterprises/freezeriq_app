@@ -135,7 +135,10 @@ describe('3. every production-intake query carries the rule', () => {
         // OPS-3 deliberately KEPT this branch. Removing it silently drops
         // ingredient demand for ordinary customers parked at that CRM stage,
         // and the only test that catches it is DB-gated.
-        expect(fn).toMatch(/customer:\s*\{\s*status:\s*'PRODUCTION'\s*\}/);
+        // DATA-CLEANUP-1B.2 narrowed it to customers that are NOT archived (an
+        // archived organization is not an active operational one); the branch
+        // itself must still be there for everyone else.
+        expect(fn).toMatch(/customer:\s*\{\s*status:\s*'PRODUCTION',\s*archived:\s*false\s*\}/);
     });
 
     it('getProductionOrders does NOT filter on fundraiser source', () => {
