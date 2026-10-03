@@ -58,7 +58,19 @@ export async function loadOrganizationDashboardInput(
     // ── 1. The organization, inside THIS tenant, or nothing at all ──────────
     const organization = await db.customer.findFirst({
         where: { id: organizationId, business_id: businessId },
-        select: { id: true, name: true, archived: true },
+        select: {
+            id: true,
+            name: true,
+            archived: true,
+            // DATA-CLEANUP-GUARDS-1A.1: PAID invoices with no campaign link — legacy
+            // fundraiser settlements recorded before (or outside) campaign tracking.
+            // Evidence that history exists, nothing more: never a campaign, a date
+            // or a sales figure (lib/organizationDashboard isLegacyPaidFundraiserInvoice).
+            invoices: {
+                where: { business_id: businessId, campaign_id: null, status: 'PAID' },
+                select: { id: true, status: true, campaign_id: true, fundraiser_profit_percent: true, fundraiser_profit_amount: true },
+            },
+        },
     });
     if (!organization) return { ok: false, reason: 'not_found' };
 
@@ -235,6 +247,13 @@ export async function loadOrganizationDashboardInput(
             audience,
             openOpportunity,
             marketing,
+            legacyInvoices: (Array.isArray((organization as any).invoices) ? (organization as any).invoices : []).map((i: any) => ({
+                id: i.id,
+                status: String(i.status),
+                campaign_id: i.campaign_id ?? null,
+                fundraiser_profit_percent: i.fundraiser_profit_percent === null || i.fundraiser_profit_percent === undefined ? null : String(i.fundraiser_profit_percent),
+                fundraiser_profit_amount: i.fundraiser_profit_amount === null || i.fundraiser_profit_amount === undefined ? null : String(i.fundraiser_profit_amount),
+            })),
         },
     };
 }

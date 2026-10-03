@@ -46,6 +46,19 @@ fundraiser count to recognize the false starts that already exist.
   evidence keeps a campaign counted. Setup attempts stay listed but are left out of
   Campaigns Run, Last Fundraiser, the month pattern and invoice follow-ups.
 
+## Legacy paid history (DATA-CLEANUP-GUARDS-1A.1)
+
+A PAID invoice with no campaign link and an organization share recorded
+(`isLegacyPaidFundraiserInvoice`) is proof a fundraiser happened. When an
+organization has no fundraiser by campaign rows but has such an invoice, the
+dashboard says "Legacy fundraiser history on file" / "Historical paid fundraiser
+activity is also on file." instead of "No fundraisers yet", and the empty Last
+Fundraiser row reads "Legacy record". The invoice changes words only: it is never a
+campaign, never counted in Campaigns Run, never dated into the month pattern, and
+never added to Lifetime Fundraiser Sales (which remain campaign sales — widening
+them is DATA-CLEANUP-1B legacy-history work). DRAFT, CANCELED, SENT, PENDING and
+OVERDUE invoices, and PAID ones with no share, are not this evidence.
+
 ## Known boundaries
 
 - A campaign archived without closeout (NULL settlement) is not provably a false

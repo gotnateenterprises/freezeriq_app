@@ -501,9 +501,15 @@ export default function FundraiserProfilePage({ params }: { params: Promise<{ id
                                 <CampaignHistoryList rows={dashboard.history} />
                             ) : (
                                 <div className="py-8 text-center">
-                                    <p className="text-sm font-bold text-slate-700 dark:text-slate-200">No fundraisers yet</p>
+                                    {/* DATA-CLEANUP-GUARDS-1A.1: legacy paid fundraiser history with no
+                                        campaign record is real history — never "No fundraisers yet". */}
+                                    <p className="text-sm font-bold text-slate-700 dark:text-slate-200">
+                                        {dashboard.legacyHistory ? 'No campaigns on record' : 'No fundraisers yet'}
+                                    </p>
                                     <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-                                        This organization’s campaigns will appear here once the first one is launched.
+                                        {dashboard.legacyHistory
+                                            ? `${dashboard.legacyHistory.note} It has no campaign record, so it is not listed here. New campaigns appear here once launched.`
+                                            : 'This organization’s campaigns will appear here once the first one is launched.'}
                                     </p>
                                     <div className="mt-4 flex justify-center">{startNextButton('inline-flex')}</div>
                                 </div>

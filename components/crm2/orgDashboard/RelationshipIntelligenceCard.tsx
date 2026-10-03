@@ -54,6 +54,10 @@ export function RelationshipIntelligenceCard({ intelligence }: { intelligence: D
                         />
                         <Row label="Last supporters" value={last.supporterCount.toLocaleString('en-US')} />
                     </>
+                ) : intelligence.legacyHistoryNote ? (
+                    // DATA-CLEANUP-GUARDS-1A.1: the last fundraiser exists only as a legacy
+                    // paid record with no campaign — not "None yet", and nothing invented.
+                    <Row label="Last fundraiser" value="Legacy record" muted sub={intelligence.legacyHistoryNote} />
                 ) : (
                     <Row label="Last fundraiser" value="None yet" muted />
                 )}
@@ -68,7 +72,9 @@ export function RelationshipIntelligenceCard({ intelligence }: { intelligence: D
             <p className="mt-3 text-[11px] font-medium leading-snug text-slate-500 dark:text-slate-400">
                 {last
                     ? 'The pattern is read from past fundraiser dates — it is not a preference the organization has stated. Supporters are matched by email or phone, never by name.'
-                    : 'Relationship intelligence fills in after the first fundraiser closes.'}
+                    : intelligence.legacyHistoryNote
+                        ? 'These rows fill in from campaign records. This organization’s earlier fundraiser history is on file without one.'
+                        : 'Relationship intelligence fills in after the first fundraiser closes.'}
             </p>
         </section>
     );

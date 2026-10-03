@@ -185,6 +185,18 @@ export interface DashboardMarketingInput {
     }[];
 }
 
+/**
+ * DATA-CLEANUP-GUARDS-1A.1 — an invoice of this organization with NO campaign link,
+ * as the loader read it (it reads only PAID ones; the rule below re-checks).
+ */
+export interface DashboardLegacyInvoiceInput {
+    id: string;
+    status: string;
+    campaign_id?: string | null;
+    fundraiser_profit_percent: NumberLike;
+    fundraiser_profit_amount: NumberLike;
+}
+
 export interface OrganizationDashboardInput {
     organization: { id: string; name: string; archived: boolean };
     /** The tenant's IANA timezone, for dating timestamps (not date-only columns). */
@@ -196,6 +208,11 @@ export interface OrganizationDashboardInput {
     audience: DerivePreviousSupportersInput;
     openOpportunity: DashboardOpportunityInput | null;
     marketing: DashboardMarketingInput;
+    /**
+     * DATA-CLEANUP-GUARDS-1A.1 — campaign-less invoices. Optional: absent means none
+     * were loaded, and then nothing below changes.
+     */
+    legacyInvoices?: DashboardLegacyInvoiceInput[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -294,6 +311,12 @@ export interface DashboardIntelligence {
     supportersOnFile: number;
     emailReady: number;
     emailReadyBreakdown: string | null;
+    /**
+     * DATA-CLEANUP-GUARDS-1A.1 — set only when no campaign has closed as a real
+     * fundraiser but legacy paid fundraiser history is on file, so the "Last
+     * fundraiser" row can say so instead of "None yet".
+     */
+    legacyHistoryNote: string | null;
 }
 
 export interface MarketingEntry {
@@ -330,6 +353,12 @@ export interface OrganizationDashboard {
     history: HistoryRow[];
     marketing: MarketingEntry[];
     rebooking: { archived: boolean; campaigns: RebookingCampaignSummary[] };
+    /**
+     * DATA-CLEANUP-GUARDS-1A.1 — legacy paid fundraiser invoices with no campaign
+     * record. A fact for the words only: they are never counted as campaigns, never
+     * dated into the month pattern and never added to lifetime sales.
+     */
+    legacyHistory: null | { paidFundraiserInvoices: number; note: string };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -620,12 +649,54 @@ function metricsLabelFor(f: CampaignFacts): string | null {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// LEGACY PAID HISTORY — evidence that a fundraiser happened, without a campaign
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * DATA-CLEANUP-GUARDS-1A.1 — is this campaign-less invoice proof of a fundraiser
+ * that really ran?
+ *
+ * Production's five legacy fundraiser settlements predate campaign tracking: they
+ * are PAID, carry no campaign link, and record the organization's share. All three
+ * are required:
+ *   - PAID only. DRAFT, CANCELED, PENDING and OVERDUE are not completed history,
+ *     and SENT means issued and awaiting payment — not done.
+ *   - No campaign link. A campaign-linked invoice is already that campaign's
+ *     history and is judged with it.
+ *   - An organization share recorded. That is what makes it a FUNDRAISER
+ *     settlement; a paid invoice for an organization's own meal order is not.
+ *
+ * It is evidence for the WORDS only. It is never turned into a campaign, a date,
+ * a bundle line or a sales figure.
+ */
+export function isLegacyPaidFundraiserInvoice(inv: DashboardLegacyInvoiceInput | null | undefined): boolean {
+    if (!inv || String(inv.status) !== 'PAID') return false;
+    if (inv.campaign_id) return false;
+    const pct = num(inv.fundraiser_profit_percent);
+    const amt = num(inv.fundraiser_profit_amount);
+    return (pct !== null && pct > 0) || (amt !== null && amt > 0);
+}
+
+/** The one sentence every surface uses when legacy paid history exists. */
+export const LEGACY_HISTORY_NOTE = 'Historical paid fundraiser activity is on file.';
+/** The timing row's value when that history is the only history there is. */
+export const LEGACY_HISTORY_TIMING_LABEL = 'Legacy fundraiser history on file';
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TIMING — inferred from history, never called a preference
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function describeTimingPattern(dates: readonly Date[], realCampaignCount: number): DashboardIntelligence['timing'] {
+export function describeTimingPattern(
+    dates: readonly Date[],
+    realCampaignCount: number,
+    /** DATA-CLEANUP-GUARDS-1A.1 — legacy paid fundraiser history exists. Never dated into the pattern. */
+    legacyHistoryOnFile = false,
+): DashboardIntelligence['timing'] {
     const n = dates.length;
     if (n === 0) {
+        if (realCampaignCount === 0 && legacyHistoryOnFile) {
+            return { label: LEGACY_HISTORY_TIMING_LABEL, muted: true, datedCount: 0 };
+        }
         return { label: realCampaignCount === 0 ? 'No fundraisers yet' : 'No fundraiser dates recorded', muted: true, datedCount: 0 };
     }
     if (n === 1) {
@@ -845,18 +916,26 @@ export function buildOrganizationDashboard(input: OrganizationDashboardInput, no
     // complete. A running fundraiser with no orders yet is not missing data.
     const missingHistory = facts.filter((f) => f.closed && !f.hasSalesData).length;
     const running = facts.filter((f) => f.lifecycle === 'open');
+    // DATA-CLEANUP-GUARDS-1A.1: legacy paid fundraiser invoices with no campaign.
+    // They change WORDING only, and only where the campaign rows alone would claim
+    // that no fundraiser ever happened. Every figure stays campaign-derived.
+    const legacyPaidInvoices = (input.legacyInvoices ?? []).filter(isLegacyPaidFundraiserInvoice).length;
+    const legacyOnly = impact.campaignCount === 0 && legacyPaidInvoices > 0;
     const kpis: DashboardKpis = {
         lifetimeSales: impact.lifetimeFundraiserSales,
         lifetimeSalesLabel: impact.campaignCount === 0 ? '—' : formatDollars(impact.lifetimeFundraiserSales),
         lifetimeSalesHelper: impact.campaignCount === 0
-            ? 'No fundraisers yet'
+            // Lifetime sales are campaign sales; legacy invoices are not in them.
+            ? (legacyOnly ? 'Legacy fundraiser history on file — not included in this total' : 'No fundraisers yet')
             : missingHistory > 0
                 ? `${missingHistory} past ${missingHistory === 1 ? 'campaign has' : 'campaigns have'} no sales data recorded`
                 : running.some((f) => f.grossSource === 'live_orders')
                     ? 'Includes sales from the fundraiser running now'
                     : null,
         campaignsRun: impact.campaignCount,
-        campaignsHelper: running.length > 0 ? `${running.length} running now` : null,
+        campaignsHelper: running.length > 0
+            ? `${running.length} running now`
+            : legacyOnly ? 'Historical paid fundraiser activity is also on file.' : null,
         supportersOnFile: audience.supporterCount,
         supportersHelper: audience.supporterCount === 0 ? 'Supporters are added as orders come in' : null,
         emailReady: audience.reachableCount,
@@ -948,6 +1027,7 @@ export function buildOrganizationDashboard(input: OrganizationDashboardInput, no
     const timing = describeTimingPattern(
         ranFacts.map((f) => credibleFundraiserDate(f.c)).filter((d): d is Date => !!d),
         ranFacts.length,
+        legacyPaidInvoices > 0,
     );
     const breakdown: string[] = [];
     if (audience.noEmailCount > 0) breakdown.push(`${audience.noEmailCount} without a usable email`);
@@ -973,6 +1053,8 @@ export function buildOrganizationDashboard(input: OrganizationDashboardInput, no
         supportersOnFile: audience.supporterCount,
         emailReady: audience.reachableCount,
         emailReadyBreakdown: breakdown.length ? breakdown.join(' · ') : null,
+        // DATA-CLEANUP-GUARDS-1A.1: no closed campaign to name, but a fundraiser did happen.
+        legacyHistoryNote: !lastClosed && legacyPaidInvoices > 0 ? LEGACY_HISTORY_NOTE : null,
     };
 
     return {
@@ -1000,5 +1082,6 @@ export function buildOrganizationDashboard(input: OrganizationDashboardInput, no
                 held_order_count: ordersOf(c.id).filter((o) => !toDate(o.canceled_at)).length,
             })),
         },
+        legacyHistory: legacyPaidInvoices > 0 ? { paidFundraiserInvoices: legacyPaidInvoices, note: LEGACY_HISTORY_NOTE } : null,
     };
 }
