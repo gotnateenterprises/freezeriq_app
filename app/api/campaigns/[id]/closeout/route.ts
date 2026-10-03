@@ -18,6 +18,11 @@
  * a check, or claim Square received anything. It creates a DRAFT invoice and
  * stops. Settlement is INV-D.
  *
+ * DATA-CLEANUP-GUARDS-1: a fundraiser that sold nothing is still closed — the
+ * claim and the $0.00 settlement are frozen exactly as before — but no invoice
+ * is written for it, and the response says `invoice_required: false`. See
+ * closeoutRequiresInvoice() for why an active order of any amount still gets one.
+ *
  * ── INV-A HARDENING ──────────────────────────────────────────────────────────
  * AUTHORIZATION: closeout freezes money, releases held orders, and records the
  * responsible actor — so it is ADMIN-or-super-admin, not merely
@@ -64,6 +69,7 @@ import { lockCampaignSelection } from '@/lib/campaignSelectionLock';
 import {
     aggregateBundleLines,
     assertLinesReconcile,
+    closeoutRequiresInvoice,
     computeCloseoutFinancials,
     CloseoutReconciliationError,
     FOOD_TAX_DEFAULT_APPLIED,
@@ -91,6 +97,23 @@ class CampaignAlreadyClosedError extends Error {
 
 /** Prisma's unique-violation code; here it can only be invoices_one_per_campaign. */
 const UNIQUE_VIOLATION = 'P2002';
+
+/**
+ * DATA-CLEANUP-GUARDS-1 — `invoice_required` for an answer about a campaign that
+ * was ALREADY closed (a retry, or the losing side of a race). An existing invoice
+ * means one was needed. Without one, the frozen settlement decides: money means
+ * an invoice is owed but missing; a frozen $0.00 means nothing was sold. A
+ * settlement nobody froze is not knowable from here, so it stays null.
+ */
+function invoiceRequiredForClosed(
+    existingInvoice: { id: string } | null,
+    settlementTotal: unknown,
+): boolean | null {
+    if (existingInvoice) return true;
+    if (settlementTotal === null || settlementTotal === undefined) return null;
+    const gross = Number(settlementTotal);
+    return Number.isFinite(gross) ? gross > 0 : null;
+}
 
 export async function POST(
     req: Request,
@@ -208,6 +231,7 @@ export async function POST(
                 promoted_order_count: 0,
                 invoice_id: existingInvoice?.id ?? null,
                 invoice_status: existingInvoice?.status ?? null,
+                invoice_required: invoiceRequiredForClosed(existingInvoice, campaign.settlement_total),
             });
         }
 
@@ -216,7 +240,10 @@ export async function POST(
             settlementTotal: number;
             closedAt: Date;
             promotedCount: number;
-            invoiceId: string;
+            /** Null only when nothing was sold, so no invoice was required. */
+            invoiceId: string | null;
+            invoiceStatus: string | null;
+            invoiceRequired: boolean;
             lines: AggregatedLine[];
             financials: ReturnType<typeof computeCloseoutFinancials>;
         };
@@ -342,6 +369,15 @@ export async function POST(
                     taxRatePercent: closeoutTaxRate,
                 });
 
+                // DATA-CLEANUP-GUARDS-1: decided from the same snapshot, inside the
+                // same lock, so it cannot disagree with the settlement just frozen.
+                const invoiceRequired = closeoutRequiresInvoice({
+                    activeOrderCount: activeOrders.length,
+                    grossSales: financials.grossSales,
+                    taxCollected,
+                    totalDue: financials.totalDue,
+                });
+
                 const closedAt = new Date();
 
                 // 2. CLAIM the campaign. The WHERE clause is the concurrency
@@ -405,6 +441,28 @@ export async function POST(
                 //    The 1% is carried in tax_amount, its own labelled column, so
                 //    the document can show it as its own line instead of hiding it
                 //    inside an unexplained 81%.
+                //
+                //    DATA-CLEANUP-GUARDS-1: only when something was sold. A
+                //    fundraiser with no active order is closed above all the same,
+                //    but a $0.00 draft is not written for it. Anything the campaign
+                //    somehow already holds is reported rather than ignored.
+                if (!invoiceRequired) {
+                    const existing = await tx.invoice.findFirst({
+                        where: { campaign_id: campaignId },
+                        select: { id: true, status: true },
+                    });
+                    return {
+                        settlementTotal,
+                        closedAt,
+                        promotedCount: 0,
+                        invoiceId: existing?.id ?? null,
+                        invoiceStatus: existing ? String(existing.status) : null,
+                        invoiceRequired: false,
+                        lines,
+                        financials,
+                    };
+                }
+
                 let invoiceId: string;
                 try {
                     const invoice = await tx.invoice.create({
@@ -465,6 +523,8 @@ export async function POST(
                     // missing field. See the note at step 3 above.
                     promotedCount: 0,
                     invoiceId,
+                    invoiceStatus: 'DRAFT',
+                    invoiceRequired: true,
                     lines,
                     financials,
                 };
@@ -493,6 +553,7 @@ export async function POST(
                         : null,
                     promoted_order_count: 0,
                     invoice_id: existingInvoice?.id ?? null,
+                    invoice_required: invoiceRequiredForClosed(existingInvoice, current?.settlement_total),
                 });
             }
             // INV-B: refuse rather than emit an invoice that contradicts itself.
@@ -519,7 +580,10 @@ export async function POST(
             settlement_total: result.settlementTotal,
             promoted_order_count: result.promotedCount,
             invoice_id: result.invoiceId,
-            invoice_status: 'DRAFT',
+            invoice_status: result.invoiceStatus,
+            // DATA-CLEANUP-GUARDS-1: false when nothing was sold, so no invoice
+            // was written and none is waiting for review.
+            invoice_required: result.invoiceRequired,
             financials: {
                 gross_sales: result.financials.grossSales,
                 org_share_percent: result.financials.orgSharePercent,

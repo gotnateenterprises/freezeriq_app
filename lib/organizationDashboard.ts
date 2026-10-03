@@ -40,6 +40,7 @@ import {
     campaignLifetimeContribution,
     computeCampaignGross,
     hasCountableValue,
+    isFundraiserSetupAttempt,
     isRealCampaign,
     type ImpactCampaignInput,
 } from '@/lib/growth/impact';
@@ -88,6 +89,13 @@ export interface DashboardInvoiceInput {
     id: string;
     status: string;
     fundraiser_profit_amount: NumberLike;
+    /**
+     * DATA-CLEANUP-GUARDS-1 — the amount and payment date, so a $0.00 draft can be
+     * told apart from real financial history. Optional: absent means "not loaded",
+     * which never makes a campaign a setup attempt.
+     */
+    total_amount?: NumberLike;
+    paid_at?: DateLike;
     items: DashboardInvoiceItemInput[];
 }
 
@@ -257,6 +265,12 @@ export interface HistoryRow {
     shareLabel: string | null;
     invoiceLabel: string | null;
     invoiceTone: Tone | null;
+    /**
+     * DATA-CLEANUP-GUARDS-1 — launched and closed before anything happened. Still
+     * listed, never counted as a fundraiser run (lib/growth/impact
+     * isFundraiserSetupAttempt).
+     */
+    isSetupAttempt: boolean;
     // Raw facts behind the words, for tests and future surfaces.
     supporterCount: number;
     orderCount: number;
@@ -442,6 +456,8 @@ interface CampaignFacts {
     organizationShare: number | null;
     invoice: CampaignInvoiceDisplay & { state: ReturnType<typeof resolveCampaignInvoiceState> };
     hasSalesData: boolean;
+    /** DATA-CLEANUP-GUARDS-1 — see HistoryRow.isSetupAttempt. */
+    setupAttempt: boolean;
 }
 
 function toImpactCampaign(c: DashboardCampaignInput, orders: readonly DashboardOrderInput[]): ImpactCampaignInput {
@@ -457,6 +473,15 @@ function toImpactCampaign(c: DashboardCampaignInput, orders: readonly DashboardO
         orders: orders.map((o) => ({
             total_amount: num(o.total_amount),
             canceled_at: toDate(o.canceled_at),
+        })),
+        // DATA-CLEANUP-GUARDS-1: the evidence isFundraiserSetupAttempt reads. An
+        // invoice whose amount was not loaded passes through as null and is then
+        // treated as real history, never as $0.00.
+        settled_externally: c.settled_externally,
+        invoices: c.invoices.map((i) => ({
+            status: String(i.status),
+            total_amount: i.total_amount === undefined ? null : num(i.total_amount),
+            paid_at: toDate(i.paid_at),
         })),
     };
 }
@@ -566,6 +591,9 @@ function campaignFacts(
         organizationShare,
         invoice,
         hasSalesData: grossSource !== 'none' || frozenItems.length > 0,
+        // DATA-CLEANUP-GUARDS-1: the one shared rule — the same call
+        // computeOrganizationImpact makes, so the history list and the KPI agree.
+        setupAttempt: isFundraiserSetupAttempt(impact),
     };
 }
 
@@ -580,6 +608,8 @@ function dateLabelFor(c: DashboardCampaignInput, closed: boolean, timeZone: stri
 }
 
 function metricsLabelFor(f: CampaignFacts): string | null {
+    // DATA-CLEANUP-GUARDS-1: listed so nothing disappears, but plainly not a run.
+    if (f.setupAttempt) return 'Never ran — closed before any orders · not counted as a fundraiser';
     // A running fundraiser with nothing sold yet has data — it is zero so far.
     // Only CLOSED history can be missing its record.
     if (!f.hasSalesData) return f.closed ? null : 'No orders yet';
@@ -860,6 +890,7 @@ export function buildOrganizationDashboard(input: OrganizationDashboardInput, no
             shareLabel: f.organizationShare !== null ? formatDollars(f.organizationShare) : null,
             invoiceLabel: f.closed ? f.invoice.label : null,
             invoiceTone: f.closed ? f.invoice.tone : null,
+            isSetupAttempt: f.setupAttempt,
             supporterCount: f.supporterCount,
             orderCount: f.orderCount,
             physicalBundles: f.physicalBundles,
@@ -900,15 +931,23 @@ export function buildOrganizationDashboard(input: OrganizationDashboardInput, no
             };
         });
 
+    // DATA-CLEANUP-GUARDS-1: only money actually outstanding asks for review. A
+    // setup attempt's $0.00 draft, or any $0.00 closeout draft nothing waits on,
+    // is classified 'completed' by the lifecycle and raises nothing here.
     const invoiceFollowUps: InvoiceFollowUp[] = facts
-        .filter((f) => f.closed && (f.invoice.state === 'draft' || f.invoice.state === 'sent' || f.invoice.state === 'overdue'))
+        .filter((f) => f.closed && !f.setupAttempt && f.lifecycle === 'closed_awaiting_payment'
+            && (f.invoice.state === 'draft' || f.invoice.state === 'sent' || f.invoice.state === 'overdue'))
         .map((f) => ({ campaignId: f.c.id, campaignName: f.c.name, label: f.invoice.label, tone: f.invoice.tone }));
 
     // ── Relationship intelligence ───────────────────────────────────────────
-    const lastClosed = facts.find((f) => f.closed) ?? null;
+    // DATA-CLEANUP-GUARDS-1: a setup attempt is never the last fundraiser and
+    // never a data point in the month pattern — the same campaigns the
+    // Campaigns Run figure (impact.campaignCount) leaves out.
+    const ranFacts = facts.filter((f) => !f.setupAttempt);
+    const lastClosed = ranFacts.find((f) => f.closed) ?? null;
     const timing = describeTimingPattern(
-        real.map(credibleFundraiserDate).filter((d): d is Date => !!d),
-        real.length,
+        ranFacts.map((f) => credibleFundraiserDate(f.c)).filter((d): d is Date => !!d),
+        ranFacts.length,
     );
     const breakdown: string[] = [];
     if (audience.noEmailCount > 0) breakdown.push(`${audience.noEmailCount} without a usable email`);

@@ -76,6 +76,13 @@ export async function GET(req: Request) {
                         orders: {
                             select: { total_amount: true, canceled_at: true },
                         },
+                        // DATA-CLEANUP-GUARDS-1: the evidence that tells a campaign
+                        // closed before any order (a setup attempt) from a fundraiser
+                        // that ran — the same rule the organization dashboard uses.
+                        settled_externally: true,
+                        invoices: {
+                            select: { status: true, total_amount: true, paid_at: true },
+                        },
                     },
                 },
             },
@@ -98,6 +105,12 @@ export async function GET(req: Request) {
                 orders: c.orders.map((ord) => ({
                     total_amount: ord.total_amount === null ? null : Number(ord.total_amount),
                     canceled_at: ord.canceled_at,
+                })),
+                settled_externally: c.settled_externally,
+                invoices: c.invoices.map((i) => ({
+                    status: String(i.status),
+                    total_amount: i.total_amount === null ? null : Number(i.total_amount),
+                    paid_at: i.paid_at,
                 })),
             })),
         }, now));

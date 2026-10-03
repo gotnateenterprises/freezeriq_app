@@ -22,6 +22,8 @@ jest.mock('@/lib/db', () => {
         invoiceItem: { deleteMany: async (args: any) => { calls.push({ op: 'invoiceItem.deleteMany', args }); return { count: 0 }; } },
         order: { update: async () => ({}), create: async () => ({}), delete: async () => ({}) },
         orderItem: { deleteMany: async () => ({ count: 0 }) },
+        // DATA-CLEANUP-GUARDS-1: DELETE row-locks the invoice before it re-reads and decides.
+        $queryRawUnsafe: async (sql: string) => { calls.push({ op: 'lock', args: { sql } }); return [{ id: 'inv-1' }]; },
     };
     return {
         prisma: {
@@ -68,15 +70,19 @@ describe('QB-INVOICE-1C · DELETE: an invoice QuickBooks holds cannot be deleted
         expect(calls.find((c) => c.op === 'tx.invoice.findUnique')!.args.include).toMatchObject({ quickbooks_invoice_links: { select: { id: true } } });
     });
 
+    // DATA-CLEANUP-GUARDS-1: only an ordinary invoice entered by mistake may be deleted at all now, so the
+    // invoice that reaches the delete below is exactly that — PENDING, not a fundraiser's, never paid.
+    const DELETABLE = { status: 'PENDING', campaign_id: null, paid_at: null, payment_reference: null };
+
     it('a link created in between is caught by the database (P2003 on a QuickBooks key) and answered 409, not 500', async () => {
-        row = { id: 'inv-1', order: null };
+        row = { id: 'inv-1', order: null, ...DELETABLE };
         deleteError = Object.assign(new Error('Foreign key constraint failed'), { code: 'P2003', meta: { field_name: 'quickbooks_invoice_links_business_id_invoice_id_fkey (index)' } });
         const { DELETE } = await import('@/app/api/tenant/invoices/route');
         expect((await DELETE(json('DELETE', { id: 'inv-1' }))).status).toBe(409);
     });
 
     it('an invoice without a QuickBooks invoice deletes exactly as before; an unrelated P2003 stays a 500', async () => {
-        row = { id: 'inv-1', order: null };
+        row = { id: 'inv-1', order: null, ...DELETABLE };
         const { DELETE } = await import('@/app/api/tenant/invoices/route');
         expect((await DELETE(json('DELETE', { id: 'inv-1' }))).status).toBe(200);
         deleteError = Object.assign(new Error('Foreign key constraint failed'), { code: 'P2003', meta: { field_name: 'some_other_fkey' } });

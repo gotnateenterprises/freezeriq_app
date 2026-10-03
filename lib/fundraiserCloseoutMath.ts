@@ -224,6 +224,38 @@ export function computeCloseoutFinancials(input: {
     };
 }
 
+/**
+ * DATA-CLEANUP-GUARDS-1 — does this closeout need an invoice at all?
+ *
+ * Closeout used to write a DRAFT invoice on every claim. For a fundraiser that
+ * sold nothing that produced a $0.00 draft nobody could act on, which then sat
+ * in every invoice list and dashboard asking to be reviewed and sent. Production
+ * holds five of them, each from a launch that was closed before anyone ordered.
+ *
+ * An invoice is required whenever ANYTHING was sold. The test is deliberately
+ * the order count first, not the money: an active order is the one thing that
+ * still needs this invoice, because a fundraiser's held orders are released to
+ * the kitchen only when its invoice is recorded as PAID (OPS-3). A campaign
+ * whose only orders total $0.00 — a comped order, say — still gets its draft,
+ * exactly as before, or those orders could never be released. The money checks
+ * beside it are defensive: with no active order every one of them is zero by
+ * construction, and any non-zero figure keeps the invoice.
+ *
+ * Closeout itself is never refused for this: the campaign is still claimed and
+ * its $0.00 settlement frozen. Only the empty document is no longer written.
+ */
+export function closeoutRequiresInvoice(input: {
+    /** Non-canceled orders on the campaign at the moment of closeout. */
+    activeOrderCount: number;
+    grossSales: number;
+    taxCollected: number;
+    totalDue: number;
+}): boolean {
+    if (input.activeOrderCount > 0) return true;
+    const cents = (v: number) => Math.round((Number(v) || 0) * 100);
+    return cents(input.grossSales) !== 0 || cents(input.taxCollected) !== 0 || cents(input.totalDue) !== 0;
+}
+
 export class CloseoutReconciliationError extends Error {
     readonly lineSum: number;
     readonly grossSales: number;

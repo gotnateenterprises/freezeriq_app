@@ -12,6 +12,17 @@ import {
     isGenericEditLockedStatus,
 } from '@/lib/invoiceFulfillment';
 import { hasQuickBooksInvoice, lockedFinancialEdit, QUICKBOOKS_INVOICE_LOCK_MESSAGES, QUICKBOOKS_LINK_SELECT } from '@/lib/quickbooks/invoiceLock';
+import { evaluateHardDelete, lockInvoiceForRemoval, mayRemoveInvoices, readHardDeleteFacts } from '@/lib/invoiceRemoval';
+
+/**
+ * DATA-CLEANUP-GUARDS-1 — a delete the history rules refuse. Identified by a marker,
+ * not `instanceof` (a downlevelled Error subclass loses its prototype — see the
+ * launch route's OpportunityClaimFailed), and carries the tenant-facing reason.
+ */
+class InvoiceDeleteRefusedError extends Error {
+    readonly isInvoiceDeleteRefused = true as const;
+    constructor(readonly code: string, message: string) { super(message); }
+}
 
 // ---------------------------------------------------------------------------
 // Local helper — round money to two decimal places consistently.
@@ -729,6 +740,15 @@ export async function DELETE(request: Request) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // DATA-CLEANUP-GUARDS-1: deleting an invoice removes financial history, so it is
+    // ADMIN or super-admin — the same authority as closeout and draft cancel.
+    if (!mayRemoveInvoices({
+        role: (session?.user as any)?.role,
+        isSuperAdmin: (session?.user as any)?.isSuperAdmin === true,
+    })) {
+        return NextResponse.json({ error: 'Only an administrator can delete an invoice.' }, { status: 403 });
+    }
+
     try {
         const { id } = await request.json();
         if (!id) {
@@ -752,6 +772,19 @@ export async function DELETE(request: Request) {
                 throw new Error('QuickBooks invoice exists');
             }
 
+            // DATA-CLEANUP-GUARDS-1: only an ordinary invoice entered by mistake, before
+            // anything happened to it — fundraiser, paid, sent and overdue invoices are
+            // history (lib/invoiceRemoval.ts). The invoice and its kitchen order are
+            // locked first and the facts re-read after, so a payment or a kitchen step
+            // that lands a moment earlier is seen, and one arriving now waits.
+            if (!await lockInvoiceForRemoval(tx, { invoiceId: id, businessId, orderId: (invoice as any).order?.id ?? null })) {
+                throw new Error('Invoice not found');
+            }
+            const decision = evaluateHardDelete(await readHardDeleteFacts(tx, { invoiceId: id, businessId }));
+            if (!decision.ok) {
+                throw new InvoiceDeleteRefusedError(decision.code, decision.error);
+            }
+
             // Delete linked order and its items if exists
             // @ts-ignore
             if (invoice.order) {
@@ -772,6 +805,9 @@ export async function DELETE(request: Request) {
 
         return NextResponse.json({ success: true });
     } catch (error: any) {
+        if (error?.isInvoiceDeleteRefused === true) {
+            return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
+        }
         // QB-INVOICE-1C: also P2003 — a QuickBooks link or send lifecycle created in between still references it.
         if (error?.message === 'QuickBooks invoice exists'
             || (error?.code === 'P2003' && String(error?.meta?.field_name ?? '').includes('quickbooks_'))) {

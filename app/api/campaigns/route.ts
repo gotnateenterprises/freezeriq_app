@@ -27,6 +27,8 @@ import {
 // reinvented so a direct creation can never require a weaker date contract
 // than a launched one.
 import { checkConfirmedDate, checkOrderDeadline } from '@/lib/fundraiserLaunch';
+// DATA-CLEANUP-GUARDS-1: the one definition of "open planning cycle".
+import { openOpportunityWhere } from '@/lib/fundraiserRebooking';
 
 
 // Helper to safely serialize BigInt
@@ -102,6 +104,10 @@ interface CreateCampaignBody {
   // every pre-FR-TAX-1 caller, which then gets the resolved default.
   taxStatus?: 'UNKNOWN' | 'TAXABLE' | 'TAX_EXEMPT' | null;
   taxRatePercent?: number | string | null;
+  // DATA-CLEANUP-GUARDS-1: the tenant's explicit answer to "this organization
+  // already has an open fundraiser plan" — the id of THAT open opportunity, sent
+  // only after they chose to create a separate fundraiser anyway.
+  separateFromOpportunityId?: string | null;
 }
 
 /**
@@ -140,6 +146,22 @@ class DuplicateCampaignSubmission extends Error {
 
 function isDuplicateCampaignSubmission(e: unknown): e is DuplicateCampaignSubmission {
     return typeof e === 'object' && e !== null && (e as any).isDuplicateCampaignSubmission === true;
+}
+
+/**
+ * DATA-CLEANUP-GUARDS-1 — thrown when the organization already has an OPEN
+ * FundraiserOpportunity (new / in_conversation / date_confirmed): a planning cycle
+ * the canonical launch (POST /api/opportunities/[id]/launch) will turn into a
+ * campaign. Creating one here as well is how an organization ended up with two
+ * fundraisers for one season. Marker property, not `instanceof` — see above.
+ */
+class OpenOpportunityConflict extends Error {
+    readonly isOpenOpportunityConflict = true as const;
+    constructor(readonly opportunity: { id: string; status: string }) { super('open_opportunity'); }
+}
+
+function isOpenOpportunityConflict(e: unknown): e is OpenOpportunityConflict {
+    return typeof e === 'object' && e !== null && (e as any).isOpenOpportunityConflict === true;
 }
 
 /**
@@ -191,6 +213,7 @@ export async function POST(req: Request) {
             bundleSelection,
             opportunityId,
             orgSharePercent,
+            separateFromOpportunityId,
         } = body;
 
         if (!customerId || !name) {
@@ -351,6 +374,30 @@ export async function POST(req: Request) {
          * or losing attempt cannot leave a stray campaign behind, and cannot
          * leave the opportunity stranded in `converted` either.
          */
+        /**
+         * DATA-CLEANUP-GUARDS-1 — never a silent second fundraiser beside an open
+         * planning cycle.
+         *
+         * An open FundraiserOpportunity is a durable row saying "this organization's
+         * next fundraiser is being planned, and the launch route will create it".
+         * The database allows one per organization (fundraiser_opportunities_one_open_per_org),
+         * so there is nothing to match — no names, no dates: if it exists, this
+         * request is refused unless the tenant explicitly said this is a different
+         * fundraiser by naming that very opportunity. Read inside the creation
+         * transaction, after its lock or claim. Planning while a campaign is RUNNING
+         * is not refused anywhere (lib/fundraiserRebooking.ts) and is not refused here.
+         */
+        const assertNoOpenPlanningCycle = async (tx: typeof prisma) => {
+            const open = await tx.fundraiserOpportunity.findFirst({
+                where: openOpportunityWhere(businessId, customerId) as any,
+                orderBy: { created_at: 'desc' },
+                select: { id: true, status: true },
+            });
+            if (open && open.id !== separateFromOpportunityId) {
+                throw new OpenOpportunityConflict({ id: open.id, status: String(open.status) });
+            }
+        };
+
         const runCreate = async <T>(create: (tx: typeof prisma) => Promise<T>): Promise<T> => {
             if (!opportunityId) {
                 // OPS-2 (gap 2) — CORRECTED: a direct create has no
@@ -391,6 +438,8 @@ export async function POST(req: Request) {
                     });
                     if (recentDuplicate) throw new DuplicateCampaignSubmission(recentDuplicate.id);
 
+                    await assertNoOpenPlanningCycle(tx as unknown as typeof prisma);
+
                     return create(tx as unknown as typeof prisma);
                 });
             }
@@ -406,6 +455,9 @@ export async function POST(req: Request) {
                     data: { status: 'converted' },
                 });
                 if (claimed.count !== 1) throw new OpportunityClaimFailed();
+
+                // Throwing here rolls the rebooking claim back with everything else.
+                await assertNoOpenPlanningCycle(tx as unknown as typeof prisma);
 
                 const created = await create(tx as unknown as typeof prisma);
 
@@ -682,6 +734,16 @@ export async function POST(req: Request) {
                 where: { id: e.existingCampaignId, customer: { business_id: attemptedBusinessId } },
             });
             if (already) return NextResponse.json({ ...already, alreadyConverted: true });
+        }
+        // DATA-CLEANUP-GUARDS-1: nothing was created. The caller is told which plan
+        // is open so it can launch from it — or explicitly create a separate one.
+        if (isOpenOpportunityConflict(e)) {
+            return NextResponse.json({
+                error: 'This organization already has an open fundraiser plan. Launch the fundraiser from that plan '
+                    + 'so it is not created twice — or, if this is a different fundraiser, confirm that and create it separately.',
+                refusal: 'open_opportunity',
+                openOpportunity: e.opportunity,
+            }, { status: 409 });
         }
         console.error("Failed to create campaign:", e);
         return NextResponse.json({ error: e.message || "Internal Server Error" }, { status: 500 });

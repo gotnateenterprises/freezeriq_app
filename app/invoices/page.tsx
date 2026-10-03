@@ -19,7 +19,8 @@ import {
     Info,
     RotateCcw,
     Link2,
-    Package
+    Package,
+    XCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Link from 'next/link';
@@ -44,6 +45,7 @@ import {
     utcNoonToCalendarDate,
     type SettlementPaymentMethod,
 } from '@/lib/invoiceSettlement';
+import { mayRemoveInvoices, offersDraftCancel, offersHardDelete } from '@/lib/invoiceRemoval';
 
 interface Invoice {
     id: string;
@@ -165,6 +167,12 @@ function InvoicesContent() {
     // ── CLOSEOUT-BUNDLE-SUMMARY-1: the read-only Bundle Summary of a fundraiser invoice.
     const [bundleSummaryInvoice, setBundleSummaryInvoice] = useState<Invoice | null>(null);
     const mayUseQuickBooks = session?.user?.role === 'ADMIN' && !(session?.user as any)?.isViewingAsTenant;
+    // DATA-CLEANUP-GUARDS-1: canceling a $0.00 draft or deleting a mistaken invoice
+    // is ADMIN or super-admin. Presentation only — both routes enforce it too.
+    const mayRemove = mayRemoveInvoices({
+        role: session?.user?.role,
+        isSuperAdmin: (session?.user as any)?.isSuperAdmin === true,
+    });
 
     const userPlan = (session?.user as any)?.plan;
     const isSuperAdmin = (session?.user as any)?.isSuperAdmin;
@@ -673,6 +681,29 @@ function InvoicesContent() {
             }
         } catch {
             toast.error('Failed to delete invoice');
+        }
+    };
+
+    // ── DATA-CLEANUP-GUARDS-1: withdraw a $0.00 draft. It stays on record as
+    //    Canceled; nothing is deleted, sent or charged. The server re-checks every rule.
+    const handleCancelDraft = async (invoice: Invoice) => {
+        if (!confirm(`Cancel this $0.00 draft invoice for ${invoice.customer.name}? `
+            + 'It stays on record as Canceled. Nothing is sent, charged or deleted.')) return;
+        try {
+            const res = await fetch(`/api/tenant/invoices/${invoice.id}/cancel-draft`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirm: true }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                toast.error(data?.error || 'Failed to cancel this draft');
+                return;
+            }
+            toast.success(data?.alreadyCanceled ? 'This draft was already canceled.' : 'Draft canceled');
+            fetchInvoices();
+        } catch {
+            toast.error('Failed to cancel this draft');
         }
     };
 
@@ -1213,8 +1244,20 @@ function InvoicesContent() {
                                             >
                                                 <Edit className="w-4 h-4" />
                                             </button>
-                                            {/* QB-INVOICE-1C: an invoice QuickBooks holds cannot be deleted (the route and database refuse too). */}
-                                            {!inv.quickbooks_invoice_send && (
+                                            {/* DATA-CLEANUP-GUARDS-1: a $0.00 draft is canceled, never deleted. */}
+                                            {mayRemove && offersDraftCancel(inv) && (
+                                            <button
+                                                onClick={() => handleCancelDraft(inv)}
+                                                className="p-2 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition-all shadow-sm"
+                                                title="Cancel $0 Draft"
+                                            >
+                                                <XCircle className="w-4 h-4" />
+                                            </button>
+                                            )}
+                                            {/* QB-INVOICE-1C: an invoice QuickBooks holds cannot be deleted (the route and database refuse too).
+                                                DATA-CLEANUP-GUARDS-1: nor can fundraiser, paid, sent or overdue
+                                                invoices — only an ordinary invoice entered by mistake. */}
+                                            {mayRemove && offersHardDelete(inv) && (
                                             <button
                                                 onClick={() => handleDeleteInvoice(inv)}
                                                 className="p-2 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition-all shadow-sm"

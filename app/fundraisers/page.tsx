@@ -27,7 +27,7 @@ import { EditCampaignDetailsModal } from '@/components/crm2/EditCampaignDetailsM
 import { useDialogFocus } from '@/components/crm2/useDialogFocus';
 import type { CampaignTriage } from '@/lib/growth/nextAction';
 import { triageCampaign } from '@/lib/growth/nextAction';
-import { classifyCampaignLifecycle, invoiceStatusesAfterCloseout, resolveCampaignInvoiceState } from '@/lib/growth/campaignLifecycle';
+import { assessObligation, classifyCampaignLifecycle, invoiceStatusesAfterCloseout, resolveCampaignInvoiceState } from '@/lib/growth/campaignLifecycle';
 import type { CampaignHealth, CampaignHealthReason } from '@/lib/growth/health';
 import { FOOD_TAX_DEFAULT_APPLIED, type AggregatedLine } from '@/lib/fundraiserCloseoutMath';
 import { resolveCloseoutTaxRate, formatTaxRate } from '@/lib/fundraiserTax';
@@ -178,6 +178,9 @@ export default function FundraisersPage() {
         // same draft invoice — the response's own `lines`, never a re-read of
         // the orders. Absent on an idempotent retry, which returns none.
         lines?: AggregatedLine[];
+        // DATA-CLEANUP-GUARDS-1: false when nothing was sold — the fundraiser
+        // closed, but no invoice was written and nothing is waiting for review.
+        invoice_required?: boolean | null;
     } | null>(null);
 
     /**
@@ -323,8 +326,11 @@ export default function FundraisersPage() {
                     message: 'Campaign closed successfully.',
                     settlement_total: data.settlement_total,
                     promoted_order_count: data.promoted_order_count,
-                    financials: data.financials,
+                    // DATA-CLEANUP-GUARDS-1: with no invoice written there is no draft
+                    // whose figures to show — only the frozen $0.00 settlement above.
+                    financials: data.invoice_required === false ? undefined : data.financials,
                     lines: Array.isArray(data.lines) ? data.lines : undefined,
+                    invoice_required: typeof data.invoice_required === 'boolean' ? data.invoice_required : null,
                 });
             }
         } catch (e: any) {
@@ -350,7 +356,10 @@ export default function FundraisersPage() {
     // about it.
     const handleArchiveCampaign = async (f: Fundraiser) => {
         const invoiceState = resolveCampaignInvoiceState(f);
-        const unresolved = invoiceState !== 'paid' && invoiceState !== 'settled_externally' && invoiceState !== 'canceled';
+        // DATA-CLEANUP-GUARDS-1: a fundraiser that sold nothing (no invoice, or only
+        // a $0.00 closeout draft) has no unfinished money to warn about.
+        const unresolved = invoiceState !== 'paid' && invoiceState !== 'settled_externally' && invoiceState !== 'canceled'
+            && assessObligation(f) !== 'none';
         const message = 'Archive this fundraiser? This removes it from your working Campaigns dashboard but '
             + 'keeps its campaign, orders, invoice, and history.'
             + (unresolved
@@ -391,9 +400,12 @@ export default function FundraisersPage() {
     const money = (v: number) =>
         Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+    // DATA-CLEANUP-GUARDS-1: closed with nothing sold — no invoice was written.
+    const closeoutWithoutInvoice = closeoutResult?.success === true && closeoutResult.invoice_required === false;
+
     // CLOSEOUT-BUNDLE-SUMMARY-1: what the frozen figures were made of, from the
     // closeout response's own lines. Null when the response carried no lines.
-    const closeoutBundleSummary = closeoutResult?.success
+    const closeoutBundleSummary = closeoutResult?.success && !closeoutWithoutInvoice
         ? bundleSummaryFromCloseoutLines(closeoutResult.lines)
         : null;
 
@@ -706,9 +718,17 @@ export default function FundraisersPage() {
                                 the real next step instead of a count that is always
                                 zero. promoted_order_count remains in the API shape
                                 and is deliberately not rendered. */}
-                            <p className="text-sm text-emerald-700 dark:text-emerald-400 font-bold">
-                                Orders stay held until this fundraiser&apos;s invoice is paid, then release to production.
-                            </p>
+                            {closeoutWithoutInvoice ? (
+                                // DATA-CLEANUP-GUARDS-1: nothing was sold, so there is
+                                // no invoice to review and no order waiting on one.
+                                <p className="text-sm text-emerald-700 dark:text-emerald-400 font-bold">
+                                    No sales were recorded, so no invoice was created. Nothing is owed and no orders are waiting.
+                                </p>
+                            ) : (
+                                <p className="text-sm text-emerald-700 dark:text-emerald-400 font-bold">
+                                    Orders stay held until this fundraiser&apos;s invoice is paid, then release to production.
+                                </p>
+                            )}
                             {closeoutResult.settlement_total !== undefined && closeoutResult.settlement_total !== null && (
                                 <p className="text-sm text-emerald-700 dark:text-emerald-400 font-bold font-mono">
                                     Settlement total: ${Number(closeoutResult.settlement_total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

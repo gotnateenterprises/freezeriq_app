@@ -103,6 +103,10 @@ const db: any = {
     // below so every other test's happy path is unaffected.
     fundraiserCampaign: { create: jest.fn(), findFirst: jest.fn() },
     campaignBundle: { createMany: jest.fn() },
+    // DATA-CLEANUP-GUARDS-1: the route now checks, inside the creation transaction,
+    // for an OPEN planning cycle (FundraiserOpportunity). None by default below, so
+    // every test here exercises exactly what it did before.
+    fundraiserOpportunity: { findFirst: jest.fn() },
     // OPS-2 (gap 2): the advisory-lock statement. A real no-op against this
     // mock -- what's under test is runCreate's LOGIC given the lock already
     // serialized the race, exactly how FR-LAUNCH-1E's own tests exercise the
@@ -120,6 +124,7 @@ beforeEach(() => {
     db.business.findUnique.mockResolvedValue({ default_food_tax_percent: 8 });
     db.fundraiserCampaign.create.mockImplementation(async (args: any) => ({ id: 'camp-1', ...args.data }));
     db.fundraiserCampaign.findFirst.mockResolvedValue(null);
+    db.fundraiserOpportunity.findFirst.mockResolvedValue(null);
     db.campaignBundle.createMany.mockResolvedValue({ count: 0 });
     db.$transaction.mockImplementation(async (fn: any) => fn(db));
     db.$executeRaw.mockResolvedValue(undefined);

@@ -600,6 +600,16 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
             }, { status: 400 });
         }
 
+        // DATA-CLEANUP-GUARDS-1: invoices CASCADE from their customer, so deleting a
+        // customer that has any would silently erase invoice history — paid legacy
+        // invoices included — through a door the invoice delete rules never see.
+        const invoiceCount = await prisma.invoice.count({ where: { customer_id: id } });
+        if (invoiceCount > 0) {
+            return NextResponse.json({
+                error: `This customer has ${invoiceCount} invoice${invoiceCount === 1 ? '' : 's'} and cannot be deleted. Archive it instead — archiving keeps its invoice history.`,
+            }, { status: 400 });
+        }
+
         await prisma.customer.delete({ where: { id } });
 
         return NextResponse.json({ success: true });

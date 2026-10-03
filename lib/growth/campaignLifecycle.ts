@@ -190,6 +190,50 @@ function knownGross(c: CampaignLifecycleInput): number | null {
 }
 
 /**
+ * DATA-CLEANUP-GUARDS-1 — closeout ran and froze a gross of exactly $0.00.
+ *
+ * Only a FROZEN zero counts. A settlement nobody froze (NULL) is unknown, not
+ * zero — legacy campaigns closed by status alone carry NULL and may well have
+ * sold through records FreezerIQ never held, so they are left exactly as they were.
+ */
+export function hasFrozenZeroSettlement(c: CampaignLifecycleInput): boolean {
+    if (!isCampaignClosedFamily(c)) return false;
+    const s = c?.settlement_total;
+    if (s === null || s === undefined || s === '') return false;
+    const n = Number(s);
+    return Number.isFinite(n) && Math.abs(n) < 0.005;
+}
+
+/**
+ * DATA-CLEANUP-GUARDS-1 — closed with a frozen $0.00 and no order still live:
+ * nothing was sold, so there is nothing to invoice. Used by every surface that
+ * would otherwise offer "Create invoice" after a zero-sale closeout.
+ */
+export function isNothingToInvoice(c: CampaignLifecycleInput): boolean {
+    if (!hasFrozenZeroSettlement(c)) return false;
+    return !(typeof c?.held_order_count === 'number' && c.held_order_count > 0);
+}
+
+/**
+ * DATA-CLEANUP-GUARDS-1 — the campaign's only invoice is a closeout draft for $0.00
+ * that nobody is waiting on.
+ *
+ * Derived, not guessed. DRAFT is written by exactly one thing — closeout (no
+ * client may set it; see CLIENT_SETTABLE_INVOICE_STATUSES) — and closeout's draft
+ * total is the remit on its frozen gross plus the tax supporters paid on that
+ * gross. A frozen gross of $0.00 therefore means a $0.00 draft. The live-order
+ * condition keeps the one case that still matters: $0.00 orders held for the
+ * kitchen are released only when that draft is PAID, so such a draft stays a task.
+ */
+export function isZeroDollarCloseoutDraft(c: CampaignLifecycleInput): boolean {
+    const statuses = readInvoiceStatuses(c);
+    if (!statuses || !statuses.includes('DRAFT')) return false;
+    if (!statuses.every((s) => s === 'DRAFT' || s === 'CANCELED')) return false;
+    if (!hasFrozenZeroSettlement(c)) return false;
+    return typeof c?.held_order_count === 'number' && c.held_order_count === 0;
+}
+
+/**
  * Is there money to collect on this campaign?
  *
  *   'owed'    — an unpaid invoice exists, or real sales exist with no invoice
@@ -215,6 +259,10 @@ export type ObligationVerdict = 'owed' | 'none' | 'unknown';
 
 export function assessObligation(c: CampaignLifecycleInput): ObligationVerdict {
     if (hasPaidCampaignInvoice(c)) return 'none';
+    // DATA-CLEANUP-GUARDS-1: a $0.00 closeout draft with no order waiting on it
+    // collects nothing. Positive proof, from the frozen gross and the live-order
+    // count — never from a missing field.
+    if (isZeroDollarCloseoutDraft(c)) return 'none';
     if (hasUnpaidCampaignInvoice(c)) return 'owed';
 
     const statuses = readInvoiceStatuses(c);
@@ -350,6 +398,11 @@ export function describeCampaignInvoice(c: CampaignLifecycleInput): CampaignInvo
         case 'sent':
             return { label: 'Invoice sent — awaiting payment', canCreateInvoice: false, tone: 'pending', known: true };
         case 'draft':
+            // DATA-CLEANUP-GUARDS-1: a $0.00 draft is not something to review and
+            // send. It can be canceled from the invoices page instead.
+            if (isZeroDollarCloseoutDraft(c)) {
+                return { label: 'Draft for $0 — nothing to collect', canCreateInvoice: false, tone: 'neutral', known: true };
+            }
             return { label: 'Draft invoice — review and send', canCreateInvoice: false, tone: 'pending', known: true };
         case 'canceled':
             return { label: 'Invoice canceled', canCreateInvoice: false, tone: 'neutral', known: true };
@@ -361,6 +414,13 @@ export function describeCampaignInvoice(c: CampaignLifecycleInput): CampaignInvo
             return { label: 'Settlement frozen at closeout', canCreateInvoice: false, tone: 'neutral', known: false };
         case 'none':
         default:
+            // DATA-CLEANUP-GUARDS-1: closeout froze $0.00 and wrote no invoice
+            // because nothing was sold — offering "Create invoice" there would
+            // claim one is needed. A $0.00 gross with orders still live keeps the
+            // old answer.
+            if (isNothingToInvoice(c)) {
+                return { label: 'No invoice needed — nothing was sold', canCreateInvoice: false, tone: 'neutral', known: true };
+            }
             return {
                 label: 'Not yet invoiced',
                 // Only offer creation once closeout has actually frozen a settlement.

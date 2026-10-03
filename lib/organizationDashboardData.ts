@@ -89,6 +89,10 @@ export async function loadOrganizationDashboardInput(
                     id: true,
                     status: true,
                     fundraiser_profit_amount: true,
+                    // DATA-CLEANUP-GUARDS-1: what tells a $0.00 draft from real
+                    // financial history (lib/growth/impact isFundraiserSetupAttempt).
+                    total_amount: true,
+                    paid_at: true,
                     items: {
                         select: { bundle_id: true, description: true, variant_size: true, quantity: true, total: true },
                     },
@@ -119,6 +123,8 @@ export async function loadOrganizationDashboardInput(
             status: String(i.status),
             fundraiser_profit_amount: i.fundraiser_profit_amount === null || i.fundraiser_profit_amount === undefined
                 ? null : String(i.fundraiser_profit_amount),
+            total_amount: i.total_amount === null || i.total_amount === undefined ? null : String(i.total_amount),
+            paid_at: i.paid_at ?? null,
             items: (i.items ?? []).map((it: any) => ({
                 bundle_id: it.bundle_id ?? null,
                 description: it.description ?? null,

@@ -386,12 +386,36 @@ describe('C. closeout modal wiring (app/fundraisers/page.tsx)', () => {
         expect((between.match(/<\/div>/g) || []).length).toBeGreaterThanOrEqual(2);
     });
 
+    /**
+     * DATA-CLEANUP-GUARDS-1 — a later, separately authorized phase changed exactly ONE element of this
+     * section: the "orders stay held until this fundraiser's invoice is paid" line is now chosen between
+     * itself and a no-invoice line for a closeout that sold nothing (no invoice is written then). That
+     * choice is put back into its released shape here, and named, so this assertion keeps saying what it
+     * was written to say: the financial figures and everything else in the section are unchanged.
+     */
+    const GUARDS_1_CHOICE = `{closeoutWithoutInvoice ? (
+                                // DATA-CLEANUP-GUARDS-1: nothing was sold, so there is
+                                // no invoice to review and no order waiting on one.
+                                <p className="text-sm text-emerald-700 dark:text-emerald-400 font-bold">
+                                    No sales were recorded, so no invoice was created. Nothing is owed and no orders are waiting.
+                                </p>
+                            ) : (
+                                <p className="text-sm text-emerald-700 dark:text-emerald-400 font-bold">
+                                    Orders stay held until this fundraiser&apos;s invoice is paid, then release to production.
+                                </p>
+                            )}`;
+    const GUARDS_1_RELEASED = `<p className="text-sm text-emerald-700 dark:text-emerald-400 font-bold">
+                                Orders stay held until this fundraiser&apos;s invoice is paid, then release to production.
+                            </p>`;
+
     it('the existing closeout financial section is byte-for-byte unchanged from the Production baseline', () => {
         const baseline = lf(execSync(`git show ${BASELINE}:${PAGE}`, { cwd: ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }));
         const now = lf(src);
+        expect(now).toContain(GUARDS_1_CHOICE);
         const start = '{/* Result state — success */}';
         const was = baseline.slice(baseline.indexOf(start), baseline.indexOf('{/* Result state — error */}')).trim();
-        const is = now.slice(now.indexOf(start), now.indexOf('{/* CLOSEOUT-BUNDLE-SUMMARY-1')).trim();
+        const is = now.slice(now.indexOf(start), now.indexOf('{/* CLOSEOUT-BUNDLE-SUMMARY-1')).trim()
+            .replace(GUARDS_1_CHOICE, GUARDS_1_RELEASED);
         expect(was.length).toBeGreaterThan(1000);
         expect(is).toBe(was);
     });

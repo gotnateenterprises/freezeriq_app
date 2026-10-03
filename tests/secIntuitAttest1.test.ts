@@ -304,9 +304,62 @@ describe('D. invoice behaviour is otherwise unchanged', () => {
                 },`;
     const CANCEL_1_RELEASED = '                quickbooks_invoice_send: { select: { status: true, qbo_doc_number: true, delivery_error_type: true } },';
 
+    /**
+     * DATA-CLEANUP-GUARDS-1 — a later, separately authorized phase restricted DELETE to an ordinary invoice
+     * entered by mistake (an ADMIN gate, a locked re-read and the history rule in lib/invoiceRemoval.ts). Its
+     * four blocks are purely ADDITIVE — no released line was edited — and are removed by name here, so this
+     * assertion keeps saying what it was written to say about the attestation patch.
+     */
+    const GUARDS_1_BLOCKS = [
+        `import { evaluateHardDelete, lockInvoiceForRemoval, mayRemoveInvoices, readHardDeleteFacts } from '@/lib/invoiceRemoval';
+
+/**
+ * DATA-CLEANUP-GUARDS-1 — a delete the history rules refuse. Identified by a marker,
+ * not \`instanceof\` (a downlevelled Error subclass loses its prototype — see the
+ * launch route's OpportunityClaimFailed), and carries the tenant-facing reason.
+ */
+class InvoiceDeleteRefusedError extends Error {
+    readonly isInvoiceDeleteRefused = true as const;
+    constructor(readonly code: string, message: string) { super(message); }
+}
+`,
+        `    // DATA-CLEANUP-GUARDS-1: deleting an invoice removes financial history, so it is
+    // ADMIN or super-admin — the same authority as closeout and draft cancel.
+    if (!mayRemoveInvoices({
+        role: (session?.user as any)?.role,
+        isSuperAdmin: (session?.user as any)?.isSuperAdmin === true,
+    })) {
+        return NextResponse.json({ error: 'Only an administrator can delete an invoice.' }, { status: 403 });
+    }
+
+`,
+        `            // DATA-CLEANUP-GUARDS-1: only an ordinary invoice entered by mistake, before
+            // anything happened to it — fundraiser, paid, sent and overdue invoices are
+            // history (lib/invoiceRemoval.ts). The invoice and its kitchen order are
+            // locked first and the facts re-read after, so a payment or a kitchen step
+            // that lands a moment earlier is seen, and one arriving now waits.
+            if (!await lockInvoiceForRemoval(tx, { invoiceId: id, businessId, orderId: (invoice as any).order?.id ?? null })) {
+                throw new Error('Invoice not found');
+            }
+            const decision = evaluateHardDelete(await readHardDeleteFacts(tx, { invoiceId: id, businessId }));
+            if (!decision.ok) {
+                throw new InvoiceDeleteRefusedError(decision.code, decision.error);
+            }
+
+`,
+        `        if (error?.isInvoiceDeleteRefused === true) {
+            return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
+        }
+`,
+    ];
+
     it('differs from the released baseline ONLY by the two removed body-log lines', () => {
-        const candidate = read(FILE).replace(/\r\n/g, '\n');
+        let candidate = read(FILE).replace(/\r\n/g, '\n');
         expect(candidate).toContain(CANCEL_1_BLOCK);
+        for (const block of GUARDS_1_BLOCKS) {
+            expect(candidate).toContain(block);
+            candidate = candidate.replace(block, '');
+        }
         const before = lines(baselineSource());
         const after = lines(candidate.replace(CANCEL_1_BLOCK, CANCEL_1_RELEASED));
 

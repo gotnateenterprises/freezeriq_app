@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { isPastCalendarDate } from '@/lib/rebookingConversion';
 import {
@@ -12,6 +12,7 @@ import {
 } from '@/lib/orgShareForm';
 import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
 import { DEFAULT_BUNDLE_GOAL } from '@/lib/fundraiserMetrics';
+import { createWizardSubmission, type WizardSubmission } from '@/lib/fundraiserWizardSubmit';
 
 type Prefill = { customerId?: string; orgName?: string; goal?: number };
 
@@ -205,6 +206,17 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
         () => new Set(rebooking?.candidateFamilyIds ?? []),
     );
     const [selectionLimit, setSelectionLimit] = useState(rebooking?.selectionLimit ?? 2); // default per spec §8 decision 2
+    // DATA-CLEANUP-GUARDS-1: one submission per wizard session. It remembers the
+    // organization it created, so a retry after a failed campaign create reuses it
+    // instead of creating a second one, and it never runs two submits at once.
+    const submissionRef = useRef<WizardSubmission | null>(null);
+    if (!submissionRef.current) submissionRef.current = createWizardSubmission((url, init) => fetch(url, init));
+    // Mirrors submission.createdOrganizationId for rendering: once set, the
+    // organization exists and the wizard no longer offers to pick another one.
+    const [createdOrgId, setCreatedOrgId] = useState<string | null>(null);
+    // DATA-CLEANUP-GUARDS-1: the campaign route found an open fundraiser plan for
+    // this organization and created nothing. The tenant decides what happens next.
+    const [openPlanConflict, setOpenPlanConflict] = useState<{ opportunity: { id: string; status: string }; message: string } | null>(null);
     // Step 3 state
     const [kit, setKit] = useState<any>(null);                  // { campaign, portalUrl, orderUrl, failures: string[] }
     // Branding — fetched same as FundraiserOverview (FIX-3 pattern)
@@ -301,7 +313,7 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
     // The campaign POST now handles family validation + candidate row creation internally.
     // The old PUT /api/campaigns/[id]/bundles call is NOT made here — that endpoint
     // creates active rows, which must NOT happen until the coordinator selects (CB-2).
-    const launch = async () => {
+    const launch = async (separateFromOpportunityId?: string) => {
         const candidateFamilyIds = [...pickedFamilyIds];
 
         try {
@@ -319,19 +331,8 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
             }
 
             setBusy(true);
+            setOpenPlanConflict(null);
             const failures: string[] = [];
-
-            let customerId = useExistingId;
-            if (!customerId) {
-                const res = await fetch('/api/customers', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ...org, type: 'Organization' }),
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Could not create organization');
-                customerId = data.id;
-            }
 
             const bundleSelectionPayload = {
                 mode: 'coordinator_selects' as const,
@@ -339,11 +340,14 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                 selectionLimit,
             };
 
-            const cRes = await fetch('/api/campaigns', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    customerId,
+            // DATA-CLEANUP-GUARDS-1: the organization (when new) and the campaign are
+            // created through the session's submission — see lib/fundraiserWizardSubmit.ts.
+            const submission = submissionRef.current!;
+            const result = await submission.submit({
+                existingCustomerId: useExistingId,
+                organization: org,
+                separateFromOpportunityId: separateFromOpportunityId ?? null,
+                campaign: {
                     name: camp.name,
                     // A manually-cleared field parses to the 0 sentinel (see the
                     // input's onChange below) — send it as omitted so the server
@@ -375,10 +379,16 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                     // from this id, and claims the opportunity in the same
                     // transaction that creates the campaign.
                     ...(rebooking ? { opportunityId: rebooking.opportunityId } : {}),
-                }),
+                },
             });
-            const campaign = await cRes.json();
-            if (!cRes.ok) throw new Error(campaign.error || 'Could not create campaign');
+            if (result.kind === 'open_opportunity') {
+                // Nothing was created. Show the choice instead of an error.
+                setOpenPlanConflict({ opportunity: result.opportunity, message: result.message });
+                return;
+            }
+            if (result.kind === 'error') throw new Error(result.message);
+            const campaign = result.campaign;
+            const customerId = result.customerId;
             // A repeated submit after a successful conversion resolves the
             // campaign that already exists instead of creating a second one.
             if (campaign.alreadyConverted) {
@@ -405,7 +415,11 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
             setStep(3);
         } catch (e: any) {
             alert(e.message);
-        } finally { setBusy(false); }
+        } finally {
+            // Whatever happened, the wizard now knows whether it created the organization.
+            setCreatedOrgId(submissionRef.current?.createdOrganizationId ?? null);
+            setBusy(false);
+        }
     };
 
     // Send info-packet — user-initiated only, NEVER auto-sent (handoff line 392)
@@ -504,7 +518,35 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                         <div className="rounded-xl bg-indigo-50 dark:bg-indigo-950 px-3 py-2 text-[13px] font-semibold text-indigo-700 dark:text-indigo-300">
                             🏫 {useExistingId ? useExistingName : org.name}
                             {useExistingId && <span className="ml-2 text-[11px] font-normal text-indigo-500">existing</span>}
+                            {/* DATA-CLEANUP-GUARDS-1: created by this wizard; every retry reuses it. */}
+                            {!useExistingId && createdOrgId && <span className="ml-2 text-[11px] font-normal text-indigo-500">created</span>}
                         </div>
+
+                        {/* DATA-CLEANUP-GUARDS-1: an open fundraiser plan exists, so nothing
+                            was created. Launching from the plan is the canonical path; a
+                            separate fundraiser only on the tenant's explicit say-so. */}
+                        {openPlanConflict && (
+                            <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950 px-3.5 py-3 space-y-2">
+                                <p className="text-[13px] font-bold text-amber-900 dark:text-amber-200">
+                                    This organization already has an open fundraiser plan, so nothing was created.
+                                </p>
+                                <p className="text-[12px] text-amber-800 dark:text-amber-300">
+                                    Launch the fundraiser from that plan so it isn&apos;t created twice. If this is a different
+                                    fundraiser, you can create it separately — the plan stays open.
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                    <a id="wiz-open-plan" href="/fundraisers?tab=leads"
+                                        className="rounded-lg bg-amber-600 px-3 py-1.5 text-[12px] font-bold text-white hover:bg-amber-700 transition-colors">
+                                        Go to the fundraiser plan
+                                    </a>
+                                    <button id="wiz-create-separate" type="button" disabled={busy}
+                                        onClick={() => launch(openPlanConflict.opportunity.id)}
+                                        className="rounded-lg border border-amber-300 px-3 py-1.5 text-[12px] font-bold text-amber-800 dark:border-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900 disabled:opacity-40 transition-colors">
+                                        Create a separate fundraiser anyway
+                                    </button>
+                                </div>
+                            </div>
+                        )}
 
                         {/* FR-RETENTION-5: what the organization actually asked for.
                             Read-only evidence. Every field below is a starting
@@ -780,7 +822,12 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
 
                         {/* Footer — ghost Back + primary Create */}
                         <div className="flex items-center justify-between pt-2">
-                            <button id="wiz-step2-back" onClick={() => { setUseExistingId(null); setUseExistingName(''); setStep(1); }} className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">← Back</button>
+                            {/* DATA-CLEANUP-GUARDS-1: once this wizard has created the
+                                organization, going back to pick or create another would
+                                strand it — so the wizard stays with it. */}
+                            {createdOrgId ? <span /> : (
+                                <button id="wiz-step2-back" onClick={() => { setUseExistingId(null); setUseExistingName(''); setStep(1); }} className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">← Back</button>
+                            )}
                             <button
                                 id="wiz-create-btn"
                                 disabled={
@@ -803,7 +850,7 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                                     selectionLimit < 1 ||
                                     selectionLimit > pickedFamilyIds.size
                                 }
-                                onClick={launch}
+                                onClick={() => launch()}
                                 className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-black text-white shadow hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                             >
                                 {busy ? <><span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />Creating…</> : 'Create & build launch kit →'}

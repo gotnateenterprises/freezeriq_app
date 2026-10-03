@@ -112,7 +112,17 @@ describe('4. completed / settled context is quiet', () => {
     });
 
     it('still offers the neutral invoice capability', () => {
-        expect(detailSections(settled, NOW).showInvoice).toBe(true);
+        // DATA-CLEANUP-GUARDS-1 moved this off the fixture above: a closeout that froze
+        // $0.00 with nothing live sold nothing, so it no longer offers to create an
+        // invoice (next test). A settled campaign that DID sell, with no invoice in
+        // FreezerIQ, still gets the neutral capability exactly as before.
+        const settledWithSales: CampaignForTriage = { ...settled, settled_externally: true, settlement_total: 500 };
+        expect(detailSections(settledWithSales, NOW).lifecycle).toBe('completed');
+        expect(detailSections(settledWithSales, NOW).showInvoice).toBe(true);
+    });
+
+    it('DATA-CLEANUP-GUARDS-1: a closeout that froze $0.00 with nothing live does not offer to create an invoice', () => {
+        expect(detailSections(settled, NOW).showInvoice).toBe(false);
     });
 });
 

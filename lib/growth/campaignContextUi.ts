@@ -19,6 +19,7 @@ import {
 import {
     describeCampaignInvoice,
     hasCampaignInvoice,
+    isNothingToInvoice,
     type CampaignInvoiceDisplay,
 } from './campaignLifecycle';
 import { hasCampaignEndedForTenant } from '@/lib/campaignBundleSelection';
@@ -103,7 +104,10 @@ export function detailSections(c: CampaignForTriage, now: Date): DetailSections 
         // A route that sends no invoice linkage yields `unknown`, and withdrawing
         // a working capability because a payload is silent would be a regression
         // dressed up as caution.
-        showInvoice: isReal && !hasCampaignInvoice(c),
+        // DATA-CLEANUP-GUARDS-1: nor after a closeout that froze $0.00 with nothing
+        // live — nothing was sold, so the drawer states that instead of offering
+        // to create an invoice for it.
+        showInvoice: isReal && !hasCampaignInvoice(c) && !isNothingToInvoice(c),
         // What the invoice actually IS, when one exists. Lets the drawer state the
         // truth instead of falling silent.
         invoiceState: describeCampaignInvoice(c),

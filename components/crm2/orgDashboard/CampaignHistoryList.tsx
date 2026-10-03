@@ -31,6 +31,12 @@ export function CampaignHistoryList({ rows }: { rows: HistoryRow[] }) {
                         <div className="flex flex-wrap items-center gap-2">
                             <h3 className="break-words text-[15px] font-black text-slate-900 dark:text-white">{r.name}</h3>
                             <StageChip status={r.status} bundleSelectionStatus={r.bundleSelectionStatus} closedAt={r.closedAt} />
+                            {/* DATA-CLEANUP-GUARDS-1: kept on the record, never counted as a run. */}
+                            {r.isSetupAttempt && (
+                                <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                                    Not run
+                                </span>
+                            )}
                         </div>
                         <p className="mt-0.5 text-[11px] font-medium text-slate-500 dark:text-slate-400">{r.dateLabel}</p>
 

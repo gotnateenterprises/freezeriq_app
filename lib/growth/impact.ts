@@ -66,6 +66,16 @@ export interface ImpactOrderInput {
 }
 
 /**
+ * DATA-CLEANUP-GUARDS-1 — one campaign-linked invoice, reduced to what decides
+ * whether it is real financial history.
+ */
+export interface ImpactInvoiceInput {
+    status: string;
+    total_amount: number | string | null;
+    paid_at?: Date | string | null;
+}
+
+/**
  * A campaign as GE-4 needs it. Deliberately narrow: whatever is not here cannot
  * accidentally influence a lifetime figure.
  */
@@ -84,6 +94,13 @@ export interface ImpactCampaignInput {
     name?: string | null;
     /** Eligible + ineligible orders on this campaign; GE-4 does the filtering. */
     orders?: ImpactOrderInput[];
+    /**
+     * DATA-CLEANUP-GUARDS-1 — evidence for isFundraiserSetupAttempt. Optional:
+     * a caller that does not load them gets the old answer (the campaign counts),
+     * because an absent fact is never proof that nothing happened.
+     */
+    settled_externally?: boolean | null;
+    invoices?: ImpactInvoiceInput[] | null;
 }
 
 export interface ImpactOrganizationInput {
@@ -149,6 +166,61 @@ export function isRealCampaign(c: Pick<ImpactCampaignInput, 'status'>): boolean 
 }
 
 /**
+ * DATA-CLEANUP-GUARDS-1 — was this a fundraiser that never ran?
+ *
+ * Production has a recurring shape: a campaign is launched, closed out before a
+ * single supporter orders (closeout froze $0.00 and wrote a $0.00 draft), archived,
+ * and launched again. Each attempt was counted as a fundraiser run, became the
+ * "last fundraiser", bent the month pattern, and raised a "review and send" for
+ * its empty draft. This is the ONE rule that says which campaigns those are, so
+ * every surface that counts fundraisers can leave them out together.
+ *
+ * Conservative by construction — a setup attempt needs POSITIVE evidence on
+ * every count, and anything unknown keeps the campaign counted:
+ *   - ordering is over (closed_at set, or a closed-family status) — a running
+ *     fundraiser with no orders YET is never one;
+ *   - closeout FROZE a gross of exactly $0.00 — a NULL settlement is unknown, and
+ *     legacy campaigns closed by status alone may have sold through records
+ *     FreezerIQ never held (their money sits on campaign-less legacy invoices);
+ *   - not marked settled outside FreezerIQ;
+ *   - the order list was supplied and is EMPTY — canceled orders included, because
+ *     a supporter who ordered and was refunded is still supporter activity;
+ *   - the invoice list was supplied and every invoice is a never-paid DRAFT or
+ *     CANCELED for $0.00 — any other invoice is financial history.
+ *
+ * The campaign row is not hidden or changed anywhere; callers decide only what
+ * it is not counted as.
+ */
+export function isFundraiserSetupAttempt(c: ImpactCampaignInput): boolean {
+    const closed = Boolean(c.closed_at) || (HISTORICAL_CAMPAIGN_STATUSES as readonly string[]).includes(c.status);
+    if (!closed) return false;
+    if (c.settlement_total === null || c.settlement_total === undefined) return false;
+    const settled = Number(c.settlement_total);
+    if (!Number.isFinite(settled) || Math.abs(settled) >= 0.005) return false;
+    if (c.settled_externally === true) return false;
+    if (!Array.isArray(c.orders) || c.orders.length > 0) return false;
+    if (!Array.isArray(c.invoices)) return false;
+    return c.invoices.every((i) => {
+        const status = String(i?.status ?? '');
+        // An amount that was not loaded is not $0.00 — it keeps the campaign counted.
+        const raw = i?.total_amount;
+        if (raw === null || raw === undefined || raw === '') return false;
+        const amount = Number(raw);
+        return (status === 'DRAFT' || status === 'CANCELED')
+            && Number.isFinite(amount) && Math.abs(amount) < 0.005
+            && !i?.paid_at;
+    });
+}
+
+/**
+ * The inclusion rule for "fundraisers run": a real campaign (not a Lead
+ * placeholder) that was not a setup attempt.
+ */
+export function countsAsFundraiserHistory(c: ImpactCampaignInput): boolean {
+    return isRealCampaign(c) && !isFundraiserSetupAttempt(c);
+}
+
+/**
  * Whether an order's money counts.
  *
  * Mirrors the closeout route exactly: not canceled, and a usable amount. There
@@ -208,7 +280,10 @@ const wholeDaysBetween = (from: Date, to: Date) => Math.floor((to.getTime() - fr
  * dependent on when the suite happens to run.
  */
 export function computeOrganizationImpact(org: ImpactOrganizationInput, now: Date): OrganizationImpact {
-    const real = (org.campaigns ?? []).filter(isRealCampaign);
+    // DATA-CLEANUP-GUARDS-1: a setup attempt is not a fundraiser run. It sold
+    // nothing, so leaving it out moves no money figure — only the counts, the
+    // averages' denominator and which campaign is the most recent.
+    const real = (org.campaigns ?? []).filter(countsAsFundraiserHistory);
     const settled = real.filter(hasCountableValue);
 
     // Per-campaign contributions, each counted exactly once: a settled campaign
