@@ -49,6 +49,19 @@ import { supporterAmountDue } from '@/lib/fundraiserTax';
 import { roundCents } from '@/lib/fundraiserCloseoutMath';
 import { PAYMENT_NOT_MARKED_LABEL, PAYMENT_PAID_LABEL, supporterPaymentState } from '@/lib/supporterPayment';
 
+/**
+ * PICKUP-TRACKER-XLSX-READABILITY-1 — presentation only, local to THIS sheet.
+ *
+ * A coordinator follows a supporter's row across the page, on screen and on paper,
+ * so every table cell (header, each order row, totals) carries a thin black border
+ * and every other order row is shaded slate-200. The stripe used to be slate-50
+ * (FFF8FAFC), which was close to invisible when printed. Colours are ARGB.
+ * Kept in this file on purpose: no other export shares these styles.
+ */
+const PICKUP_SHEET_STRIPE_ARGB = 'FFE2E8F0';
+const GRID_LINE = { style: 'thin', color: { argb: 'FF000000' } } as const;
+const GRID_BORDER = { top: GRID_LINE, left: GRID_LINE, bottom: GRID_LINE, right: GRID_LINE };
+
 export async function GET(req: Request) {
     try {
         // FR-COORD-SEC-1B: the coordinator credential used to arrive here as
@@ -221,9 +234,7 @@ export async function GET(req: Request) {
             cell.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
             cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-            cell.border = {
-                bottom: { style: 'thin', color: { argb: 'FF3730A3' } },
-            };
+            cell.border = GRID_BORDER;
             // Set column width
             worksheet.getColumn(idx + 1).width = col.width;
         });
@@ -274,11 +285,15 @@ export async function GET(req: Request) {
             rowValues.push(amountDue, paid ? PAYMENT_PAID_LABEL : PAYMENT_NOT_MARKED_LABEL);
 
             const dataRow = worksheet.addRow(rowValues);
-            // Alternate row shading for scannability
-            if (idx % 2 === 1) {
-                dataRow.eachCell((cell) => {
-                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
-                });
+            // Black grid on every column, and every-other-row shading for scannability.
+            // By column index, not eachCell(): eachCell skips cells holding no value
+            // (a blank bundle quantity), which would leave gaps in the grid and stripe.
+            for (let c = 1; c <= allColumns.length; c++) {
+                const cell = dataRow.getCell(c);
+                cell.border = GRID_BORDER;
+                if (idx % 2 === 1) {
+                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PICKUP_SHEET_STRIPE_ARGB } };
+                }
             }
             // Center-align quantity columns
             for (let c = 4; c <= 3 + bundles.length + 1; c++) {
@@ -301,7 +316,7 @@ export async function GET(req: Request) {
         totalsRow.font = { bold: true, size: 11 };
         totalsRow.eachCell((cell, colNumber) => {
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
-            cell.border = { top: { style: 'medium', color: { argb: 'FF4F46E5' } } };
+            cell.border = GRID_BORDER;
             if (colNumber >= 4) cell.alignment = { horizontal: 'center' };
         });
         totalsRow.getCell(amountDueColumn).numFmt = MONEY_FORMAT;
