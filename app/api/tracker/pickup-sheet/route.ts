@@ -238,7 +238,20 @@ export async function GET(req: Request) {
             // Set column width
             worksheet.getColumn(idx + 1).width = col.width;
         });
-        worksheet.getRow(HEADER_ROW).height = 36;
+        // No explicit height on the header row: its cells wrap (above), and a row without a stored
+        // height is sized by Excel to fit its tallest wrapped cell, so a long bundle name is shown
+        // whole. (A fixed height is not reliable: Excel here applied stored heights at two thirds.)
+
+        // PICKUP-TRACKER-XLSX-READABILITY-1A — print layout. Landscape, ONE page wide however many
+        // bundle columns there are, as many pages tall as needed, with the header row repeated on
+        // each. Before this the sheet printed two pages wide, so page 2 had quantities but no names.
+        worksheet.pageSetup = {
+            orientation: 'landscape',
+            fitToPage: true,
+            fitToWidth: 1,
+            fitToHeight: 0, // 0 = automatic: do NOT squeeze the sheet onto a single page tall
+            printTitlesRow: `${HEADER_ROW}:${HEADER_ROW}`,
+        };
 
         // Bundle total accumulators (unchanged math)
         const bundleTotals: Record<string, number> = {};
@@ -302,6 +315,9 @@ export async function GET(req: Request) {
             dataRow.getCell(amountDueColumn).numFmt = MONEY_FORMAT;
             dataRow.getCell(amountDueColumn).alignment = { horizontal: 'right' };
             dataRow.getCell(paymentColumn).alignment = { horizontal: 'left' };
+            // A long supporter name wraps onto a second line rather than being cut off by the
+            // Phone cell beside it. No row height is set, so Excel sizes the row to fit.
+            dataRow.getCell(2).alignment = { wrapText: true };
         });
 
         // Add totals row

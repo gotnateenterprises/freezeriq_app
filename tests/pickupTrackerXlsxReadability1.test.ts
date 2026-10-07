@@ -55,8 +55,9 @@ async function generate(orders: any[]) {
     expect(res.status).toBe(200);
     const ExcelJS = (await import('exceljs')).default;
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(Buffer.from(await res.arrayBuffer()) as any);
-    return { wb, ws: wb.worksheets[0] };
+    const buf = Buffer.from(await res.arrayBuffer());
+    await wb.xlsx.load(buf as any);
+    return { wb, ws: wb.worksheets[0], buf };
 }
 
 const sides = ['top', 'left', 'bottom', 'right'] as const;
@@ -124,16 +125,12 @@ describe('PICKUP-TRACKER-XLSX-READABILITY-1 — workbook structure and data are 
         expect(ws.getRow(t + 1).hasValues).toBe(false); // no extra row appeared
     });
 
-    it('column widths, alignment and the print setup are untouched', async () => {
+    it('column widths and the number/quantity/payment alignment are untouched', async () => {
         const { ws } = await generate(sheetOrders());
         expect(ws.columns.map((c) => c.width)).toEqual([6, 26, 16, 20, 20, 20, 12, 13, 20]);
         expect(ws.getCell(FIRST_DATA_ROW, 4).alignment).toEqual({ horizontal: 'center' });
         expect(ws.getCell(FIRST_DATA_ROW, 8).alignment).toEqual({ horizontal: 'right' });
         expect(ws.getCell(FIRST_DATA_ROW, 9).alignment).toEqual({ horizontal: 'left' });
-        // This phase changes colours and lines only: orientation, scale and page fit stay the defaults.
-        expect(ws.pageSetup.orientation).toBe('portrait');
-        expect(ws.pageSetup.fitToPage).toBe(false);
-        expect(ws.pageSetup.scale).toBe(100);
     });
 
     it('body text keeps its default (black) colour — no style on a body cell lightens it', async () => {
@@ -240,6 +237,83 @@ describe('PICKUP-TRACKER-XLSX-READABILITY-1 — the darker alternating shade', (
         for (let c = 1; c <= 6; c++) {
             expect(badSides(none.ws.getCell(HEADER_ROW, c))).toEqual([]);
             expect(badSides(none.ws.getCell(FIRST_DATA_ROW, c))).toEqual([]);
+        }
+    });
+});
+
+/** The raw XML of one part of the generated workbook, bypassing ExcelJS's read-back defaults. */
+async function rawPart(orders: any[], part: string): Promise<string> {
+    const { buf } = await generate(orders); // the bytes the route returned, not a re-serialised copy
+    const JSZip = require('jszip');
+    const zip = await JSZip.loadAsync(buf);
+    return zip.file(part).async('string');
+}
+
+describe('PICKUP-TRACKER-XLSX-READABILITY-1A — print layout', () => {
+    it('prints landscape, ONE page wide, as many pages tall as it needs', async () => {
+        const { ws } = await generate(sheetOrders());
+        expect(ws.pageSetup.orientation).toBe('landscape');
+        expect(ws.pageSetup.fitToPage).toBe(true);
+        expect(ws.pageSetup.fitToWidth).toBe(1);
+        // 0 = automatic. Anything else (the default 1) would squeeze a long sheet onto one page tall.
+        expect(ws.pageSetup.fitToHeight).toBe(0);
+    });
+
+    it('writes those settings into the file itself, not just the read-back model', async () => {
+        const sheet = await rawPart(sheetOrders(), 'xl/worksheets/sheet1.xml');
+        const setup = sheet.match(/<pageSetup[^>]*>/)![0];
+        expect(setup).toContain('orientation="landscape"');
+        expect(setup).toContain('fitToWidth="1"');
+        expect(setup).toContain('fitToHeight="0"');
+        expect(sheet).toMatch(/<pageSetUpPr fitToPage="1"\/>/);
+    });
+
+    it('repeats exactly the table header row (row 4) on every printed page — not the title rows', async () => {
+        const { ws } = await generate(sheetOrders());
+        expect(ws.pageSetup.printTitlesRow).toBe(`${HEADER_ROW}:${HEADER_ROW}`);
+        const book = await rawPart(sheetOrders(), 'xl/workbook.xml');
+        expect(book).toMatch(/<definedName name="_xlnm\.Print_Titles" localSheetId="0">&apos;Pickup Sheet&apos;!\$4:\$4<\/definedName>/);
+        // The header really is on row 4.
+        expect(ws.getCell(HEADER_ROW, 2).value).toBe('Customer');
+    });
+
+    it('wraps the Customer column so a long name is shown whole, on every order row', async () => {
+        const orders = sheetOrders();
+        const { ws } = await generate(orders);
+        for (let i = 0; i < orders.length; i++) {
+            expect({ row: FIRST_DATA_ROW + i, wrap: ws.getCell(FIRST_DATA_ROW + i, 2).alignment?.wrapText }).toEqual({ row: FIRST_DATA_ROW + i, wrap: true });
+        }
+        // The name itself is the full name — nothing was truncated to make it fit.
+        expect(orders.some((o) => o.customer_name.length > 50)).toBe(true);
+        orders.forEach((o, i) => expect(ws.getCell(FIRST_DATA_ROW + i, 2).value).toBe(o.customer_name));
+    });
+
+    it('wraps every header cell, including the bundle names, which keep their full text', async () => {
+        const { ws } = await generate(sheetOrders());
+        for (let c = 1; c <= COLUMNS; c++) expect({ c, wrap: ws.getCell(HEADER_ROW, c).alignment?.wrapText }).toEqual({ c, wrap: true });
+        expect(ws.getCell(HEADER_ROW, 6).value).toBe('Q3 - Keto Favorites With A Deliberately Long Bundle Name\n(Serves 2)');
+    });
+
+    it('leaves the header and order rows without a stored height, so Excel sizes them to the wrapped text', async () => {
+        const { ws } = await generate(sheetOrders());
+        for (let r = HEADER_ROW; r < FIRST_DATA_ROW + SHEET_SUPPORTER_COUNT; r++) {
+            expect({ r, height: ws.getRow(r).height }).toEqual({ r, height: undefined });
+        }
+        const sheet = await rawPart(sheetOrders(), 'xl/worksheets/sheet1.xml');
+        for (let r = HEADER_ROW; r < FIRST_DATA_ROW + SHEET_SUPPORTER_COUNT; r++) {
+            expect(sheet.match(new RegExp(`<row r="${r}"[^>]*>`))![0]).not.toMatch(/customHeight|ht=/);
+        }
+    });
+
+    it('does not touch the approved look: grid, stripe and totals fill are exactly as in 568366b', async () => {
+        const { ws } = await generate(sheetOrders());
+        const t = FIRST_DATA_ROW + SHEET_SUPPORTER_COUNT;
+        for (let c = 1; c <= COLUMNS; c++) {
+            expect(badSides(ws.getCell(HEADER_ROW, c))).toEqual([]);
+            expect(fillArgb(ws.getCell(FIRST_DATA_ROW + 1, c))).toBe(STRIPE);
+            expect(fillArgb(ws.getCell(FIRST_DATA_ROW, c))).toBeUndefined();
+            expect(fillArgb(ws.getCell(t, c))).toBe(STRIPE);
+            expect(badSides(ws.getCell(t, c))).toEqual([]);
         }
     });
 });
