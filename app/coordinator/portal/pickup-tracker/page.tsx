@@ -237,65 +237,127 @@ export default function PickupTrackerPage() {
                             : 'Your final pickup list fills in with every order as soon as this fundraiser closes. Until then, new orders appear in Recent orders on your portal.'}
                     </p>
                 ) : (
-                    <ul className="mt-1">
-                        {groups.map((g) => (
-                            <li key={g.key} className="supporter-row flex items-start gap-4 border-b border-slate-300 py-3">
-                                {/* Check-off box. Paper only — not persisted. */}
-                                <span aria-hidden className="mt-0.5 h-7 w-7 shrink-0 border-2 border-slate-900" />
+                    <div className="mt-2 overflow-x-auto print:overflow-visible">
+                        {/* PICKUP-TRACKER-READABILITY-1: one black-ruled grid so a row can be
+                            followed across the page on paper. Presentation only — the same
+                            groups, in the same order, with the same cells' content as the
+                            list this replaced. The grid and the alternating shade are styled
+                            by .pickup-grid in the style block below and nowhere else. */}
+                        <table className="pickup-grid w-full text-left" data-pickup-grid>
+                            <thead>
+                                <tr>
+                                    <th scope="col" className="pickup-col-check">Picked up</th>
+                                    <th scope="col" className="pickup-col-supporter">Supporter</th>
+                                    <th scope="col" className="pickup-col-order">Order</th>
+                                    <th scope="col" className="pickup-col-total">Total</th>
+                                    <th scope="col" className="pickup-col-pay">Payment</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {groups.map((g) => (
+                                    <tr key={g.key} className="supporter-row">
+                                        <td className="pickup-col-check">
+                                            {/* Check-off box. Paper only — not persisted. */}
+                                            <span aria-hidden className="mx-auto block h-7 w-7 border-2 border-slate-900" />
+                                        </td>
 
-                                <div className="min-w-0 flex-1">
-                                    <p className="text-[15px] font-black uppercase tracking-wide text-slate-900">
-                                        {g.customer_name || 'Supporter'}
-                                    </p>
+                                        <td>
+                                            <p className="text-[15px] font-black uppercase tracking-wide text-slate-900">
+                                                {g.customer_name || 'Supporter'}
+                                            </p>
 
-                                    <p className="text-[12px] text-slate-700">
-                                        {g.email && <span className="mr-3">{g.email}</span>}
-                                        {g.phone && <span className="mr-3">{g.phone}</span>}
-                                        {g.participant_name && <span className="text-slate-600">for {g.participant_name}</span>}
-                                    </p>
+                                            <p className="text-[12px] text-slate-700">
+                                                {g.email && <span className="mr-3 [overflow-wrap:anywhere]">{g.email}</span>}
+                                                {g.phone && <span className="mr-3 whitespace-nowrap">{g.phone}</span>}
+                                                {g.participant_name && <span className="text-slate-600">for {g.participant_name}</span>}
+                                            </p>
+                                        </td>
 
-                                    <ul className="mt-1 text-[13px] text-slate-900">
-                                        {g.items.map((it, idx) => {
-                                            const tier = formatServingTier(it.variant_size);
-                                            return (
-                                                <li key={idx}>
-                                                    <span className="font-bold">{it.item_name || 'Item'}</span>
-                                                    {tier ? <span> | {tier}</span> : null}
-                                                    <span> | Qty {it.quantity}</span>
-                                                </li>
-                                            );
-                                        })}
-                                    </ul>
-                                </div>
+                                        <td>
+                                            <ul className="text-[13px] text-slate-900">
+                                                {g.items.map((it, idx) => {
+                                                    const tier = formatServingTier(it.variant_size);
+                                                    return (
+                                                        <li key={idx}>
+                                                            <span className="font-bold">{it.item_name || 'Item'}</span>
+                                                            {tier ? <span> | <span className="whitespace-nowrap">{tier}</span></span> : null}
+                                                            <span> | <span className="whitespace-nowrap">Qty {it.quantity}</span></span>
+                                                        </li>
+                                                    );
+                                                })}
+                                            </ul>
+                                        </td>
 
-                                <div className="flex shrink-0 flex-col items-end gap-1">
-                                    <span className="text-[13px] font-bold tabular-nums text-slate-900">
-                                        ${Number(g.total || 0).toFixed(2)}
-                                    </span>
-                                    {/* FR-SUPPORTER-PAYMENT-STATUS-1: what the coordinator
-                                        recorded. Blank box when not marked — tickable by hand. */}
-                                    {g.payment?.state === 'paid' ? (
-                                        <span className="text-[12px] font-black uppercase tracking-wide text-slate-900" data-payment-state="paid">
-                                            ✓ Paid
-                                        </span>
-                                    ) : g.payment?.state === 'partly_marked' ? (
-                                        <span className="text-[12px] font-black uppercase tracking-wide text-slate-900" data-payment-state="partly_marked">
-                                            Paid {g.payment.paidCount} of {g.payment.orderCount}
-                                        </span>
-                                    ) : (
-                                        <span className="flex items-center gap-1.5 text-[12px] font-bold uppercase tracking-wide text-slate-700" data-payment-state="not_marked">
-                                            Paid
-                                            <span aria-hidden className="inline-block h-5 w-5 border-2 border-slate-900" />
-                                        </span>
-                                    )}
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
+                                        <td className="pickup-col-total">
+                                            <span className="text-[13px] font-bold tabular-nums text-slate-900">
+                                                ${Number(g.total || 0).toFixed(2)}
+                                            </span>
+                                        </td>
+
+                                        <td className="pickup-col-pay">
+                                            {/* FR-SUPPORTER-PAYMENT-STATUS-1: what the coordinator
+                                                recorded. Blank box when not marked — tickable by hand. */}
+                                            {g.payment?.state === 'paid' ? (
+                                                <span className="whitespace-nowrap text-[12px] font-black uppercase tracking-wide text-slate-900" data-payment-state="paid">
+                                                    ✓ Paid
+                                                </span>
+                                            ) : g.payment?.state === 'partly_marked' ? (
+                                                <span className="whitespace-nowrap text-[12px] font-black uppercase tracking-wide text-slate-900" data-payment-state="partly_marked">
+                                                    Paid {g.payment.paidCount} of {g.payment.orderCount}
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center gap-1.5 text-[12px] font-bold uppercase tracking-wide text-slate-700" data-payment-state="not_marked">
+                                                    Paid
+                                                    <span aria-hidden className="inline-block h-5 w-5 border-2 border-slate-900" />
+                                                </span>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
             </div>
 
             <style jsx global>{`
+                /* PICKUP-TRACKER-READABILITY-1 — every rule below is scoped to
+                   .pickup-grid, so no other FreezerIQ table is touched.
+                   Grid: solid black, 1px, on the table, header and every cell.
+                   Stripe: #E2E8F0 (Tailwind slate-200) on every even body row —
+                   white, gray, white, gray. It is set on the cells, not the row,
+                   so every printed cell carries its own background, and
+                   print-color-adjust keeps that background on paper. */
+                .pickup-grid {
+                    /* On a phone the wrapper scrolls sideways instead of crushing the
+                       columns to a word per line. Paper is wider than this: no effect. */
+                    min-width: 42rem;
+                    border-collapse: collapse;
+                    border: 1px solid #000;
+                    -webkit-print-color-adjust: exact;
+                    print-color-adjust: exact;
+                }
+                .pickup-grid th,
+                .pickup-grid td {
+                    border: 1px solid #000;
+                    padding: 0.4rem 0.5rem;
+                    vertical-align: top;
+                    text-align: left;
+                }
+                .pickup-grid th {
+                    background-color: #fff;
+                    font-size: 11px;
+                    font-weight: 800;
+                    letter-spacing: 0.06em;
+                    text-transform: uppercase;
+                }
+                .pickup-grid thead { display: table-header-group; }
+                .pickup-grid tbody tr:nth-child(even) > td { background-color: #E2E8F0; }
+                .pickup-grid .pickup-col-check { width: 3.75rem; text-align: center; }
+                .pickup-grid .pickup-col-supporter { width: 24%; }
+                .pickup-grid .pickup-col-order { width: 42%; }
+                .pickup-grid .pickup-col-total { width: 4.5rem; text-align: right; }
+                .pickup-grid .pickup-col-pay { width: 7.5rem; }
                 @media print {
                     /* Toolbar and any other chrome must not reach paper. */
                     .no-print { display: none !important; }
