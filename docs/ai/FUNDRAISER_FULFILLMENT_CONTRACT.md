@@ -336,6 +336,17 @@ re-reads the eligible set on the server, refuses (writing nothing) when the stop
 changed since it was loaded, validates every order against the shared transition
 matrix, and writes all of them in one transaction or none.
 
+**DELIVERY-FUNDRAISER-GROUPING-1A — nothing can join a stop mid-delivery.** That
+one transaction first row-locks every order of the tenant's campaign (`SELECT …
+FOR UPDATE`, in id order), and only then reads the eligible set. An order enters a
+campaign's Delivery set only through the handoff's UPDATE of that order's own row,
+which needs the same lock. So a release that committed first is seen and refuses
+the stop (409, refresh, nothing written); a release attempted during the delivery
+waits for it and then becomes a new stop. The handoff itself is unchanged.
+SERIALIZABLE was evaluated and rejected: with the handoff at READ COMMITTED it does
+not detect the release (proven on Postgres), and making it detect it would mean
+changing the handoff's isolation.
+
 Production, labels, packing slips, the manifest, box counts and packaging
 need remain ORDER-level; only the stop list and this action aggregate.
 

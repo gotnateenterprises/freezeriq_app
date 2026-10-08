@@ -439,13 +439,15 @@ describe('MARK DELIVERED — one action for the whole fundraiser', () => {
         expect(updatedTotal).toBe(12); // each order counted as newly delivered exactly once
     });
 
-    it('22b. a writer that changes one order between the read and the write rolls the whole stop back', async () => {
+    it('22b. an order canceled while the request is in flight is caught by the locked read — nothing is written', async () => {
         const A = campaign('camp-A');
         useStore([fundraiserOrder('a1', A), fundraiserOrder('a2', A), fundraiserOrder('a3', A)]);
+        // 1A: the authoritative read now happens INSIDE the transaction, after the
+        // campaign lock, so a change that lands before the lock is seen there and refused.
         store.beforeNextTransaction = () => { store.get('a3')!.canceled_at = new Date(); };
         const res = await deliver('camp-A', ['a1', 'a2', 'a3']);
         expect(res.status).toBe(409);
-        expect(res.body.code).toBe('STATUS_CHANGED_CONCURRENTLY');
+        expect(res.body).toMatchObject({ code: 'STOP_CHANGED', refused: [{ id: 'a3', reason: 'canceled' }] });
         expect(['a1', 'a2', 'a3'].map(statusOf)).toEqual(['ready_to_ship', 'ready_to_ship', 'ready_to_ship']);
     });
 
@@ -487,6 +489,112 @@ describe('MARK DELIVERED — one action for the whole fundraiser', () => {
             expect(res.status).toBe(400);
         }
         expect((await deliver('camp-none', ['nope'])).status).toBe(404);
+    });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// DELIVERY-FUNDRAISER-GROUPING-1A — nothing may join the stop while it is being delivered.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('1A — CONCURRENT NEW ORDER ENTERS DELIVERY', () => {
+    /** Campaign A: orders a01–a20 in Delivery, and a21 packed but not yet sent to Delivery. */
+    function twentyPlusOne() {
+        const A = campaign('camp-A');
+        const rows = Array.from({ length: 20 }, (_, i) => fundraiserOrder(`a${String(i + 1).padStart(2, '0')}`, A));
+        rows.push(fundraiserOrder('a21', A, { released_to_delivery_at: null }));
+        useStore(rows);
+        return rows.map((r) => r.id);
+    }
+    /** The handoff's own compare-and-set, as a concurrent writer outside our transaction. */
+    const releaseA21 = () => store.client.order.updateMany({
+        where: { id: 'a21', business_id: BIZ, released_to_delivery_at: null, canceled_at: null, status: 'ready_to_ship' },
+        data: { released_to_delivery_at: new Date(), released_to_delivery_by: 'concurrent-handoff' },
+    });
+    const statusWrites = () => store.writes.filter((w) => w.data.status !== undefined && w.count > 0);
+
+    it('1A-1. order 21 enters Delivery while the click is in flight: NOTHING is delivered, 409 refresh; after refresh all 21 deliver atomically', async () => {
+        const ids = twentyPlusOne();
+        const [screen] = await stopsNow();
+        expect(screen.orderIds).toHaveLength(20); // the driver is looking at 1–20
+
+        // Released after the board loaded and after the click — before the delivery's locked read.
+        store.beforeNextTransaction = async () => { expect((await releaseA21()).count).toBe(1); };
+        const res = await deliver('camp-A', screen.orderIds);
+        expect(res.status).toBe(409);
+        expect(res.body).toMatchObject({ code: 'STOP_CHANGED', notShownOrderIds: ['a21'] });
+        expect(res.body.error).toMatch(/Refresh/);
+        expect(ids.map(statusOf).every((s) => s === 'ready_to_ship')).toBe(true); // 1–20 AND 21 untouched
+        expect(store.get('a21')!.released_to_delivery_at).not.toBeNull();
+        expect(statusWrites()).toEqual([]);
+
+        // Refresh: the stop now holds 21. Retry: all 21, in one transaction.
+        const [fresh] = await stopsNow();
+        expect(fresh.orderIds).toHaveLength(21);
+        const retry = await deliver('camp-A', fresh.orderIds);
+        expect(retry).toMatchObject({ status: 200, body: { updated: 21, alreadyDelivered: 0 } });
+        expect(ids.map(statusOf).every((s) => s === 'delivered')).toBe(true);
+        expect(store.events.filter((e) => e.endsWith(':commit'))).toHaveLength(2); // the refused attempt wrote nothing; the retry is one commit
+    });
+
+    it('1A-2. a release attempted while the delivery holds the campaign lock WAITS, and lands after the commit as a new stop', async () => {
+        twentyPlusOne();
+        const [screen] = await stopsNow();
+        let release: Promise<{ count: number }> | null = null;
+        // Fired right after the delivery's authoritative read — the exact window the gap lived in.
+        store.afterFirstReadInNextTransaction = () => { release = releaseA21(); };
+        const res = await deliver('camp-A', screen.orderIds);
+        expect(res).toMatchObject({ status: 200, body: { updated: 20 } });
+        expect(release).not.toBeNull();
+        expect((await release!).count).toBe(1);
+
+        // The release could only commit AFTER the delivery: at the delivery's commit, the
+        // campaign's Delivery population was exactly the 20 it delivered.
+        const commit = store.events.findIndex((e) => e.endsWith(':commit'));
+        const landed = store.events.findIndex((e) => e === 'outside:write:a21');
+        expect(commit).toBeGreaterThanOrEqual(0);
+        expect(landed).toBeGreaterThan(commit);
+        // Order 21 is now its own new stop, needing the operator's attention — not lost, not half-delivered.
+        const after = await stopsNow();
+        expect(after).toHaveLength(1);
+        expect(after[0].orderIds).toEqual(['a21']);
+    });
+
+    it('1A-3. a double click: one call delivers, the other waits for it and reports "already delivered" — never 409, never 500', async () => {
+        const A = campaign('camp-A');
+        const rows = Array.from({ length: 12 }, (_, i) => fundraiserOrder(`a${i}`, A, { status: i % 2 ? 'completed' : 'ready_to_ship' }));
+        useStore(rows);
+        const ids = rows.map((r) => r.id);
+        const results = await Promise.all([deliver('camp-A', ids), deliver('camp-A', ids)]);
+        expect(results.map((r) => r.status)).toEqual([200, 200]);
+        expect(results.map((r) => [r.body.updated, r.body.alreadyDelivered]).sort()).toEqual([[0, 12], [12, 0]]);
+        expect(statusWrites().reduce((n, w) => n + w.count, 0)).toBe(12); // each order written once
+    });
+
+    it('1A-4. structure: lock, then the authoritative read, then the writes — all inside ONE transaction; no read outside it', () => {
+        const src = strip(read('app/api/delivery/campaign-delivered/route.ts'));
+        const body = src.slice(src.indexOf('export async function POST'));
+        const tx = body.indexOf('prisma.$transaction(async (tx)');
+        expect(tx).toBeGreaterThan(-1);
+        const lock = body.indexOf('await lockCampaignOrders(tx, businessId, campaign);');
+        const readAt = body.indexOf('const eligible = await readEligible(tx, businessId, campaign);');
+        const write = body.indexOf('tx.order.updateMany(');
+        expect(tx < lock && lock < readAt && readAt < write).toBe(true);
+        expect(body).not.toMatch(/prisma\.order\./); // every order read/write goes through `tx`
+        expect(src).toMatch(/SELECT id FROM orders WHERE business_id = \$\{businessId\} AND campaign_id = \$\{campaignId\} ORDER BY id FOR UPDATE/);
+        // The handoff is untouched — it simply waits on the row lock it already needs.
+        expect(read('app/api/delivery/handoff/route.ts')).not.toMatch(/FOR UPDATE|campaign-delivered|deliveryStops/);
+    });
+
+    it('1A-5. a deadlock or lock timeout with another writer is a safe 409, never a 500, and writes nothing', async () => {
+        const A = campaign('camp-A');
+        useStore([fundraiserOrder('a1', A)]);
+        for (const code of ['P2034', 'P2028']) {
+            const real = store.client.$transaction;
+            store.client.$transaction = async () => { throw Object.assign(new Error('conflict'), { code }); };
+            const res = await deliver('camp-A', ['a1']);
+            store.client.$transaction = real;
+            expect(res).toMatchObject({ status: 409, body: { code: 'STATUS_CHANGED_CONCURRENTLY' } });
+        }
+        expect(statusOf('a1')).toBe('ready_to_ship');
     });
 });
 

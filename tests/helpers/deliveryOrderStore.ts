@@ -57,50 +57,95 @@ export interface DeliveryOrderStore {
     client: any;
     /** Every updateMany actually applied (inside or outside a transaction), with its data. */
     writes: { where: any; data: any; count: number }[];
+    /**
+     * What happened, in order: `tx<N>:commit`, `tx<N>:rollback`, and `outside:write:<ids>` for a
+     * write made outside any transaction (a concurrent writer such as the handoff).
+     */
+    events: string[];
     /** Throw inside the NEXT transaction once it has applied this many row updates. */
     failAfterRowUpdates: number | null;
-    /** Runs at the start of the NEXT interactive transaction — a writer that commits first. */
-    beforeNextTransaction: (() => void) | null;
+    /** Runs (and is awaited) at the start of the NEXT interactive transaction — a writer that commits first. */
+    beforeNextTransaction: (() => void | Promise<void>) | null;
+    /** Fired (not awaited) right after the NEXT transaction's first read — a writer racing the commit. */
+    afterFirstReadInNextTransaction: (() => void) | null;
     get(id: string): StoreRow | undefined;
 }
 
+interface TxState { id: number; done: Promise<void>; finish: () => void; readHookFired: boolean }
+
+/**
+ * ROW LOCKS. A row updated inside a transaction, or selected FOR UPDATE, is locked by
+ * that transaction until it ends. A write from OUTSIDE (the simulated concurrent
+ * writer) that matches a locked row waits for the lock holder to finish, then
+ * re-evaluates its WHERE against what was committed — Postgres's behaviour at READ
+ * COMMITTED. Without this the fake could not tell "the release waited for the
+ * delivery" from "the release slipped in mid-delivery".
+ */
 export function createDeliveryOrderStore(seed: StoreRow[]): DeliveryOrderStore {
     const store: DeliveryOrderStore = {
         rows: seed.map((r) => structuredClone(r)),
         client: null,
         writes: [],
+        events: [],
         failAfterRowUpdates: null,
         beforeNextTransaction: null,
+        afterFirstReadInNextTransaction: null,
         get: (id) => store.rows.find((r) => r.id === id),
     };
+    const locks = new Map<string, TxState>();
+    let txSeq = 0;
+    let pendingAfterReadHook: (() => void) | null = null;
 
-    const makeOrderDelegate = (undo: { row: StoreRow; prev: Record<string, any> }[] | null, txCounter: { n: number } | null) => ({
+    type Ctx = { tx: TxState; undo: { row: StoreRow; prev: Record<string, any> }[]; counter: { n: number } } | null;
+
+    const apply = (ctx: Ctx, args: any) => {
+        let count = 0;
+        const ids: string[] = [];
+        for (const row of store.rows) {
+            if (!rowMatches(row, args.where)) continue;
+            if (ctx && store.failAfterRowUpdates !== null && ctx.counter.n >= store.failAfterRowUpdates) {
+                store.failAfterRowUpdates = null;
+                throw new Error('injected mid-transaction failure');
+            }
+            const prev: Record<string, any> = {};
+            for (const k of Object.keys(args.data)) prev[k] = row[k];
+            if (ctx) { ctx.undo.push({ row, prev }); locks.set(row.id, ctx.tx); ctx.counter.n++; }
+            Object.assign(row, structuredClone(args.data));
+            ids.push(row.id);
+            count++;
+        }
+        store.writes.push({ where: args.where, data: args.data, count });
+        if (!ctx && count > 0) store.events.push(`outside:write:${ids.join(',')}`);
+        return { count };
+    };
+
+    const makeOrderDelegate = (ctx: Ctx) => ({
         findMany: async (args: any = {}) => {
             const rows = store.rows.filter((r) => rowMatches(r, args.where)).sort((a, b) => a.id.localeCompare(b.id));
-            return rows.map((r) => project(r, args.select));
+            const out = rows.map((r) => project(r, args.select));
+            if (ctx && !ctx.tx.readHookFired) {
+                ctx.tx.readHookFired = true;
+                const hook = pendingAfterReadHook;
+                pendingAfterReadHook = null;
+                if (hook) hook();
+            }
+            return out;
         },
         count: async (args: any = {}) => store.rows.filter((r) => rowMatches(r, args.where)).length,
         updateMany: async (args: any) => {
-            let count = 0;
-            for (const row of store.rows) {
-                if (!rowMatches(row, args.where)) continue;
-                if (txCounter && store.failAfterRowUpdates !== null && txCounter.n >= store.failAfterRowUpdates) {
-                    store.failAfterRowUpdates = null;
-                    throw new Error('injected mid-transaction failure');
+            if (!ctx) {
+                // A concurrent writer: wait out every lock held on a row it would touch.
+                for (;;) {
+                    const blocker = store.rows.find((r) => rowMatches(r, args.where) && locks.has(r.id));
+                    if (!blocker) break;
+                    await locks.get(blocker.id)!.done;
                 }
-                const prev: Record<string, any> = {};
-                for (const k of Object.keys(args.data)) prev[k] = row[k];
-                if (undo) undo.push({ row, prev });
-                Object.assign(row, structuredClone(args.data));
-                count++;
-                if (txCounter) txCounter.n++;
             }
-            store.writes.push({ where: args.where, data: args.data, count });
-            return { count };
+            return apply(ctx, args);
         },
     });
 
-    const client: any = { order: makeOrderDelegate(null, null) };
+    const client: any = { order: makeOrderDelegate(null) };
     // Interactive transactions run one at a time. Two Postgres transactions that
     // update the same rows serialize on the row locks — the second waits, then
     // re-evaluates its WHERE against the committed winner. Without this the fake
@@ -110,13 +155,39 @@ export function createDeliveryOrderStore(seed: StoreRow[]): DeliveryOrderStore {
     const runInteractive = async (fn: (tx: any) => Promise<any>) => {
         const hook = store.beforeNextTransaction;
         store.beforeNextTransaction = null;
-        if (hook) hook();
-        const undo: { row: StoreRow; prev: Record<string, any> }[] = [];
-        const tx = { order: makeOrderDelegate(undo, { n: 0 }) };
+        if (hook) await hook();
+        pendingAfterReadHook = store.afterFirstReadInNextTransaction;
+        store.afterFirstReadInNextTransaction = null;
+
+        let finish!: () => void;
+        const state: TxState = { id: ++txSeq, done: new Promise<void>((r) => { finish = r; }), finish: () => finish(), readHookFired: false };
+        const ctx: Ctx = { tx: state, undo: [], counter: { n: 0 } };
+        const tx: any = {
+            order: makeOrderDelegate(ctx),
+            // Only the one raw statement the delivery route issues: lock this tenant's campaign rows.
+            $queryRaw: async (strings: TemplateStringsArray, ...values: any[]) => {
+                const sql = strings.join('?').replace(/\s+/g, ' ').trim();
+                if (sql !== 'SELECT id FROM orders WHERE business_id = ? AND campaign_id = ? ORDER BY id FOR UPDATE') {
+                    throw new Error(`deliveryOrderStore: unsupported raw SQL "${sql}"`);
+                }
+                const [businessId, campaignId] = values;
+                const rows = store.rows.filter((r) => r.business_id === businessId && r.campaign_id === campaignId).sort((a, b) => a.id.localeCompare(b.id));
+                for (const r of rows) locks.set(r.id, state);
+                return rows.map((r) => ({ id: r.id }));
+            },
+        };
+        const release = (outcome: 'commit' | 'rollback') => {
+            store.events.push(`tx${state.id}:${outcome}`);
+            for (const [id, holder] of [...locks]) if (holder === state) locks.delete(id);
+            state.finish();
+        };
         try {
-            return await fn(tx);
+            const result = await fn(tx);
+            release('commit');
+            return result;
         } catch (e) {
-            for (const { row, prev } of undo.reverse()) Object.assign(row, prev);
+            for (const { row, prev } of ctx.undo.reverse()) Object.assign(row, prev);
+            release('rollback');
             throw e;
         }
     };
