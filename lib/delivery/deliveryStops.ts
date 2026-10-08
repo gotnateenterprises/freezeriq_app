@@ -232,7 +232,7 @@ export function buildDeliveryStops(rows: readonly DeliveryQueueRow[]): DeliveryS
             deliveryTime: null,
             contactName: null,
             contactPhone: null,
-            orderCount: (first.items || []).length,
+            orderCount: 1,
             boxes: boxesFor([first]),
             bundles,
             sequence,

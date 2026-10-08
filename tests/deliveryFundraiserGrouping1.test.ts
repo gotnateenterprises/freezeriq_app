@@ -284,7 +284,10 @@ describe('ROUTE PLAN', () => {
 
     it('15. an ordinary customer is one navigation stop at its own address, exactly as before', () => {
         const [stop] = buildDeliveryStops(asQueueRows([customerOrder('c1', { delivery_address: '42 Elm St, Paris IL' })]));
-        expect(stop).toMatchObject({ id: 'c1', kind: 'customer', address: '42 Elm St, Paris IL', addressSource: 'order_address', orderIds: ['c1'] });
+        expect(stop).toMatchObject({ id: 'c1', kind: 'customer', address: '42 Elm St, Paris IL', addressSource: 'order_address', orderIds: ['c1'], orderCount: 1 });
+        // orderCount counts ORDERS, even when one order has several lines.
+        const [two] = buildDeliveryStops(asQueueRows([customerOrder('c2', { items: [item('c2-a', 'serves_5'), item('c2-b', 'serves_2')] })]));
+        expect(two.orderCount).toBe(1);
     });
 
     it('16. optimize + reorder work on stops: a stop keeps its orders together, a no-address stop goes last, and the order round-trips', async () => {
