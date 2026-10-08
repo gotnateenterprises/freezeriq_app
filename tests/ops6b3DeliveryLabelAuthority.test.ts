@@ -160,7 +160,11 @@ describe('REPRINT SCOPE', () => {
         const fn = s.slice(s.indexOf('const reprintBoxLabels'), s.indexOf('const refreshData'));
         expect(fn.length).toBeGreaterThan(100);
         // `locations` is built from /api/delivery/queue, which is released-only.
-        expect(fn).toMatch(/locations\.map\(l => l\.id\)/);
+        // DELIVERY-FUNDRAISER-GROUPING-1: a location is now a STOP, and a
+        // fundraiser stop holds many orders, so the batch flattens every stop back
+        // to all of its underlying order ids — never one label per stop.
+        expect(fn).toMatch(/orderIdsInRouteOrder\(locations\)/);
+        expect(fn).not.toMatch(/locations\.map\(l => l\.id\)/);
         expect(s).toMatch(/api\/delivery\/queue/);
     });
 

@@ -2,9 +2,17 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Package, MapPin, Printer, ExternalLink, Plus, RefreshCw, AlertTriangle, Truck, GripVertical, Navigation, Edit, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { Package, MapPin, Printer, ExternalLink, Plus, RefreshCw, AlertTriangle, Truck, GripVertical, Navigation, Edit, ChevronLeft, ChevronRight, Calendar, ChevronDown, ChevronUp } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { writeBoxLabelBatch, fetchAuthenticatedBusinessId } from '@/lib/printBatchStorage';
+import {
+    buildDeliveryStops,
+    navigableStops,
+    orderIdsInRouteOrder,
+    FUNDRAISER_ADDRESS_NEEDED_LABEL,
+    NO_ADDRESS_LABEL,
+    type DeliveryStop,
+} from '@/lib/delivery/deliveryStops';
 
 // --- WEEK HELPERS ---
 function getISOMonday(date: Date): Date {
@@ -78,16 +86,13 @@ interface Stats {
     undatedActiveCount: number;
 }
 
-interface DeliveryLocation {
-    id: string;
-    externalId: string;
-    customerName: string;
-    address: string;
-    orderCount: number;
-    bundles: string[];
-    sequence: number;
-    index: number;
-}
+/**
+ * DELIVERY-FUNDRAISER-GROUPING-1: a stop on the route. A fundraiser campaign is
+ * ONE stop carrying all of its orders (lib/delivery/deliveryStops.ts); an
+ * ordinary customer is one stop per order, as before. `orderIds` always lists
+ * every underlying order, so labels, reordering and delivery stay order-level.
+ */
+type DeliveryLocation = DeliveryStop & { index: number };
 
 // ... existing code ...
 
@@ -144,7 +149,13 @@ const InventoryItem = ({ item, onUpdate }: { item: PackagingItem, onUpdate: (id:
     );
 };
 
-const SortableItem = ({ loc, openGoogleMaps, onDeliver }: { loc: any, openGoogleMaps: (addr: string) => void, onDeliver: (id: string) => void }) => {
+const plural = (n: number, one: string, many: string = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** A fundraiser campaign's delivery date (a calendar date — shown in UTC so it never shifts a day). */
+const formatStopDate = (iso: string | null) =>
+    iso ? new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }) : null;
+
+const SortableItem = ({ loc, openGoogleMaps, onDeliver }: { loc: DeliveryLocation, openGoogleMaps: (addr: string) => void, onDeliver: (stop: DeliveryLocation) => void }) => {
     const {
         attributes,
         listeners,
@@ -153,6 +164,7 @@ const SortableItem = ({ loc, openGoogleMaps, onDeliver }: { loc: any, openGoogle
         transition,
         isDragging
     } = useSortable({ id: loc.id });
+    const [showOrders, setShowOrders] = useState(false);
 
     const style = {
         transform: CSS.Transform.toString(transform),
@@ -160,6 +172,93 @@ const SortableItem = ({ loc, openGoogleMaps, onDeliver }: { loc: any, openGoogle
         zIndex: isDragging ? 50 : 'auto',
         opacity: isDragging ? 0.8 : 1,
     };
+
+    // DELIVERY-FUNDRAISER-GROUPING-1: one card for a whole fundraiser campaign —
+    // delivered to the organization, not to each supporter.
+    if (loc.kind === 'fundraiser') {
+        const when = [formatStopDate(loc.deliveryDate), loc.deliveryTime].filter(Boolean).join(' · ');
+        const contact = [loc.contactName, loc.contactPhone].filter(Boolean).join(' · ');
+        return (
+            <div ref={setNodeRef} style={style} data-stop-kind="fundraiser" className="bg-white dark:bg-slate-800 p-3 rounded-xl border border-indigo-200 dark:border-indigo-800 shadow-sm flex items-start gap-3 group hover:border-indigo-300 transition-colors">
+                <div {...attributes} {...listeners} className="cursor-grab hover:text-indigo-500 text-slate-400 p-1 mt-1">
+                    <GripVertical size={20} />
+                </div>
+
+                <div className="w-8 h-8 shrink-0 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center font-bold text-indigo-600 dark:text-indigo-300 text-sm mt-0.5">
+                    {loc.index + 1}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                    <div className="font-bold text-slate-900 dark:text-white truncate">{loc.title}</div>
+                    <div className="text-[10px] uppercase font-bold tracking-wider text-indigo-600 dark:text-indigo-300 truncate">
+                        Fundraiser delivery{loc.campaignName && loc.campaignName !== loc.title ? ` · ${loc.campaignName}` : ''}
+                    </div>
+                    <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 mt-1" data-stop-summary>
+                        {plural(loc.orderCount, 'supporter order')} • {plural(loc.boxes.total, 'box', 'boxes')}
+                        <span className="font-normal text-slate-500"> ({loc.boxes.large} large, {loc.boxes.small} small)</span>
+                    </div>
+                    {loc.boxes.unpackable > 0 && (
+                        <div className="text-[11px] font-bold text-amber-600">
+                            {plural(loc.boxes.unpackable, 'bundle')} could not be packed automatically (no provable sold serving size).
+                        </div>
+                    )}
+                    {when && <div className="text-xs text-slate-500 mt-0.5">{when}</div>}
+                    {loc.address ? (
+                        <div onClick={() => openGoogleMaps(loc.address!)} className="text-xs text-slate-500 truncate hover:text-indigo-500 cursor-pointer flex items-center gap-1 mt-0.5">
+                            <MapPin size={10} /> {loc.address}
+                        </div>
+                    ) : (
+                        <div className="text-xs font-bold text-amber-600 flex items-center gap-1 mt-0.5" data-address-needed>
+                            <AlertTriangle size={11} /> {FUNDRAISER_ADDRESS_NEEDED_LABEL}
+                        </div>
+                    )}
+                    {loc.locationNote && loc.locationNote !== loc.address && (
+                        <div className="text-[11px] text-slate-400 truncate">Pickup location: {loc.locationNote}</div>
+                    )}
+                    {contact && <div className="text-[11px] text-slate-400 truncate">Contact: {contact}</div>}
+                    {showOrders && (
+                        <ul className="mt-2 border-t border-slate-100 dark:border-slate-700 pt-2 space-y-0.5 text-xs text-slate-600 dark:text-slate-300 max-h-48 overflow-y-auto">
+                            {loc.orders.map((o) => (
+                                <li key={o.id} className="flex justify-between gap-2">
+                                    <span className="truncate">{o.name}</span>
+                                    <span className="shrink-0 text-slate-400">{plural(o.boxes.total, 'box', 'boxes')}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+
+                <div className="text-right flex flex-col items-end gap-1 shrink-0">
+                    <button
+                        onClick={(e) => { e.stopPropagation(); if (loc.address) openGoogleMaps(loc.address); }}
+                        disabled={!loc.address}
+                        title={loc.address ? 'Directions to this drop-off' : 'No delivery address on file'}
+                        className="bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                        Directions
+                    </button>
+                    <button
+                        onClick={(e) => { e.stopPropagation(); setShowOrders((v) => !v); }}
+                        className="bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-0.5"
+                    >
+                        {showOrders ? <ChevronUp size={10} /> : <ChevronDown size={10} />} View Orders
+                    </button>
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm(`Mark the ${loc.title} fundraiser as DELIVERED?\n\nThis records that all ${plural(loc.orderCount, 'supporter order')} (${plural(loc.boxes.total, 'box', 'boxes')}) were dropped off with the organization. It does not mark any supporter as picked up — the coordinator's Pickup Tracker still handles that.`)) {
+                                onDeliver(loc);
+                            }
+                        }}
+                        className="bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider transition-colors"
+                    >
+                        Mark Delivered
+                    </button>
+                    <div className="text-[10px] text-slate-400 uppercase font-bold">Stop #{loc.index + 1}</div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div ref={setNodeRef} style={style} className="bg-white dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-3 group hover:border-indigo-300 transition-colors">
@@ -175,9 +274,9 @@ const SortableItem = ({ loc, openGoogleMaps, onDeliver }: { loc: any, openGoogle
 
             {/* Content */}
             <div className="flex-1 min-w-0">
-                <div className="font-bold text-slate-900 dark:text-white truncate">{loc.customerName}</div>
-                <div onClick={() => openGoogleMaps(loc.address)} className="text-xs text-slate-500 truncate hover:text-indigo-500 cursor-pointer flex items-center gap-1">
-                    <MapPin size={10} /> {loc.address}
+                <div className="font-bold text-slate-900 dark:text-white truncate">{loc.title}</div>
+                <div onClick={() => { if (loc.address) openGoogleMaps(loc.address); }} className="text-xs text-slate-500 truncate hover:text-indigo-500 cursor-pointer flex items-center gap-1">
+                    <MapPin size={10} /> {loc.address ?? NO_ADDRESS_LABEL}
                 </div>
             </div>
 
@@ -188,7 +287,7 @@ const SortableItem = ({ loc, openGoogleMaps, onDeliver }: { loc: any, openGoogle
                         e.stopPropagation();
                         // Use onMouseDown to prevent drag interference if needed, but onClick usually fine here
                         if (confirm('Mark this order as DELIVERED? It will be removed from the list.')) {
-                            onDeliver(loc.id);
+                            onDeliver(loc);
                         }
                     }}
                     className="bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider transition-colors"
@@ -385,7 +484,10 @@ export default function DeliveryDashboard() {
     const reprintBoxLabels = async () => {
         setLabelError(null);
 
-        const orderIds = locations.map(l => l.id).filter(Boolean);
+        // DELIVERY-FUNDRAISER-GROUPING-1: a fundraiser stop carries all of its
+        // orders, so the batch is every underlying order id — the same label
+        // count as before grouping, never one label per stop.
+        const orderIds = orderIdsInRouteOrder(locations).filter(Boolean);
         if (orderIds.length === 0) {
             setLabelError('There are no active Delivery orders to reprint box labels for.');
             return;
@@ -457,25 +559,22 @@ export default function DeliveryDashboard() {
 
             // Routes
             const orders = await routesRes.json();
-            const mappedRoutes = orders
-                .map((o: any) => ({
-                    id: o.id,
-                    externalId: o.external_id,
+            // DELIVERY-FUNDRAISER-GROUPING-1: orders -> stops. A fundraiser
+            // campaign becomes ONE stop at its organization's drop location; an
+            // ordinary customer keeps one stop per order at its own address.
+            const stops = buildDeliveryStops(
+                orders.map((o: any) => ({
+                    ...o,
                     // OPS-6B.1: the server resolves this through the SAME
                     // frozen-identity authority the packing slip uses, so the
                     // stop and its slip can never show different names for the
                     // same order. (`organization` was a dead fallback — the
                     // delivery queue route has never returned that field.)
                     customerName: o.supporterName || o.customer_name || 'Unknown Customer',
-                    address: o.delivery_address || o.organization?.delivery_address || 'No Address Provided',
-                    orderCount: o.items?.length || 0,
-                    bundles: o.items?.map((i: any) => i.bundle?.name || 'Item'),
-                    sequence: o.delivery_sequence || 0
-                }))
-                .sort((a: any, b: any) => a.sequence - b.sequence)
-                .map((item: any, index: number) => ({ ...item, index }));
+                })),
+            ).map((stop, index) => ({ ...stop, index }));
 
-            setLocations(mappedRoutes);
+            setLocations(stops);
 
         } catch (e) {
             console.error("Failed to load delivery data", e);
@@ -541,10 +640,11 @@ export default function DeliveryDashboard() {
             const newItems = arrayMove(items, oldIndex, newIndex).map((item, index) => ({ ...item, index }));
 
             // Fire and forget save
+            // Saved per ORDER: a fundraiser stop's orders keep one contiguous run.
             fetch('/api/delivery/route/reorder', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ orderIds: newItems.map(i => i.id) })
+                body: JSON.stringify({ orderIds: orderIdsInRouteOrder(newItems) })
             }).catch(e => console.error("Failed to save route"));
 
             return newItems;
@@ -569,25 +669,27 @@ export default function DeliveryDashboard() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     origin: originAddress,
-                    orders: locations.map(l => ({ id: l.id, address: l.address }))
+                    // One entry per STOP. A stop with no address sends none, so the
+                    // optimizer leaves it at the end instead of geocoding a placeholder.
+                    orders: locations.map(l => ({ id: l.id, address: l.address ?? '' }))
                 })
             });
 
             const data = await res.json();
             if (res.ok && data.optimizedIds) {
                 // Map the new sequence back to location objects
-                const reordered = data.optimizedIds
+                const reordered: DeliveryLocation[] = data.optimizedIds
                     .map((id: string) => locations.find(l => l.id === id))
                     .filter(Boolean)
                     .map((item: any, index: number) => ({ ...item, index }));
 
                 setLocations(reordered);
 
-                // Save to Database
+                // Save to Database — per order, each stop's orders together.
                 await fetch('/api/delivery/route/reorder', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ orderIds: data.optimizedIds })
+                    body: JSON.stringify({ orderIds: orderIdsInRouteOrder(reordered) })
                 });
 
                 alert('Route optimized successfully!');
@@ -604,7 +706,18 @@ export default function DeliveryDashboard() {
     const openFullRoute = () => {
         if (locations.length === 0) return;
 
-        let stops = locations.map(l => encodeURIComponent(l.address));
+        // A stop without an address is left out rather than navigated to.
+        const routable = navigableStops(locations);
+        if (routable.length === 0) {
+            alert('None of these stops has a delivery address to navigate to.');
+            return;
+        }
+        const skipped = locations.length - routable.length;
+        if (skipped > 0 && !confirm(`${plural(skipped, 'stop')} ${skipped === 1 ? 'has' : 'have'} no delivery address and will be left out of the route. Continue?`)) {
+            return;
+        }
+
+        let stops = routable.map(l => encodeURIComponent(l.address!));
 
         // Add origin if set
         if (originAddress && originAddress.trim() !== '') {
@@ -616,7 +729,33 @@ export default function DeliveryDashboard() {
         window.open(url, '_blank');
     };
 
-    const handleMarkDelivered = async (id: string) => {
+    const handleMarkDelivered = async (stop: DeliveryLocation) => {
+        // DELIVERY-FUNDRAISER-GROUPING-1: a fundraiser stop is delivered ONCE, for
+        // all of its orders, all-or-nothing on the server. It records the drop-off
+        // with the organization only; supporter pickup stays with the coordinator.
+        if (stop.kind === 'fundraiser' && stop.campaignId) {
+            try {
+                const res = await fetch('/api/delivery/campaign-delivered', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ campaignId: stop.campaignId, orderIds: stop.orderIds })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    setLocations(prev => prev.filter(l => l.id !== stop.id));
+                } else {
+                    alert(data?.error || 'Failed to mark the fundraiser delivered');
+                }
+            } catch (e) {
+                console.error(e);
+                alert('Error updating status');
+            } finally {
+                refreshData();
+            }
+            return;
+        }
+
+        const id = stop.id;
         try {
             const res = await fetch('/api/orders', {
                 method: 'PATCH',

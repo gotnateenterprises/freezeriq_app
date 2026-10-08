@@ -273,12 +273,19 @@ describe('5. lib/delivery/orderClassification.ts structure', () => {
         expect(fn).toMatch(/pickup_location/);
     });
 
-    it('changes no delivery behaviour yet — nothing in app/, components/ or lib/ imports it', () => {
+    it('is consumed ONLY by the Delivery stop builder and the fundraiser delivery route', () => {
+        // DELIVERY-FUNDRAISER-GROUPING-1 is the grouping phase this tripwire was
+        // armed for (contract §15.3). It used to require ZERO importers; it now
+        // pins the exact two that phase added, so any further consumer is still a
+        // deliberate, reviewed change rather than a quiet re-use. Matches IMPORT
+        // statements (relative or aliased), not prose, so a comment naming the
+        // module can neither trip nor satisfy it.
         // Walked in Node rather than shelled out to a grep binary: a missing
         // binary would make this assertion pass vacuously, which is precisely
         // the false green it exists to prevent.
         const fs = require('fs');
         const path = require('path');
+        const IMPORTS_IT = /(?:\bfrom\s*|\brequire\(\s*|\bimport\(\s*)['"][^'"]*\borderClassification['"]/;
 
         const hits: string[] = [];
         let scanned = 0;
@@ -292,8 +299,8 @@ describe('5. lib/delivery/orderClassification.ts structure', () => {
                     walk(full);
                 } else if (/\.(ts|tsx)$/.test(e.name)) {
                     scanned++;
-                    if (fs.readFileSync(full, 'utf8').includes('delivery/orderClassification')) {
-                        hits.push(full.replace(/\\/g, '/'));
+                    if (IMPORTS_IT.test(fs.readFileSync(full, 'utf8'))) {
+                        hits.push(path.relative(process.cwd(), full).replace(/\\/g, '/'));
                     }
                 }
             }
@@ -305,6 +312,9 @@ describe('5. lib/delivery/orderClassification.ts structure', () => {
         // hits: it has no self-import.
         expect(scanned).toBeGreaterThan(100);
         expect(fs.existsSync(path.join(process.cwd(), 'lib/delivery/orderClassification.ts'))).toBe(true);
-        expect(hits).toEqual([]);
+        expect(hits.sort()).toEqual([
+            'app/api/delivery/campaign-delivered/route.ts',
+            'lib/delivery/deliveryStops.ts',
+        ]);
     });
 });

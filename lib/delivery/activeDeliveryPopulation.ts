@@ -62,18 +62,13 @@
  * WHAT THIS MODULE IS NOT
  * ══════════════════════════════════════════════════════════════════════════
  *
- * Not a stop builder and not a grouping rule. Every consumer still turns one
- * Order into one stop exactly as before, so ordinary customer delivery keeps
- * its per-order stop at its own address (contract §3.4 / Rule 6) and no
- * fundraiser campaign is collapsed. The "one campaign = one stop" grouping
- * repair is a separate phase, and the sibling discriminator module in this
- * directory was built for it — deliberately still unimported, with its
- * zero-importer tripwire left armed, because this phase changes no grouping.
- *
- * (That module's path is not spelled out here on purpose: its guard test
- * searches file CONTENTS for the import path, without stripping comments, so
- * even naming it in prose would trip a check that exists to prove nothing
- * imports it yet.)
+ * Not a stop builder and not a grouping rule. It decides WHICH orders are in
+ * active Delivery and nothing else. Turning those orders into stops — one
+ * fundraiser campaign = one stop, ordinary customers one stop per order at their
+ * own address (contract §3.4 / Rule 6) — is lib/delivery/deliveryStops.ts, added
+ * by DELIVERY-FUNDRAISER-GROUPING-1. Keep grouping out of this file: every count,
+ * slip and label surface reads this population order by order, and that is why
+ * grouping the stop list cannot change any of their numbers.
  *
  * Not a box rule. Cartons remain lib/physicalBoxPacking.ts's answer alone.
  */

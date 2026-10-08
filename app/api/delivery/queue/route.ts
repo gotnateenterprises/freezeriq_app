@@ -84,6 +84,26 @@ export async function GET(req: Request) {
                 status: true,
                 released_to_delivery_at: true,
                 customer: { select: { name: true, delivery_address: true } },
+                // DELIVERY-FUNDRAISER-GROUPING-1: what lib/delivery/deliveryStops.ts
+                // needs to put a whole campaign on ONE stop. `source` + `campaign_id`
+                // are the classification conjunction; the campaign's ORGANIZATION
+                // (campaign.customer — not the order's own customer, which for a
+                // supporter order is that supporter) supplies the drop address and
+                // contact. Additive: every field above is unchanged.
+                source: true,
+                campaign_id: true,
+                campaign: {
+                    select: {
+                        id: true,
+                        name: true,
+                        pickup_location: true,
+                        delivery_date: true,
+                        delivery_time: true,
+                        customer: {
+                            select: { name: true, delivery_address: true, contact_name: true, contact_phone: true },
+                        },
+                    },
+                },
                 items: {
                     select: {
                         id: true,

@@ -101,6 +101,25 @@ One fundraiser campaign creates **one** delivery stop.
 Do NOT derive it from `Order.delivery_address`, `Customer.delivery_address`,
 supporter address, or organization name.
 
+> **Amended — DELIVERY-FUNDRAISER-GROUPING-1 (owner ruling, October 8, 2026).**
+> Where a fundraiser stop **navigates to** is resolved in this order by
+> `lib/delivery/deliveryStops.ts` `resolveFundraiserStopAddress`:
+>
+> 1. a structured campaign delivery address — **none exists in the schema**;
+>    adding one is a future, optional, additive change and is not authorized here;
+> 2. the **organization's** profile address — `FundraiserCampaign.customer.delivery_address`
+>    (the campaign's organization row, never `Order.customer`, which for a supporter
+>    order is that supporter);
+> 3. `FundraiserCampaign.pickup_location`, **only when it reads like a street
+>    address** (a house number followed by a word). Free text such as "Farm Bureau
+>    Basement" is shown to the driver as a note but never handed to a map;
+> 4. otherwise **"Delivery address needed"**: the stop is still shown and still
+>    deliverable, but is left out of navigation — no coordinates are invented.
+>
+> The prohibition above is unchanged: never `Order.delivery_address`, never the
+> supporter's `Customer.delivery_address`, never a supporter address of any kind.
+> `pickup_location` is still always shown on the stop when present.
+
 ## 3.3 Why `Order.delivery_address` must never be the fundraiser location
 
 That column holds three different things depending on who wrote it:
@@ -300,6 +319,26 @@ supporter orders
 **Delivered is fulfillment completion, NOT deletion.** Orders, campaign, invoice,
 supporter identity and financial history are all retained.
 
+## 8.1 Delivered ≠ picked up — DELIVERY-FUNDRAISER-GROUPING-1 (October 8, 2026)
+
+| | Meaning | Who records it |
+|---|---|---|
+| **DELIVERED** | Freezer Chef dropped the fundraiser off with the organization | the Delivery board — ONE Mark Delivered per campaign stop |
+| **PICKED UP** | a supporter collected their own order from the organization | the coordinator's Pickup Tracker |
+
+Never collapse them. Marking a fundraiser stop delivered
+(`app/api/delivery/campaign-delivered/route.ts`) writes only `Order.status =
+'delivered'` on the campaign's orders in active Delivery — the same write an
+ordinary stop's Mark Delivered makes — and nothing else: no payment mark, no
+invoice, no pickup state. A delivered order stays on both pickup documents
+(§9.1 lists it, open or closed). The action is tenant- and campaign-scoped,
+re-reads the eligible set on the server, refuses (writing nothing) when the stop
+changed since it was loaded, validates every order against the shared transition
+matrix, and writes all of them in one transaction or none.
+
+Production, labels, packing slips, the manifest, box counts and packaging
+need remain ORDER-level; only the stop list and this action aggregate.
+
 ---
 
 # SECTION 9 — COORDINATOR VISIBILITY
@@ -383,6 +422,7 @@ Do not re-derive these. Import them.
 | What tier was sold? | `lib/orderItemTier.ts` — `resolveSoldVariantSize` |
 | Tier string vocabulary | `lib/serving_multipliers.ts` — `resolveVariantSize` (sensitive core file; compose, never edit) |
 | Is this fundraiser or customer delivery? | `lib/delivery/orderClassification.ts` |
+| What are the Delivery board's stops, and where does a fundraiser stop go? | `lib/delivery/deliveryStops.ts` — `buildDeliveryStops`, `resolveFundraiserStopAddress` (§3.2 as amended) |
 | Order status + legal transitions | `lib/orderStatus.ts` |
 | Is the campaign closed? | `lib/campaignBundleSelection.ts` — `CLOSED_STATUSES`, `isCampaignClosed` |
 | Which orders does a coordinator pickup document list? | `lib/coordinatorSupporterOrders.ts` — `isPickupDocumentOrder`, `pickupDocumentOrderWhere` (§9.1) |
@@ -489,6 +529,10 @@ Fundraiser and ordinary delivery share one render path with no discriminator, so
 a grouping change written directly in that path silently changes what a regular
 customer's delivery looks like. The classification boundary exists so that
 change has something safe to branch on. Its fixtures are the contract.
+
+**Done — DELIVERY-FUNDRAISER-GROUPING-1.** The board builds its stops through
+`lib/delivery/deliveryStops.ts`, which consumes this module; the classification
+tests now pin exactly that consumer and the fundraiser delivery route.
 
 ## 15.4 Beware brittle source-text assertions
 Several suites assert on file SOURCE TEXT, including occurrence counts and

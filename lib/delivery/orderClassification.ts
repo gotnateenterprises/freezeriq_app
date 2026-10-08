@@ -19,9 +19,17 @@
  * discriminator to exist FIRST — otherwise the grouping edit lands in the one
  * code path that also draws every regular customer's delivery.
  *
- * This module is that discriminator. It changes no behaviour and has no
- * importers yet: it is the boundary the delivery repair will consume instead of
- * re-deriving these rules inline for a third time.
+ * This module is that discriminator: the boundary the delivery repair consumes
+ * instead of re-deriving these rules inline for a third time. Since
+ * DELIVERY-FUNDRAISER-GROUPING-1 it has exactly two consumers — the Delivery stop
+ * builder (lib/delivery/deliveryStops.ts) and the fundraiser Mark Delivered
+ * route (app/api/delivery/campaign-delivered/route.ts) — and a test pins that.
+ *
+ * Location note: `fundraiserDeliveryLocation` below still answers "what is the
+ * campaign's pickup location". Which ADDRESS a fundraiser stop navigates to is
+ * the stop builder's rule (organization address first, then this pickup location
+ * when it reads like a street address — contract §3.2 as amended); it reuses
+ * this function for the pickup-location half rather than reading the column again.
  *
  * THE GROUPING KEY IS FundraiserCampaign.id — NOTHING ELSE
  *

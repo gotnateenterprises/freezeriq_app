@@ -337,13 +337,14 @@ describe('PRESERVED BEHAVIOUR', () => {
         }
     });
 
-    it('R4. the orderClassification contract is preserved — grouping is unchanged and its tripwire stays armed', () => {
-        // This phase changes WHICH orders are active, never how they are grouped
-        // into stops: one order is still one stop, so ordinary customer delivery
-        // keeps its own per-order stop at its own address and no campaign is
-        // collapsed. The discriminator therefore stays unimported, and the
-        // zero-importer tripwire in tests/fulfillmentContinuity1Classification.ts
-        // stays armed for the grouping phase it was built for.
+    it('R4. the population authority decides WHICH orders, never how they group; grouping lives only in the stop builder', () => {
+        // OPS-6B.1 changed WHICH orders are active and left grouping alone. The
+        // grouping phase it reserved — DELIVERY-FUNDRAISER-GROUPING-1 — has now
+        // landed in lib/delivery/deliveryStops.ts (one campaign = one stop) and the
+        // fundraiser Mark Delivered route. This keeps both halves honest: the
+        // discriminator has exactly those two consumers, and the population
+        // authority itself still contains no grouping at all.
+        const IMPORTS_IT = /(?:\bfrom\s*|\brequire\(\s*|\bimport\(\s*)['"][^'"]*\borderClassification['"]/;
         const hits: string[] = [];
         let scanned = 0;
         const walk = (dir: string) => {
@@ -356,13 +357,13 @@ describe('PRESERVED BEHAVIOUR', () => {
                     walk(full);
                 } else if (/\.(ts|tsx)$/.test(e.name)) {
                     scanned++;
-                    if (readFileSync(full, 'utf8').includes('delivery/orderClassification')) hits.push(full);
+                    if (IMPORTS_IT.test(readFileSync(full, 'utf8'))) hits.push(full.slice(ROOT.length + 1).replace(/\\/g, '/'));
                 }
             }
         };
         for (const root of ['app', 'components', 'lib']) walk(join(ROOT, root));
         expect(scanned).toBeGreaterThan(100);
-        expect(hits).toEqual([]);
+        expect(hits.sort()).toEqual(['app/api/delivery/campaign-delivered/route.ts', 'lib/delivery/deliveryStops.ts']);
         // And no grouping/aggregation was introduced into the population authority.
         expect(strip(read(AUTHORITY))).not.toMatch(/groupBy|campaignId|groupOrdersForDelivery/);
     });
