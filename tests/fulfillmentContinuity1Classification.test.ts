@@ -273,11 +273,16 @@ describe('5. lib/delivery/orderClassification.ts structure', () => {
         expect(fn).toMatch(/pickup_location/);
     });
 
-    it('is consumed ONLY by the Delivery stop builder and the fundraiser delivery route', () => {
+    it('is consumed ONLY by the Delivery stop builder, the fundraiser delivery route and the order-recipient-name rule', () => {
         // DELIVERY-FUNDRAISER-GROUPING-1 is the grouping phase this tripwire was
         // armed for (contract §15.3). It used to require ZERO importers; it now
         // pins the exact two that phase added, so any further consumer is still a
-        // deliberate, reviewed change rather than a quiet re-use. Matches IMPORT
+        // deliberate, reviewed change rather than a quiet re-use.
+        // PROD-PACKED-READY-NAME-1 is that deliberate change for a third: the
+        // Production display rule lib/orderRecipientName.ts asks the SAME
+        // "is this a fundraiser order?" question (source + campaign_id) rather than
+        // re-deriving the conjunction, so a coordinator-entered order's supporter
+        // — not its organization — titles a Packed & Ready row. Matches IMPORT
         // statements (relative or aliased), not prose, so a comment naming the
         // module can neither trip nor satisfy it.
         // Walked in Node rather than shelled out to a grep binary: a missing
@@ -315,6 +320,7 @@ describe('5. lib/delivery/orderClassification.ts structure', () => {
         expect(hits.sort()).toEqual([
             'app/api/delivery/campaign-delivered/route.ts',
             'lib/delivery/deliveryStops.ts',
+            'lib/orderRecipientName.ts',
         ]);
     });
 });

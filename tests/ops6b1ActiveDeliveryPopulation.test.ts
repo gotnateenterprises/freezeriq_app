@@ -342,8 +342,10 @@ describe('PRESERVED BEHAVIOUR', () => {
         // grouping phase it reserved — DELIVERY-FUNDRAISER-GROUPING-1 — has now
         // landed in lib/delivery/deliveryStops.ts (one campaign = one stop) and the
         // fundraiser Mark Delivered route. This keeps both halves honest: the
-        // discriminator has exactly those two consumers, and the population
-        // authority itself still contains no grouping at all.
+        // discriminator has exactly those two Delivery consumers (plus the
+        // Production display rule PROD-PACKED-READY-NAME-1 added, which only asks
+        // "is this a fundraiser order?"), and the population authority itself
+        // still contains no grouping at all.
         const IMPORTS_IT = /(?:\bfrom\s*|\brequire\(\s*|\bimport\(\s*)['"][^'"]*\borderClassification['"]/;
         const hits: string[] = [];
         let scanned = 0;
@@ -363,7 +365,11 @@ describe('PRESERVED BEHAVIOUR', () => {
         };
         for (const root of ['app', 'components', 'lib']) walk(join(ROOT, root));
         expect(scanned).toBeGreaterThan(100);
-        expect(hits.sort()).toEqual(['app/api/delivery/campaign-delivered/route.ts', 'lib/delivery/deliveryStops.ts']);
+        expect(hits.sort()).toEqual([
+            'app/api/delivery/campaign-delivered/route.ts',
+            'lib/delivery/deliveryStops.ts',
+            'lib/orderRecipientName.ts',
+        ]);
         // And no grouping/aggregation was introduced into the population authority.
         expect(strip(read(AUTHORITY))).not.toMatch(/groupBy|campaignId|groupOrdersForDelivery/);
     });

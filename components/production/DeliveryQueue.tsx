@@ -9,6 +9,10 @@ import { writeBoxLabelBatch, writePackingSlipBatch, fetchAuthenticatedBusinessId
 // lane header can consume the exact same rule the printed labels do rather
 // than re-deriving a second, divergent box count.
 import { summarizeItemPacking } from '@/lib/physicalBoxPacking';
+// PROD-PACKED-READY-NAME-1: the ONE rule for whose order a row is — the box label's
+// own supporter resolver for a fundraiser order, the long-standing customer name
+// for everything else. See lib/orderRecipientName.ts.
+import { resolveOrderRecipientName } from '@/lib/orderRecipientName';
 
 interface Order {
     id: string;
@@ -20,6 +24,13 @@ interface Order {
     // KB-1A: identity fallback for orders with no linked Customer relation
     // (manual and imported orders still carry this scalar).
     customer_name?: string | null;
+    // PROD-PACKED-READY-NAME-1: order-time identity and the fundraiser signals.
+    // All of these are Order scalars the dashboard route already returns
+    // (`include` ships every scalar); none is a new query or a new column.
+    first_name?: string | null;
+    last_name?: string | null;
+    source?: string | null;
+    campaign_id?: string | null;
     created_at: string;
     items: {
         quantity: number;
@@ -415,7 +426,12 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                                 aria-label={`Select order ${order.id.slice(0, 8)}`}
                             />
                             <div>
-                                <h4 className="font-black text-slate-900 dark:text-white text-lg">{order.customer?.name || order.customer_name || 'Unknown Customer'}</h4>
+                                {/* PROD-PACKED-READY-NAME-1: a fundraiser order is titled by the
+                                    SUPPORTER (the same resolver the box label uses). The linked
+                                    Customer can be the ORGANIZATION on a coordinator-entered
+                                    order, so it must not decide the title. Ordinary orders are
+                                    titled exactly as before. */}
+                                <h4 className="font-black text-slate-900 dark:text-white text-lg">{resolveOrderRecipientName(order)}</h4>
                                 <div className="text-sm text-slate-500 flex flex-col">
                                     <span>#{order.id.slice(0, 8)} • {format(new Date(order.created_at), 'MMM d')}</span>
                                     {order.customer?.delivery_address && (

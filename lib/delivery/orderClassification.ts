@@ -21,9 +21,11 @@
  *
  * This module is that discriminator: the boundary the delivery repair consumes
  * instead of re-deriving these rules inline for a third time. Since
- * DELIVERY-FUNDRAISER-GROUPING-1 it has exactly two consumers — the Delivery stop
+ * DELIVERY-FUNDRAISER-GROUPING-1 it has two Delivery consumers — the Delivery stop
  * builder (lib/delivery/deliveryStops.ts) and the fundraiser Mark Delivered
- * route (app/api/delivery/campaign-delivered/route.ts) — and a test pins that.
+ * route (app/api/delivery/campaign-delivered/route.ts) — plus, since
+ * PROD-PACKED-READY-NAME-1, the Production display rule that asks only "is this a
+ * fundraiser order?" (lib/orderRecipientName.ts). A test pins all three.
  *
  * Location note: `fundraiserDeliveryLocation` below still answers "what is the
  * campaign's pickup location". Which ADDRESS a fundraiser stop navigates to is
