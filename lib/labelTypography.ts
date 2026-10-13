@@ -76,6 +76,31 @@
  * SAME accepted tradeoff this module already made for names, now extended to
  * a rarer, independent case (no real organization name in this tenant's data
  * exceeds ORG_NAME_LONG_THRESHOLD as of BOX-LABEL-ORG-1).
+ *
+ * PRODUCTION-LABEL-PRESETS-1 ADDENDUM — one budget per label size ("face")
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ * Everything above is the budget for a 4" x 2.5" sticker, and it is unchanged:
+ * it is now the `4x2.5` face, the default for every function here. A 4" x 2"
+ * sticker (Avery 5163 / 15513) has the same width but only 1.76in of printable
+ * height instead of 2.26in, so the same type would overrun it. The `4x2` face
+ * prints exactly the same text — same fields, same order, same tier rules and
+ * thresholds — at sizes budgeted for that height:
+ *
+ *   logo row   0.55in -> 0.30in   (cosmetic; the tenant name fallback is 12pt,
+ *                                  0.25in at the inherited 1.5 line height)
+ *   comfortable  name 22pt / content 11pt
+ *   standard     name 19pt / content 9.5pt
+ *   compact      name 14pt / content 8.5pt
+ *   organization 9 / 8.5 / 8pt
+ *
+ * Budgeted the same way as the 4x2.5 face — every content entry wrapped to
+ * two rendered rows, plus the organization line at its largest size — the
+ * tightest reachable shape (compact: long name on two lines, two entries)
+ * leaves ~0.05in, and every other tier leaves 0.11in or more. Box N of M
+ * (10pt) and LARGE/SMALL BOX (8pt) are the same on both faces. Which face a
+ * sticker uses is decided by its label preset (lib/labelPresets.ts), never by
+ * the text on it.
  */
 
 /** Which budget a sticker is rendered under. */
@@ -111,6 +136,49 @@ export const STICKER_TYPOGRAPHY_TIERS: Readonly<Record<StickerTypographyTier, St
         compact: Object.freeze({ tier: 'compact', nameSizePt: 18, contentSizePt: 10 }),
     });
 
+/* ── PRODUCTION-LABEL-PRESETS-1: one face per label size ───────────────── */
+
+/** The label size a face was budgeted for, width x height in inches. */
+export type StickerFaceId = '4x2.5' | '4x2';
+
+export interface StickerFace {
+    id: StickerFaceId;
+    /** The three name/content tiers. Same tier rules on every face; only the sizes differ. */
+    tiers: Readonly<Record<StickerTypographyTier, StickerTypography>>;
+    /** Organization line, by the ORG_NAME_* length buckets below. */
+    orgNameSizesPt: Readonly<{ short: number; medium: number; long: number }>;
+    /** Tenant logo ceiling, which is also the header row's reserved height (CSS length). */
+    logoMaxHeight: string;
+    /** Tenant logo width ceiling (CSS length). */
+    logoMaxWidth: string;
+}
+
+export const STICKER_FACES: Readonly<Record<StickerFaceId, StickerFace>> = Object.freeze({
+    // The 4" x 2.5" budget documented above, exactly as it has always printed.
+    '4x2.5': Object.freeze({
+        id: '4x2.5',
+        tiers: STICKER_TYPOGRAPHY_TIERS,
+        orgNameSizesPt: Object.freeze({ short: 10, medium: 9, long: 8 }),
+        logoMaxHeight: '0.55in',
+        logoMaxWidth: '1.70in',
+    }),
+    // The 4" x 2" budget — see the PRODUCTION-LABEL-PRESETS-1 addendum above.
+    '4x2': Object.freeze({
+        id: '4x2',
+        tiers: Object.freeze({
+            comfortable: Object.freeze({ tier: 'comfortable', nameSizePt: 22, contentSizePt: 11 }),
+            standard: Object.freeze({ tier: 'standard', nameSizePt: 19, contentSizePt: 9.5 }),
+            compact: Object.freeze({ tier: 'compact', nameSizePt: 14, contentSizePt: 8.5 }),
+        }),
+        orgNameSizesPt: Object.freeze({ short: 9, medium: 8.5, long: 8 }),
+        logoMaxHeight: '0.30in',
+        logoMaxWidth: '1.40in',
+    }),
+});
+
+/** The face every function here uses when none is given: the 4" x 2.5" sticker. */
+export const DEFAULT_STICKER_FACE: StickerFace = STICKER_FACES['4x2.5'];
+
 /**
  * Choose the typography for one sticker.
  *
@@ -125,10 +193,14 @@ export const STICKER_TYPOGRAPHY_TIERS: Readonly<Record<StickerTypographyTier, St
  * sticker must always render. An out-of-range content count is clamped
  * rather than throwing, since refusing to size a label would be a worse
  * failure than printing it slightly conservatively.
+ *
+ * PRODUCTION-LABEL-PRESETS-1: `face` picks the label size's own sizes; the
+ * tier decision itself is identical on every face.
  */
 export function chooseStickerTypography(
     supporterName: string | null | undefined,
     contentLineCount: number,
+    face: StickerFace = DEFAULT_STICKER_FACE,
 ): StickerTypography {
     const name = (supporterName ?? '').trim();
     const isLongName = name.length > NAME_LONG_THRESHOLD;
@@ -136,9 +208,9 @@ export function chooseStickerTypography(
     const count = Number.isFinite(contentLineCount) ? Math.max(1, Math.floor(contentLineCount)) : 1;
     const hasTwoContentLines = count >= 2;
 
-    if (isLongName && hasTwoContentLines) return STICKER_TYPOGRAPHY_TIERS.compact;
-    if (isLongName || hasTwoContentLines) return STICKER_TYPOGRAPHY_TIERS.standard;
-    return STICKER_TYPOGRAPHY_TIERS.comfortable;
+    if (isLongName && hasTwoContentLines) return face.tiers.compact;
+    if (isLongName || hasTwoContentLines) return face.tiers.standard;
+    return face.tiers.comfortable;
 }
 
 /* ── BOX-LABEL-ORG-1: the fundraiser organization line ──────────────────── */
@@ -178,9 +250,10 @@ export const ORG_NAME_LONG_THRESHOLD = 40;
  */
 export function chooseOrgNameTypography(
     organizationName: string | null | undefined,
+    face: StickerFace = DEFAULT_STICKER_FACE,
 ): OrgNameTypography {
     const name = (organizationName ?? '').trim();
-    if (name.length > ORG_NAME_LONG_THRESHOLD) return { sizePt: 8 };
-    if (name.length > ORG_NAME_MEDIUM_THRESHOLD) return { sizePt: 9 };
-    return { sizePt: 10 };
+    if (name.length > ORG_NAME_LONG_THRESHOLD) return { sizePt: face.orgNameSizesPt.long };
+    if (name.length > ORG_NAME_MEDIUM_THRESHOLD) return { sizePt: face.orgNameSizesPt.medium };
+    return { sizePt: face.orgNameSizesPt.short };
 }

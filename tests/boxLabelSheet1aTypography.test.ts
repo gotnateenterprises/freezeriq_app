@@ -66,10 +66,14 @@ const cssRule = (raw: string, selector: string, nextMarker: string): string => {
 
 const src = strip(read(PAGE));
 const sticker = src.slice(src.indexOf('className="label-slot"'));
-const logoIn = (name: string) =>
-    Number((src.match(new RegExp(`const ${name} = '([\\d.]+)in';`)) || [])[1]);
-const LOGO_H = logoIn('LOGO_MAX_HEIGHT_IN');
-const LOGO_W = logoIn('LOGO_MAX_WIDTH_IN');
+// REVISED BY PRODUCTION-LABEL-PRESETS-1: the logo ceiling moved from two page
+// constants (LOGO_MAX_HEIGHT_IN = '0.55in', LOGO_MAX_WIDTH_IN = '1.70in') into
+// the 4" x 2.5" sticker's face, with the same values; the page reads it from the
+// selected preset, whose default is this face (asserted in test 6).
+const { STICKER_FACES } = require('@/lib/labelTypography');
+const FACE_4X25 = STICKER_FACES['4x2.5'];
+const LOGO_H = parseFloat(FACE_4X25.logoMaxHeight);
+const LOGO_W = parseFloat(FACE_4X25.logoMaxWidth);
 const BOX_TYPE_PT = Number((sticker.match(/fontSize: '([\d.]+)pt'[^}]*textTransform: 'uppercase'/) || [])[1]);
 
 /**
@@ -168,7 +172,10 @@ describe('1-2. OL600 geometry is frozen', () => {
 
     it('2. the sticker rectangle is still exactly 4 x 2.5 on a Letter page', () => {
         const raw = read(PAGE);
-        expect(raw).toMatch(/size:\s*8\.5in 11in/);
+        // REVISED BY PRODUCTION-LABEL-PRESETS-1: sized from the selected stock's
+        // geometry, which starts as OL600 (pinned here, numbers pinned in test 1).
+        expect(raw).toMatch(/size:\s*\$\{geometry\.sheetWidthIn\}in \$\{geometry\.sheetHeightIn\}in/);
+        expect(require('@/lib/labelPresets').DEFAULT_LABEL_PRESET.geometry).toBe(OL600_SHEET);
 
         // Scoped to the .label-slot RULE, not the whole file: .align-slot
         // declares the same dimensions, so an unscoped match would pass even
@@ -179,8 +186,8 @@ describe('1-2. OL600 geometry is frozen', () => {
         // next `}`: these declarations contain `${...}` interpolations, whose
         // closing brace would otherwise truncate the slice mid-declaration.
         const slotRule = cssRule(raw, '.label-slot {', '.align-slot {');
-        expect(slotRule).toMatch(/width:\s*\$\{OL600_SHEET\.labelWidthIn\}in/);
-        expect(slotRule).toMatch(/height:\s*\$\{OL600_SHEET\.labelHeightIn\}in/);
+        expect(slotRule).toMatch(/width:\s*\$\{geometry\.labelWidthIn\}in/);
+        expect(slotRule).toMatch(/height:\s*\$\{geometry\.labelHeightIn\}in/);
         expect(slotRule).toMatch(/padding:\s*\$\{LABEL_PADDING_IN\}/);
         expect(slotRule).toMatch(/overflow:\s*hidden/);
         // No hardcoded inch dimension may replace the shared constants.
@@ -190,8 +197,8 @@ describe('1-2. OL600 geometry is frozen', () => {
         // The alignment-test outline uses the same constants, so the printed
         // guide can never disagree with the real sticker.
         const alignRule = cssRule(raw, '.align-slot {', '`,');
-        expect(alignRule).toMatch(/width:\s*\$\{OL600_SHEET\.labelWidthIn\}in/);
-        expect(alignRule).toMatch(/height:\s*\$\{OL600_SHEET\.labelHeightIn\}in/);
+        expect(alignRule).toMatch(/width:\s*\$\{geometry\.labelWidthIn\}in/);
+        expect(alignRule).toMatch(/height:\s*\$\{geometry\.labelHeightIn\}in/);
     });
 });
 
@@ -233,8 +240,10 @@ describe('3-7. name and logo', () => {
     it('6. the logo stays proportional and cannot overpower the name', () => {
         const imgTag = src.slice(src.indexOf('<img'), src.indexOf('/>', src.indexOf('<img')));
         expect(imgTag).toMatch(/objectFit:\s*'contain'/);
-        expect(imgTag).toMatch(/maxHeight: LOGO_MAX_HEIGHT_IN/);
-        expect(imgTag).toMatch(/maxWidth: LOGO_MAX_WIDTH_IN/);
+        expect(imgTag).toMatch(/maxHeight: face\.logoMaxHeight/);
+        expect(imgTag).toMatch(/maxWidth: face\.logoMaxWidth/);
+        // The face the page starts on is the 4" x 2.5" one measured here.
+        expect(require('@/lib/labelPresets').DEFAULT_LABEL_PRESET.face).toBe(FACE_4X25);
         expect(imgTag).not.toMatch(/\bheight:\s*'[\d.]+in'/);
         expect(imgTag).not.toMatch(/\bwidth:\s*'[\d.]+in'/);
         // Bounded relative to the smallest name tier.
@@ -283,7 +292,7 @@ describe('8-12. content and fit', () => {
         expect(sticker).not.toMatch(/contentLines\.filter\(/);
         // ...and the count it sizes from is the full count, so a truncating
         // render could not even be masked by a smaller tier.
-        expect(src).toMatch(/chooseStickerTypography\(box\.supporterName, contentLines\.length\)/);
+        expect(src).toMatch(/chooseStickerTypography\(box\.supporterName, contentLines\.length, face\)/);
 
         // Behavioural counterpart: a paired box really does have two lines.
         const boxes = boxesOf(ORDER([
@@ -409,7 +418,7 @@ describe('automatic typography is deterministic', () => {
     });
 
     it('the page routes both variable sizes through the authority', () => {
-        expect(src).toMatch(/chooseStickerTypography\(box\.supporterName, contentLines\.length\)/);
+        expect(src).toMatch(/chooseStickerTypography\(box\.supporterName, contentLines\.length, face\)/);
         expect(sticker).toMatch(/fontSize: `\$\{type\.nameSizePt\}pt`/);
         expect(sticker).toMatch(/fontSize: `\$\{type\.contentSizePt\}pt`/);
     });
@@ -455,7 +464,7 @@ describe('19-26. frozen behaviour', () => {
         expect(sheets[0].slots.filter((s) => s.label !== null).map((s) => s.position)).toEqual([4, 5, 6, 7, 8]);
         expect(sheets[1].slots.filter((s) => s.label !== null).map((s) => s.position)).toEqual([1]);
         expect(normalizeStartPosition(9)).toBe(8);
-        expect(src).toMatch(/paginateLabelSheets\(boxes \|\| \[\], startPosition\)/);
+        expect(src).toMatch(/paginateLabelSheets\(boxes \|\| \[\], startPosition, geometry\)/);
     });
 
     it('25. Delivery does not consume the STICKER-specific typography/geometry authorities', () => {

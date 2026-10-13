@@ -135,7 +135,13 @@ describe('ONE CANONICAL LABEL AUTHORITY', () => {
 
     it('B5. Production Packed & Ready box labels are UNCHANGED', () => {
         const page = strip(read(OL600_PAGE));
-        expect(page).toMatch(/OL600_SHEET/);
+        // REVISED BY PRODUCTION-LABEL-PRESETS-1: the page no longer names
+        // OL600_SHEET — it lays out the selected stock, starting on the preset
+        // registry's default, which is exactly that sheet. Delivery's reprint
+        // lands on this same page and so gets the same selector.
+        expect(page).toMatch(/DEFAULT_LABEL_PRESET/);
+        const { OL600_SHEET } = require('@/lib/labelSheetLayout');
+        expect(require('@/lib/labelPresets').DEFAULT_LABEL_PRESET.geometry).toBe(OL600_SHEET);
         expect(page).toMatch(/paginateLabelSheets\(/);
         expect(page).toMatch(/readBoxLabelBatch\(/);
         expect(page).toMatch(/'\/api\/production\/box-labels'/);

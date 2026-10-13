@@ -17,14 +17,21 @@ import type { BlockedBoxOrder } from '@/lib/supporterBoxManifest';
 import { chooseBrandHeader, isLogoSettling, type TenantLogoStatus } from '@/lib/tenantLogo';
 import { chooseStickerTypography, chooseOrgNameTypography } from '@/lib/labelTypography';
 import {
-    OL600_SHEET,
     FIRST_SLOT,
-    LAST_SLOT,
+    lastSlot,
     paginateLabelSheets,
     normalizeStartPosition,
     occupiedSlotCount,
     slotOrigin,
 } from '@/lib/labelSheetLayout';
+import {
+    LABEL_PRESETS,
+    DEFAULT_LABEL_PRESET,
+    resolveLabelPreset,
+    describePaper,
+    formatInches,
+    type LabelPreset,
+} from '@/lib/labelPresets';
 
 /**
  * OPS-6 / OPS-6A — the supporter outer-box label sheet.
@@ -120,11 +127,17 @@ const LOGO_SETTLE_TIMEOUT_MS = 2500;
  * organization, then customer, then Box N of M / size, then contents. See
  * lib/labelTypography.ts's module-header addendum for the exact space
  * budget this required from the `compact` tier.
+ *
+ * PRODUCTION-LABEL-PRESETS-1 — the operator now chooses the label stock
+ * (lib/labelPresets.ts). The stock decides the sheet geometry and the text
+ * sizes — the preset's `face`, which also holds the logo ceiling that used to
+ * be two constants here (still 0.55in x 1.70in on the 4" x 2.5" sticker). It never decides
+ * the content: every sticker below renders the same fields from the same
+ * physical boxes on every stock. The default is the stock printed before this
+ * phase, so doing nothing changes nothing.
  */
-const LOGO_MAX_HEIGHT_IN = '0.55in';
-const LOGO_MAX_WIDTH_IN = '1.70in';
 
-/** Inner padding of one sticker, keeping content off the die-cut edge. */
+/** Inner padding of one sticker, keeping content off the die-cut edge. Same on every stock. */
 const LABEL_PADDING_IN = '0.12in';
 
 interface BoxLabelResponse {
@@ -159,6 +172,28 @@ export default function BoxLabelsPage() {
      * real label stock. Carries no supporter data whatsoever.
      */
     const [alignmentMode, setAlignmentMode] = useState(false);
+
+    /**
+     * PRODUCTION-LABEL-PRESETS-1: which label stock this print run is for.
+     * Held for this page only — never stored, never sent to the server (the
+     * box manifest does not depend on it) — and it starts at the stock that
+     * was printed before this phase, so doing nothing changes nothing.
+     */
+    const [preset, setPreset] = useState<LabelPreset>(DEFAULT_LABEL_PRESET);
+    const geometry = preset.geometry;
+    const face = preset.face;
+
+    /**
+     * Only an id in the registry is accepted; anything else is refused and the
+     * current stock stays selected. The start position is re-clamped to the new
+     * sheet, so position 10 on Avery becomes 8 on OL600 rather than overflowing.
+     */
+    const choosePreset = (id: string) => {
+        const next = resolveLabelPreset(id);
+        if (!next) return;
+        setPreset(next);
+        setStartPosition((current) => normalizeStartPosition(current, next.geometry));
+    };
 
     /**
      * Tenant branding, from the ONE canonical authority (/api/tenant/branding,
@@ -370,13 +405,14 @@ export default function BoxLabelsPage() {
     const supporterCount = new Set((boxes || []).map(b => b.orderId)).size;
 
     /**
-     * BOX-LABEL-SHEET-1: physical boxes -> OL600WX sheets.
+     * BOX-LABEL-SHEET-1: physical boxes -> sheets of the selected stock.
      *
      * The box list arrives already in its canonical physical order from
      * lib/physicalBoxPacking.ts; pagination preserves that order exactly and
-     * neither drops nor repeats a box. One physical box remains one sticker.
+     * neither drops nor repeats a box. One physical box remains one sticker,
+     * on every stock — only how many fit on a sheet changes.
      */
-    const sheets = paginateLabelSheets(boxes || [], startPosition);
+    const sheets = paginateLabelSheets(boxes || [], startPosition, geometry);
 
     /**
      * The printed header: tenant logo, else tenant name, else nothing.
@@ -400,7 +436,7 @@ export default function BoxLabelsPage() {
                     // so this only catches an image evicted between the probe
                     // and the paint. Falling back to the name, never to blank.
                     onError={() => setLogoStatus('failed')}
-                    style={{ maxHeight: LOGO_MAX_HEIGHT_IN, maxWidth: LOGO_MAX_WIDTH_IN, objectFit: 'contain', display: 'block' }}
+                    style={{ maxHeight: face.logoMaxHeight, maxWidth: face.logoMaxWidth, objectFit: 'contain', display: 'block' }}
                 />
             );
         }
@@ -465,13 +501,28 @@ export default function BoxLabelsPage() {
 
                 <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 mb-8">
                     <div className="flex flex-wrap gap-6 items-end justify-between">
+                        {/* PRODUCTION-LABEL-PRESETS-1: which stock is loaded.
+                            Changes the sheet layout and type sizes only —
+                            never the box count or what a label says. */}
                         <div>
-                            <div className="text-xs font-bold text-slate-500 uppercase mb-1">Label Stock</div>
-                            <div className="font-bold text-slate-900 dark:text-white">
-                                OL600WX — 4&quot; × 2.5&quot;, 8 per sheet
+                            <label htmlFor="labelPreset" className="block text-xs font-bold text-slate-500 uppercase mb-1">
+                                Label Type
+                            </label>
+                            <select
+                                id="labelPreset"
+                                value={preset.id}
+                                onChange={(e) => choosePreset(e.target.value)}
+                                className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold"
+                            >
+                                {LABEL_PRESETS.map((p) => (
+                                    <option key={p.id} value={p.id}>{p.displayName}</option>
+                                ))}
+                            </select>
+                            <div className="text-xs text-slate-500 font-medium mt-1">
+                                {preset.helperText}
                             </div>
                             <div className="text-xs text-slate-500 font-medium mt-0.5">
-                                {sheets.length} sheet{sheets.length === 1 ? '' : 's'} · US Letter
+                                {sheets.length} sheet{sheets.length === 1 ? '' : 's'} · {describePaper(geometry)}
                             </div>
                         </div>
 
@@ -485,10 +536,10 @@ export default function BoxLabelsPage() {
                             <select
                                 id="startPosition"
                                 value={startPosition}
-                                onChange={(e) => setStartPosition(normalizeStartPosition(e.target.value))}
+                                onChange={(e) => setStartPosition(normalizeStartPosition(e.target.value, geometry))}
                                 className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold"
                             >
-                                {Array.from({ length: LAST_SLOT }, (_, i) => i + FIRST_SLOT).map((p) => (
+                                {Array.from({ length: lastSlot(geometry) }, (_, i) => i + FIRST_SLOT).map((p) => (
                                     <option key={p} value={p}>
                                         {p === FIRST_SLOT ? 'Position 1 — New sheet' : `Position ${p}`}
                                     </option>
@@ -513,14 +564,17 @@ export default function BoxLabelsPage() {
                             Before printing on label stock
                         </h4>
                         <ul className="text-xs font-medium text-slate-600 dark:text-slate-300 space-y-1">
-                            <li>Load <strong>OnlineLabels OL600 / OL600WX</strong> sheets.</li>
-                            <li>Paper: <strong>US Letter 8.5 × 11</strong>, Portrait.</li>
+                            <li>Load <strong>{preset.stockName}</strong> sheets.</li>
+                            {preset.printerType === 'laser' && (
+                                <li>Printer: <strong>Laser</strong> — this stock is made for laser printers.</li>
+                            )}
+                            <li>Paper: <strong>{describePaper(geometry)}</strong>, Portrait.</li>
                             <li>Scale: <strong>100% / Actual Size</strong>.</li>
                             <li>Margins: <strong>None</strong> (browser margins off).</li>
                             <li>Do <strong>not</strong> select Fit to Page or Shrink to Fit.</li>
                         </ul>
                         <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mt-2">
-                            This stock has 0.18&quot; side margins, which sit inside some printers&apos;
+                            This stock has {formatInches(geometry.marginLeftIn)}&quot; side margins, which sit inside some printers&apos;
                             non-printable area. Run the alignment test on plain paper first.
                         </p>
                         <button
@@ -574,12 +628,16 @@ export default function BoxLabelsPage() {
                                     Sheet {sheet.sheetNumber} of {sheets.length}
                                 </h3>
                                 <span className="text-xs font-bold text-slate-500">
-                                    {occupiedSlotCount(sheet)} of {OL600_SHEET.labelsPerSheet} positions used
+                                    {occupiedSlotCount(sheet)} of {geometry.labelsPerSheet} positions used
                                 </span>
                             </div>
 
-                            {/* 2 x 4, mirroring the physical sheet's reading order. */}
-                            <div className="grid grid-cols-2 gap-2">
+                            {/* Columns x rows of the selected stock, mirroring the
+                                physical sheet's reading order. */}
+                            <div
+                                className="grid gap-2"
+                                style={{ gridTemplateColumns: `repeat(${geometry.columns}, minmax(0, 1fr))` }}
+                            >
                                 {sheet.slots.map((slot) => (
                                     <div
                                         key={slot.position}
@@ -631,7 +689,12 @@ export default function BoxLabelsPage() {
                 </div>
             </div>
 
-            {/* PRINT OPTIMIZED LAYOUT — OL600WX 8-up US Letter sheets */}
+            {/* PRINT OPTIMIZED LAYOUT — the selected stock's sheets (OL600WX 8-up
+                by default), at the manufacturer's own geometry.
+                PRODUCTION-LABEL-PRESETS-1: every dimension below now comes from
+                `geometry` (the selected preset's sheet). The CSS comments inside
+                the stylesheet are left word for word as they were, so the
+                default stock's printed page stays byte-identical to before. */}
             <div className="hidden print:block">
                 <style dangerouslySetInnerHTML={{
                     __html: `
@@ -643,7 +706,7 @@ export default function BoxLabelsPage() {
                                corner, so any browser margin would shift the
                                whole grid off the die-cut. */
                             @page {
-                                size: 8.5in 11in;
+                                size: ${geometry.sheetWidthIn}in ${geometry.sheetHeightIn}in;
                                 margin: 0;
                             }
                             body { margin: 0; padding: 0; }
@@ -661,8 +724,8 @@ export default function BoxLabelsPage() {
                                 break-after: always;
                                 page-break-after: always;
                                 position: relative;
-                                width: 8.5in;
-                                height: 11in;
+                                width: ${geometry.sheetWidthIn}in;
+                                height: ${geometry.sheetHeightIn}in;
                                 overflow: hidden;
                                 box-sizing: border-box;
                             }
@@ -672,8 +735,8 @@ export default function BoxLabelsPage() {
                                would drift against a die-cut sheet. */
                             .label-slot {
                                 position: absolute;
-                                width: ${OL600_SHEET.labelWidthIn}in;
-                                height: ${OL600_SHEET.labelHeightIn}in;
+                                width: ${geometry.labelWidthIn}in;
+                                height: ${geometry.labelHeightIn}in;
                                 overflow: hidden;
                                 box-sizing: border-box;
                                 display: flex;
@@ -690,11 +753,11 @@ export default function BoxLabelsPage() {
                             }
                             .align-slot {
                                 position: absolute;
-                                width: ${OL600_SHEET.labelWidthIn}in;
-                                height: ${OL600_SHEET.labelHeightIn}in;
+                                width: ${geometry.labelWidthIn}in;
+                                height: ${geometry.labelHeightIn}in;
                                 box-sizing: border-box;
                                 border: 1px dashed #999;
-                                border-radius: ${OL600_SHEET.cornerRadiusIn}in;
+                                border-radius: ${geometry.cornerRadiusIn ?? 0}in;
                                 display: flex;
                                 align-items: center;
                                 justify-content: center;
@@ -724,9 +787,9 @@ export default function BoxLabelsPage() {
                        checking registration on plain paper before committing
                        real stock. Deliberately carries NO supporter data. */
                     <div className="label-sheet">
-                        {Array.from({ length: OL600_SHEET.labelsPerSheet }, (_, i) => {
+                        {Array.from({ length: geometry.labelsPerSheet }, (_, i) => {
                             const position = i + FIRST_SLOT;
-                            const { leftIn, topIn } = slotOrigin(position);
+                            const { leftIn, topIn } = slotOrigin(position, geometry);
                             return (
                                 <div
                                     key={position}
@@ -736,7 +799,7 @@ export default function BoxLabelsPage() {
                                     <div style={{ textAlign: 'center', fontSize: '10pt', fontWeight: 700 }}>
                                         <div style={{ fontSize: '20pt', fontWeight: 900 }}>{position}</div>
                                         <div style={{ opacity: 0.7 }}>
-                                            {OL600_SHEET.labelWidthIn}&quot; × {OL600_SHEET.labelHeightIn}&quot;
+                                            {geometry.labelWidthIn}&quot; × {geometry.labelHeightIn}&quot;
                                         </div>
                                     </div>
                                 </div>
@@ -758,7 +821,7 @@ export default function BoxLabelsPage() {
                                 // name length and content count — so the
                                 // print result stays deterministic. No DOM
                                 // measurement, no shrink-to-fit.
-                                const type = chooseStickerTypography(box.supporterName, contentLines.length);
+                                const type = chooseStickerTypography(box.supporterName, contentLines.length, face);
                                 return (
                                     <div
                                         key={slot.position}
@@ -771,7 +834,7 @@ export default function BoxLabelsPage() {
                                             on a 2.5in sticker. */}
                                         <div style={{
                                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                            gap: '0.08in', minHeight: LOGO_MAX_HEIGHT_IN, marginBottom: '0.04in',
+                                            gap: '0.08in', minHeight: face.logoMaxHeight, marginBottom: '0.04in',
                                         }}>
                                             <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
                                                 {renderBrandHeader()}
@@ -792,7 +855,7 @@ export default function BoxLabelsPage() {
                                             can never show the wrong one. */}
                                         {box.organizationName && (
                                             <div style={{
-                                                fontSize: `${chooseOrgNameTypography(box.organizationName).sizePt}pt`,
+                                                fontSize: `${chooseOrgNameTypography(box.organizationName, face).sizePt}pt`,
                                                 fontWeight: 800, lineHeight: 1.1, letterSpacing: '0.01em',
                                                 marginBottom: '0.02in', wordBreak: 'break-word',
                                             }}>

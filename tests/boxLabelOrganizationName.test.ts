@@ -420,13 +420,17 @@ describe('H. packing regression', () => {
         expect(OL600_SHEET.labelHeightIn).toBe(2.5);
         expect(OL600_SHEET.labelsPerSheet).toBe(8);
         const raw = read(PAGE);
-        expect(raw).toMatch(/size:\s*8\.5in 11in/);
+        // REVISED BY PRODUCTION-LABEL-PRESETS-1: the page is sized from the
+        // selected stock's geometry, and the stock it starts on is OL600.
+        expect(raw).toMatch(/size:\s*\$\{geometry\.sheetWidthIn\}in \$\{geometry\.sheetHeightIn\}in/);
+        expect(require('@/lib/labelPresets').DEFAULT_LABEL_PRESET.geometry).toBe(OL600_SHEET);
         expect(raw).not.toMatch(/transform:\s*scale/);
     });
 
     it('start-position, pagination and alignment-test markup are untouched', () => {
         const raw = strip(read(PAGE));
-        expect(raw).toMatch(/paginateLabelSheets\(boxes \|\| \[\], startPosition\)/);
+        // REVISED BY PRODUCTION-LABEL-PRESETS-1: + the selected stock's geometry.
+        expect(raw).toMatch(/paginateLabelSheets\(boxes \|\| \[\], startPosition, geometry\)/);
         expect(raw).toMatch(/alignmentMode/);
         expect(raw).toMatch(/align-slot/);
     });

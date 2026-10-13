@@ -20,12 +20,21 @@ const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
 const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const PAGE = 'app/production/box-labels/page.tsx';
 
-/** Inches, from the page's own constants. */
-const readInches = (src: string, name: string): number => {
-    const m = src.match(new RegExp(`const ${name} = '([\\d.]+)in';`));
-    if (!m) throw new Error(`${name} not found as an inch constant`);
+/**
+ * Inches, from a CSS length.
+ *
+ * REVISED BY PRODUCTION-LABEL-PRESETS-1: the logo ceiling moved from the page's
+ * own constants (LOGO_MAX_HEIGHT_IN = '0.55in', LOGO_MAX_WIDTH_IN = '1.70in')
+ * into the 4" x 2.5" sticker's face in lib/labelTypography.ts, unchanged in
+ * value. This file still measures that sticker; the page reads the ceiling from
+ * the selected preset's face, which starts as this one (asserted in test 6).
+ */
+const readInches = (length: string): number => {
+    const m = /^([\d.]+)in$/.exec(length);
+    if (!m) throw new Error(`${length} is not an inch length`);
     return Number(m[1]);
 };
+const FACE_4X25 = require('@/lib/labelTypography').STICKER_FACES['4x2.5'];
 
 // REVISED BY BOX-LABEL-SHEET-1: the medium changed from a 4x6 page-per-box
 // to a 4 x 2.5 sticker, eight to a US Letter OL600WX sheet. The logo was
@@ -43,8 +52,8 @@ const squareRendered = (maxH: number, maxW: number) => Math.min(maxH, maxW);
 
 describe('OPS-6A.3 logo sizing', () => {
     const src = strip(read(PAGE));
-    const maxH = readInches(src, 'LOGO_MAX_HEIGHT_IN');
-    const maxW = readInches(src, 'LOGO_MAX_WIDTH_IN');
+    const maxH = readInches(FACE_4X25.logoMaxHeight);
+    const maxW = readInches(FACE_4X25.logoMaxWidth);
 
     it('1. the logo is substantial on the sticker without dominating it', () => {
         // SUPERSEDED BY BOX-LABEL-SHEET-1. The old "1.5-1.8x the 0.62in 4x6
@@ -62,8 +71,8 @@ describe('OPS-6A.3 logo sizing', () => {
     it('2. aspect ratio is preserved — bounded by max-* with contain, never fixed w+h', () => {
         const imgTag = src.slice(src.indexOf('<img'), src.indexOf('/>', src.indexOf('<img')));
         expect(imgTag).toMatch(/objectFit:\s*'contain'/);
-        expect(imgTag).toMatch(/maxHeight: LOGO_MAX_HEIGHT_IN/);
-        expect(imgTag).toMatch(/maxWidth: LOGO_MAX_WIDTH_IN/);
+        expect(imgTag).toMatch(/maxHeight: face\.logoMaxHeight/);
+        expect(imgTag).toMatch(/maxWidth: face\.logoMaxWidth/);
         // A fixed width AND height together would stretch a non-square logo.
         expect(imgTag).not.toMatch(/\bheight:\s*'[\d.]+in'/);
         expect(imgTag).not.toMatch(/\bwidth:\s*'[\d.]+in'/);
@@ -129,17 +138,23 @@ describe('OPS-6A.3 logo sizing', () => {
         // One constant drives both, so the container can never reserve less
         // space than the image it holds.
         const printBlock = src.slice(src.indexOf('hidden print:block'));
-        expect(printBlock).toMatch(/minHeight: LOGO_MAX_HEIGHT_IN/);
+        expect(printBlock).toMatch(/minHeight: face\.logoMaxHeight/);
+        // ...and the face the page starts on is the one measured above.
+        expect(require('@/lib/labelPresets').DEFAULT_LABEL_PRESET.face).toBe(FACE_4X25);
     });
 
     it('7. the print contract and page-break protection are intact', () => {
         // REVISED BY BOX-LABEL-SHEET-1: the printed PAGE is now the US Letter
         // stock sheet and the sticker is 4 x 2.5 within it. Same guarantees,
         // new medium.
+        // REVISED BY PRODUCTION-LABEL-PRESETS-1: sized from the selected stock's
+        // geometry, which starts as the OL600 4 x 2.5 sheet.
         const raw = read(PAGE);
-        expect(raw).toMatch(/size:\s*8\.5in 11in/);
-        expect(raw).toMatch(/width:\s*\$\{OL600_SHEET\.labelWidthIn\}in/);
-        expect(raw).toMatch(/height:\s*\$\{OL600_SHEET\.labelHeightIn\}in/);
+        expect(raw).toMatch(/size:\s*\$\{geometry\.sheetWidthIn\}in \$\{geometry\.sheetHeightIn\}in/);
+        expect(raw).toMatch(/width:\s*\$\{geometry\.labelWidthIn\}in/);
+        expect(raw).toMatch(/height:\s*\$\{geometry\.labelHeightIn\}in/);
+        const { OL600_SHEET } = require('@/lib/labelSheetLayout');
+        expect(require('@/lib/labelPresets').DEFAULT_LABEL_PRESET.geometry).toBe(OL600_SHEET);
         expect(raw).toMatch(/overflow:\s*hidden/);
         expect(raw).toMatch(/\.label-sheet:last-child\s*\{[\s\S]*?break-after:\s*auto/);
     });

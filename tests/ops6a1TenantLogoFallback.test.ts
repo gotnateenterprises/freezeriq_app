@@ -299,7 +299,9 @@ describe('2/4. rendering contract', () => {
         // numeric bound itself is asserted against the real page budget in
         // tests/ops6a3LogoSizing.test.ts rather than pinned as a magic value
         // here.
-        expect(headerContainer).toMatch(/minHeight:\s*LOGO_MAX_HEIGHT_IN/);
+        // REVISED BY PRODUCTION-LABEL-PRESETS-1: that shared constant is now the
+        // selected preset's face (face.logoMaxHeight), still driving both.
+        expect(headerContainer).toMatch(/minHeight:\s*face\.logoMaxHeight/);
         expect(headerContainer).toMatch(/marginBottom:/);
     });
 });
@@ -349,10 +351,14 @@ describe('8-11. owner-approved label content is untouched', () => {
 describe('12/13. print contract', () => {
     it('12. the printed sticker size is exact — OL600WX 4 x 2.5 on US Letter', () => {
         // SUPERSEDED BY BOX-LABEL-SHEET-1: was one 4x6 page per box.
+        // REVISED BY PRODUCTION-LABEL-PRESETS-1: sized from the selected stock's
+        // geometry, which starts as the OL600 4 x 2.5 sheet.
         const s = read(PAGE);
-        expect(s).toMatch(/size:\s*8\.5in 11in/);
-        expect(s).toMatch(/width:\s*\$\{OL600_SHEET\.labelWidthIn\}in/);
-        expect(s).toMatch(/height:\s*\$\{OL600_SHEET\.labelHeightIn\}in/);
+        expect(s).toMatch(/size:\s*\$\{geometry\.sheetWidthIn\}in \$\{geometry\.sheetHeightIn\}in/);
+        expect(s).toMatch(/width:\s*\$\{geometry\.labelWidthIn\}in/);
+        expect(s).toMatch(/height:\s*\$\{geometry\.labelHeightIn\}in/);
+        const { OL600_SHEET } = require('@/lib/labelSheetLayout');
+        expect(require('@/lib/labelPresets').DEFAULT_LABEL_PRESET.geometry).toBe(OL600_SHEET);
     });
 
     it('13. no trailing blank print page — the OPS-5F last-child exemption is intact', () => {

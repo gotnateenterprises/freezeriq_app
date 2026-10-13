@@ -957,10 +957,14 @@ describe('50-54. print', () => {
 
     it('52b. the printed sticker size is exact — OL600WX 4 x 2.5', () => {
         // SUPERSEDED BY BOX-LABEL-SHEET-1: was a 4x6 page per box.
+        // REVISED BY PRODUCTION-LABEL-PRESETS-1: sized from the selected stock's
+        // geometry, which starts as the OL600 4 x 2.5 sheet.
         const s = read(PAGE);
-        expect(s).toMatch(/size:\s*8\.5in 11in/);
-        expect(s).toMatch(/width:\s*\$\{OL600_SHEET\.labelWidthIn\}in/);
-        expect(s).toMatch(/height:\s*\$\{OL600_SHEET\.labelHeightIn\}in/);
+        expect(s).toMatch(/size:\s*\$\{geometry\.sheetWidthIn\}in \$\{geometry\.sheetHeightIn\}in/);
+        expect(s).toMatch(/width:\s*\$\{geometry\.labelWidthIn\}in/);
+        expect(s).toMatch(/height:\s*\$\{geometry\.labelHeightIn\}in/);
+        const { OL600_SHEET } = require('@/lib/labelSheetLayout');
+        expect(require('@/lib/labelPresets').DEFAULT_LABEL_PRESET.geometry).toBe(OL600_SHEET);
     });
 
     it('53. a paired Serves-2 box gets ONE sheet, not two', () => {

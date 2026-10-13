@@ -38,6 +38,16 @@ const ROOT = process.cwd();
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
 const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
+/**
+ * REVISED BY PRODUCTION-LABEL-PRESETS-1: the page no longer names OL600_SHEET
+ * or writes `8.5in 11in` literally — it prints the SELECTED stock's geometry,
+ * `geometry` (= preset.geometry), and the stock it starts on is OL600. So the
+ * page-source checks below now pin "sized from the shared geometry", and these
+ * helpers pin that the default really is the OL600 sheet these numbers describe.
+ */
+const PAGE_SIZE_RE = /size:\s*\$\{geometry\.sheetWidthIn\}in \$\{geometry\.sheetHeightIn\}in/;
+const defaultGeometry = () => require('@/lib/labelPresets').DEFAULT_LABEL_PRESET.geometry;
+
 const PAGE = 'app/production/box-labels/page.tsx';
 const LAYOUT = 'lib/labelSheetLayout.ts';
 const PACKING = 'lib/physicalBoxPacking.ts';
@@ -74,7 +84,8 @@ describe('0. failing-first: one 4x6 page per box could not satisfy OL600WX', () 
 
     it('0b. the printed page is US Letter, not a 4x6 label page', () => {
         const s = read(PAGE);
-        expect(s).toMatch(/size:\s*8\.5in 11in/);
+        expect(s).toMatch(PAGE_SIZE_RE);
+        expect(defaultGeometry()).toBe(OL600_SHEET);
         expect(s).not.toMatch(/size:\s*4in 6in/);
     });
 
@@ -91,7 +102,7 @@ describe('1-12. OL600 geometry', () => {
     it('1. the page is exactly 8.5 x 11', () => {
         expect(OL600_SHEET.sheetWidthIn).toBe(8.5);
         expect(OL600_SHEET.sheetHeightIn).toBe(11);
-        expect(read(PAGE)).toMatch(/size:\s*8\.5in 11in/);
+        expect(read(PAGE)).toMatch(PAGE_SIZE_RE);
     });
 
     it('2. the label is exactly 4 x 2.5', () => {
@@ -169,8 +180,9 @@ describe('1-12. OL600 geometry', () => {
         const s = strip(read(PAGE));
         expect(s).toMatch(/left: `\$\{slot\.leftIn\}in`/);
         expect(s).toMatch(/top: `\$\{slot\.topIn\}in`/);
-        expect(s).toMatch(/width:\s*\$\{OL600_SHEET\.labelWidthIn\}in/);
-        expect(s).toMatch(/height:\s*\$\{OL600_SHEET\.labelHeightIn\}in/);
+        expect(s).toMatch(/width:\s*\$\{geometry\.labelWidthIn\}in/);
+        expect(s).toMatch(/height:\s*\$\{geometry\.labelHeightIn\}in/);
+        expect(defaultGeometry()).toBe(OL600_SHEET);
     });
 });
 
@@ -323,8 +335,8 @@ describe('22-27. start position', () => {
     it('27b. the page exposes the control and routes it through the authority', () => {
         const s = strip(read(PAGE));
         expect(s).toMatch(/const \[startPosition, setStartPosition\] = useState<number>\(FIRST_SLOT\);/);
-        expect(s).toMatch(/setStartPosition\(normalizeStartPosition\(e\.target\.value\)\)/);
-        expect(s).toMatch(/paginateLabelSheets\(boxes \|\| \[\], startPosition\)/);
+        expect(s).toMatch(/setStartPosition\(normalizeStartPosition\(e\.target\.value, geometry\)\)/);
+        expect(s).toMatch(/paginateLabelSheets\(boxes \|\| \[\], startPosition, geometry\)/);
         expect(s).toMatch(/Start at label position/);
     });
 });
@@ -464,14 +476,20 @@ describe('37-42. print safety', () => {
         expect(printBlock).toMatch(/sheets\.map\(\(sheet\) =>/);
         expect(printBlock).toMatch(/className="label-sheet"/);
         const raw = read(PAGE);
-        expect(raw).toMatch(/\.label-sheet\s*\{[\s\S]*?width:\s*8\.5in/);
-        expect(raw).toMatch(/\.label-sheet\s*\{[\s\S]*?height:\s*11in/);
+        expect(raw).toMatch(/\.label-sheet\s*\{[\s\S]*?width:\s*\$\{geometry\.sheetWidthIn\}in/);
+        expect(raw).toMatch(/\.label-sheet\s*\{[\s\S]*?height:\s*\$\{geometry\.sheetHeightIn\}in/);
+        expect(defaultGeometry().sheetWidthIn).toBe(8.5);
+        expect(defaultGeometry().sheetHeightIn).toBe(11);
     });
 
     it('42. no browser margin can insert an empty page between sheets', () => {
         const s = read(PAGE);
-        const page = s.slice(s.indexOf('@page'), s.indexOf('}', s.indexOf('@page')) + 1);
+        // Delimited by `margin:` rather than the next `}`: the size line now
+        // interpolates `${geometry...}`, whose own brace would end the slice early.
+        const at = s.indexOf('@page');
+        const page = s.slice(at, s.indexOf(';', s.indexOf('margin:', at)) + 1);
         expect(page).toMatch(/margin:\s*0/);
+        expect(page).toMatch(PAGE_SIZE_RE);
         // The sheet is exactly the page, with overflow contained.
         expect(s).toMatch(/\.label-sheet\s*\{[\s\S]*?overflow:\s*hidden/);
     });

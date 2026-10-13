@@ -396,11 +396,14 @@ describe('16-20. print', () => {
         // SUPERSEDED BY BOX-LABEL-SHEET-1: one 4x6 page per box became eight
         // 4 x 2.5 stickers on a US Letter sheet. Same guarantee — an exact,
         // non-approximated printed size — restated for the new medium.
+        // REVISED BY PRODUCTION-LABEL-PRESETS-1: sized from the selected stock's
+        // geometry, which starts as the OL600 4 x 2.5 sheet.
         const s = read(PAGE);
-        expect(s).toMatch(/size:\s*8\.5in 11in/);
-        expect(s).toMatch(/width:\s*\$\{OL600_SHEET\.labelWidthIn\}in/);
-        expect(s).toMatch(/height:\s*\$\{OL600_SHEET\.labelHeightIn\}in/);
+        expect(s).toMatch(/size:\s*\$\{geometry\.sheetWidthIn\}in \$\{geometry\.sheetHeightIn\}in/);
+        expect(s).toMatch(/width:\s*\$\{geometry\.labelWidthIn\}in/);
+        expect(s).toMatch(/height:\s*\$\{geometry\.labelHeightIn\}in/);
         const { OL600_SHEET } = require('@/lib/labelSheetLayout');
+        expect(require('@/lib/labelPresets').DEFAULT_LABEL_PRESET.geometry).toBe(OL600_SHEET);
         expect(OL600_SHEET.labelWidthIn).toBe(4);
         expect(OL600_SHEET.labelHeightIn).toBe(2.5);
     });
