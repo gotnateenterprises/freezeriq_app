@@ -115,6 +115,58 @@ export function calendarDateOfDateOnlyValue(value: Date | string): string | null
 }
 
 /**
+ * COORDINATOR-CONTACT-DATE-1 — whole calendar days from the tenant's today to a
+ * DATE-only value: 0 on the day itself, 1 the day before, negative once it has
+ * passed. Null when the date, the zone or the instant is unusable.
+ *
+ * The coordinator portal used `Math.ceil((new Date(end_date) - now) / 1 day)`,
+ * an instant comparison against UTC midnight. For an America/Chicago tenant
+ * that counts one day too few from 7:00 PM (6:00 PM in winter) every evening,
+ * shows "Last day" the evening BEFORE the last day, and from 7:00 PM on the
+ * deadline day itself shows the campaign as finished while orders are still
+ * open. Same calendar-day rule as isCampaignPastOrderDeadline() and
+ * hasCampaignEndedForTenant() — never an instant comparison, never a fixed offset.
+ */
+export function calendarDaysUntil(
+    dateOnlyValue: Date | string | null | undefined,
+    timeZone: string | null | undefined,
+    now: Date = new Date(),
+): number | null {
+    if (dateOnlyValue === null || dateOnlyValue === undefined || dateOnlyValue === '') return null;
+    const target = calendarDateOfDateOnlyValue(dateOnlyValue);
+    if (!target) return null;
+    if (!isValidIanaTimeZone(timeZone)) return null;
+    const today = calendarDateInTimeZone(timeZone, now);
+    if (!today) return null;
+    const dayNumber = (iso: string) => {
+        const [y, m, d] = iso.split('-').map(Number);
+        return new Date(0).setUTCFullYear(y, m - 1, d) / 86_400_000;
+    };
+    return Math.round(dayNumber(target) - dayNumber(today));
+}
+
+/**
+ * COORDINATOR-CONTACT-DATE-1 — a real INSTANT (created_at, paid_at) formatted in
+ * the TENANT's zone, never the viewer's, the server's or the database's.
+ *
+ * Null when the zone is not a canonical IANA zone or the instant is unusable, so
+ * the caller shows nothing rather than a time in a guessed zone. Never use this
+ * for a DATE-only value: those go through lib/calendarDate.ts with no conversion.
+ */
+export function formatInstantInTimeZone(
+    value: Date | string | null | undefined,
+    timeZone: string | null | undefined,
+    options: Intl.DateTimeFormatOptions,
+    locale: string = 'en-US',
+): string | null {
+    if (!isValidIanaTimeZone(timeZone)) return null;
+    if (value === null || value === undefined || value === '') return null;
+    const d = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(d.getTime())) return null;
+    return new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(d);
+}
+
+/**
  * OPS-DATE-PICKER-HOTFIX-1: the one definition of "a plausible calendar
  * year," shared by lib/fundraiserLaunch.ts's launch gate and by
  * safeCalendarDateForInput below, so the two can never drift into two

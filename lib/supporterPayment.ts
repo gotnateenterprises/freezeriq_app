@@ -214,8 +214,9 @@ export function summarizeGroupPayment(
  * it is formatted in local time, like created_at. It must NOT go through
  * lib/calendarDate.ts: that module is for DATE-only values (deadlines, delivery
  * days) and reads UTC fields, which would move a late-evening U.S. mark onto
- * the next calendar day. `timeZone` exists only so tests can be deterministic;
- * the UI omits it and gets the viewer's own zone.
+ * the next calendar day. COORDINATOR-CONTACT-DATE-1: the coordinator portal
+ * passes the TENANT's zone (Business.timezone), so the day shown is the
+ * tenant's, not the viewer's. Pass only a validated IANA zone.
  */
 export function formatPaidDate(
     paidAt: Date | string | null | undefined,

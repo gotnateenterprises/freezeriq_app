@@ -31,7 +31,10 @@ import {
     ExternalLink
 } from 'lucide-react';
 import type { CoordinatorActionSummary } from '@/app/api/coordinator-actions/summary/route';
-import { format } from 'date-fns';
+// COORDINATOR-CONTACT-DATE-1: date-only values render with no timezone conversion;
+// "today" is the tenant's calendar day (Business.timezone), never the viewer's.
+import { formatCalendarDateValue } from '@/lib/calendarDate';
+import { calendarDaysUntil } from '@/lib/tenantTimezone';
 
 // FR-COORD-SEC-1B: the portal no longer reads a credential from the URL.
 // Authority is the coordinator session cookie, sent automatically.
@@ -711,10 +714,18 @@ export default function CoordinatorPortal() {
     const totalBundlesSold = metrics.totalBundlesSold;
     const bundleGoal = metrics.bundleGoal;
 
-    // Days remaining (negative = campaign ended)
-    const daysRemaining = campaign.end_date
-        ? Math.ceil((new Date(campaign.end_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-        : null;
+    // COORDINATOR-CONTACT-DATE-1: the tenant's own IANA zone (Business.timezone),
+    // supplied by GET /api/coordinator. The one authority for "today" and for
+    // when an order was placed or marked paid on this page.
+    const tenantTimeZone: string | null = campaign.customer?.business?.timezone ?? null;
+
+    // Days remaining (negative = campaign ended). COORDINATOR-CONTACT-DATE-1:
+    // whole tenant-calendar days to the date-only end_date. The old instant
+    // arithmetic against UTC midnight ran one day short from early evening and
+    // flipped the portal to "complete" on the deadline evening while orders
+    // were still open. An unusable zone yields null: no date-driven phase,
+    // rather than one computed in a guessed zone.
+    const daysRemaining = calendarDaysUntil(campaign.end_date, tenantTimeZone);
 
     // ── Phase 7E-4: Server-authoritative closed state ──────────────────────
     // Derived from the closeout endpoint fields (Phase 7E-2). Takes priority
@@ -835,10 +846,10 @@ export default function CoordinatorPortal() {
     // Coordinator first name for setup checklist
     const coordinatorFirstName = campaign?.customer?.contact_name?.split(" ")[0] || undefined;
 
-    // Delivery date label for DeliveryPrep / WhatsNext
-    const deliveryDateLabel = campaign.delivery_date
-        ? format(new Date(campaign.delivery_date), 'MMMM d')
-        : undefined;
+    // Delivery date label for DeliveryPrep / WhatsNext. COORDINATOR-CONTACT-DATE-1:
+    // delivery_date is a DATE column; date-fns `format(new Date(...))` read it in
+    // the viewer's zone and showed every U.S. coordinator the day before.
+    const deliveryDateLabel = formatCalendarDateValue(campaign.delivery_date) ?? undefined;
 
     // Org label for ProgressHero
     const orgLabel = campaign.customer?.name || 'your group';
@@ -1096,6 +1107,7 @@ export default function CoordinatorPortal() {
                         onMarkPaid={(id) => handleSupporterPayment(id, 'mark_paid')}
                         onMarkUnpaid={(id) => handleSupporterPayment(id, 'mark_unpaid')}
                         paymentPendingId={paymentPendingId}
+                        timeZone={tenantTimeZone}
                         onViewAll={() => setShowAllOrders(!showAllOrders)}
                         limit={showAllOrders ? 999 : 3}
                         hasExternalPaymentLink={hasPaymentInfo}
@@ -1152,6 +1164,7 @@ export default function CoordinatorPortal() {
                         onMarkPaid={(id) => handleSupporterPayment(id, 'mark_paid')}
                         onMarkUnpaid={(id) => handleSupporterPayment(id, 'mark_unpaid')}
                         paymentPendingId={paymentPendingId}
+                        timeZone={tenantTimeZone}
                         onViewAll={() => setShowAllOrders(!showAllOrders)}
                         limit={showAllOrders ? 999 : 3}
                         hasExternalPaymentLink={hasPaymentInfo}
@@ -1222,6 +1235,7 @@ export default function CoordinatorPortal() {
                         onMarkPaid={(id) => handleSupporterPayment(id, 'mark_paid')}
                         onMarkUnpaid={(id) => handleSupporterPayment(id, 'mark_unpaid')}
                         paymentPendingId={paymentPendingId}
+                        timeZone={tenantTimeZone}
                         onViewAll={() => setShowAllOrders(!showAllOrders)}
                         limit={showAllOrders ? 999 : 3}
                         isClosed={isClosed}

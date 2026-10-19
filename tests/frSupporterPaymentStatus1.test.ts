@@ -507,7 +507,8 @@ describe('6. Recent Orders and the pickup tracker', () => {
     it('Recent Orders shows the recorded state using the shared labels', () => {
         expect(recent).toMatch(/PAYMENT_NOT_MARKED_LABEL/);
         expect(recent).toMatch(/PAYMENT_PAID_LABEL/);
-        expect(recent).toMatch(/formatPaidDate\(o\.paid_at\)/);
+        // COORDINATOR-CONTACT-DATE-1: formatted in the tenant's zone, not the viewer's.
+        expect(recent).toMatch(/formatPaidDate\(o\.paid_at, \{ timeZone \}\)/);
         expect(recent).toMatch(/'Mark paid'/);
     });
 

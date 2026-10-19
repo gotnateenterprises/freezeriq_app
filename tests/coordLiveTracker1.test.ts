@@ -192,7 +192,8 @@ describe('COORD-LIVE-TRACKER-1: order content — the data was already selected 
         expect(src).toMatch(/it\.item_name \|\| 'Item'/);
         expect(src).toMatch(/formatServingTierLabel\(it\.variant_size\)/);
         expect(src).toMatch(/it\.quantity/);
-        expect(src).toMatch(/formatOrderTimestamp\(o\.created_at\)/);
+        // COORDINATOR-CONTACT-DATE-1: now also passed the tenant's zone.
+        expect(src).toMatch(/formatOrderTimestamp\(o\.created_at, timeZone\)/);
         // The old defect this replaces: a bare item COUNT instead of content.
         expect(src).not.toMatch(/o\.items\?\.length \?\? 0\} items/);
     });
@@ -257,7 +258,10 @@ describe('COORD-LIVE-TRACKER-1: privacy boundary — REVISED by COORD-FULFILLMEN
         const src = read(RECENT_ORDERS);
         expect(src).toMatch(/\.email\b/);
         expect(src).toMatch(/\.phone\b/);
-        expect(src).toMatch(/mailto:/);
+        // COORDINATOR-CONTACT-DATE-1: the mailto href is now built (validated and
+        // RFC 6068-encoded) by lib/mailtoLink.ts rather than inline.
+        expect(src).toMatch(/mailtoHref\(o\.email\)/);
+        expect(read('lib/mailtoLink.ts')).toMatch(/`mailto:\$\{encoded\}`/);
         expect(src).toMatch(/tel:/);
         // Checked as property-access patterns, not bare words, so the file's
         // own prose about the boundary cannot trip a false positive.

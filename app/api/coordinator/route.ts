@@ -185,7 +185,12 @@ export async function GET(req: Request) {
                                 custom_domain: true,
                                 logo_url: true,
                                 plan: true,
-                                subscription_status: true
+                                subscription_status: true,
+                                // COORDINATOR-CONTACT-DATE-1: the tenant's IANA
+                                // zone. The portal decides "today" (days left,
+                                // last day) and renders order/paid times in it,
+                                // instead of in whatever zone the viewer is in.
+                                timezone: true
                             }
                         }
                     }

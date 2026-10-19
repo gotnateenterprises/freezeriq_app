@@ -33,6 +33,9 @@ import {
     formatPaidDate,
     supporterPaymentState,
 } from '@/lib/supporterPayment';
+// COORDINATOR-CONTACT-DATE-1: pure, client-safe.
+import { mailtoHref, usableEmailAddress } from '@/lib/mailtoLink';
+import { formatInstantInTimeZone, isValidIanaTimeZone } from '@/lib/tenantTimezone';
 
 /** How long "Tap again to undo" waits for the confirming tap. */
 const UNDO_CONFIRM_WINDOW_MS = 4000;
@@ -47,13 +50,49 @@ function formatServingTierLabel(variantSize: string | null | undefined): string 
     return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
-function formatOrderTimestamp(createdAt: string | null | undefined): string {
-    if (!createdAt) return '';
-    const d = new Date(createdAt);
-    if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleString('en-US', {
+/**
+ * When the order was placed, in the TENANT's zone (Business.timezone).
+ *
+ * COORDINATOR-CONTACT-DATE-1: this used the viewer's own zone, so the same order
+ * read differently to a coordinator on a phone in another state. With no usable
+ * tenant zone it shows nothing rather than guessing one.
+ */
+function formatOrderTimestamp(createdAt: string | null | undefined, timeZone: string | null | undefined): string {
+    return formatInstantInTimeZone(createdAt, timeZone, {
         month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-    });
+    }) ?? '';
+}
+
+/**
+ * COORDINATOR-CONTACT-DATE-1 — the fallback beside a supporter's mail link, for a
+ * device with no mail handler (the portal's own share flow already copies first
+ * for the same reason). Copies the address only; it never touches an order.
+ */
+function CopyEmailButton({ address }: { address: string }) {
+    const [copied, setCopied] = useState(false);
+    useEffect(() => {
+        if (!copied) return;
+        const t = setTimeout(() => setCopied(false), 2000);
+        return () => clearTimeout(t);
+    }, [copied]);
+    return (
+        <button
+            type="button"
+            aria-label={`Copy email address ${address}`}
+            data-copy-email
+            onClick={async () => {
+                try {
+                    await navigator.clipboard.writeText(address);
+                    setCopied(true);
+                } catch {
+                    /* clipboard blocked — the address stays on screen to select */
+                }
+            }}
+            className="shrink-0 rounded px-1 text-[11px] font-bold text-slate-400 hover:text-slate-600"
+        >
+            {copied ? 'Copied' : 'Copy'}
+        </button>
+    );
 }
 
 interface OrderLineItem {
@@ -123,6 +162,9 @@ export function RecentOrders({
     onMarkUnpaid,
     /** The order whose payment change is in flight — its button is disabled. */
     paymentPendingId = null,
+    /** COORDINATOR-CONTACT-DATE-1: the tenant's IANA zone (Business.timezone);
+     *  order and paid times render in it. Without it they are omitted. */
+    timeZone = null,
 }: {
     orders: TrackerOrder[];
     onCancel: (id: string) => void;
@@ -136,6 +178,7 @@ export function RecentOrders({
     onMarkPaid?: (id: string) => void;
     onMarkUnpaid?: (id: string) => void;
     paymentPendingId?: string | null;
+    timeZone?: string | null;
 }) {
     const active = (orders || []).filter((o: any) => !o.canceled_at);
     const shown = active.slice(0, limit);
@@ -164,6 +207,12 @@ export function RecentOrders({
                 )}
                 {shown.map((o) => {
                     const items = o.items || [];
+                    const placedAt = formatOrderTimestamp(o.created_at, timeZone);
+                    // COORDINATOR-CONTACT-DATE-1: a link only for an address that
+                    // can actually be a recipient; anything else stays plain text.
+                    const shownEmail = typeof o.email === 'string' ? o.email.trim() : '';
+                    const emailAddress = usableEmailAddress(o.email);
+                    const emailHref = mailtoHref(o.email);
                     return (
                         <div key={o.id} className="flex flex-col gap-1 py-2.5 text-sm">
                             <div className="flex items-start gap-2">
@@ -172,8 +221,8 @@ export function RecentOrders({
                                     {o.participant_name && (
                                         <span className="text-slate-400"> · for {o.participant_name}</span>
                                     )}
-                                    {formatOrderTimestamp(o.created_at) && (
-                                        <span className="block text-[11px] text-slate-400">{formatOrderTimestamp(o.created_at)}</span>
+                                    {placedAt && (
+                                        <span className="block text-[11px] text-slate-400">{placedAt}</span>
                                     )}
                                 </span>
                                 <span className="font-bold tabular-nums text-slate-900 whitespace-nowrap">
@@ -207,17 +256,24 @@ export function RecentOrders({
                                 tapping calls or opens mail — because the coordinator
                                 uses this list to chase payment and pickup. Nothing
                                 renders when neither is present. */}
-                            {(o.email || o.phone) && (
+                            {(shownEmail || o.phone) && (
                                 <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-0.5 text-[11px]">
-                                    {o.email && (
-                                        <a
-                                            href={`mailto:${o.email}`}
-                                            className="max-w-full truncate text-indigo-600 hover:underline"
-                                            title={o.email}
-                                        >
-                                            {o.email}
-                                        </a>
-                                    )}
+                                    {emailAddress && emailHref ? (
+                                        <span className="inline-flex max-w-full items-center gap-1">
+                                            <a
+                                                href={emailHref}
+                                                className="min-w-0 truncate text-indigo-600 hover:underline"
+                                                title={emailAddress}
+                                            >
+                                                {emailAddress}
+                                            </a>
+                                            <CopyEmailButton address={emailAddress} />
+                                        </span>
+                                    ) : shownEmail ? (
+                                        <span className="max-w-full truncate text-slate-500" title={shownEmail} data-unusable-email>
+                                            {shownEmail}
+                                        </span>
+                                    ) : null}
                                     {o.phone && telHref(o.phone) && (
                                         <a
                                             href={telHref(o.phone)}
@@ -234,7 +290,8 @@ export function RecentOrders({
                                 nothing here ever claims a supporter has not paid. */}
                             {(() => {
                                 const paid = supporterPaymentState(o) === 'paid';
-                                const paidDate = paid ? formatPaidDate(o.paid_at) : null;
+                                // COORDINATOR-CONTACT-DATE-1: the tenant's day, never the viewer's.
+                                const paidDate = paid && isValidIanaTimeZone(timeZone) ? formatPaidDate(o.paid_at, { timeZone }) : null;
                                 const pending = paymentPendingId === o.id;
                                 const confirming = confirmUndoId === o.id;
                                 return (

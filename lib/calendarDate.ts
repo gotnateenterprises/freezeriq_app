@@ -79,6 +79,19 @@ export function formatCalendarDateShortValue(value: Date | string | null | undef
 }
 
 /**
+ * "October 7" from a Date OR an ISO string — timezone-independent.
+ *
+ * COORDINATOR-CONTACT-DATE-1: the coordinator portal rendered the campaign's
+ * delivery date with date-fns `format(new Date(value), 'MMMM d')`, which reads
+ * the viewer's local zone, so every U.S. coordinator saw pickup one day early
+ * ("Pickup is October 8" for October 9). Same visual format, same UTC-field rule.
+ */
+export function formatCalendarDateValue(value: Date | string | null | undefined): string | null {
+    const d = calendarDateFrom(value);
+    return d ? formatCalendarDate(d) : null;
+}
+
+/**
  * "10/7/2026" — the numeric form, timezone-independent.
  *
  * Exists so call sites that already rendered `toLocaleDateString()` keep their
