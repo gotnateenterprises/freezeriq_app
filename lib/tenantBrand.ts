@@ -22,6 +22,7 @@
  *
  * Neither value is ever hardcoded. Nothing here knows what "Freezer Chef" is.
  */
+import { usableEmailAddress } from '@/lib/mailtoLink';
 
 /** The columns any customer-facing surface needs. Nothing more is selected. */
 export interface TenantBrandSource {
@@ -29,6 +30,7 @@ export interface TenantBrandSource {
     display_name?: string | null;
     custom_domain?: string | null;
     slug?: string | null;
+    contact_email?: string | null;
 }
 
 export interface TenantBrand {
@@ -93,6 +95,27 @@ export function customerFacingWebsite(
 
     const url = `${origin}/shop/${slug}`;
     return { url, label: url.replace(/^https?:\/\//i, '') };
+}
+
+/**
+ * COORDINATOR-GUIDE-CONTACT-1 — the address a tenant's customers write to.
+ *
+ * `Business.contact_email` already IS that address everywhere else: it is the
+ * reply-to on every tenant email (lib/email.getTenantSender) and the address
+ * the inquiry acknowledgement prints. The coordinator Success Guide used to
+ * hardcode one tenant's inbox instead, so every other tenant's coordinators
+ * were told to email a different company.
+ *
+ * Tenants type the value by hand, so it goes through the portal's one
+ * recipient rule (lib/mailtoLink.usableEmailAddress): trimmed, and null for
+ * anything that cannot be a recipient — blank, missing or doubled `@`, spaces,
+ * markup, a `javascript:` string. The surface then shows no contact at all
+ * rather than a link that reaches no one. Links are built with mailtoHref.
+ */
+export function customerFacingContactEmail(
+    business: Pick<TenantBrandSource, 'contact_email'> | null | undefined
+): string | null {
+    return usableEmailAddress(business?.contact_email);
 }
 
 /** Both facts at once, for the surfaces that need the whole identity. */

@@ -183,6 +183,12 @@ export async function GET(req: Request) {
                                 // the tenant's storefront domain, exactly like
                                 // the FR-REBOOK-2 invitation.
                                 custom_domain: true,
+                                // COORDINATOR-GUIDE-CONTACT-1: the tenant's own
+                                // customer-facing inbox (the reply-to on all
+                                // tenant mail), shown as the Success Guide's
+                                // help contact through
+                                // lib/tenantBrand.customerFacingContactEmail.
+                                contact_email: true,
                                 logo_url: true,
                                 plan: true,
                                 subscription_status: true,

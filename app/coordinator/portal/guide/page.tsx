@@ -9,16 +9,16 @@ import {
     Share2,
     DollarSign,
     TrendingUp,
-    Mail,
     ArrowRight,
     Star,
     Rocket,
-    Users,
     AlertCircle
 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { resolveBundleGoal } from '@/lib/fundraiserMetrics';
+import { customerFacingBusinessName } from '@/lib/tenantBrand';
+import { GuideSupportContact } from '@/components/coordinator/GuideSupportContact';
 
 export default function SuccessGuide() {
     const [campaign, setCampaign] = useState<any>(null);
@@ -54,6 +54,11 @@ export default function SuccessGuide() {
             });
     }, []);
 
+    // COORDINATOR-GUIDE-CONTACT-1: this campaign's own tenant — never a
+    // hardcoded one. Same customer-facing name authority as the dashboard.
+    const business = campaign?.customer?.business ?? null;
+    const tenantName = business ? customerFacingBusinessName(business) : null;
+
     const sections = [
         {
             icon: <TrendingUp className="text-indigo-600" />,
@@ -84,7 +89,7 @@ export default function SuccessGuide() {
             tips: [
                 "Add your payment link in the Portal settings.",
                 "Direct donors to use your specific payment link for faster processing.",
-                "Let Laurie know if you need help setting this up."
+                `Let ${tenantName || 'the organizer'} know if you need help setting this up.`
             ],
             color: "bg-amber-50"
         }
@@ -215,19 +220,8 @@ export default function SuccessGuide() {
                     </Link>
                 </div>
 
-                {/* FAQ / Support */}
-                <div className="bg-white rounded-3xl p-8 border border-slate-100 text-center space-y-4">
-                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto text-slate-400">
-                        <Users size={32} />
-                    </div>
-                    <div>
-                        <h4 className="text-xl font-black text-slate-900">Need Help?</h4>
-                        <p className="text-slate-500 font-medium">Laurie is here to support you every step of the way.</p>
-                    </div>
-                    <a href="mailto:Laurie@MyFreezerChef.com" className="inline-flex items-center gap-2 text-indigo-600 font-black hover:underline underline-offset-4">
-                        <Mail size={18} /> Laurie@MyFreezerChef.com
-                    </a>
-                </div>
+                {/* FAQ / Support — the tenant's own contact, or nothing */}
+                <GuideSupportContact business={business} />
 
                 {/* Bottom CTA */}
                 <div className="text-center pt-10">
