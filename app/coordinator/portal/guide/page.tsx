@@ -6,7 +6,6 @@ import {
     Megaphone,
     ArrowLeft,
     CheckCircle2,
-    Share2,
     DollarSign,
     TrendingUp,
     ArrowRight,
@@ -15,10 +14,10 @@ import {
     AlertCircle
 } from 'lucide-react';
 import Link from 'next/link';
-import { toast } from 'sonner';
 import { resolveBundleGoal } from '@/lib/fundraiserMetrics';
 import { customerFacingBusinessName } from '@/lib/tenantBrand';
 import { GuideSupportContact } from '@/components/coordinator/GuideSupportContact';
+import { GuideShareCard, GuideMobileShare, guideOrderUrl } from '@/components/coordinator/GuideShareLink';
 
 export default function SuccessGuide() {
     const [campaign, setCampaign] = useState<any>(null);
@@ -111,10 +110,10 @@ export default function SuccessGuide() {
         );
     }
 
-    const slug = (campaign?.customer as any)?.business?.slug;
-    const publicUrl = slug && campaign?.id
-        ? `${window.location.origin}/shop/${slug}/fundraiser/${campaign.id}`
-        : `${window.location.origin}/fundraiser/${campaign?.public_token}`;
+    // COORDINATOR-GUIDE-SHARE-LINK-1: the supporter link is the one /api/coordinator
+    // resolved for this campaign (share.orderUrl) — the same value the dashboard's
+    // Copy Link uses. Never composed from the browser's own origin.
+    const orderUrl = guideOrderUrl(campaign);
 
     return (
         <div className="min-h-screen bg-slate-50 pb-20 font-sans selection:bg-indigo-100 selection:text-indigo-900">
@@ -147,33 +146,8 @@ export default function SuccessGuide() {
                     </p>
                 </div>
 
-                {/* Scoreboard Preview */}
-                <div className="bg-slate-900 rounded-[2.5rem] p-10 text-white relative overflow-hidden shadow-2xl">
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full -translate-y-20 translate-x-20 blur-3xl" />
-                    <div className="relative z-10 space-y-6">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center text-indigo-400">
-                                <Share2 size={24} />
-                            </div>
-                            <h2 className="text-2xl font-black tracking-tight">Promote Your Online Order Form</h2>
-                        </div>
-                        <p className="text-slate-400 font-medium">
-                            Share this link everywhere — texts, emails, Facebook, word-of-mouth! The more people who see your order form, the faster you hit your goal. Every share counts!
-                        </p>
-                        <div className="bg-white/5 rounded-2xl p-4 flex items-center justify-between gap-4 border border-white/10 group">
-                            <code className="text-xs font-mono text-indigo-300 truncate">{publicUrl}</code>
-                            <button
-                                onClick={() => {
-                                    navigator.clipboard.writeText(publicUrl);
-                                    toast.success("Public Link Copied!");
-                                }}
-                                className="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl text-xs font-black uppercase transition-all"
-                            >
-                                Copy Link
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                {/* Scoreboard Preview — the canonical supporter link, or nothing */}
+                <GuideShareCard orderUrl={orderUrl} />
 
                 {/* The Plan */}
                 <div className="space-y-6">
@@ -237,22 +211,7 @@ export default function SuccessGuide() {
 
 
             {/* Sticky Mobile Share */}
-            <div className="fixed bottom-6 left-0 right-0 px-6 z-40 md:hidden">
-                <button
-                    onClick={() => {
-                        if (navigator.share) {
-                            navigator.share({
-                                title: `${campaign?.name} Fundraiser`,
-                                text: `Support our fundraiser and solve dinner!`,
-                                url: publicUrl
-                            });
-                        }
-                    }}
-                    className="w-full bg-indigo-600 text-white py-5 rounded-full font-black shadow-2xl shadow-indigo-500/40 flex items-center justify-center gap-3 active:scale-95 transition-all"
-                >
-                    <Share2 size={24} /> Share Order Page
-                </button>
-            </div>
+            <GuideMobileShare orderUrl={orderUrl} campaignName={campaign?.name} />
         </div>
     );
 }
