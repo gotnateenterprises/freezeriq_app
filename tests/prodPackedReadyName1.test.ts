@@ -185,7 +185,21 @@ describe('1-4. Packed & Ready titles a fundraiser order by its supporter', () =>
         const t = titles(renderLane(lane.completed));
         expect(t.sort()).toEqual(['Avery Testwell', 'Dakota Mockford', 'Harper Demoson', 'Jordan Sample', 'Wren Fictional']);
         expect(t.some((x) => x.includes('Farm Bureau'))).toBe(false);
-        expect(text(renderLane(lane.completed))).not.toContain(ORG_NAME);
+        // REVISED BY PACKED-READY-WAVES-1. This used to assert the organization appears
+        // NOWHERE in the lane. The defect was the organization standing in for a PERSON, and
+        // that is still pinned above (no title contains it). The lane now also states which
+        // fundraiser a row belongs to, as secondary context under the supporter — so the
+        // claim is scoped: outside the explicit "Fundraiser:" row line and the fundraiser
+        // quick-select panel (which labels each fundraiser by its organization) the
+        // organization still appears nowhere, and no row's title is the organization.
+        const html = renderLane(lane.completed);
+        const outsideFundraiserContext = html
+            .replace(/<div[^>]*data-fundraiser-line="row"[^>]*>[\s\S]*?<\/div>/g, '')
+            .replace(/<section aria-label="Fundraisers in Packed &amp; Ready"[\s\S]*?<\/section>/g, '');
+        expect(text(outsideFundraiserContext)).not.toContain(ORG_NAME);
+        expect(text(html)).toContain(`Fundraiser: ${ORG_NAME}`);
+        // ...and a row line sits under EACH of the five supporters, never in place of one.
+        expect((html.match(/data-fundraiser-line="row"/g) || []).length).toBe(5);
     });
 
     it('4. supporter AND organization both populated — the supporter wins as the primary name', () => {
@@ -357,7 +371,15 @@ describe('9-13. nothing but the title changed', () => {
         const q = strip(read(QUEUE));
         expect(q).toMatch(/fetch\('\/api\/delivery\/handoff'/);
         expect(q).toMatch(/body: JSON\.stringify\(\{ orderIds \}\)/);
-        expect(q).toMatch(/sendToDelivery\(selected\.size > 0 \? orders\.filter\(o => selected\.has\(o\.id\)\) : orders\)/);
+        // REVISED BY PACKED-READY-WAVES-1. The button used to pass `selected ? picked : orders`,
+        // i.e. an empty selection meant "send everything", which with several fundraisers in
+        // the lane is every fundraiser at once. It now passes the pruned selection, and an
+        // empty selection in a MIXED lane passes nothing (the button is also disabled); in a
+        // single-population lane an empty selection is still "all", as before. What is
+        // unchanged and still pinned: the route, the body (order ids only), and that the
+        // server — not this UI — remains the only writer.
+        expect(q).toMatch(/sendToDelivery\(hasSelection \? selectedOrders : needsExplicitSelection \? \[\] : orders\)/);
+        expect(q).toMatch(/const selectedOrders = orders\.filter\(o => visibleSelected\.has\(o\.id\)\)/);
     });
 
     it('13. labels are unchanged — same output, and no label file knows the new rule', async () => {

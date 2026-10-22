@@ -121,7 +121,22 @@ describe('IDENTITY', () => {
         );
         expect(select.length).toBeGreaterThan(100);
         expect(select).toMatch(/\bcustomer_name\b/);
-        expect(select).not.toMatch(/\bcustomer:\s*\{/);
+
+        // REVISED BY PACKED-READY-WAVES-1. The invariant is unchanged: the ORDER's own
+        // Customer relation (the mutable CRM row, which is the organization on a
+        // coordinator-entered order and the supporter on a public one) is never selected.
+        // What the slip now needs is a DIFFERENT relation — the campaign's OWNING
+        // organization, `campaign.customer`, name only — which the outer-box label route has
+        // selected since BOX-LABEL-ORG-1. So the assertion is scoped, not dropped: with the
+        // campaign block removed, no customer relation may remain; and the one inside the
+        // campaign block must be that name-only select, asserted on the object itself.
+        const withoutCampaign = select.slice(0, select.indexOf('campaign:')) + select.slice(select.indexOf('items:'));
+        expect(withoutCampaign.length).toBeGreaterThan(100);
+        expect(withoutCampaign).not.toMatch(/\bcustomer:\s*\{/);
+
+        const { PACKING_SLIP_ORDER_SELECT } = require('@/lib/packingSlipContents');
+        expect(Object.keys(PACKING_SLIP_ORDER_SELECT)).not.toContain('customer');
+        expect(PACKING_SLIP_ORDER_SELECT.campaign.select.customer).toEqual({ select: { name: true } });
 
         for (const f of [ROUTE, 'app/api/production/packing-slips/route.ts']) {
             expect(strip(read(f))).not.toMatch(/\bcustomer:\s*\{/);

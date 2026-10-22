@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Package, Printer, Truck, AlertTriangle, FileText } from 'lucide-react';
 import { format } from 'date-fns';
 import { useRouter } from 'next/navigation';
@@ -13,6 +13,19 @@ import { summarizeItemPacking } from '@/lib/physicalBoxPacking';
 // own supporter resolver for a fundraiser order, the long-standing customer name
 // for everything else. See lib/orderRecipientName.ts.
 import { resolveOrderRecipientName } from '@/lib/orderRecipientName';
+// PACKED-READY-WAVES-1: fundraiser quick-select is a SELECTION layer over the lane's
+// existing Set<Order.id>; see lib/packedReadyWaves.ts. Nothing imported here mutates.
+import {
+    describeLane,
+    describeSelectionScope,
+    formatScopeLine,
+    fundraiserOrganizationFor,
+    pruneSelection,
+    toggleWaves,
+    type FundraiserWave,
+} from '@/lib/packedReadyWaves';
+import FundraiserQuickSelect from '@/components/production/FundraiserQuickSelect';
+import FundraiserIdentityLine from '@/components/production/FundraiserIdentityLine';
 
 interface Order {
     id: string;
@@ -31,6 +44,16 @@ interface Order {
     last_name?: string | null;
     source?: string | null;
     campaign_id?: string | null;
+    // PACKED-READY-WAVES-1: the campaign the dashboard route now joins for this lane — its
+    // name, its delivery DATE and its OWNING organization. Display labels only; the
+    // grouping key stays `campaign_id`. Not Order.customer, which may be the organization
+    // itself (coordinator-entered) or the supporter (public order).
+    campaign?: {
+        id?: string;
+        name?: string | null;
+        delivery_date?: string | null;
+        customer?: { name?: string | null } | null;
+    } | null;
     created_at: string;
     items: {
         quantity: number;
@@ -75,6 +98,27 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
         { tone: 'ok' | 'warn'; message: string; shortages?: { name: string; needed: number; available: number }[] } | null
     >(null);
 
+    /**
+     * PACKED-READY-WAVES-1 — what is the operator actually working on?
+     *
+     * `selected` is the ONE selection set. Per-order checkboxes edit it, and so does the
+     * fundraiser quick-select (which only adds or removes a campaign's own Order IDs). It
+     * can hold an id for an order that has since left the lane (a refresh after Send to
+     * Delivery, another tab), so every consumer below reads `visibleSelected` — the same
+     * set restricted to orders on screen — and a stale id is never counted or sent.
+     *
+     * `lane.mixed` is true when the lane holds more than one population: two or more
+     * fundraisers, or a fundraiser beside ordinary orders. With a mixed lane and nothing
+     * selected, "all" would silently mean "every fundraiser at once", so the batch actions
+     * below require an explicit choice instead. A single population keeps today's
+     * convenient "All" buttons exactly as they were.
+     */
+    const lane = useMemo(() => describeLane(orders), [orders]);
+    const visibleSelected = useMemo(() => pruneSelection(selected, orders), [selected, orders]);
+    const selectedOrders = orders.filter(o => visibleSelected.has(o.id));
+    const hasSelection = visibleSelected.size > 0;
+    const needsExplicitSelection = lane.mixed && !hasSelection;
+
     const toggleOne = (id: string) => {
         setSelected(prev => {
             const next = new Set(prev);
@@ -82,10 +126,15 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
             return next;
         });
     };
-    const allSelected = orders.length > 0 && selected.size === orders.length;
+    const allSelected = orders.length > 0 && visibleSelected.size === orders.length;
     const toggleAll = () => {
         setSelected(allSelected ? new Set() : new Set(orders.map(o => o.id)));
     };
+    /** Quick-select: add or remove exactly these fundraisers' Order IDs. Touches no other id. */
+    const toggleFundraisers = (waves: FundraiserWave[]) => {
+        setSelected(prev => toggleWaves(prev, waves));
+    };
+    const clearSelection = () => setSelected(new Set());
 
     /**
      * OPS-6B.2 — PRIMARY packing slips, printed BEFORE the handoff.
@@ -163,8 +212,17 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
         }
 
         const noun = orderIds.length === 1 ? 'order' : 'orders';
+        // PACKED-READY-WAVES-1: when fundraiser orders are going, say WHICH fundraisers and
+        // how many orders each, so the operator confirms the actual scope. The counts come
+        // from the very ids in the request below, so they always sum to its size. An
+        // ordinary-only send has no lines and keeps its original wording exactly.
+        const scope = describeSelectionScope(orderIds, orders);
+        const scopeText = scope.lines.length > 0
+            ? scope.lines.map(line => `  • ${formatScopeLine(line)}`).join('\n') + '\n\n'
+            : '';
         if (!confirm(
             `Send ${orderIds.length} ${noun} to Delivery?\n\n`
+            + scopeText
             + `They will leave Packed & Ready and appear in the Delivery queue.\n`
             + `This does NOT mark them delivered.`
         )) return;
@@ -321,14 +379,30 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                     {/* Part M: printing a whole lane must not mean clicking every
-                        supporter in turn. */}
+                        supporter in turn.
+                        PACKED-READY-WAVES-1: Box Labels now follows the SAME explicit
+                        selection Packing Slips and Send to Delivery do — it used to
+                        print the whole lane whatever was ticked. With nothing ticked it
+                        is still "All Orders", but only when the lane is ONE population;
+                        in a mixed lane an accidental all-fundraiser print is not
+                        offered, a choice is required. Queuing labels writes Order IDs
+                        to a per-browser batch and navigates; it never changes an order. */}
                     <button
-                        onClick={() => queueBoxLabels(orders, 'Box Labels — Packed & Ready')}
-                        disabled={queueing || orders.length === 0}
+                        onClick={() => queueBoxLabels(
+                            hasSelection ? selectedOrders : needsExplicitSelection ? [] : orders,
+                            hasSelection ? 'Box Labels — Selected' : 'Box Labels — Packed & Ready',
+                        )}
+                        disabled={queueing || orders.length === 0 || needsExplicitSelection}
                         className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center gap-2"
                     >
                         <Package size={18} />
-                        {queueing ? 'Preparing…' : 'Box Labels — All Orders'}
+                        {queueing
+                            ? 'Preparing…'
+                            : hasSelection
+                                ? `Box Labels — ${visibleSelected.size}`
+                                : needsExplicitSelection
+                                    ? 'Box Labels — choose orders'
+                                    : 'Box Labels — All Orders'}
                     </button>
 
                     {/* OPS-6B.2: the slip that goes INSIDE the box, printed
@@ -337,33 +411,43 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                         action that does. */}
                     <button
                         onClick={() => queuePackingSlips(
-                            selected.size > 0 ? orders.filter(o => selected.has(o.id)) : orders,
+                            hasSelection ? selectedOrders : needsExplicitSelection ? [] : orders,
                             'Packing Slips — Packed & Ready',
                         )}
-                        disabled={queueing || orders.length === 0}
+                        disabled={queueing || orders.length === 0 || needsExplicitSelection}
                         className="bg-slate-700 text-white px-6 py-3 rounded-xl font-bold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-500/20 disabled:opacity-50 flex items-center gap-2"
                     >
                         <FileText size={18} />
                         {queueing
                             ? 'Preparing…'
-                            : selected.size > 0
-                                ? `Packing Slips — ${selected.size}`
-                                : 'Packing Slips — All Orders'}
+                            : hasSelection
+                                ? `Packing Slips — ${visibleSelected.size}`
+                                : needsExplicitSelection
+                                    ? 'Packing Slips — choose orders'
+                                    : 'Packing Slips — All Orders'}
                     </button>
 
                     {/* OPS-6B: the deliberate handoff. Printing above never does
                         this — only this button does. */}
+                    {/* PACKED-READY-WAVES-1: "Send All" used to be the meaning of an empty
+                        selection. With several fundraisers (or a fundraiser beside
+                        ordinary orders) in the lane that would release every one of them
+                        from a single click, so a mixed lane must be told WHAT to send.
+                        The per-row "Send to Delivery" buttons stay: each names one order.
+                        The route is untouched — it still takes exact Order IDs. */}
                     <button
-                        onClick={() => sendToDelivery(selected.size > 0 ? orders.filter(o => selected.has(o.id)) : orders)}
-                        disabled={sending || orders.length === 0}
+                        onClick={() => sendToDelivery(hasSelection ? selectedOrders : needsExplicitSelection ? [] : orders)}
+                        disabled={sending || orders.length === 0 || needsExplicitSelection}
                         className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-500/20 disabled:opacity-50 flex items-center gap-2"
                     >
                         <Truck size={18} />
                         {sending
                             ? 'Sending…'
-                            : selected.size > 0
-                                ? `Send ${selected.size} to Delivery`
-                                : 'Send All to Delivery'}
+                            : hasSelection
+                                ? `Send ${visibleSelected.size} to Delivery`
+                                : needsExplicitSelection
+                                    ? 'Send to Delivery — choose orders'
+                                    : 'Send All to Delivery'}
                     </button>
                 </div>
             </div>
@@ -399,6 +483,22 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                 </div>
             )}
 
+            {/* PACKED-READY-WAVES-1: pick a whole fundraiser. Only edits the selection
+                below; renders nothing for a lane with no fundraiser orders. */}
+            <FundraiserQuickSelect
+                waves={lane.waves}
+                selected={visibleSelected}
+                onToggle={toggleFundraisers}
+            />
+
+            {/* In a mixed lane the batch buttons wait for a choice rather than guess. */}
+            {needsExplicitSelection && (
+                <div className="bg-slate-50 dark:bg-slate-900/40 border-2 border-slate-200 dark:border-slate-700 rounded-2xl p-4 text-sm font-bold text-slate-600 dark:text-slate-300">
+                    This lane holds {lane.groupCount} separate groups of orders. Choose a fundraiser above, or tick the
+                    orders you want. Box Labels, Packing Slips and Send to Delivery only ever use what you choose.
+                </div>
+            )}
+
             {/* OPS-6B: select exactly what will move. Part D — no unrelated
                 order is ever released because another one was. */}
             <div className="flex items-center gap-3 px-1">
@@ -410,8 +510,17 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                     className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                 />
                 <label htmlFor="dq-select-all" className="text-sm font-bold text-slate-500 dark:text-slate-400 cursor-pointer">
-                    {selected.size > 0 ? `${selected.size} selected` : 'Select all'}
+                    {hasSelection ? `${visibleSelected.size} selected` : 'Select all'}
                 </label>
+                {hasSelection && (
+                    <button
+                        type="button"
+                        onClick={clearSelection}
+                        className="text-sm font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
+                    >
+                        Clear selection
+                    </button>
+                )}
             </div>
 
             <div className="grid grid-cols-1 gap-4">
@@ -420,7 +529,7 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                         <div className="flex items-start gap-4">
                             <input
                                 type="checkbox"
-                                checked={selected.has(order.id)}
+                                checked={visibleSelected.has(order.id)}
                                 onChange={() => toggleOne(order.id)}
                                 className="mt-1.5 w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                                 aria-label={`Select order ${order.id.slice(0, 8)}`}
@@ -432,6 +541,11 @@ export default function DeliveryQueue({ orders, onRefresh }: DeliveryQueueProps)
                                     order, so it must not decide the title. Ordinary orders are
                                     titled exactly as before. */}
                                 <h4 className="font-black text-slate-900 dark:text-white text-lg">{resolveOrderRecipientName(order)}</h4>
+                                {/* PACKED-READY-WAVES-1: WHICH fundraiser this order belongs to,
+                                    from the campaign's owning organization (the label's own
+                                    resolver) — never Order.customer. The supporter above stays
+                                    primary. Null for an ordinary order, which gets no line. */}
+                                <FundraiserIdentityLine organizationName={fundraiserOrganizationFor(order)} variant="row" />
                                 <div className="text-sm text-slate-500 flex flex-col">
                                     <span>#{order.id.slice(0, 8)} • {format(new Date(order.created_at), 'MMM d')}</span>
                                     {order.customer?.delivery_address && (

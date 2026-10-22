@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Printer, Box, AlertCircle } from 'lucide-react';
 import { type PhysicalBox } from '@/lib/physicalBoxPacking';
 import { buildSlipBundleSections, type PackingSlipMeal } from '@/lib/packingSlipContents';
+import FundraiserIdentityLine from '@/components/production/FundraiserIdentityLine';
 import { chooseBrandHeader, isLogoSettling, type TenantLogoStatus } from '@/lib/tenantLogo';
 import {
     fetchAuthenticatedBusinessId,
@@ -440,6 +441,14 @@ export default function PrintPackingSlipsPage() {
                                 <div>
                                     <div className="text-[10px] uppercase font-bold text-slate-400">Prepared For</div>
                                     <div className="text-lg font-bold text-slate-900 truncate max-w-md leading-tight">{box.supporterName}</div>
+                                    {/* PACKED-READY-WAVES-1: WHICH fundraiser this slip belongs to, so a
+                                        stack can be sorted into per-fundraiser piles without knowing the
+                                        supporters. box.organizationName is the campaign's OWNING
+                                        organization (the outer-box label's own resolver), identical in the
+                                        pre-handoff slip and the Delivery reprint because both build their
+                                        boxes through the one shared payload. null for an ordinary order,
+                                        which renders no line. The supporter above stays primary. */}
+                                    <FundraiserIdentityLine organizationName={box.organizationName} variant="slip" />
                                 </div>
                                 <div className="text-center px-4">
                                     <div className="text-[10px] uppercase font-bold text-slate-400">Box</div>

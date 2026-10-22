@@ -118,6 +118,22 @@ export async function GET() {
                 customer: {
                     select: { name: true, type: true, delivery_address: true }
                 },
+                // PACKED-READY-WAVES-1: which fundraiser is this order FOR, and when does
+                // it deliver? The campaign's own name and DATE, and its OWNING
+                // organization (`campaign.customer`, the same relation the outer-box label
+                // and the Fundraisers Waiting lane read) — a different row from the
+                // order's own `customer` above. Explicit select: nothing else of the
+                // campaign or organization (contacts, notes, finances) rides along. Null
+                // for an ordinary order. READ-ONLY and additive: the WHERE above is
+                // untouched, so lane membership cannot change.
+                campaign: {
+                    select: {
+                        id: true,
+                        name: true,
+                        delivery_date: true,
+                        customer: { select: { name: true } },
+                    }
+                },
                 items: {
                     include: {
                         bundle: {

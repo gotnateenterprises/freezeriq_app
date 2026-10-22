@@ -250,7 +250,20 @@ export const PACKING_SLIP_ORDER_SELECT = {
     customer_name: true,
     delivery_date: true,
     delivery_sequence: true,
-    campaign: { select: { delivery_date: true } },
+    // PACKED-READY-WAVES-1: the campaign's OWNING organization, so the slip can say which
+    // fundraiser it belongs to. This is `campaign.customer` — the relation the outer-box
+    // label route already selects (BOX-LABEL-ORG-1) — and NOT the order's own `customer`,
+    // which is deliberately still absent from this select (PACKING-SLIP-1: it may be the
+    // organization itself or the supporter). Only the organization's name is read: no
+    // contact, address, email or phone. `name` is the documented fallback when the
+    // organization is unavailable, exactly as the label resolves it.
+    campaign: {
+        select: {
+            delivery_date: true,
+            name: true,
+            customer: { select: { name: true } },
+        },
+    },
     items: {
         select: {
             id: true,
@@ -302,7 +315,24 @@ export interface PackingSlipPayload {
 export function buildPackingSlipPayload(
     orders: readonly any[],
 ): PackingSlipPayload {
-    const manifest = buildPhysicalBoxManifest(orders as unknown as BoxManifestOrder[]);
+    // PACKED-READY-WAVES-1: an EXPLICIT mapping, not a blind cast — the same mapping, for
+    // the same reason, as app/api/production/box-labels/route.ts (BOX-LABEL-ORG-1). The
+    // campaign's organization arrives NESTED (`campaign.customer.name`) while
+    // BoxManifestOrder wants it FLAT (`campaign_organization_name`). The cast that used to
+    // stand here compiled clean and resolved that field to undefined on every order, which
+    // is why a packing slip could never say which fundraiser it belonged to. Going through
+    // the manifest's own resolver means the slip and the outer-box label name the same
+    // organization for the same order by construction, in both slip contexts.
+    const manifestOrders: BoxManifestOrder[] = orders.map((o: any) => ({
+        id: o.id,
+        first_name: o.first_name ?? null,
+        last_name: o.last_name ?? null,
+        customer_name: o.customer_name ?? null,
+        campaign_organization_name: o.campaign?.customer?.name ?? null,
+        campaign_name: o.campaign?.name ?? null,
+        items: o.items,
+    }));
+    const manifest = buildPhysicalBoxManifest(manifestOrders);
 
     const deliverySequenceByOrderId: Record<string, number | null> = {};
     const deliveryDateByOrderId: Record<string, string | null> = {};

@@ -346,6 +346,11 @@ describe('PRESERVED BEHAVIOUR', () => {
         // Production display rule PROD-PACKED-READY-NAME-1 added, which only asks
         // "is this a fundraiser order?"), and the population authority itself
         // still contains no grouping at all.
+        // REVISED BY PACKED-READY-WAVES-1: a fourth consumer, lib/packedReadyWaves.ts,
+        // asks that same "is this a fundraiser order?" question to build the Packed &
+        // Ready fundraiser quick-select. It groups Order IDs for a UI SELECTION in
+        // Production; it is not Delivery grouping, the handoff route does not import
+        // it, and the population-authority assertion below is unchanged.
         const IMPORTS_IT = /(?:\bfrom\s*|\brequire\(\s*|\bimport\(\s*)['"][^'"]*\borderClassification['"]/;
         const hits: string[] = [];
         let scanned = 0;
@@ -369,6 +374,7 @@ describe('PRESERVED BEHAVIOUR', () => {
             'app/api/delivery/campaign-delivered/route.ts',
             'lib/delivery/deliveryStops.ts',
             'lib/orderRecipientName.ts',
+            'lib/packedReadyWaves.ts',
         ]);
         // And no grouping/aggregation was introduced into the population authority.
         expect(strip(read(AUTHORITY))).not.toMatch(/groupBy|campaignId|groupOrdersForDelivery/);

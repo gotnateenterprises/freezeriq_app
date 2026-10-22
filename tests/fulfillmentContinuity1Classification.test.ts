@@ -273,7 +273,14 @@ describe('5. lib/delivery/orderClassification.ts structure', () => {
         expect(fn).toMatch(/pickup_location/);
     });
 
-    it('is consumed ONLY by the Delivery stop builder, the fundraiser delivery route and the order-recipient-name rule', () => {
+    it('is consumed ONLY by the Delivery stop builder, the fundraiser delivery route, the order-recipient-name rule and the Packed & Ready fundraiser selection layer', () => {
+        // PACKED-READY-WAVES-1 is the deliberate change for a fourth:
+        // lib/packedReadyWaves.ts decides which Packed & Ready rows form a fundraiser
+        // "wave" by asking the SAME canonical question (source + campaign_id) instead
+        // of re-deriving the conjunction (contract §11 Rule 8). It is a Production
+        // display/selection layer over Order IDs: it builds no Delivery stop, groups
+        // nothing for Delivery, and the handoff route does not import it. Exactly
+        // that one addition is pinned, so any further consumer is still reviewed.
         // DELIVERY-FUNDRAISER-GROUPING-1 is the grouping phase this tripwire was
         // armed for (contract §15.3). It used to require ZERO importers; it now
         // pins the exact two that phase added, so any further consumer is still a
@@ -321,6 +328,7 @@ describe('5. lib/delivery/orderClassification.ts structure', () => {
             'app/api/delivery/campaign-delivered/route.ts',
             'lib/delivery/deliveryStops.ts',
             'lib/orderRecipientName.ts',
+            'lib/packedReadyWaves.ts',
         ]);
     });
 });
