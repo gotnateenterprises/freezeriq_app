@@ -885,8 +885,15 @@ describe('7. printing is read-only; the lane\'s data and every other lane are un
         expect(lane.include.campaign).toEqual({ select: { id: true, name: true, delivery_date: true, customer: { select: { name: true } } } });
         expect(lane.include.customer.select).toEqual({ name: true, type: true, delivery_address: true });
         expect(Object.keys(lane.where).sort()).toEqual(['NOT', 'business_id', 'canceled_at', 'released_to_delivery_at', 'status']);
-        // No other lane's query learned about the campaign include.
-        for (const a of seen) if (a !== lane) expect(a?.include?.campaign).toBeUndefined();
+        // REVISED BY PREP-WAVES-1. This used to say NO other lane's query carries the campaign
+        // include. PREP-WAVES-1 deliberately gives the To Prep / In Prep query the SAME explicit
+        // select (it needs each prep order's campaign to group fundraiser waves). What this still
+        // protects: the New Orders lane learned nothing about campaigns, and the Prep query's
+        // select is exactly this minimal one.
+        const prepQuery = seen.find((a) => a !== lane && Array.isArray(a?.where?.status?.in) && a.where.status.in.includes('production_ready'));
+        expect(prepQuery.include.campaign).toEqual(lane.include.campaign);
+        const newOrdersQuery = seen.find((a) => Array.isArray(a?.where?.AND));
+        expect(newOrdersQuery.include.campaign).toBeUndefined();
     });
 
     it('7b. queuing labels or slips from the UI never calls the handoff route or any API but the tenant identity', async () => {
@@ -919,12 +926,15 @@ describe('7. printing is read-only; the lane\'s data and every other lane are un
         expect(strip(read(DASH))).not.toMatch(/packedReadyWaves|groupFundraiserWaves|FundraiserWave/);
     });
 
-    it('7f. scope guard: the prep path is exactly as audited (PREP-WAVES-1 is a separate task)', () => {
+    it('7f. REVISED BY PREP-WAVES-1: the Prep UI now uses the exact-id route; the bundle-wide route is left exactly as it was', () => {
+        // This was the tripwire that held the prep path "exactly as audited" until PREP-WAVES-1,
+        // the dedicated task that replaces it. The bundle-wide ROUTE is deliberately neither
+        // edited nor removed (its predicate is asserted unchanged); only its UI caller moved.
         const batch = strip(read('app/api/orders/batch-update-by-bundle/route.ts'));
         expect(batch).toMatch(/items: \{ some: \{ bundle_id: bundleId \} \}/);
         const prep = strip(read('components/production/PrepList.tsx'));
-        expect(prep).toMatch(/'\/api\/orders\/batch-update-by-bundle'/);
-        expect(prep).not.toMatch(/packedReadyWaves|campaign_id|FundraiserWave/);
+        expect(prep).not.toMatch(/batch-update-by-bundle/);
+        expect(prep).toMatch(/'\/api\/orders\/bulk-status'/);
     });
 
     it('7g. physical packing, Delivery grouping and the label route are not touched by name', () => {

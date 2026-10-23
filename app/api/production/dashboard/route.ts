@@ -66,6 +66,21 @@ export async function GET() {
                 NOT: { status: 'fundraiser_hold' as any }
             },
             include: {
+                // PREP-WAVES-1: which fundraiser each prep order belongs to, and when that
+                // fundraiser delivers. The SAME explicit select the Packed & Ready lane
+                // uses (PACKED-READY-WAVES-1): the campaign's own name and DATE and its
+                // OWNING organization's name, nothing else of the campaign or the
+                // organization. Null for an ordinary order. The WHERE above is untouched,
+                // so which orders reach the kitchen cannot change. These orders are only
+                // aggregated below; none of their other columns leave this route.
+                campaign: {
+                    select: {
+                        id: true,
+                        name: true,
+                        delivery_date: true,
+                        customer: { select: { name: true } },
+                    }
+                },
                 items: {
                     include: {
                         bundle: {
@@ -146,12 +161,37 @@ export async function GET() {
         });
 
         // Aggregate for Prep List - Group by Bundle AND Status
+        //
+        // PREP-WAVES-1 — THE AGGREGATE IS FOR THE KITCHEN; IT IS NOT AN ACTION SCOPE.
+        // A row is still "this bundle, at this status and tier, across every order", because
+        // combined demand is what the kitchen plans food from. What it used to do next was
+        // throw away WHICH orders made that number (`order_ids` was collected here and
+        // deleted from the response), so the screen could only say "start this bundle" and
+        // the server matched every tenant order at that status containing the bundle —
+        // every fundraiser that happened to share it. Each row now keeps its exact
+        // `sources`: one entry per ORDER, with the campaign it belongs to and the
+        // quantities and OrderItem ids it contributed (contract §6.2: campaign -> order ->
+        // order item must survive aggregation). The client decides what may move, by order
+        // id, through the existing exact-id route; nothing here widens what is returned
+        // beyond ids, quantities and the campaign's own label fields.
+        const prepCampaigns: Record<string, {
+            id: string;
+            name: string | null;
+            delivery_date: Date | string | null;
+            customer: { name: string | null } | null;
+        }> = {};
         const prepMap = new Map<string, {
             bundle_id: string;
             bundle_name: string;
             sku: string;
             total_quantity: number;
-            order_ids: Set<string>;
+            sources: Map<string, {
+                order_id: string;
+                source: string | null;
+                campaign_id: string | null;
+                quantity: number;
+                order_item_ids: string[];
+            }>;
             status: string;
             // OPS-5A: the sold tier this prep row was ordered at. Carried so the
             // meal labels PrepList prints can name it truthfully.
@@ -184,7 +224,7 @@ export async function GET() {
                         bundle_name: item.bundle.name,
                         sku: item.bundle.sku,
                         total_quantity: 0,
-                        order_ids: new Set<string>(),
+                        sources: new Map(),
                         status: status,
                         variant_size: variantSize,
                         recipes: (item.bundle.contents || []).map(c => ({
@@ -198,8 +238,35 @@ export async function GET() {
 
                 const entry = prepMap.get(key)!;
                 entry.total_quantity += item.quantity;
-                entry.order_ids.add(order.id);
+
+                // The order's identity survives the aggregate. Two lines of the same bundle and
+                // tier on one order are ONE source (its quantities add; both item ids are kept).
+                // `source` and `campaign_id` are passed through raw: whether this is a
+                // fundraiser order is the canonical classifier's question and is answered on
+                // the client from exactly these two signals, never guessed here.
+                const existing = entry.sources.get(order.id);
+                if (existing) {
+                    existing.quantity += item.quantity;
+                    existing.order_item_ids.push(item.id);
+                } else {
+                    entry.sources.set(order.id, {
+                        order_id: order.id,
+                        source: (order.source as string | null) ?? null,
+                        campaign_id: order.campaign_id ?? null,
+                        quantity: item.quantity,
+                        order_item_ids: [item.id],
+                    });
+                }
             });
+
+            if (order.campaign_id && order.campaign && !prepCampaigns[order.campaign_id]) {
+                prepCampaigns[order.campaign_id] = {
+                    id: order.campaign.id,
+                    name: order.campaign.name ?? null,
+                    delivery_date: order.campaign.delivery_date ?? null,
+                    customer: order.campaign.customer ? { name: order.campaign.customer.name ?? null } : null,
+                };
+            }
         });
 
         // ── OPS-3: the FUNDRAISER WAITING lane. ──────────────────────────────
@@ -257,7 +324,15 @@ export async function GET() {
 
         return NextResponse.json({
             pending: pendingOrders,
-            prep: Array.from(prepMap.values()).map(({ order_ids, ...e }) => ({ ...e, order_count: order_ids.size })),
+            prep: Array.from(prepMap.values()).map(({ sources, ...e }) => ({
+                ...e,
+                order_count: sources.size,
+                // PREP-WAVES-1: the exact orders behind this row's number (see the aggregate's header).
+                sources: Array.from(sources.values()),
+            })),
+            // PREP-WAVES-1: label data for the campaigns behind those sources, keyed by
+            // FundraiserCampaign.id. Display only; the client never treats a name or date as a key.
+            prepCampaigns,
             completed: completedOrders,
             fundraiserWaiting: buildFundraiserBatches(fundraiserHeldOrders as any),
         });

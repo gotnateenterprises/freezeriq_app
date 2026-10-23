@@ -11,7 +11,7 @@ import FundraiserWaiting from '@/components/production/FundraiserWaiting';
 
 export default function ProductionPage() {
     const [activeTab, setActiveTab] = useState<'dashboard' | 'planner'>('dashboard');
-    const [data, setData] = useState<{ pending: any[], prep: any[], completed: any[], fundraiserWaiting?: any[] } | null>(null);
+    const [data, setData] = useState<{ pending: any[], prep: any[], prepCampaigns?: Record<string, any>, completed: any[], fundraiserWaiting?: any[] } | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
     const refreshData = async () => {
@@ -126,6 +126,7 @@ export default function ProductionPage() {
                                 ) : (
                                     <PrepList
                                         items={data?.prep || []}
+                                        campaigns={data?.prepCampaigns}
                                         onRefresh={refreshData}
                                     />
                                 )}
