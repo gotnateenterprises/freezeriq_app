@@ -8,10 +8,14 @@
  * PURPOSE: Officially closes a fundraiser campaign. In a single transaction:
  *   1. Freezes settlement_total from active non-canceled orders
  *   2. Claims the campaign into 'Closed', recording closed_at and closed_by
- *   3. Batch-promotes fundraiser_hold orders to production_ready
+ *   3. Creates the campaign's DRAFT invoice (unless nothing was sold; see below)
+ *
+ * Closeout does NOT release held orders to the kitchen (OPS-3). Release is
+ * payment-gated: fundraiser_hold -> production_ready happens only when the
+ * campaign's invoice becomes PAID, in lib/invoiceSettlementTransition.ts.
  *
  * IDEMPOTENT: Re-calling on an already-closed campaign returns success
- * without re-promoting orders or overwriting an existing settlement_total, and
+ * without overwriting an existing settlement_total, and
  * returns the campaign's existing invoice rather than manufacturing a second.
  *
  * DOES NOT: process payments, send emails, mark an invoice SENT or PAID, record
@@ -24,7 +28,7 @@
  * closeoutRequiresInvoice() for why an active order of any amount still gets one.
  *
  * ── INV-A HARDENING ──────────────────────────────────────────────────────────
- * AUTHORIZATION: closeout freezes money, releases held orders, and records the
+ * AUTHORIZATION: closeout freezes money, creates the invoice, and records the
  * responsible actor — so it is ADMIN-or-super-admin, not merely
  * "any authenticated tenant user". The rule itself lives in
  * lib/campaignCloseout.ts so it can be unit-tested directly; this introduces no
@@ -40,9 +44,9 @@
  * closed_at/closed_by/settlement_total. The authoritative guard is now a
  * conditional updateMany inside the transaction (the house pattern: see the
  * one-campaign opportunity claim in app/api/campaigns/route.ts and the
- * ConcurrentChangeError shape in app/api/orders/bulk-status). Order promotion —
- * and, later, INV-B's invoice creation — run only after count === 1 proves this
- * request won the claim.
+ * ConcurrentChangeError shape in app/api/orders/bulk-status). Invoice creation
+ * (INV-B) runs only after count === 1 proves this request won the claim. (Order
+ * promotion used to run here too; OPS-3 moved it to invoice settlement.)
  *
  * ── INV-B: THE SETTLEMENT RACE, NOW CLOSED ───────────────────────────────────
  * INV-A recorded this as deliberately unclosed: an order committing between the

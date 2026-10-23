@@ -928,10 +928,13 @@ describe('7. printing is read-only; the lane\'s data and every other lane are un
 
     it('7f. REVISED BY PREP-WAVES-1: the Prep UI now uses the exact-id route; the bundle-wide route is left exactly as it was', () => {
         // This was the tripwire that held the prep path "exactly as audited" until PREP-WAVES-1,
-        // the dedicated task that replaces it. The bundle-wide ROUTE is deliberately neither
-        // edited nor removed (its predicate is asserted unchanged); only its UI caller moved.
+        // the dedicated task that replaces it. PREP-WAVES-1 left the bundle-wide ROUTE untouched
+        // (its predicate was asserted unchanged) and only moved its UI caller.
+        // REVISED AGAIN BY WAVES-CLOSEOUT-1A: the route is still not removed, but it is now an inert
+        // 410; its bundle-wide predicate no longer exists anywhere in it.
         const batch = strip(read('app/api/orders/batch-update-by-bundle/route.ts'));
-        expect(batch).toMatch(/items: \{ some: \{ bundle_id: bundleId \} \}/);
+        expect(batch).toMatch(/LEGACY_BATCH_ROUTE_DISABLED/);
+        expect(batch).not.toMatch(/bundle_id|bundleId|findMany|updateMany|prisma/);
         const prep = strip(read('components/production/PrepList.tsx'));
         expect(prep).not.toMatch(/batch-update-by-bundle/);
         expect(prep).toMatch(/'\/api\/orders\/bulk-status'/);

@@ -213,9 +213,26 @@ describe('GUARDS-1A.1 · 8–10. the false-start rule and every live classificat
         const at = (file: string) => execFileSync('git', ['show', `588c547713552c311f5fe17b4e2e7cd91494f089:${file}`],
             { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }).replace(/\r\n/g, '\n');
         for (const file of ['lib/growth/impact.ts', 'lib/growth/campaignLifecycle.ts', 'lib/growth/nextAction.ts', 'lib/invoiceRemoval.ts',
-            'app/api/campaigns/[id]/closeout/route.ts', 'app/api/campaigns/route.ts', 'lib/fundraiserWizardSubmit.ts']) {
+            'app/api/campaigns/route.ts', 'lib/fundraiserWizardSubmit.ts']) {
             expect([file, read(file) === at(file)]).toEqual([file, true]);
         }
+    });
+
+    it('9–10b. REVISED BY WAVES-CLOSEOUT-1A: the closeout route\'s CODE is identical to the GUARDS-1 Preview; only its header comments were corrected', () => {
+        // WAVES-CLOSEOUT-1A corrected the route's header, which still said closeout "batch-promotes" and "releases held
+        // orders" — false since OPS-3 moved release to invoice settlement. That is a comment-only edit, so this file can
+        // no longer be BYTE-identical to 588c547. What the original assertion protects is the behaviour: so compare the
+        // emitted JavaScript with comments removed, and fail if a single statement differs.
+        const ts = require('typescript');
+        const { execFileSync } = require('child_process');
+        const emit = (text: string) => ts.transpileModule(text, {
+            fileName: 'route.ts',
+            compilerOptions: { target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.CommonJS, removeComments: true },
+        }).outputText;
+        const file = 'app/api/campaigns/[id]/closeout/route.ts';
+        const then = execFileSync('git', ['--literal-pathspecs', 'show', `588c547713552c311f5fe17b4e2e7cd91494f089:${file}`],
+            { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+        expect([file, emit(read(file)) === emit(then)]).toEqual([file, true]);
     });
 });
 

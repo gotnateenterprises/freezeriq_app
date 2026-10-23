@@ -65,8 +65,8 @@ const CANONICAL_VALUES: readonly CanonicalOrderStatus[] = [
 // Maps every value that currently exists in the database or codebase to its
 // canonical equivalent. Covers:
 //   - Uppercase Prisma enum values that were added before the canonical set
-//   - READY_TO_SHIP ghost value (written by InProductionArea.tsx but never
-//     formally in the schema)
+//   - READY_TO_SHIP ghost value (once written by the since-removed
+//     InProductionArea.tsx, never formally in the schema)
 //   - Already-canonical lowercase values (identity mapping, safe to include)
 
 export const LEGACY_STATUS_MAP: Record<string, CanonicalOrderStatus> = {

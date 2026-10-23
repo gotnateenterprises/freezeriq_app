@@ -283,6 +283,16 @@ this correctly: each batch carries `sourceOrderIds` and each line carries
 `sourceOrderItemIds`. Keep them. They are the traceability contract, not
 incidental payload.
 
+**The Prep dashboard (PREP-WAVES-1, additive).** The Prep aggregate still answers
+the kitchen's question — one row per bundle, status and tier, with combined
+demand across campaigns — and it now keeps the same identity per order: every
+row carries `sources[]` (the `order_id`, the raw `source` and `campaign_id`, the
+quantity that order contributes, and its `order_item_ids`), and the response
+carries a `prepCampaigns` label map. The aggregate is informational. The scope of
+a status action is the exact Order ids selected by fundraiser
+(`lib/prepWaves.ts`), posted to `POST /api/orders/bulk-status`; a bundle card
+never defines it.
+
 ---
 
 # SECTION 7 — LABELS
@@ -439,6 +449,8 @@ Do not re-derive these. Import them.
 | Which orders does a coordinator pickup document list? | `lib/coordinatorSupporterOrders.ts` — `isPickupDocumentOrder`, `pickupDocumentOrderWhere` (§9.1) |
 | What price? | `lib/pricing.ts` — `buildBundlePriceMap` (sensitive core file) |
 | Fundraiser production batch | `lib/fundraiserProductionBatch.ts` |
+| Which Packed & Ready orders form a fundraiser wave, and what may a selection carry? | `lib/packedReadyWaves.ts` — `groupFundraiserWaves` (keyed by `FundraiserCampaign.id`), `toggleWaves`, `describeSelectionScope` (PACKED-READY-WAVES-1) |
+| Which Prep orders form a fundraiser wave, and which exact Order ids may a status action carry? | `lib/prepWaves.ts` — `buildPrepModel`, `resolveWaveSelection`, `buildPrepStatusRequest` (PREP-WAVES-1). The status write itself is the exact-id route `POST /api/orders/bulk-status`. |
 
 ## 11.1 Known duplication, not yet consolidated
 
@@ -516,6 +528,7 @@ what changed stays visible.
 | `lib/orderStatus.ts` §11 note | Same stale closeout attribution | Same correction. |
 | `CLAUDE.md`, `docs/ai/UI_REDESIGN_SPEC.md` | Lock `app/api/coordinator/[token]/route.ts` and `app/coordinator/[token]/page.tsx` | Both were renamed away; the live surfaces are `app/api/coordinator/route.ts` and `app/coordinator/portal/page.tsx`. |
 | `docs/FUNDRAISER_ARCHITECTURE.md` | Supporters pay externally then receive a magic link | Contradicts the shipped self-serve order path. |
+| `docs/ai/KITCHEN_DELIVERY_HANDOFF.md`, `docs/ai/UI_REDESIGN_SPEC.md` (KB-1), `docs/ai/prototypes/kitchen_board_prototype.html` | Preserve, reuse or build on `/api/orders/batch-update-by-bundle` ("same three APIs underneath") | The route advanced every tenant order sharing a bundle, across fundraisers. It is retired (WAVES-CLOSEOUT-1A: `410`, no database access). Prep status changes are exact-Order-ID through `POST /api/orders/bulk-status` (§6.2, §11). |
 | COORD-FULFILLMENT-2 (pickup tracker and XLSX headers, `tests/coordFulfillment2.test.ts`) | A pickup document is a fulfilment document, so it lists released work only — held orders appear once the invoice is paid | True only BEFORE closeout. Since COORD-CLOSEOUT-PICKUP-1 a closed campaign's pickup documents list its final, non-canceled order set, held or released (§9.1). Production release is unchanged (§5). |
 | §4.5 of this document (QB-INVOICE-1A amendment — in effect; owner-accepted September 13, 2026) | "the Square and QBO importers keep their existing compatibility behaviour" | The QBO importer is RETIRED. It turned the newest QuickBooks invoices — unpaid ones included — into `production_ready` Orders, which contradicts HARD RULE 1. No QuickBooks record creates, releases or changes an Order. A QuickBooks connection, its health, or any QuickBooks invoice or payment state never releases fundraiser food: release remains `Invoice.status = 'PAID'` (§5). The Square importer is unchanged by this amendment. |
 
@@ -542,8 +555,11 @@ customer's delivery looks like. The classification boundary exists so that
 change has something safe to branch on. Its fixtures are the contract.
 
 **Done — DELIVERY-FUNDRAISER-GROUPING-1.** The board builds its stops through
-`lib/delivery/deliveryStops.ts`, which consumes this module; the classification
-tests now pin exactly that consumer and the fundraiser delivery route.
+`lib/delivery/deliveryStops.ts`, which consumes this module. The classification
+tests pin its importers: the Delivery stop builder and the fundraiser delivery
+route (this phase) plus, since PROD-PACKED-READY-NAME-1 and PACKED-READY-WAVES-1,
+the Production display rule (`lib/orderRecipientName.ts`) and the Production wave
+grouping (`lib/packedReadyWaves.ts`) — four importers in all.
 
 ## 15.4 Beware brittle source-text assertions
 Several suites assert on file SOURCE TEXT, including occurrence counts and

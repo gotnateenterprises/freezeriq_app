@@ -1,3 +1,6 @@
+<!-- HISTORICAL PROTOTYPE (look and copy only). Its note D below names the batch-update-by-bundle API; that route is
+     RETIRED (WAVES-CLOSEOUT-1A). Prep status changes are exact-Order-ID, through /api/orders/bulk-status. Do not
+     treat this file as implementation guidance for status behaviour. -->
 <title>Kitchen Board — Production Redesign</title>
 <style>
   :root{
@@ -282,8 +285,9 @@
     <b>Batch cards cook the way kitchens cook</b>
     <p>Grouped by bundle with the recipe checklist inside — "make 7 trays of pot pie filling" — and the big
     Pack button stays locked until every recipe is checked, so nothing ships half-cooked. Checking rows fills
-    the progress bar; the whole card is built for a greasy thumb on a tablet. Same
-    batch-update-by-bundle API underneath — this is presentation, not new plumbing.</p>
+    the progress bar; the whole card is built for a greasy thumb on a tablet. <em>[Historical note, SUPERSEDED: this
+    prototype said "same batch-update-by-bundle API underneath". That route is retired; a Prep card is combined
+    demand, never a mutation scope, and status changes are exact-Order-ID via /api/orders/bulk-status.]</em></p>
     <span class="was">was: recipe lists shown but no per-recipe check-off on the dashboard; status buttons small</span>
   </div></div>
   <div class="dnote"><span class="keychip">E</span><div>

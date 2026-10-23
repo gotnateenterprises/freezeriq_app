@@ -4,10 +4,24 @@
 **Pixel references:** `docs/ai/prototypes/kitchen_board_prototype.html` + `docs/ai/prototypes/delivery_day_prototype.html` — open in a browser; match them when look/copy is ambiguous. Both are interactive: study the check-off gating and lane behavior.
 **Phases:** DD-0 → KB-1 → DD-1 → DD-2 → DD-3 → DD-4 → DD-5. Each = its own diff.
 
+> **SUPERSEDED IN PART — WAVES-CLOSEOUT-1A.** This handoff predates the fundraiser waves work
+> (PACKED-READY-WAVES-1, PREP-WAVES-1). Where it says to preserve, reuse or call
+> `/api/orders/batch-update-by-bundle`, do not: that route advanced every tenant order that shared a
+> bundle, across fundraisers, and is RETIRED (it answers 410 and touches nothing). The current rules:
+>
+> - **Prep status mutation is exact Order-ID based.** The canonical endpoint is
+>   `POST /api/orders/bulk-status` with `{ orderIds, status }`, built by `lib/prepWaves.ts`.
+> - **The fundraiser grouping authority is `FundraiserCampaign.id`** (`lib/packedReadyWaves.ts`), never
+>   the organization, the bundle, or any text.
+> - **Aggregate bundle cards are informational.** They show combined kitchen demand across campaigns and
+>   are never a mutation scope.
+>
+> Authority: `docs/ai/FUNDRAISER_FULFILLMENT_CONTRACT.md` §6.2 and §11. The spec, not this file, wins.
+
 ## HARD RULES
 
 1. NEVER touch: `app/api/coordinator/**`, `app/api/checkout/**`, `app/api/webhooks/**`, `app/api/stripe/**`, `app/api/public/order/route.ts`, `prisma/schema.prisma`, `middleware.ts`, `auth.ts`, `lib/pricing.ts`, `lib/serving_multipliers.ts`, `lib/kitchen_engine.ts`, RecipeEditor/BundleEditor.
-2. PRESERVE and reuse verbatim: `lib/orderStatus.ts` helpers (all status reads via `toDbOrderStatusReadCandidates`, writes via the existing writers), `/api/orders/bulk-status`, `/api/orders/batch-update-by-bundle`, `/api/delivery/optimize`, `/api/delivery/route/reorder`, the multi-stop Google Maps URL builder in `app/delivery/page.tsx` (~line 530) and `openGoogleMaps` (~line 469), the ProductionCalculator (renamed tab only), all print pages, the inventory CRUD.
+2. PRESERVE and reuse verbatim: `lib/orderStatus.ts` helpers (all status reads via `toDbOrderStatusReadCandidates`, writes via the existing writers), `/api/orders/bulk-status` (the exact-order-id status route; see the note above), `/api/delivery/optimize`, `/api/delivery/route/reorder`, the multi-stop Google Maps URL builder in `app/delivery/page.tsx` (~line 530) and `openGoogleMaps` (~line 469), the ProductionCalculator (renamed tab only), all print pages, the inventory CRUD.
 3. New components: `components/kitchen/` (KB) and `components/delivery2/` (DD). Existing components swap out per phase; delete only what the phase names.
 4. Design tokens: spec §1 (indigo accent, slate ground, amber=cooking, emerald=done). Kitchen/Driver Mode = a wrapper class scaling type/targets ~8–15% (see prototypes).
 5. No new `@ts-ignore`/`as any`. Every board must be clean at 768px (tablet) — test there first.
@@ -181,10 +195,10 @@ export function BatchCard({ batch, onPacked, onPrintPrep, onPrintLabels }: {
 }
 ```
 
-`onPacked` → existing `batch-update-by-bundle` to `ready_to_ship`. `onPrintLabels` → existing label print flow. In-production batches render the same card with a "Start cooking" primary (→ `in_production`) when status is `production_ready` — read the current PrepList for the exact fetch bodies and reuse them.
+`onPacked` → `POST /api/orders/bulk-status` with the EXACT order ids being packed (a selected fundraiser's orders, or a card's own ordinary orders) and `status: 'ready_to_ship'` — never a bundle card as the scope (originally specified as the bundle-wide route, now retired). `onPrintLabels` → existing label print flow. In-production batches render the same card with a "Start cooking" primary (→ `in_production`) when status is `production_ready` — read the current PrepList for the exact fetch bodies and reuse them.
 
 ### Page assembly
-Header: title + view tabs (Today's Board / Shopping & Prep Sheets / Schedule → links `app/production/schedule`) + Kitchen Mode toggle (`kitchen` class on the page root; CSS scales per prototype). Day chips (This week default / Today / Next week / Everything) drive a client-side filter on `delivery_date` (data already includes it — verify; if not, add the field to the dashboard select, additive). Stats row from the fetched data. Lanes: New orders (order cards: customer, bundle summary, due chip, paid ✓ from source/status, one **Approve** button → existing bulk-status `production_ready`; keep archive/delete in an overflow menu) · To cook (BatchCards) · Packed & ready (read-only list linking to the Delivery page — **the mark-delivered buttons are DELETED here**; keep label reprint).
+Header: title + view tabs (Today's Board / Shopping & Prep Sheets / Schedule → links `app/production/schedule`) + Kitchen Mode toggle (`kitchen` class on the page root; CSS scales per prototype). Day chips (This week default / Today / Next week / Everything) drive a client-side filter on `delivery_date` (data already includes it — verify; if not, add the field to the dashboard select, additive). Stats row from the fetched data. Lanes: New orders (order cards: customer, bundle summary, due chip, paid ✓ from source/status, one **Approve** button → `production_ready` (as built, KB-1A: one guarded `PATCH /api/orders` per order, because bulk-status only accepts `in_production` / `ready_to_ship`); keep archive/delete in an overflow menu) · To cook (BatchCards) · Packed & ready (read-only list linking to the Delivery page — **the mark-delivered buttons are DELETED here**; keep label reprint).
 
 ---
 
@@ -236,7 +250,7 @@ Trigger points: "Loaded in van" per day (first load-out fires the batch) → **o
 
 ## DD-5 — Cleanup + cost visibility
 
-Archive to `archive/` (git mv): `components/production/InProductionArea.tsx` (zero imports), `app/api/production/deduct/route.ts` (zero callers — re-verify with grep first). Supplies tab additions: packaging cost per selected day (BoxCounter count × inventory unit costs) and a low-stock nudge when `stock / avg boxes-per-week < 2` (from inventory quantities if tracked; if quantity isn't tracked in the inventory model, ship cost-per-run only and note it).
+Archive to `archive/` (git mv): `components/production/InProductionArea.tsx` (zero imports — **done: removed by WAVES-CLOSEOUT-1A**), `app/api/production/deduct/route.ts` (zero callers — re-verify with grep first). Supplies tab additions: packaging cost per selected day (BoxCounter count × inventory unit costs) and a low-stock nudge when `stock / avg boxes-per-week < 2` (from inventory quantities if tracked; if quantity isn't tracked in the inventory model, ship cost-per-run only and note it).
 
 ---
 

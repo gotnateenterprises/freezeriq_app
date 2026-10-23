@@ -31,8 +31,9 @@ import { computePackagingNeed, packagingDrawdown } from '@/lib/deliveryPackaging
  * preferential:
  *
  *   - `ready_to_ship` is ALREADY the Packed & Ready lane's membership key
- *     (app/api/production/dashboard/route.ts), and both PrepList and
- *     InProductionArea write it to ENTER that lane. Writing it again is a
+ *     (app/api/production/dashboard/route.ts), and PrepList writes it to ENTER
+ *     that lane (Mark Packed & Ready; the retired InProductionArea component
+ *     wrote it too). Writing it again is a
  *     no-op — bulk-status classifies it 'same' and returns updated: 0.
  *   - `ready_to_ship`'s only legal successor in the canonical transition
  *     matrix is `delivered`, and Send to Delivery must NOT mark anything

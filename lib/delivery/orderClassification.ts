@@ -25,7 +25,9 @@
  * builder (lib/delivery/deliveryStops.ts) and the fundraiser Mark Delivered
  * route (app/api/delivery/campaign-delivered/route.ts) — plus, since
  * PROD-PACKED-READY-NAME-1, the Production display rule that asks only "is this a
- * fundraiser order?" (lib/orderRecipientName.ts). A test pins all three.
+ * fundraiser order?" (lib/orderRecipientName.ts) and, since PACKED-READY-WAVES-1,
+ * the Production wave grouping (lib/packedReadyWaves.ts, which lib/prepWaves.ts
+ * reuses). Tests pin exactly these four importers.
  *
  * Location note: `fundraiserDeliveryLocation` below still answers "what is the
  * campaign's pickup location". Which ADDRESS a fundraiser stop navigates to is

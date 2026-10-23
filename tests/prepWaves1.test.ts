@@ -769,11 +769,13 @@ describe('6. nothing is advanced by accident', () => {
 
     it('6f. a CANCELED order that shares the bundle neither appears nor blocks the selected fundraiser', async () => {
         use(board());
-        // CONTROL: the old bundle-wide route trips over x1 (canceled, same bundle, same status) and refuses everything.
+        // CONTROL — REVISED BY WAVES-CLOSEOUT-1A. The old bundle-wide route used to trip over x1 (canceled,
+        // same bundle, same status) and refuse everything with 400 ORDER_CANCELED. It is retired now: it
+        // refuses the same request outright and writes nothing, whatever the database holds.
         const { POST: oldRoute } = require('@/app/api/orders/batch-update-by-bundle/route');
         const old = await oldRoute(new Request('http://localhost/x', { method: 'POST', body: JSON.stringify({ bundleId: 'b-ff', currentStatus: 'production_ready', newStatus: 'in_production' }) }));
-        expect(old.status).toBe(400);
-        expect((await old.json()).code).toBe('ORDER_CANCELED');
+        expect(old.status).toBe(410);
+        expect((await old.json()).code).toBe('LEGACY_BATCH_ROUTE_DISABLED');
         expect(db.writes).toEqual([]);
 
         // The exact-id flow never selected x1, so it simply works.
@@ -784,13 +786,18 @@ describe('6. nothing is advanced by accident', () => {
         expect(db.rows.find((r) => r.id === 'x1')!.status).toBe('production_ready');     // the canceled order was never touched
     });
 
-    it('6g. the old bundle-wide behaviour is exactly the defect: it moves every campaign sharing the bundle', async () => {
-        // Documents WHY the UI no longer uses it: same data, no canceled blocker.
+    it('6g. REVISED BY WAVES-CLOSEOUT-1A: the request that used to move every campaign sharing the bundle now moves nothing', async () => {
+        // This test documented WHY the UI stopped using the route: same data, no canceled blocker, and the old
+        // route answered 200 and rewrote eight orders across three fundraisers and the ordinary customers
+        // (a1 a2 a3 b1 b2 c1 o1 o3). The route is retired, so the same request is now refused, and every
+        // one of those orders is exactly where it was.
         use(board().filter((o) => o.id !== 'x1'));
         const { POST: oldRoute } = require('@/app/api/orders/batch-update-by-bundle/route');
         const res = await oldRoute(new Request('http://localhost/x', { method: 'POST', body: JSON.stringify({ bundleId: 'b-ff', currentStatus: 'production_ready', newStatus: 'in_production' }) }));
-        expect(res.status).toBe(200);
-        expect(sorted(db.writes.map((w) => w.id))).toEqual(['a1', 'a2', 'a3', 'b1', 'b2', 'c1', 'o1', 'o3']);   // EVERY campaign + ordinary
+        expect(res.status).toBe(410);
+        expect(db.writes).toEqual([]);
+        const swept = ['a1', 'a2', 'a3', 'b1', 'b2', 'c1', 'o1', 'o3'];
+        expect(Object.values(statuses(db, swept))).toEqual(swept.map(() => 'production_ready'));
     });
 
     it('6h. the Prep UI never calls the bundle-wide route, and its request carries only ids and a status', async () => {
@@ -890,13 +897,17 @@ describe('9. the Packed & Ready lane, Delivery and the release gate are untouche
         expect(read('prisma/schema.prisma')).not.toMatch(/prep_wave|production_batch|PrepWave/i);
     });
 
-    it('9c. both status routes are exactly as they were: bulk-status is reused unmodified, the bundle-wide route is left in place', () => {
+    it('9c. bulk-status is reused unmodified; the bundle-wide route is left in place only as an inert 410', () => {
         const bulk = strip(read(BULK));
         expect(bulk).toMatch(/const BATCHABLE_TARGETS = new Set\(\['in_production', 'ready_to_ship'\]\)/);
         expect(bulk).toMatch(/id: \{ in: uniqueIds \}/);
         expect(bulk).toMatch(/prisma\.\$transaction/);
         expect(bulk).not.toMatch(/prepWaves|campaign/i);
-        expect(strip(read(BATCH))).toMatch(/items: \{ some: \{ bundle_id: bundleId \} \}/);     // not edited, not removed
+        // REVISED BY WAVES-CLOSEOUT-1A: this used to assert the route's bundle-wide predicate was "not edited,
+        // not removed". The route is still not removed, but its predicate is gone on purpose: it is a 410 now.
+        const legacy = strip(read(BATCH));
+        expect(legacy).toMatch(/LEGACY_BATCH_ROUTE_DISABLED/);
+        expect(legacy).not.toMatch(/bundle_id|bundleId|findMany|updateMany|prisma/);
     });
 
     it('9d. the presentational panel performs no I/O and knows nothing about statuses or APIs', () => {

@@ -720,7 +720,10 @@ tracking (decision recorded 2026-07-12).
   pipeline board (New orders → To cook → Packed & ready), week/today filter,
   4-stat header, batch cards with per-recipe check-off gating the Pack button,
   Kitchen Mode scale toggle. Same three APIs underneath (dashboard, bulk-status,
-  batch-update-by-bundle). Rename "Manual Planner" → "Shopping & Prep Sheets",
+  ~~batch-update-by-bundle~~ — **SUPERSEDED, WAVES-CLOSEOUT-1A:** that route is
+  retired (it answers 410); Prep status changes are exact-Order-ID through
+  bulk-status, and a bundle card is combined demand, never a mutation scope).
+  Rename "Manual Planner" → "Shopping & Prep Sheets",
   pre-filled from the To-Cook lane; give Schedule a real tab. DELETE the
   production page's mark-delivered buttons (delivered moves to DD-1).
 - **DD-1 — Delivery Day board UI:** day-first board (Pack station → Route →
@@ -742,7 +745,8 @@ tracking (decision recorded 2026-07-12).
   "ready for pickup" email on pack completion — tenant-branded via lib/email.ts,
   per-tenant toggles (default OFF), no emails to fundraiser buyers.
 - **DD-5 — Cleanup + cost visibility:** archive orphans
-  (components/production/InProductionArea.tsx, /api/production/deduct);
+  (components/production/InProductionArea.tsx — removed by WAVES-CLOSEOUT-1A;
+  /api/production/deduct);
   packaging cost per run + low-stock nudge on the Supplies tab.
 
 **FUTURE (do not build yet):** Kitchen Wall Mode (?wall=1 auto-refresh display),
