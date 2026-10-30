@@ -4,23 +4,31 @@ import { Prisma } from '@prisma/client';
 import FundraiserClient from './FundraiserClient';
 import { computeFundraiserProgress } from '@/lib/fundraiserMetrics';
 import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
-import { toPublicCampaign } from '@/lib/publicFundraiserPayload';
+import { toPublicCampaign, toPublicSupporterBusiness, toPublicBundleProgress, toPublicOrderMode } from '@/lib/publicFundraiserPayload';
 import { customerFacingBusinessName } from '@/lib/tenantBrand';
+import { resolveCanonicalSupporterUrl } from '@/lib/fundraiserCanonicalUrl';
+import { describeSupporterDeadline } from '@/lib/supporterDeadline';
 import type { Metadata } from 'next';
 
 // ── OG Metadata (controls the Facebook/Twitter link preview) ───────────
 // FR-LAUNCH-1B share polish: campaign-specific title/description, canonical
 // public fundraiser URL, and the best available existing public image.
-// Site URL follows the repo's authoritative pattern (NEXT_PUBLIC_BASE_URL, as
-// used by the auth callback routes) → Vercel deployment URL → omit
-// canonical/URL/image fields when no reliable absolute base exists.
-// No domain is hardcoded and no localhost URL is ever emitted explicitly.
+//
+// FR-SUPPORTER-SHARE-INTEGRITY-1: the canonical/OG URL used to be
+// NEXT_PUBLIC_BASE_URL → VERCEL_URL. NEXT_PUBLIC_BASE_URL is not set in Vercel,
+// so every live fundraiser advertised the protected deployment host
+// (freezeriq-…vercel.app, a login wall) as its canonical address and as the
+// link Facebook previews. It now comes from the ONE public-URL authority
+// (lib/fundraiserCanonicalUrl.ts) that also feeds every share button on the
+// page, so canonical == og:url == the share destination by construction.
+// When that authority cannot produce a safe URL, canonical/url/image are
+// omitted rather than guessed.
 export async function generateMetadata({ params }: { params: Promise<{ slug: string; fundraiserId: string }> }): Promise<Metadata> {
     const { slug, fundraiserId } = await params;
 
     const business = await prisma.business.findUnique({
         where: { slug },
-        select: { id: true, name: true, display_name: true, logo_url: true },
+        select: { id: true, name: true, display_name: true, logo_url: true, slug: true, custom_domain: true },
     });
 
     if (!business) return { title: 'Fundraiser Not Found' };
@@ -85,25 +93,26 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
         ogImage = business.logo_url;
     }
 
-    // Base URL follows the repo's existing convention (NEXT_PUBLIC_BASE_URL, as used
-    // by the auth callback routes) → VERCEL_URL → none. Trailing slashes are stripped
-    // so paths can never compose as "https://example.com//shop/...". No production
-    // domain is hardcoded.
-    const rawSiteUrl = process.env.NEXT_PUBLIC_BASE_URL
-        || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
-    const siteUrl = rawSiteUrl ? rawSiteUrl.replace(/\/+$/, '') : null;
-    const canonicalUrl = siteUrl ? `${siteUrl}/shop/${slug}/fundraiser/${fundraiserId}` : null;
-    const absoluteOgImage = ogImage.startsWith('http')
+    // The canonical public fundraiser URL: tenant + campaign from the DATABASE rows
+    // (never the request's slug or host). A relative image is made absolute on the
+    // SAME public origin, which serves the same deployment's /public assets.
+    const canonicalUrl = resolveCanonicalSupporterUrl({
+        campaignId: campaign.id,
+        slug: business.slug,
+        customDomain: business.custom_domain,
+    });
+    const publicOrigin = canonicalUrl ? new URL(canonicalUrl).origin : null;
+    const absoluteOgImage = /^https?:\/\//i.test(ogImage)
         ? ogImage
-        : (siteUrl ? `${siteUrl}${ogImage.startsWith('/') ? '' : '/'}${ogImage}` : null);
+        : (publicOrigin && ogImage.startsWith('/') ? `${publicOrigin}${ogImage}` : null);
 
     const title = `Support ${orgName} | ${tenantName}`;
     const description = `Help ${orgName} reach its bundle goal. Choose freezer meal bundles, support the fundraiser, and pay the coordinator directly.`;
 
     // The app defines no metadataBase, so a relative URL cannot be resolved into the
-    // absolute form these fields require. When no base URL is configured (local dev),
+    // absolute form these fields require. When no canonical URL can be resolved,
     // title/description are still emitted but canonical/url/images are omitted rather
-    // than emitting a relative or falsely production-looking value.
+    // than emitting a relative, internal or falsely production-looking value.
     return {
         title,
         description,
@@ -136,7 +145,9 @@ async function getData(slug: string, fundraiserId: string) {
         // compute orderMode and is never passed across the client boundary.
         // TENANT-BRAND-AUTHORITY-1: display_name is the customer-facing brand
         // authority FundraiserClient.tsx resolves the tenant name from.
-        select: { id: true, name: true, display_name: true, slug: true, logo_url: true, timezone: true }
+        // FR-SUPPORTER-SHARE-INTEGRITY-1: custom_domain feeds the canonical
+        // public URL. Like timezone, it is read here and projected away below.
+        select: { id: true, name: true, display_name: true, slug: true, logo_url: true, timezone: true, custom_domain: true }
     });
 
     if (!business) return null;
@@ -322,13 +333,46 @@ async function getData(slug: string, fundraiserId: string) {
     // JSON blob that carries internal keys such as checks_payable_to.
     const publicCampaign = toPublicCampaign(campaign);
 
+    // FR-SUPPORTER-SHARE-INTEGRITY-1: the same include-list discipline for the
+    // rest of the payload — brand/logo/colour and the bundle lineup only, the two
+    // weighted-bundle progress numbers (no dollar figures), and the ordering mode
+    // without its internal reason code. See lib/publicFundraiserPayload.ts.
+    const publicBusiness = toPublicSupporterBusiness(business, branding, formattedBundles);
+
+    // The ONE public URL every share channel on the page uses (Copy, Facebook,
+    // Email, Text, the device share sheet, before and after ordering) — the same
+    // value generateMetadata publishes as canonical/og:url. Resolved here, on the
+    // server, from the database rows; the client never derives a URL of its own.
+    const shareUrl = resolveCanonicalSupporterUrl({
+        campaignId: campaign.id,
+        slug: business.slug,
+        customDomain: (business as any).custom_domain ?? null,
+    });
+
+    // The ordering deadline as the supporter should read it, decided in the SAME
+    // render, in the SAME tenant timezone, as the orderMode above — so the
+    // countdown can never say "open" while the server refuses an order, or the
+    // reverse.
+    const deadline = describeSupporterDeadline({
+        endDate: campaign.end_date,
+        timeZone: business.timezone,
+        orderingOpen: orderMode.mode !== 'closed',
+    });
+
     // Serialize the full return value to plain objects before the Server→Client boundary.
     // $queryRaw returns TIMESTAMP(3) columns as Date objects and any DECIMAL columns as
     // strings/numbers — all of which must be plain primitives before being passed to a
     // Client Component (Next.js "Only plain objects" constraint).
     // JSON.stringify converts Date → ISO string; JSON.parse produces a plain object.
     // This is the same approach as safeJSON() in /api/campaigns/route.ts.
-    return JSON.parse(JSON.stringify({ business, campaign: publicCampaign, bundleProgress, orderMode }));
+    return JSON.parse(JSON.stringify({
+        business: publicBusiness,
+        campaign: publicCampaign,
+        bundleProgress: toPublicBundleProgress(bundleProgress),
+        orderMode: toPublicOrderMode(orderMode),
+        shareUrl,
+        deadline,
+    }));
 
 }
 
@@ -338,7 +382,7 @@ export default async function FundraiserPage({ params }: { params: Promise<{ slu
 
     if (!data) notFound();
 
-    const { business, campaign, bundleProgress, orderMode } = data;
+    const { business, campaign, bundleProgress, orderMode, shareUrl, deadline } = data;
 
     return (
         <FundraiserClient
@@ -348,6 +392,8 @@ export default async function FundraiserPage({ params }: { params: Promise<{ slu
             orderMode={orderMode}
             slug={slug}
             fundraiserId={fundraiserId}
+            shareUrl={shareUrl}
+            deadline={deadline}
         />
     );
 }

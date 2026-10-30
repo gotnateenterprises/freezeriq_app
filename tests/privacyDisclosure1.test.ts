@@ -128,7 +128,10 @@ describe('PRIVACY-DISCLOSURE-1: supporter order form disclosure', () => {
         // RAISE-FUNDS-MARKETING-1 added ONE optional, defaulted prop (sampleMode
         // = false) for the /raise-funds/sample demo. Every existing caller is
         // unaffected; the six original props are still required, in order.
-        expect(src).toMatch(/export default function FundraiserClient\(\{\s*\n\s*business,\s*\n\s*campaign,\s*\n\s*bundleProgress,\s*\n\s*orderMode,\s*\n\s*slug,\s*\n\s*fundraiserId,(\s*\n\s*\/\/[^\n]*)*\s*\n\s*sampleMode = false\s*\n\}: any\)/);
+        // REVISED BY FR-SUPPORTER-SHARE-INTEGRITY-1: two more OPTIONAL, defaulted props follow
+        // sampleMode (`shareUrl = null`, `deadline = null`, each with its comment). Still no
+        // breaking change: every existing caller works unchanged without them.
+        expect(src).toMatch(/export default function FundraiserClient\(\{\s*\n\s*business,\s*\n\s*campaign,\s*\n\s*bundleProgress,\s*\n\s*orderMode,\s*\n\s*slug,\s*\n\s*fundraiserId,(\s*\n\s*\/\/[^\n]*)*\s*\n\s*sampleMode = false,?((\s*\n\s*\/\/[^\n]*)|(\s*\n\s*\w+ = null,?))*\s*\n\}: any\)/);
     });
 });
 

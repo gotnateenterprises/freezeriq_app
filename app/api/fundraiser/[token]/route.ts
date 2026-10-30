@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { toPublicScoreboard } from '@/lib/publicFundraiserPayload';
 
 /** Masks a full name to first name + last initial for public privacy. */
 function maskName(name: string | null | undefined): string | null {
@@ -17,24 +18,21 @@ export async function GET(
     try {
         const { token } = await params;
 
+        // FR-SUPPORTER-SHARE-INTEGRITY-1: select, and return, only what the
+        // public scoreboard renders (lib/publicFundraiserPayload.toPublicScoreboard).
+        // It used to also return the lifecycle status, the dollar goal, the dates,
+        // the fundraiser's DOLLAR sales, and each supporter's order total — none of
+        // which the scoreboard shows. Progress is in weighted bundles, from items.
         const campaign = await prisma.fundraiserCampaign.findUnique({
             where: { public_token: token },
             select: {
-                id: true,
                 name: true,
-                status: true,
                 bundle_selection_status: true,
-                start_date: true,
-                end_date: true,
-                goal_amount: true,
                 bundle_goal: true,
-                total_sales: true,
                 about_text: true,
                 mission_text: true,
                 payment_instructions: true,
                 external_payment_link: true,
-                delivery_date: true,
-                pickup_location: true,
                 customer: {
                     select: {
                         name: true,
@@ -45,7 +43,6 @@ export async function GET(
                     orderBy: { created_at: 'desc' },
                     select: {
                         customer_name: true,
-                        total_amount: true,
                         created_at: true,
                         // Bundle-unit progress needs item-level data
                         items: {
@@ -63,18 +60,8 @@ export async function GET(
             return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
         }
 
-        // Privacy: mask supporter names to first name + last initial
-        const maskedOrders = (campaign as any).orders.map((order: any) => ({
-            ...order,
-            customer_name: maskName(order.customer_name),
-        }));
-
-        // Compute total_sales from active orders (not the stale denormalized field)
-        const computedTotalSales = (campaign as any).orders.reduce(
-            (sum: number, o: any) => sum + Number(o.total_amount || 0), 0
-        );
-
-        return NextResponse.json({ ...(campaign as any), total_sales: computedTotalSales, orders: maskedOrders });
+        // Privacy: supporter names are masked to first name + last initial.
+        return NextResponse.json(toPublicScoreboard(campaign as any, maskName));
 
     } catch (e: any) {
         console.error("Fetch Public Scoreboard Error:", e);

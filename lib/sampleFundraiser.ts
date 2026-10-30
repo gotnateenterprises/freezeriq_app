@@ -17,6 +17,7 @@
 import type { PublicCampaign } from '@/lib/publicFundraiserPayload';
 import type { FundraiserProgressResult } from '@/lib/fundraiserMetrics';
 import type { CampaignOrderBundleMode } from '@/lib/campaignOrderBundles';
+import type { SupporterDeadline } from '@/lib/supporterDeadline';
 
 /** Not a UUID and cannot match one — never a real campaign id. */
 export const SAMPLE_FUNDRAISER_ID = 'sample';
@@ -43,6 +44,13 @@ export const SAMPLE_ORDER_MODE: CampaignOrderBundleMode = {
     mode: 'legacy',
     activeOrderableBundleIds: [],
 };
+
+/**
+ * FR-SUPPORTER-SHARE-INTEGRITY-1: the supporter page no longer counts the deadline down in the
+ * browser; the server hands it a descriptor. The sample's deadline is always 14 days out (see
+ * buildSampleCampaign below), so its descriptor is that, by construction.
+ */
+export const SAMPLE_DEADLINE: SupporterDeadline = { kind: 'days', days: 14 };
 
 const DAY_MS = 86_400_000;
 const isoDate = (d: Date) => d.toISOString().slice(0, 10);

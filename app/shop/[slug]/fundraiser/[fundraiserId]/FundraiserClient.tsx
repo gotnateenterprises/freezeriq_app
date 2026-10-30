@@ -1,7 +1,20 @@
 "use client";
 
 import React, { useState, useMemo, useRef } from 'react';
-import { formatBundleCount, computeBundleUnitsFromItems, type FundraiserProgressResult } from '@/lib/fundraiserMetrics';
+import { formatBundleCount, computeBundleUnitsFromItems, resolveBundleGoal, type FundraiserProgressResult } from '@/lib/fundraiserMetrics';
+// FR-SUPPORTER-SHARE-INTEGRITY-1: every share channel is built from ONE server-resolved
+// URL (the `shareUrl` prop), and the deadline from ONE server-resolved descriptor.
+import {
+    supporterShareCaption,
+    supporterSmsHref,
+    supporterEmailHref,
+    supporterNativeShareData,
+    openFacebookShare,
+    copyShareText,
+    shareNatively,
+    type SupporterShareFacts,
+} from '@/lib/supporterShare';
+import { supporterDeadlinePill, type SupporterDeadline } from '@/lib/supporterDeadline';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
 import { customerFacingBusinessName } from '@/lib/tenantBrand';
 // FR-TAX-CORRECTNESS-1: the SAME rule the server applies, so the figure shown
@@ -65,6 +78,23 @@ const qtyBtn: React.CSSProperties = {
     lineHeight: 1,
 };
 
+// FR-SUPPORTER-SHARE-INTEGRITY-1: the quiet share button — the light fill the
+// share guide's Copy step already uses, never the filled primary colour that
+// marks the order CTA. 44px tall so it is an easy tap target on a phone.
+const shareSecondaryBtn = (primaryColor: string): React.CSSProperties => ({
+    background: '#f6ede2',
+    color: primaryColor,
+    border: 0,
+    borderRadius: 11,
+    fontSize: '.72rem',
+    fontWeight: 800,
+    padding: '.65rem .7rem',
+    minHeight: 44,
+    minWidth: 0,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+});
+
 const fableCard: React.CSSProperties = {
     background: '#fff',
     border: '1px solid #eee2d6',
@@ -121,10 +151,22 @@ export default function FundraiserClient({
     // RAISE-FUNDS-MARKETING-1: set ONLY by /shop/[slug]/raise-funds/sample.
     // The real fundraiser route never passes it, so for every real campaign
     // this is false and nothing below behaves differently.
-    sampleMode = false
+    sampleMode = false,
+    // FR-SUPPORTER-SHARE-INTEGRITY-1: the canonical public fundraiser URL
+    // (lib/fundraiserCanonicalUrl.ts), resolved on the server. Null means no
+    // safe URL exists, and then no share control is shown at all.
+    shareUrl = null,
+    // FR-SUPPORTER-SHARE-INTEGRITY-1: the ordering deadline as decided on the
+    // server in the tenant's calendar (lib/supporterDeadline.ts). Null hides it.
+    deadline = null
 }: any) {
 
-    const { totalBundlesSold, bundleGoal } = bundleProgress as FundraiserProgressResult;
+    // FR-SUPPORTER-SHARE-INTEGRITY-1: the goal goes through the single goal rule
+    // (FR-GOAL-CONFIG-1) once more here, so no caller's malformed value can ever
+    // render as "null", NaN or Infinity bundles.
+    const { totalBundlesSold: rawBundlesSold, bundleGoal: rawBundleGoal } = (bundleProgress || {}) as FundraiserProgressResult;
+    const totalBundlesSold = Number.isFinite(Number(rawBundlesSold)) && Number(rawBundlesSold) > 0 ? Number(rawBundlesSold) : 0;
+    const bundleGoal = resolveBundleGoal(rawBundleGoal);
 
     const primaryColor = business.branding?.primary_color || '#4f46e5';
     // TENANT-BRAND-AUTHORITY-1: the customer-facing brand a fundraiser
@@ -164,6 +206,9 @@ export default function FundraiserClient({
     // after the 2-second `copied` flash resets. No behavioral meaning.
     const [step1Done, setStep1Done] = useState(false);
     const [shareStatus, setShareStatus] = useState<string | null>(null);
+    // FR-SUPPORTER-SHARE-INTEGRITY-1: the Copy link / Facebook / Email / Text
+    // panel, opened when the device has no share sheet (or by its fallback).
+    const [shareOptionsOpen, setShareOptionsOpen] = useState(false);
 
     const bundles = business.bundles || [];
     // Defense-in-depth: only the exact coordinator-approved bundle ids this page
@@ -408,52 +453,44 @@ export default function FundraiserClient({
         }
     };
 
-    // ── ShareRow actions ──────────────────────────────────────────────────────
-    // One suggested caption drives Text / Facebook / Copy. Facebook does not
-    // permit prefilling the user's post text, so the caption is copied to the
-    // clipboard and the URL Share Dialog is opened with the fundraiser URL; the
-    // link PREVIEW itself comes from the page's Open Graph metadata and can only
-    // be built by Facebook from a public HTTPS URL (never from localhost).
-    const pageUrl = () => (typeof window !== 'undefined' ? window.location.href : '');
-    const isLocalhost = () => typeof window !== 'undefined'
-        && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
-    const shareCaption = () =>
-        `Help ${campaign.organization_name} reach ${formatBundleCount(bundleGoal)} bundles!\n\n` +
-        `We're currently at ${formatBundleCount(displayBundlesSold)} bundles. Choose delicious freezer meal ` +
-        `bundles and support the fundraiser. Payment is collected separately by the coordinator.\n\n` +
-        `Order here:\n${pageUrl()}`;
+    // ── Share actions ─────────────────────────────────────────────────────────
+    // FR-SUPPORTER-SHARE-INTEGRITY-1: ONE destination for every channel — the
+    // server-resolved canonical URL in `shareUrl`, never the browser's address
+    // (which carried Preview hosts, tracking queries and share tokens into every
+    // share). Message text is built by lib/supporterShare.ts from the same facts.
+    // With no shareUrl there are no share facts, and no share control renders.
+    //
+    // Facebook does not permit prefilling the user's post text, so the caption is
+    // copied to the clipboard and the URL Share Dialog is opened with the
+    // canonical URL; the link PREVIEW comes from that URL's Open Graph metadata
+    // and can only be built by Facebook from a public HTTPS URL (never localhost).
+    const shareFacts: SupporterShareFacts | null = shareUrl
+        ? { url: shareUrl, organizationName: campaign.organization_name, bundleGoal, bundlesSold: displayBundlesSold }
+        : null;
+    const shareIsLocal = !!shareUrl && /^http:\/\/(localhost|127\.0\.0\.1)(:|\/)/i.test(shareUrl);
+    const browserNavigator = () => (typeof navigator === 'undefined' ? null : navigator);
 
     const handleTextIt = () => {
-        window.location.href = `sms:?&body=${encodeURIComponent(shareCaption())}`;
+        if (!shareFacts) return;
+        window.location.href = supporterSmsHref(shareFacts);
     };
 
-    // Guards browsers/contexts (e.g. non-HTTPS, older WebViews) where
-    // navigator.clipboard or writeText is missing entirely, so calling it
-    // can't throw synchronously and block the Facebook share below.
-    const copyShareCaption = (): Promise<boolean> => {
-        if (
-            typeof navigator === 'undefined'
-            || !navigator.clipboard
-            || typeof navigator.clipboard.writeText !== 'function'
-        ) {
-            return Promise.resolve(false);
-        }
-
-        return navigator.clipboard
-            .writeText(shareCaption())
-            .then(() => true)
-            .catch(() => false);
+    const handleEmail = () => {
+        if (!shareFacts) return;
+        window.location.href = supporterEmailHref(shareFacts);
     };
 
     const handleFacebook = async () => {
+        if (!shareFacts) return;
         // Start the clipboard write from the click itself, BEFORE any await, so the
         // browser's user-activation is still valid when window.open runs (awaiting
-        // first would let the popup blocker cancel it).
-        const captionCopyPromise = copyShareCaption();
+        // first would let the popup blocker cancel it). The share never depends on
+        // the clipboard succeeding.
+        const captionCopyPromise = copyShareText(browserNavigator(), supporterShareCaption(shareFacts));
 
         // Localhost can't produce a real link preview, so opening the sharer only
         // yields an empty-looking composer — copy the caption and stop here.
-        if (isLocalhost()) {
+        if (shareIsLocal) {
             const copiedLocally = await captionCopyPromise;
             setShareStatus(copiedLocally
                 ? 'Facebook previews require the public Vercel or live page. Caption copied — test Facebook after deployment.'
@@ -461,11 +498,7 @@ export default function FundraiserClient({
             return;
         }
 
-        window.open(
-            `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(pageUrl())}`,
-            '_blank',
-            'noopener,noreferrer'
-        );
+        openFacebookShare(window, shareFacts.url);
 
         const captionCopied = await captionCopyPromise;
         setShareStatus(captionCopied
@@ -474,19 +507,39 @@ export default function FundraiserClient({
     };
 
     const handleCopy = async () => {
-        try {
-            await navigator.clipboard.writeText(shareCaption());
+        if (!shareFacts) return;
+        if (await copyShareText(browserNavigator(), supporterShareCaption(shareFacts))) {
             setCopied(true);
             setStep1Done(true);
             setShareStatus('Caption copied — ready to paste anywhere.');
             setTimeout(() => setCopied(false), 2000);
-        } catch {
-            try {
-                await navigator.clipboard.writeText(pageUrl());
-                setShareStatus('Caption copy failed — the link was copied instead.');
-            } catch {
-                setShareStatus('Copy is unavailable in this browser — long-press the address bar to share the link.');
-            }
+        } else if (await copyShareText(browserNavigator(), shareFacts.url)) {
+            setShareStatus('Caption copy failed — the link was copied instead.');
+        } else {
+            setShareOptionsOpen(true);
+            setShareStatus('Copy is unavailable in this browser — the fundraiser link is shown below to share.');
+        }
+    };
+
+    const handleCopyLink = async () => {
+        if (!shareFacts) return;
+        setShareStatus(await copyShareText(browserNavigator(), shareFacts.url)
+            ? 'Link copied — paste it anywhere.'
+            : 'Copy is unavailable in this browser — the fundraiser link is shown below to share.');
+    };
+
+    // The device share sheet where there is one; otherwise the Copy link /
+    // Facebook / Email / Text panel. Never a silent no-op.
+    const handleNativeShare = async () => {
+        if (!shareFacts) return;
+        const result = await shareNatively(browserNavigator(), supporterNativeShareData(shareFacts));
+        if (result === 'shared') {
+            setShareStatus('Thanks for sharing!');
+        } else if (result === 'unsupported' || result === 'failed') {
+            setShareOptionsOpen(true);
+            setShareStatus(result === 'failed'
+                ? 'Sharing didn’t open — choose another way below.'
+                : 'Choose how you’d like to share:');
         }
     };
 
@@ -515,19 +568,13 @@ export default function FundraiserClient({
         } catch { return null; }
     };
 
-    const daysLeft = useMemo(() => {
-        const endDate = campaign.end_date;
-        if (!endDate) return null;
-        try {
-            const str = endDate instanceof Date ? endDate.toISOString() : String(endDate);
-            const dateOnly = str.match(/^(\d{4}-\d{2}-\d{2})/)?.[1];
-            const end = dateOnly ? new Date(dateOnly + 'T12:00:00') : new Date(str);
-            if (isNaN(end.getTime())) return null;
-            const now = new Date();
-            const diff = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-            return Math.max(0, diff);
-        } catch { return null; }
-    }, [campaign.end_date]);
+    // FR-SUPPORTER-SHARE-INTEGRITY-1: no countdown arithmetic here any more. The
+    // browser used to compute Math.ceil((noon-LOCAL end_date − now) / 1 day),
+    // which depended on the visitor's timezone and the hour — "1 Day Left" on the
+    // morning of the last day, "0 Days Left" from noon of it while orders were
+    // still open. The server now decides it, in the tenant's calendar, in the same
+    // render as the ordering mode (lib/supporterDeadline.ts); this only renders it.
+    const deadlinePill = supporterDeadlinePill(deadline as SupporterDeadline | null);
 
     const endDateStr = formatDate(campaign.end_date);
 
@@ -740,7 +787,13 @@ export default function FundraiserClient({
                             three-button ShareRow. Same warm Fable card shell; each step is
                             a numbered row (pill + heading + one sentence + one action).
                             All three handlers are the existing hardened ones — the steps
-                            are guidance only and none is a prerequisite for another. */}
+                            are guidance only and none is a prerequisite for another.
+                            FR-SUPPORTER-SHARE-INTEGRITY-1: every step now shares the
+                            canonical PUBLIC fundraiser page (shareUrl), never this
+                            browser's address — the supporter is sharing the fundraiser,
+                            not their own confirmation. Without a shareUrl the card is
+                            not shown at all (fail closed). */}
+                        {shareFacts && (
                         <div style={{ margin: '0 0 .8rem', background: '#fff', border: '1px solid #eee2d6', borderRadius: 18, padding: '1rem 1.05rem .9rem' }}>
                             <b style={{ display: 'block', fontFamily: SERIF, fontWeight: 400, fontSize: '.95rem', color: '#3b2a2f' }}>Help us keep the momentum going</b>
                             <p style={{ margin: '.3rem 0 .85rem', fontSize: '.72rem', color: '#7a6258', lineHeight: 1.45 }}>
@@ -803,6 +856,28 @@ export default function FundraiserClient({
                                 </div>
                             </div>
 
+                            {/* FR-SUPPORTER-SHARE-INTEGRITY-1: the two channels the
+                                guide did not offer — email, and the device's own share
+                                sheet (falling back to the options panel below). */}
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.45rem', marginTop: '.75rem' }}>
+                                <button onClick={handleEmail} aria-label="Email the fundraiser link" style={{ ...shareSecondaryBtn(primaryColor), flex: '1 1 8rem' }}>
+                                    ✉️ Email it
+                                </button>
+                                <button onClick={handleNativeShare} aria-label="More ways to share the fundraiser" style={{ ...shareSecondaryBtn(primaryColor), flex: '1 1 8rem' }}>
+                                    📤 More ways to share
+                                </button>
+                            </div>
+                            {shareOptionsOpen && (
+                                <SupporterShareOptions
+                                    url={shareFacts.url}
+                                    primaryColor={primaryColor}
+                                    onCopyLink={handleCopyLink}
+                                    onFacebook={handleFacebook}
+                                    onEmail={handleEmail}
+                                    onText={handleTextIt}
+                                />
+                            )}
+
                             {/* Shared status region — announces copy/Facebook/localhost outcomes */}
                             <div aria-live="polite">
                                 {shareStatus && (
@@ -814,6 +889,7 @@ export default function FundraiserClient({
                                 Even one additional order helps the fundraiser raise more. Thank you for spreading the word. 🧡
                             </p>
                         </div>
+                        )}
 
                         {/* FounderNote → fundraiser-lead CTA (COORDINATOR-SUPPORTER-POLISH-1).
                             This replaced a generic "come shop our storefront" closing note
@@ -874,10 +950,10 @@ export default function FundraiserClient({
                                             <b style={{ display: 'block', fontSize: '.9rem', color: '#3b2a2f', fontVariantNumeric: 'tabular-nums' }}>{formatBundleCount(bundleGoal)}</b>
                                             <span style={{ fontSize: '.55rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.1em', color: '#9a8075' }}>Bundle Goal</span>
                                         </div>
-                                        {daysLeft !== null && (
+                                        {deadlinePill && (
                                             <div style={{ background: '#faf5ef', border: '1px solid #e9d9cb', borderRadius: 12, padding: '.4rem .7rem', textAlign: 'center' }}>
-                                                <b style={{ display: 'block', fontSize: '.9rem', color: '#3b2a2f', fontVariantNumeric: 'tabular-nums' }}>{daysLeft}</b>
-                                                <span style={{ fontSize: '.55rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.1em', color: '#9a8075' }}>Day{daysLeft !== 1 ? 's' : ''} Left</span>
+                                                <b style={{ display: 'block', fontSize: '.9rem', color: '#3b2a2f', fontVariantNumeric: 'tabular-nums' }}>{deadlinePill.value}</b>
+                                                <span style={{ fontSize: '.55rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.1em', color: '#9a8075' }}>{deadlinePill.caption}</span>
                                             </div>
                                         )}
                                     </div>
@@ -1140,6 +1216,42 @@ export default function FundraiserClient({
                                     No payment taken online · your order counts toward the goal instantly
                                 </p>
                             </div>
+
+                            {/* FR-SUPPORTER-SHARE-INTEGRITY-1 — PRE-ORDER SHARE.
+                                Someone can help this fundraiser without ordering
+                                today. Deliberately AFTER the order card and quieter
+                                than it: a light secondary button, never the filled
+                                primary colour "Place my order" owns. Shares the SAME
+                                canonical URL as every other channel; only shown while
+                                ordering is open and a safe URL exists. */}
+                            {shareFacts && (
+                                <section aria-labelledby="fr-preorder-share-title" style={{ ...fableCard, padding: '.85rem 1rem' }}>
+                                    <b id="fr-preorder-share-title" style={{ display: 'block', fontSize: '.8rem', color: '#3b2a2f', overflowWrap: 'anywhere' }}>
+                                        Help this fundraiser reach more people
+                                    </b>
+                                    <p style={{ margin: '.2rem 0 .55rem', fontSize: '.7rem', color: '#7a6258', lineHeight: 1.45, overflowWrap: 'anywhere' }}>
+                                        Not ordering right now? Sharing helps {campaign.organization_name || 'this fundraiser'} too.
+                                    </p>
+                                    <button onClick={handleNativeShare} aria-label="Share this fundraiser" style={{ ...shareSecondaryBtn(primaryColor), width: '100%' }}>
+                                        📤 Share this fundraiser
+                                    </button>
+                                    {shareOptionsOpen && (
+                                        <SupporterShareOptions
+                                            url={shareFacts.url}
+                                            primaryColor={primaryColor}
+                                            onCopyLink={handleCopyLink}
+                                            onFacebook={handleFacebook}
+                                            onEmail={handleEmail}
+                                            onText={handleTextIt}
+                                        />
+                                    )}
+                                    <div aria-live="polite">
+                                        {shareStatus && (
+                                            <p style={{ margin: '.55rem 0 0', fontSize: '.66rem', fontWeight: 700, color: '#7a6258' }}>{shareStatus}</p>
+                                        )}
+                                    </div>
+                                </section>
+                            )}
                         </>
                     ) : null}
 
@@ -1246,6 +1358,33 @@ function BundleCard({ bundle, primaryColor, inOrder, onToggle }: {
                     </button>
                 </div>
             </div>
+        </div>
+    );
+}
+
+// ─── FR-SUPPORTER-SHARE-INTEGRITY-1: the share options panel ─────────────────
+// Hookless and presentational: the parent owns every handler, and every handler
+// shares the same `url`. Shown wherever the device has no share sheet. The link
+// itself is printed too, so a supporter whose browser blocks the clipboard can
+// still see and long-press it. auto-fit columns collapse to two on a small phone.
+function SupporterShareOptions({ url, primaryColor, onCopyLink, onFacebook, onEmail, onText }: {
+    url: string;
+    primaryColor: string;
+    onCopyLink: () => void;
+    onFacebook: () => void;
+    onEmail: () => void;
+    onText: () => void;
+}) {
+    const btn = { ...shareSecondaryBtn(primaryColor), width: '100%' };
+    return (
+        <div role="group" aria-label="Ways to share this fundraiser" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(7rem, 1fr))', gap: '.45rem', marginTop: '.6rem' }}>
+            <button onClick={onCopyLink} aria-label="Copy the fundraiser link" style={btn}>🔗 Copy link</button>
+            <button onClick={onFacebook} aria-label="Share the fundraiser on Facebook" style={btn}>📘 Facebook</button>
+            <button onClick={onEmail} aria-label="Email the fundraiser link" style={btn}>✉️ Email</button>
+            <button onClick={onText} aria-label="Text the fundraiser link" style={btn}>💬 Text</button>
+            <p style={{ gridColumn: '1 / -1', margin: '.15rem 0 0', fontSize: '.62rem', color: '#9a8075', overflowWrap: 'anywhere' }}>
+                {url}
+            </p>
         </div>
     );
 }

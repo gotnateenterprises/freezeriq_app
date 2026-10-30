@@ -137,7 +137,10 @@ describe('2. the sample route', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 describe('3. the sample cannot place an order', () => {
     // End anchor is CODE, not a comment — strip() removes comment lines.
-    const SHARE_ROW_START = 'const pageUrl = () =>';
+    // REVISED BY FR-SUPPORTER-SHARE-INTEGRITY-1: the share block that follows submitOrder no
+    // longer begins with `const pageUrl = () =>` (the browser-address URL it read is gone); it
+    // begins with the canonical share facts. Same anchor role, same position.
+    const SHARE_ROW_START = 'const shareFacts: SupporterShareFacts | null =';
     const submitStart = client.indexOf('const submitOrder = async () => {');
     const submitEnd = client.indexOf(SHARE_ROW_START, submitStart);
     const submitBody = client.slice(submitStart, submitEnd);
@@ -148,7 +151,9 @@ describe('3. the sample cannot place an order', () => {
     });
 
     it('sampleMode is optional and defaults to false', () => {
-        expect(client).toMatch(/fundraiserId,\s*\n\s*sampleMode = false\s*\n\}: any\)/);
+        // REVISED BY FR-SUPPORTER-SHARE-INTEGRITY-1: two more OPTIONAL props now follow it
+        // (`shareUrl = null`, `deadline = null`). sampleMode is still optional and still false.
+        expect(client).toMatch(/fundraiserId,\s*\n\s*sampleMode = false,?(\s*\n\s*\w+ = null,?)*\s*\n\}: any\)/);
     });
 
     it('the sample-mode early return is the FIRST statement of submitOrder', () => {

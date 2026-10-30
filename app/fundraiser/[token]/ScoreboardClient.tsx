@@ -20,12 +20,18 @@ import {
     ExternalLink
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { openFacebookShare, copyShareText } from '@/lib/supporterShare';
 
 interface ScoreboardClientProps {
     token: string;
+    /**
+     * FR-SUPPORTER-SHARE-INTEGRITY-1: the canonical public fundraiser URL (the ORDERING page),
+     * resolved on the server. Every share button and the order link use it; null hides them.
+     */
+    shareUrl?: string | null;
 }
 
-export default function ScoreboardClient({ token }: ScoreboardClientProps) {
+export default function ScoreboardClient({ token, shareUrl = null }: ScoreboardClientProps) {
     const [campaign, setCampaign] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [copied, setCopied] = useState(false);
@@ -55,21 +61,27 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
         }
     };
 
-    const handleCopy = () => {
-        navigator.clipboard.writeText(window.location.href);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+    // FR-SUPPORTER-SHARE-INTEGRITY-1: every share goes to the fundraiser's ordering page
+    // (shareUrl), never to this scoreboard's own browser address.
+    const handleCopy = async () => {
+        if (!shareUrl) return;
+        // Only claim "copied" when it was; the link is printed below either way.
+        if (await copyShareText(typeof navigator === 'undefined' ? null : navigator, shareUrl)) {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        }
     };
 
     const shareOnFacebook = () => {
-        const url = encodeURIComponent(window.location.href);
-        window.open(`https://www.facebook.com/sharer/sharer.php?u=${url}`, '_blank');
+        if (!shareUrl) return;
+        openFacebookShare(window, shareUrl);
     };
 
     const shareOnWhatsApp = () => {
-        const metrics = computeFundraiserProgress(campaign?.bundle_goal, campaign?.total_sales, campaign?.orders || []);
-        const text = encodeURIComponent(`Check out this fundraiser for ${campaign?.customer?.name || 'a great cause'}! ${formatBundleCount(metrics.totalBundlesSold)} bundles sold so far. Support us here: ${window.location.href}`);
-        window.open(`https://wa.me/?text=${text}`, '_blank');
+        if (!shareUrl) return;
+        const metrics = computeFundraiserProgress(campaign?.bundle_goal, null, campaign?.orders || []);
+        const text = encodeURIComponent(`Check out this fundraiser for ${campaign?.customer?.name || 'a great cause'}! ${formatBundleCount(metrics.totalBundlesSold)} bundles sold so far. Support us here: ${shareUrl}`);
+        window.open(`https://wa.me/?text=${text}`, '_blank', 'noopener,noreferrer');
     };
 
     if (isLoading) {
@@ -90,7 +102,7 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
         );
     }
 
-    const metrics = computeFundraiserProgress(campaign.bundle_goal, campaign.total_sales, campaign.orders || []);
+    const metrics = computeFundraiserProgress(campaign.bundle_goal, null, campaign.orders || []);
     const progress = metrics.progressPercent;
 
     return (
@@ -150,17 +162,29 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
                             </div>
                             <div className="flex justify-between mt-3 px-1">
                                 <span className="text-xs font-black text-slate-300 uppercase tracking-widest">0</span>
-                                <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Goal: {metrics.bundleGoal} Bundles</span>
+                                <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Goal: {formatBundleCount(metrics.bundleGoal)} Bundles</span>
                             </div>
                         </div>
 
                         <p className="mt-8 text-slate-500 font-medium leading-relaxed">
                             {campaign.about_text || 'Help us reach our goal! Every purchase directly supports our organization.'}
                         </p>
+
+                        {/* FR-SUPPORTER-SHARE-INTEGRITY-1: the scoreboard is no longer a dead
+                            end — a supporter can go straight to the fundraiser's ordering page. */}
+                        {shareUrl && (
+                            <a
+                                href={shareUrl}
+                                className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-6 py-4 font-black text-white transition-colors hover:bg-indigo-500"
+                            >
+                                Order meals &amp; support <ArrowRight size={20} />
+                            </a>
+                        )}
                     </div>
                 )}
 
                 {/* Social Share Box */}
+                {shareUrl && (
                 <div className="bg-white rounded-[2rem] p-8 border border-slate-200 shadow-sm text-center">
                     <h2 className="text-xl font-black mb-6 flex items-center justify-center gap-2">
                         <Share2 size={24} className="text-indigo-600" />
@@ -171,6 +195,7 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
                             onClick={shareOnFacebook}
                             className="w-14 h-14 bg-[#1877F2]/10 text-[#1877F2] rounded-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-90"
                             title="Share on Facebook"
+                            aria-label="Share the fundraiser on Facebook"
                         >
                             <Facebook size={28} />
                         </button>
@@ -178,6 +203,7 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
                             onClick={shareOnWhatsApp}
                             className="w-14 h-14 bg-[#25D366]/10 text-[#25D366] rounded-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-90"
                             title="Share on WhatsApp"
+                            aria-label="Share the fundraiser on WhatsApp"
                         >
                             <MessageCircle size={28} />
                         </button>
@@ -185,12 +211,17 @@ export default function ScoreboardClient({ token }: ScoreboardClientProps) {
                             onClick={handleCopy}
                             className={`w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-90 ${copied ? 'text-emerald-500 bg-emerald-50' : 'text-slate-600 hover:bg-slate-200'}`}
                             title="Copy Link"
+                            aria-label="Copy the fundraiser link"
                         >
                             {copied ? <CheckCircle2 size={28} /> : <LinkIcon size={28} />}
                         </button>
                     </div>
-                    {copied && <p className="text-xs font-black text-emerald-500 mt-3 animate-bounce uppercase">Link Copied!</p>}
+                    <div aria-live="polite">
+                        {copied && <p className="text-xs font-black text-emerald-500 mt-3 animate-bounce uppercase">Link Copied!</p>}
+                    </div>
+                    <p className="mt-3 break-all text-xs font-bold text-slate-400">{shareUrl}</p>
                 </div>
+                )}
 
                 {/* Recent Activity Ticker */}
                 {campaign.bundle_selection_status !== 'pending' && (

@@ -8,9 +8,11 @@ import { customerFacingBusinessName } from '@/lib/tenantBrand';
 import {
     buildSampleCampaign,
     SAMPLE_BUNDLE_PROGRESS,
+    SAMPLE_DEADLINE,
     SAMPLE_FUNDRAISER_ID,
     SAMPLE_ORDER_MODE,
 } from '@/lib/sampleFundraiser';
+import { toPublicSupporterBusiness } from '@/lib/publicFundraiserPayload';
 import FundraiserClient from '../../fundraiser/[fundraiserId]/FundraiserClient';
 
 /**
@@ -107,7 +109,9 @@ async function loadTenant(slug: string) {
     }));
 
     // Plain objects only across the Server→Client boundary, as the real page does.
-    return JSON.parse(JSON.stringify({ ...business, branding, bundles: formattedBundles }));
+    // FR-SUPPORTER-SHARE-INTEGRITY-1: through the same public include-list as the
+    // real page, so the demo cannot serialize sku/stock/branding internals either.
+    return JSON.parse(JSON.stringify(toPublicSupporterBusiness(business, branding, formattedBundles)));
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
@@ -150,6 +154,7 @@ export default async function SampleFundraiserPage({ params }: { params: Promise
                 orderMode={SAMPLE_ORDER_MODE}
                 slug={slug}
                 fundraiserId={SAMPLE_FUNDRAISER_ID}
+                deadline={SAMPLE_DEADLINE}
                 sampleMode
             />
         </div>
