@@ -529,8 +529,11 @@ describe('FR-COORD-123 · Previous Supporters in Step 2', () => {
         expect(ps).toContain('onAvailability?: (reachable: number) => void');
         expect(ps).toContain('onAvailability?.(json.counts?.reachable ?? 0)');
         // The send contract is untouched: only the two edited strings travel.
+        // REVISED (PREVIOUS-SUPPORTER-EMAIL-2.0): plus the ticked opaque references
+        // and the confirmation literal (tests/frRebook2Arming.test.ts pins the exact
+        // key set). Still never a recipient list.
         const stripped = strip(ps);
-        expect(stripped).toContain('JSON.stringify({ subject: subject.trim(), text })');
+        expect(stripped).toContain('JSON.stringify(buildInviteSendBody({ subject, text, selected }))');
         expect(stripped).not.toContain('recipients');
     });
 

@@ -535,19 +535,25 @@ describe('FR-REBOOK-2-ORIGIN-1 · the route never trusts the request host', () =
     });
 
     it('passes the tenant storefront through to the builder', () => {
-        const call = route.slice(route.indexOf('return buildInviteDraft({'));
-        const args = call.slice(0, call.indexOf('    });'));
-        expect(args).toContain('customDomain: campaign.customer?.business?.custom_domain');
-        expect(args).toContain('slug: campaign.customer?.business?.slug');
-        expect(args).toContain('id: campaign.id');
-        // The origin is a parameter of the shared helper, so BOTH callers must
-        // supply the pinned one — a single site could otherwise drift.
-        expect(args).toContain('origin,');
-        const callers = [...route.matchAll(/buildDraftFor\(campaign, ([^)]+)\)/g)].map((m) => m[1]);
-        expect(callers.length).toBeGreaterThanOrEqual(1);
+        // REVISED (PREVIOUS-SUPPORTER-EMAIL-2.0): the ordering link in the email is
+        // now THE canonical supporter URL (lib/fundraiserCanonicalUrl, from
+        // FR-SUPPORTER-SHARE-INTEGRITY-1) — buildSupporterOrderUrl over the PINNED
+        // outreach origin, then sanitized — resolved in ONE place both handlers
+        // call. The only origin left in the route is the unsubscribe link's, and it
+        // is still the pinned one.
+        const facts = strip(R('lib/previousSupporterInvitation.ts'));
+        const call = facts.slice(facts.indexOf('resolveCanonicalSupporterUrl({'));
+        const args = call.slice(0, call.indexOf('});'));
+        expect(args).toContain('customDomain: business?.custom_domain');
+        expect(args).toContain('slug: business?.slug');
+        expect(args).toContain('campaignId: campaign.id');
+        const canonical = strip(R('lib/fundraiserCanonicalUrl.ts'));
+        expect(canonical).toContain('resolveOutreachOrigin(),');
+        expect(canonical).toContain('return sanitizeSupporterShareUrl(raw);');
         const origins = [...route.matchAll(/const origin = ([^;]+);/g)].map((m) => m[1].trim());
-        expect(origins.length).toBe(2);                       // GET and POST
+        expect(origins.length).toBe(1);                       // POST: the unsubscribe link
         expect(origins.every((o) => o === 'resolveOutreachOrigin(req)')).toBe(true);
+        expect(route).not.toContain('buildSupporterOrderUrl(');
     });
 
     it('a hostile Host header cannot become the link', () => {

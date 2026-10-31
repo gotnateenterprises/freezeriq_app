@@ -466,9 +466,18 @@ describe('FR-REBOOK-2 · coordinator authority (shipped source)', () => {
         const get = route.slice(route.indexOf('export async function GET('), route.indexOf('export async function POST('));
         expect(get).not.toMatch(/await req\.json\(\)/);
         // The POST reads one — deliberately, and takes exactly two strings from it.
+        // REVISED (PREVIOUS-SUPPORTER-EMAIL-2.0, owner amendment: "Select All or
+        // select individual supporters"): it now also reads the coordinator's
+        // ticked OPAQUE references and the confirmation literal — and nothing
+        // else. The references are matched only inside the audience the server
+        // recomputes (lib/previousSupporterInvitation.resolveSelection), so they
+        // can narrow who is emailed but never name an address, a campaign or an
+        // organization.
         const post = route.slice(route.indexOf('export async function POST('));
         expect(post).toContain('subject: body?.subject, text: body?.text');
-        expect((post.match(/body\?\./g) ?? [])).toHaveLength(2);
+        const fields = [...new Set([...post.matchAll(/body\?\.(\w+)/g)].map((m) => m[1]))].sort();
+        expect(fields).toEqual(['confirm', 'selected', 'subject', 'text']);
+        expect(post).toContain('resolveSelection({ campaignId, refs: body?.selected, audience, history })');
     });
 
     // FR-ORG-DASHBOARD-1A moved the audience assembly, unchanged, into
@@ -522,8 +531,14 @@ describe('FR-REBOOK-2 · coordinator authority (shipped source)', () => {
     });
 
     it('returns masked addresses and a bounded list, never a mailing list', () => {
-        expect(route).toContain('emailMasked: s.email ? maskSupporterEmail(s.email) : null');
+        // REVISED (PREVIOUS-SUPPORTER-EMAIL-2.0): the row shape moved, with its
+        // masking, into lib/previousSupporterInvitation.buildSupporterRows so the
+        // card's per-supporter status and opaque reference are unit-testable.
+        const rows = strip(R('lib/previousSupporterInvitation.ts'));
+        expect(rows).toContain('emailMasked: s.email ? maskSupporterEmail(s.email) : null');
+        expect(rows).not.toMatch(/\bemail:\s*s\.email/);
         expect(route).toContain('SUPPORTER_PREVIEW_LIMIT');
+        expect(route).toContain('limit: SUPPORTER_PREVIEW_LIMIT');
         // The full address is never placed in the payload.
         const payload = route.slice(route.indexOf('return NextResponse.json({'));
         expect(payload).not.toMatch(/email:\s*s\.email/);
@@ -554,16 +569,18 @@ describe('FR-REBOOK-2 · coordinator authority (shipped source)', () => {
     });
 
     it('builds the draft from the CURRENT campaign\'s own deadline and token', () => {
-        // Now inside the shared buildDraftFor helper that GET and POST both use,
-        // so the preview and the send cannot diverge.
-        const call = route.slice(route.indexOf('return buildInviteDraft({'));
-        const args = call.slice(0, call.indexOf('    });'));
-        expect(args).toContain('end_date: campaign.end_date');
-        expect(args).toContain('public_token: campaign.public_token');
-        expect(args).toContain('id: campaign.id');
-        expect(args).not.toContain('end_date: null');
-        expect(args).not.toContain('public_token: null');
-        expect(args).not.toContain('priorCampaign');
+        // REVISED (PREVIOUS-SUPPORTER-EMAIL-2.0): the facts the email states now
+        // come from lib/previousSupporterInvitation.loadInvitationFacts, which GET
+        // and POST both call with the session's own campaign row — the deadline,
+        // pickup and ordering link of THAT campaign, never a prior one.
+        const facts = strip(R('lib/previousSupporterInvitation.ts'));
+        expect(facts).toContain('deadlineLabel: formatOrderDeadline(campaign.end_date)');
+        expect(facts).toContain('publicToken: campaign.public_token');
+        expect(facts).toContain('campaignId: campaign.id');
+        expect(facts).not.toContain('priorCampaign');
+        expect(facts).not.toContain('fundraiser_info');
+        expect((route.match(/await loadInvitationFacts\(campaign\)/g) ?? []).length).toBe(2);   // GET and POST
+        expect(route).not.toContain('priorCampaign');
     });
 });
 

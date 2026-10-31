@@ -26,6 +26,15 @@ export interface SendableRecipient {
     displayName: string;
     contactIds: string[];
     organizationNames: string[];
+    /**
+     * PREVIOUS-SUPPORTER-EMAIL-2.0 — set only when the caller is deliberately
+     * retrying a recipient whose earlier attempt at this SAME generation FAILED.
+     * It gives the retry its own claim key; it does not loosen the duplicate
+     * guard, because the partial unique index on (message, recipient) still
+     * refuses any second attempt while a queued, accepted or skipped one exists.
+     * Omitted (every other caller), the key is exactly what it always was.
+     */
+    retryOrdinal?: number;
 }
 
 export interface SendOutcome {
@@ -56,8 +65,9 @@ export interface SendSummary {
 }
 
 /** Deterministic — the same recipient and message always produce the same key. */
-export function buildIdempotencyKey(messageId: string, recipientId: string, generation: number): string {
-    return `${messageId}:${recipientId}:g${generation}`;
+export function buildIdempotencyKey(messageId: string, recipientId: string, generation: number, retryOrdinal?: number): string {
+    const base = `${messageId}:${recipientId}:g${generation}`;
+    return retryOrdinal && retryOrdinal > 0 ? `${base}:r${retryOrdinal}` : base;
 }
 
 /** One preference row, reduced to what suppression actually depends on. */
@@ -204,7 +214,7 @@ export async function runSend(input: SendRunInput): Promise<SendSummary> {
     }
 
     for (const r of recipients) {
-        const key = buildIdempotencyKey(messageId, r.recipientId, generation);
+        const key = buildIdempotencyKey(messageId, r.recipientId, generation, r.retryOrdinal);
 
         // ── CLAIM ────────────────────────────────────────────────────────────
         // Create the attempt row BEFORE contacting the provider. If a

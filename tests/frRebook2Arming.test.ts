@@ -405,13 +405,21 @@ describe('FR-REBOOK-2 · send endpoint authority (shipped source)', () => {
     });
 
     it('renders the email server-side and sends the RENDERED body', () => {
-        expect(post).toContain('renderInviteEmail({');
+        // REVISED (PREVIOUS-SUPPORTER-EMAIL-2.0, owner amendment: personalize
+        // "Hi Sarah," per recipient): the server still renders every email; it now
+        // renders it ONCE PER RECIPIENT inside runSend's render callback, from that
+        // recipient's own row, through lib/previousSupporterEmail. The client's
+        // text is never sent as a body.
+        expect(post).toContain('renderPreviousSupporterEmail({');
         expect(post).toContain('safeSubject(validated.subject)');
         const send = post.slice(post.indexOf('await runSend({'));
         const args = send.slice(0, send.indexOf('        });'));
-        expect(args).toContain('html: rendered.html');
-        expect(args).toContain('text: rendered.text');
-        expect(args).not.toContain('html: body');
+        expect(args).toContain('render: (r) => {');
+        expect(args).toContain('greetingName: r.displayName');
+        const callback = post.slice(post.indexOf('render: (r) => {'), post.indexOf('from: sender.from,'));
+        expect(callback).toContain('return rendered;');
+        expect(callback).not.toContain('html: body');
+        expect(callback).not.toContain('text: body');
     });
 
     it('goes through the deployed engine — never a parallel sender', () => {
@@ -455,8 +463,16 @@ describe('FR-REBOOK-2 · the armed card', () => {
     const card = strip(R(CARD));
 
     it('posts only the two edited strings', () => {
-        expect(card).toContain("JSON.stringify({ subject: subject.trim(), text })");
+        // REVISED (PREVIOUS-SUPPORTER-EMAIL-2.0): plus the ticked OPAQUE references
+        // and the confirmation literal, built by one helper whose exact key set is
+        // pinned below. Still no address, campaign, organization, tenant or batch id.
+        expect(card).toContain('JSON.stringify(buildInviteSendBody({ subject, text, selected }))');
         expect(card).not.toMatch(/recipients|emails:|campaignId|businessId|batchId/);
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { buildInviteSendBody } = require('../lib/previousSupporterSelection');
+        const body = buildInviteSendBody({ subject: '  Hi  ', text: 'Words', selected: ['ps_aaaaaaaaaaaaaaaaaaaaaaaa', 'ps_aaaaaaaaaaaaaaaaaaaaaaaa'] });
+        expect(Object.keys(body).sort()).toEqual(['confirm', 'selected', 'subject', 'text']);
+        expect(body).toEqual({ subject: 'Hi', text: 'Words', selected: ['ps_aaaaaaaaaaaaaaaaaaaaaaaa'], confirm: 'send_individual_emails' });
     });
 
     it('obeys the server\'s capability rather than deciding for itself', () => {
@@ -479,7 +495,9 @@ describe('FR-REBOOK-2 · the armed card', () => {
 
     it('presents the order link as system-controlled, not as something to type', () => {
         expect(card).toContain('Current fundraiser');
-        expect(card).toContain('Order Online');
+        // REVISED (PREVIOUS-SUPPORTER-EMAIL-2.0, owner amendment): the CTA is now
+        // "View Meals & Order" — still appended by the server, still not editable.
+        expect(card).toContain('View Meals &amp; Order');
         expect(card).toMatch(/don&rsquo;t need to type or paste it/);
     });
 
