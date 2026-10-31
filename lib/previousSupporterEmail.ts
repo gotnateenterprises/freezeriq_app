@@ -30,7 +30,9 @@
  *
  *   "Open in my email"  buildPersonalMailto — a mailto: draft for ONE supporter that
  *                       opens in the coordinator's own mail app; they review and send
- *                       it from their own mailbox. FreezerIQ sends nothing.
+ *                       it from their own mailbox. FreezerIQ sends nothing. Since
+ *                       2.0B it, too, carries the organization's mailing address and
+ *                       is not built without one.
  *   automated send      renderPreviousSupporterEmail — FreezerIQ delivers it, so the
  *                       ORGANIZATION is presented as the sender ("{Org} via {tenant}",
  *                       from the platform's verified address) and its mailing address
@@ -390,7 +392,12 @@ export function headerSafeReplyTo(raw: string | null | undefined): string | null
 // ── "Open in my email" — the coordinator's own mailbox ──────────────────────
 
 /** Said in the personal draft, because the coordinator — not FreezerIQ — is writing to them. */
-export const PERSONAL_OPT_OUT_LINE = "If you'd rather not hear about future fundraisers, just reply and let me know.";
+export const PERSONAL_OPT_OUT_LINE = "If you'd rather not receive future fundraiser emails from us, just reply and let us know.";
+
+/** The personal draft's footer heading: plain about what the email is and who it is from. */
+export function solicitationLine(organizationName: string | null | undefined): string {
+    return `Fundraiser solicitation from ${organizationLabel(organizationName)}`;
+}
 
 /**
  * A mailto: draft for ONE previous supporter, for the coordinator's own mail app.
@@ -398,9 +405,12 @@ export const PERSONAL_OPT_OUT_LINE = "If you'd rather not hear about future fund
  * Only `to` is the supporter's address, and only when it is a plain single address
  * (isSendableSupporterAddress), so it can never smuggle a second recipient, a CC or
  * a header. The subject is header-safe; the body is the same greeting, message,
- * current facts and canonical link as the automated email, plus a line inviting
- * them to say no to future contact. Line breaks are %0D%0A, as RFC 6068 asks.
- * FreezerIQ sends nothing — and records nothing as sent — when this is opened.
+ * current facts and canonical link as the automated email, then (2.0B) a footer
+ * that says plainly it is a fundraiser solicitation from the organization, gives
+ * the ORGANIZATION's mailing address, and invites them to say no to future
+ * contact. No organization name or complete address, no draft. Line breaks are
+ * %0D%0A, as RFC 6068 asks. FreezerIQ sends nothing — and records nothing as
+ * sent — when this is opened.
  */
 export function buildPersonalMailto(input: {
     to: string | null | undefined;
@@ -408,13 +418,17 @@ export function buildPersonalMailto(input: {
     subject: string;
     message: string;
     facts: InvitationFacts;
+    sender: { organizationName: string; mailingAddress: OrganizationMailingAddress } | null;
 }): string | null {
     if (!isSendableSupporterAddress(input.to)) return null;
     const url = safeOrderUrl(input.facts?.orderUrl);
     if (!url) return null;
+    const senderOrg = oneLine(input.sender?.organizationName, 120);
+    const address = input.sender?.mailingAddress ? mailingAddressLines(input.sender.mailingAddress).map((l) => oneLine(l, 120)).filter(Boolean) : [];
+    if (!senderOrg || address.length < 2) return null;
     const greeting = greetingLine(input.greetingName ? supporterGreetingName(input.greetingName) : null);
     const lines = invitationTextLines({ greeting, message: cleanMessage(input.message), facts: input.facts, url });
-    lines.push('', PERSONAL_OPT_OUT_LINE);
+    lines.push('', '--', solicitationLine(senderOrg), ...address, '', PERSONAL_OPT_OUT_LINE);
     const body = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim().replace(/\n/g, '\r\n');
     return `mailto:${input.to}?subject=${encodeURIComponent(safeSubject(input.subject))}&body=${encodeURIComponent(body)}`;
 }

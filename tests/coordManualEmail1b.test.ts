@@ -99,6 +99,9 @@ describe('1. schema and migration', () => {
             // QB-INVOICE-CANCEL-1: two nullable columns recording when the linked QuickBooks invoice was
             // voided by "Cancel invoice", and by whom. Additive; authorized by the owner's brief.
             '20260923010000_qb_invoice_cancel_1_voided',
+            // PREVIOUS-SUPPORTER-EMAIL-2.0B: five nullable mailing-address columns on customers (the
+            // organization's mailing address). Additive; authorized by the owner's 2.0B brief.
+            '20261031120000_prev_supporter_email_2b_org_mailing_address',
         ]);
     });
 });

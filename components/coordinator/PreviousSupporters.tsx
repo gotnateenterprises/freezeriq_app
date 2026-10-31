@@ -25,8 +25,10 @@
  *   3. Send — an explicit "Send N Individual Emails": a separate email to each
  *      person, addressed only to them, starting with their own first name.
  *
- * Today no previous supporter has recorded permission and no organization has a
- * mailing address on file, so Path B explains itself and Path A does the work.
+ * 2.0B: Path A also needs the organization's mailing address (recorded in the CRM's
+ * Organization Details); without it the card says so and offers no draft. No
+ * previous supporter has recorded permission yet, so Path B explains itself and
+ * Path A does the work.
  *
  * Full addresses never reach this component's state from the list: rows carry a
  * masked address and an opaque reference. The one exception is the single draft
@@ -69,6 +71,8 @@ export interface PreviousSupportersPayload {
     truncated: boolean;
     invitation?: { open: boolean; code: string; reason: string };
     automated?: { available: boolean; code: string; reason: string };
+    /** 2.0B: "Open in my email" needs the organization's mailing address on file. */
+    personal?: { available: boolean; code: string; reason: string };
     draft: {
         subject: string;
         text: string;
@@ -274,6 +278,11 @@ export function PreviousSupporters({ onAvailability }: {
                     <Send size={14} /> Send selected supporters
                 </button>
             </div>
+            {data.canInvite && data.invitation?.open !== false && data.personal && !data.personal.available && (
+                <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[12px] font-semibold text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                    {data.personal.reason}
+                </p>
+            )}
             {data.canInvite && !automatedAvailable && data.automated?.reason && (
                 <p className="mt-2 text-[12px] text-slate-500 dark:text-slate-400">{data.automated.reason}</p>
             )}

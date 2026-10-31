@@ -41,9 +41,11 @@ jest.mock('@/lib/previousSupporterAuthorities', () => {
     const g = global as any;
     return {
         ...actual,
-        loadOrganizationMailingAddress: jest.fn(async (scope: any) => {
+        // 2.0B: the REAL address authority always runs (against the in-memory DB);
+        // the mock only records which organization/tenant it was asked about.
+        loadOrganizationMailingAddress: jest.fn(async (scope: any, db?: any) => {
             (g.__pse2AuthCalls ??= []).push(['address', scope]);
-            return g.__pse2Address ? g.__pse2Address(scope) : actual.loadOrganizationMailingAddress(scope);
+            return actual.loadOrganizationMailingAddress(scope, db);
         }),
         loadExplicitEmailConsent: jest.fn(async (scope: any) => {
             (g.__pse2AuthCalls ??= []).push(['consent', scope]);
@@ -52,8 +54,12 @@ jest.mock('@/lib/previousSupporterAuthorities', () => {
     };
 });
 
+jest.mock('@/auth', () => ({ auth: jest.fn(async () => (global as any).__pse2Auth) }));
+
 import { GET, POST } from '@/app/api/coordinator/previous-supporters/route';
 import { POST as DRAFT } from '@/app/api/coordinator/previous-supporters/draft/route';
+import { GET as MAILING_GET, PUT as MAILING_PUT } from '@/app/api/customers/[id]/mailing-address/route';
+import { MailingAddressCardView } from '@/components/crm2/orgDashboard/OrganizationMailingAddressCard';
 import {
     describeAutomatedSend,
     validateOrganizationMailingAddress,
@@ -132,10 +138,18 @@ function makeWorld() {
         { id: BIZ_A, name: 'Maple Kitchen', display_name: null, slug: 'maple-kitchen', custom_domain: null, contact_email: 'hello@maple-kitchen.example', timezone: 'America/Chicago' },
         { id: BIZ_B, name: 'Birch Meals', display_name: null, slug: 'birch-meals', custom_domain: null, contact_email: 'hi@birch-meals.example', timezone: 'America/Chicago' },
     ];
+    // 2.0B: organizations carry their own mailing address — and, deliberately, a DIFFERENT
+    // delivery address, so any confusion between the two shows up in a test.
+    const mail = (line1: string, line2: string | null, city: string, state: string, postal: string) => ({
+        mailing_address_line1: line1, mailing_address_line2: line2, mailing_city: city, mailing_state: state, mailing_postal_code: postal,
+    });
     const customers: any[] = [
-        { id: ORG_A, business_id: BIZ_A, name: ORG_A_NAME, contact_email: 'coordinator@maple-grove.example', contact_phone: null },
-        { id: ORG_A2, business_id: BIZ_A, name: ORG_A2_NAME, contact_email: 'pta@cedar-hill.example', contact_phone: null },
-        { id: ORG_B, business_id: BIZ_B, name: 'Birch Valley Scouts (fixture)', contact_email: 'scouts@birch.example', contact_phone: null },
+        { id: ORG_A, business_id: BIZ_A, type: 'fundraiser_org', name: ORG_A_NAME, contact_email: 'coordinator@maple-grove.example', contact_phone: null,
+            delivery_address: 'Loading Dock B, 5 Warehouse Rd, Maple Grove, IL 61944', notes: 'fixture notes', ...mail('742 Fixture Lane', 'Suite 3', 'Maple Grove', 'IL', '61944') },
+        { id: ORG_A2, business_id: BIZ_A, type: 'fundraiser_org', name: ORG_A2_NAME, contact_email: 'pta@cedar-hill.example', contact_phone: null,
+            ...mail('88 Cedar Ave', null, 'Cedarville', 'IL', '62000') },
+        { id: ORG_B, business_id: BIZ_B, type: 'fundraiser_org', name: 'Birch Valley Scouts (fixture)', contact_email: 'scouts@birch.example', contact_phone: null,
+            ...mail('9 Birch Rd', null, 'Birchton', 'IN', '47000') },
         { id: 'cust-jamie', business_id: BIZ_A, name: 'Jamie Example', contact_email: JAMIE, contact_phone: null },
         { id: 'cust-jamie-caps', business_id: BIZ_A, name: 'Jamie Example', contact_email: 'Jamie.Example@Example.test', contact_phone: null },
         { id: 'cust-alex', business_id: BIZ_A, name: 'Alex Failer', contact_email: ALEX, contact_phone: null },
@@ -231,6 +245,7 @@ function makeWorld() {
         status: 'accepted', is_test: false, created_at: d('2026-04-01T00:00:00Z'), accepted_at: d('2026-04-01T00:00:00Z'),
     }];
     const writes: string[] = [];
+    const rawSql: string[] = [];
     // FundraiserCampaignCoordinator rows, by campaign id (CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT shape).
     const assignments: Record<string, any> = {};
 
@@ -260,6 +275,44 @@ function makeWorld() {
         },
         fundraiserCampaignCoordinator: {
             findUnique: async ({ where }: any) => assignments[where.campaign_id] ?? null,
+        },
+        // 2.0B: the two raw statements the mailing-address authority and CRM route use.
+        $queryRaw: async (strings: TemplateStringsArray, ...values: any[]) => {
+            const sql = strings.join('?');
+            rawSql.push(sql);
+            // Honour the statement as written: the SELECTed columns, and whichever of the
+            // id / business_id / type predicates the WHERE actually carries.
+            const select = sql.match(/SELECT\s+([\s\S]+?)\s+FROM customers\s+WHERE\s+([\s\S]+?)(?:\s+LIMIT|\s*$)/);
+            if (select) {
+                const cols = select[1].split(',').map((c) => c.trim());
+                const where = select[2];
+                const vals = [...values];
+                const id = /\bid = \?/.test(where) ? vals.shift() : undefined;
+                const biz = /business_id = \?/.test(where) ? vals.shift() : undefined;
+                const types = /type::text IN/.test(where) ? vals : null;
+                const c = customers.find((x) => (id === undefined || x.id === id) && (biz === undefined || x.business_id === biz) && (!types || types.includes(x.type)));
+                return c ? [Object.fromEntries(cols.map((k) => [k, c[k] ?? null]))] : [];
+            }
+            throw new Error(`unexpected raw query: ${sql}`);
+        },
+        $executeRaw: async (strings: TemplateStringsArray, ...values: any[]) => {
+            const sql = strings.join('?');
+            rawSql.push(sql);
+            writes.push('customers.mailing_address');
+            const update = sql.match(/UPDATE customers\s+SET\s+([\s\S]+?)\s+WHERE\s+([\s\S]+)$/);
+            if (update) {
+                const sets = [...update[1].matchAll(/(\w+) = \?/g)].map((m) => m[1]);
+                const where = update[2];
+                const vals = values.slice(sets.length);
+                const id = /\bid = \?/.test(where) ? vals.shift() : undefined;
+                const biz = /business_id = \?/.test(where) ? vals.shift() : undefined;
+                const types = /type::text IN/.test(where) ? vals : null;
+                const c = customers.find((x) => (id === undefined || x.id === id) && (biz === undefined || x.business_id === biz) && (!types || types.includes(x.type)));
+                if (!c) return 0;
+                sets.forEach((col, i) => { c[col] = values[i]; });
+                return 1;
+            }
+            throw new Error(`unexpected raw statement: ${sql}`);
         },
         order: {
             findMany: async ({ where }: any) => orders
@@ -339,7 +392,7 @@ function makeWorld() {
                 .map((a) => ({ ...a, recipient: { normalized_email: recipients.find((r) => r.id === a.outreach_recipient_id)?.normalized_email ?? null } })),
         },
     };
-    return { client, campaigns, prefs, attempts, recipients, messages, batches, writes, assignments };
+    return { client, campaigns, prefs, attempts, recipients, messages, batches, writes, assignments, customers, rawSql };
 }
 
 // ── harness ──────────────────────────────────────────────────────────────────
@@ -371,19 +424,26 @@ beforeEach(() => {
     delete process.env.VERCEL_ENV;
     delete process.env.VERCEL_URL;
     delete process.env.VERCEL;
-    // The REAL authorities by default: no recorded consent, no organization address.
-    (global as any).__pse2Address = undefined;
+    // The REAL authorities by default: no recorded consent anywhere; Maple Grove's
+    // organization mailing address IS on file in the in-memory DB (2.0B).
     (global as any).__pse2Consent = undefined;
     (global as any).__pse2AuthCalls = [];
+    // A tenant (CRM) session for Maple Kitchen, for the mailing-address route.
+    (global as any).__pse2Auth = { user: { businessId: BIZ_A } };
 });
 
-/** A complete, fictional mailing address for Maple Grove's ORGANIZATION (never its pickup hall). */
+/** Maple Grove's ORGANIZATION mailing address, as stored in the fixture (never its pickup hall or delivery dock). */
 const ORG_A_ADDRESS: OrganizationMailingAddress = { line1: '742 Fixture Lane', line2: 'Suite 3', city: 'Maple Grove', state: 'IL', postalCode: '61944' };
-/** Grant the automated path: the address for ORG_A in BIZ_A only, consent for the given addresses in that scope only. */
+/** Grant RECORDED consent for the given addresses, for ORG_A in BIZ_A only. (The address comes from the DB.) */
 function grantAutomated(consented: string[] = [JAMIE, CASEY, ALEX, TAYLOR]) {
     const ours = (s: any) => s?.businessId === BIZ_A && s?.organizationCustomerId === ORG_A;
-    (global as any).__pse2Address = (s: any) => (ours(s) ? ORG_A_ADDRESS : null);
     (global as any).__pse2Consent = (s: any) => new Set(ours(s) ? consented : []);
+}
+/** Remove an organization's mailing address in the fixture DB. */
+function clearAddress(orgId = ORG_A) {
+    Object.assign(world.customers.find((c) => c.id === orgId), {
+        mailing_address_line1: null, mailing_address_line2: null, mailing_city: null, mailing_state: null, mailing_postal_code: null,
+    });
 }
 const EXPECTED_FROM = '"Maple Grove Booster Club (fixture) via Maple Kitchen" <notifications@freezeriq.test>';
 
@@ -628,10 +688,11 @@ describe('3 · the coordinator view (real GET)', () => {
         expect(status).toBe(200);
         const names = body.supporters.map((s: SupporterRow) => s.name).sort();
         expect(names).toEqual(['Alex Failer', 'Casey Sample', 'Jamie Example', 'Morgan Noemail', 'Pat Oddmail', 'Taylor Optout']);
-        // TODAY (real authorities): everyone with a usable address can be emailed PERSONALLY;
-        // nobody can be sent by FreezerIQ, and each row says why.
+        // TODAY (real authorities, organization address on file): everyone with a usable address
+        // can be emailed PERSONALLY; nobody can be sent by FreezerIQ, and each row says why.
         expect(rowFor(body, 'Jamie Example')).toMatchObject({ status: 'ready', canOpenEmail: true, selectable: false, orderCount: 2, ref: refOf(JAMIE),
-            automated: { eligible: false, reason: 'Automated email unavailable — organization mailing address required' } });
+            automated: { eligible: false, reason: 'FreezerIQ send unavailable — future email permission not recorded' } });
+        expect(body.personal).toEqual({ available: true, code: 'available', reason: 'Prepared emails include the organization’s mailing address.' });
         expect(rowFor(body, 'Casey Sample')).toMatchObject({ status: 'ready', canOpenEmail: true, selectable: false });
         expect(rowFor(body, 'Morgan Noemail')).toMatchObject({ status: 'no_email', canOpenEmail: false, selectable: false, ref: null });
         expect(rowFor(body, 'Pat Oddmail')).toMatchObject({ status: 'invalid_email', canOpenEmail: false, selectable: false, ref: null });
@@ -953,10 +1014,9 @@ describe('5 · tenant and organization isolation', () => {
     });
 
     it('the same address in another tenant is a different supporter with its own history', async () => {
-        // Each tenant's organization has its OWN address and its OWN consent records.
+        // Each tenant's organization has its OWN address (in the DB) and its OWN consent records.
         const isA = (s: any) => s.businessId === BIZ_A && s.organizationCustomerId === ORG_A;
         const isB = (s: any) => s.businessId === BIZ_B && s.organizationCustomerId === ORG_B;
-        (global as any).__pse2Address = (s: any) => (isA(s) ? ORG_A_ADDRESS : isB(s) ? { line1: '9 Birch Rd', city: 'Birchton', state: 'IN', postalCode: '47000' } : null);
         (global as any).__pse2Consent = (s: any) => new Set(isA(s) ? [JAMIE] : isB(s) ? [JAMIE, QUINN] : []);
         await send([refOf(JAMIE)]);                                         // Maple's coordinator emails Jamie
         (global as any).__pse2Session = { ok: true, campaignId: B_CUR, sessionId: 'sess-b' };
@@ -1130,9 +1190,15 @@ describe('7 · shipped-source invariants', () => {
         expect(buildIdempotencyKey('m', 'r', 3, 2)).toBe('m:r:g3:r2');
     });
 
-    it('brings no schema change and no migration', () => {
-        const names = execSync('git --literal-pathspecs diff --name-only HEAD -- prisma/', { encoding: 'utf8', cwd: ROOT });
-        expect(names.trim()).toBe('');
+    it('REVISED (2.0B, owner-approved schema): the ONLY schema change since Production b215aa7 is the additive mailing-address migration', () => {
+        const names = execSync('git --literal-pathspecs diff --name-only b215aa74601aa614b2f91cb904eef590b437898c -- prisma/', { encoding: 'utf8', cwd: ROOT })
+            .split('\n').map((l) => l.trim()).filter(Boolean).sort();
+        const untracked = execSync('git --literal-pathspecs ls-files --others --exclude-standard -- prisma/', { encoding: 'utf8', cwd: ROOT })
+            .split('\n').map((l) => l.trim()).filter(Boolean);
+        expect([...new Set([...names, ...untracked])].sort()).toEqual([
+            'prisma/migrations/20261031120000_prev_supporter_email_2b_org_mailing_address/migration.sql',
+            'prisma/schema.prisma',
+        ]);
     });
 });
 
@@ -1142,10 +1208,14 @@ describe('7 · shipped-source invariants', () => {
 describe('8 · 2.0A — who FreezerIQ may email itself, and "Open in my email"', () => {
     const ALL_READY = () => [refOf(JAMIE), refOf(CASEY), refOf(ALEX)];
 
-    it('TODAY: no recorded consent and no organization address → FreezerIQ sends to nobody', async () => {
+    it('no organization mailing address → neither path: no FreezerIQ send and no prepared draft', async () => {
+        clearAddress();
         const { body } = await get();
         expect(body.automated).toEqual({ available: false, code: 'mailing_address_required',
-            reason: 'Automated email unavailable — organization mailing address required. You can still email supporters yourself with "Open in my email".' });
+            reason: 'Automated email unavailable — organization mailing address required.' });
+        expect(body.personal).toEqual({ available: false, code: 'mailing_address_required',
+            reason: 'Email draft unavailable — organization mailing address required.' });
+        expect(body.supporters.some((s: SupporterRow) => s.canOpenEmail || s.ref)).toBe(false);
         expect(body.send).toMatchObject({ canSend: false, code: 'mailing_address_required' });
         expect(body.counts.consented).toBe(0);
         expect(body.supporters.some((s: SupporterRow) => s.selectable)).toBe(false);
@@ -1156,8 +1226,7 @@ describe('8 · 2.0A — who FreezerIQ may email itself, and "Open in my email"',
         expect(world.writes).toEqual([]);
     });
 
-    it('purchase history plus a valid organization address is STILL not permission', async () => {
-        (global as any).__pse2Address = (s: any) => (s.organizationCustomerId === ORG_A ? ORG_A_ADDRESS : null);
+    it('purchase history plus a valid organization address is STILL not permission (TODAY)', async () => {
         const { body } = await get();
         expect(body.automated.code).toBe('consent_not_recorded');
         expect(body.send).toMatchObject({ canSend: false, code: 'consent_not_recorded' });
@@ -1169,7 +1238,8 @@ describe('8 · 2.0A — who FreezerIQ may email itself, and "Open in my email"',
     });
 
     it('recorded consent without the organization address is blocked too', async () => {
-        (global as any).__pse2Consent = () => new Set([JAMIE, CASEY, ALEX]);
+        grantAutomated([JAMIE, CASEY, ALEX]);
+        clearAddress();
         const { body } = await get();
         expect(body.automated.code).toBe('mailing_address_required');
         expect(body.supporters.some((s: SupporterRow) => s.selectable)).toBe(false);
@@ -1212,12 +1282,19 @@ describe('8 · 2.0A — who FreezerIQ may email itself, and "Open in my email"',
         expect((global as any).__pse2AuthCalls.every(([, s]: any) => s.businessId === BIZ_B && s.organizationCustomerId === ORG_B)).toBe(true);
     });
 
-    it('the real authorities read nothing and invent nothing — no consent backfill, no pickup-as-address', async () => {
+    it('the real authorities invent nothing — no consent backfill, and the address is the organization\'s own columns only', async () => {
         const actual = jest.requireActual('@/lib/previousSupporterAuthorities');
         expect([...(await actual.loadExplicitEmailConsent({ businessId: BIZ_A, organizationCustomerId: ORG_A }))]).toEqual([]);
-        expect(await actual.loadOrganizationMailingAddress({ businessId: BIZ_A, organizationCustomerId: ORG_A })).toBeNull();
+        expect(await actual.loadOrganizationMailingAddress({ businessId: BIZ_A, organizationCustomerId: ORG_A })).toEqual(ORG_A_ADDRESS);
+        // Tenant AND organization both in the WHERE: a wrong tenant or another organization gets nothing back.
+        expect(await actual.loadOrganizationMailingAddress({ businessId: BIZ_B, organizationCustomerId: ORG_A })).toBeNull();
+        expect(await actual.loadOrganizationMailingAddress({ businessId: BIZ_A, organizationCustomerId: ORG_B })).toBeNull();
+        expect(await actual.loadOrganizationMailingAddress({ businessId: '', organizationCustomerId: ORG_A })).toBeNull();
         const src = strip(R('lib/previousSupporterAuthorities.ts'));
-        expect(src).not.toMatch(/prisma|pickup_location|delivery_address|origin_address|fundraiser_info|\.findMany|\.findFirst|order/);
+        expect(src).not.toMatch(/pickup_location|delivery_address|origin_address|fundraiser_info|storefront|\.findMany|\.findFirst|\.create|\.update|\.upsert/);
+        expect(src).toMatch(/SELECT mailing_address_line1, mailing_address_line2, mailing_city, mailing_state, mailing_postal_code\s+FROM customers\s+WHERE id = \$\{scope\.organizationCustomerId\} AND business_id = \$\{scope\.businessId\}/);
+        const consentFn = src.slice(src.indexOf('export async function loadExplicitEmailConsent('), src.indexOf('export type AutomatedSendCode'));
+        expect(consentFn).not.toMatch(/prisma|db\.|\$queryRaw/);
         for (const f of ['app/api/coordinator/previous-supporters/route.ts', 'app/api/coordinator/previous-supporters/draft/route.ts']) {
             const code = strip(R(f));
             expect(code).not.toMatch(/marketingPreference\.(create|update|upsert)|consent.*\.(create|update|upsert)/);
@@ -1272,7 +1349,7 @@ describe('8 · 2.0A — who FreezerIQ may email itself, and "Open in my email"',
     });
 
     describe('"Open in my email" (the personal draft route)', () => {
-        it('is available today, without consent or an address, for every supporter it is safe for', async () => {
+        it('is available today, without consent, once the organization\'s mailing address is on file', async () => {
             for (const e of [JAMIE, CASEY, ALEX]) {
                 const r = await draft(refOf(e));
                 expect(r.status).toBe(200);
@@ -1295,8 +1372,17 @@ describe('8 · 2.0A — who FreezerIQ may email itself, and "Open in my email"',
             expect(m.body.startsWith('Hi Casey,\r\n\r\nThank you again for supporting Maple Grove Booster Club (fixture)!')).toBe(true);
             for (const piece of ['• Little Italy\r\n• Harvest Table', 'Ordering ends: Tuesday, November 19',
                 'Pickup:\r\nThursday, November 21\r\n4:00–6:00 PM\r\nMaple Grove Community Hall, 100 Example Ave',
-                `You can view this round's meals and place your order here:\r\n${CANONICAL}`, PERSONAL_OPT_OUT_LINE]) {
+                `You can view this round's meals and place your order here:\r\n${CANONICAL}`, PERSONAL_OPT_OUT_LINE,
+                // 2.0B: the solicitation footer with the ORGANIZATION's mailing address.
+                '--\r\nFundraiser solicitation from Maple Grove Booster Club (fixture)\r\n742 Fixture Lane\r\nSuite 3\r\nMaple Grove, IL 61944\r\n\r\n'
+                    + "If you'd rather not receive future fundraiser emails from us, just reply and let us know."]) {
                 expect(m.body).toContain(piece);
+            }
+            expect(m.body.endsWith("If you'd rather not receive future fundraiser emails from us, just reply and let us know.")).toBe(true);
+            // Never the delivery dock, another organization's or tenant's address, or the pickup hall as the address.
+            const footer = m.body.slice(m.body.lastIndexOf('--\r\n'));
+            for (const notOurs of ['Loading Dock', '5 Warehouse Rd', '88 Cedar Ave', 'Cedarville', '9 Birch Rd', 'Birchton', 'Community Hall', '100 Example Ave', 'Kitchen']) {
+                expect(footer).not.toContain(notOurs);
             }
             for (const other of [JAMIE, ALEX, TAYLOR, RILEY, 'Jamie', 'Alex', 'Taylor', 'Spring Comfort Menu', 'April 29', 'Old Gym Lobby', 'pub-previous', PREV, 'vercel.app']) {
                 expect(`${m.subject}${m.body}`).not.toContain(other);
@@ -1325,10 +1411,15 @@ describe('8 · 2.0A — who FreezerIQ may email itself, and "Open in my email"',
 
         it('the building block itself refuses anything but one plain address', () => {
             const facts = FACTS;
+            const sender = { organizationName: ORG_A_NAME, mailingAddress: ORG_A_ADDRESS };
             for (const to of [PAT_ODD, 'a@b.test,c@d.test', 'a@b.test?cc=c@d.test', 'x@y.test\r\nbcc:z@w.test', null]) {
-                expect(buildPersonalMailto({ to: to as any, greetingName: 'Jamie', subject: 's', message: 'm', facts })).toBeNull();
+                expect(buildPersonalMailto({ to: to as any, greetingName: 'Jamie', subject: 's', message: 'm', facts, sender })).toBeNull();
             }
-            const m = buildPersonalMailto({ to: JAMIE, greetingName: 'Jamie', subject: 'Hi\r\nBcc: x@y.test', message: 'm', facts })!;
+            // 2.0B: no organization name or no complete address → no draft at all.
+            expect(buildPersonalMailto({ to: JAMIE, greetingName: 'Jamie', subject: 's', message: 'm', facts, sender: null })).toBeNull();
+            expect(buildPersonalMailto({ to: JAMIE, greetingName: 'Jamie', subject: 's', message: 'm', facts, sender: { ...sender, organizationName: ' ' } })).toBeNull();
+            expect(buildPersonalMailto({ to: JAMIE, greetingName: 'Jamie', subject: 's', message: 'm', facts, sender: { ...sender, mailingAddress: null as any } })).toBeNull();
+            const m = buildPersonalMailto({ to: JAMIE, greetingName: 'Jamie', subject: 'Hi\r\nBcc: x@y.test', message: 'm', facts, sender })!;
             expect(parseMailto(m).subject).toBe('Hi Bcc: x@y.test');
             expect(parseMailto(m).params).toEqual(['subject', 'body']);
         });
@@ -1358,5 +1449,199 @@ describe('8 · 2.0A — who FreezerIQ may email itself, and "Open in my email"',
         expect(at('if (!capability.canSend)')).toBeLessThan(at('resolveCampaignBatch(prisma'));
         expect(at('resolveSelection({ campaignId, refs: body?.selected, audience, history, consent })')).toBeLessThan(at('await runSend({'));
         expect(post).toContain('automated,');
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 9. PREVIOUS-SUPPORTER-EMAIL-2.0B — the organization's mailing address
+// ═══════════════════════════════════════════════════════════════════════════
+describe('9 · 2.0B — the organization mailing address (CRM, migration, both email paths)', () => {
+    const MAILING_URL = (id: string) => `https://www.freezeriqapp.com/api/customers/${id}/mailing-address`;
+    async function mGet(id: string) {
+        const res = await MAILING_GET(new Request(MAILING_URL(id)), { params: Promise.resolve({ id }) });
+        return { status: res.status, body: await res.json() };
+    }
+    async function mPut(id: string, body: any) {
+        const res = await MAILING_PUT(new Request(MAILING_URL(id), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+            { params: Promise.resolve({ id }) });
+        return { status: res.status, body: await res.json() };
+    }
+    const orgRow = (id = ORG_A) => ({ ...world.customers.find((c) => c.id === id) });
+
+    it('CRM: no tenant session → 401, and the database is never touched', async () => {
+        (global as any).__pse2Auth = null;
+        expect((await mGet(ORG_A)).status).toBe(401);
+        expect((await mPut(ORG_A, { line1: '1 X St', city: 'Y', state: 'IL', postalCode: '60000' })).status).toBe(401);
+        expect(world.rawSql).toEqual([]);
+        expect(world.writes).toEqual([]);
+    });
+
+    it('CRM: reads THIS tenant\'s ORGANIZATION only — never another tenant\'s, never a direct customer', async () => {
+        const r = await mGet(ORG_A);
+        expect(r).toEqual({ status: 200, body: {
+            mailingAddress: { line1: '742 Fixture Lane', line2: 'Suite 3', city: 'Maple Grove', state: 'IL', postalCode: '61944' }, complete: true } });
+        expect(JSON.stringify(r.body)).not.toMatch(/Loading Dock|delivery/i);
+        expect((await mGet(ORG_B)).status).toBe(404);                 // another tenant's organization
+        expect((await mGet('cust-jamie')).status).toBe(404);          // a supporter, not an organization
+        expect(world.rawSql.every((sql) => /WHERE id = \? AND business_id = \? AND type::text IN \(\?, \?\)/.test(sql))).toBe(true);
+    });
+
+    it('CRM: save, reload — persisted; delivery address and every other field untouched', async () => {
+        const before = orgRow();
+        const saved = await mPut(ORG_A, { line1: '  1200 New Office Rd ', line2: '', city: 'Maple Grove', state: 'il', postalCode: '61945' });
+        expect(saved.status).toBe(200);
+        expect(saved.body).toEqual({ mailingAddress: { line1: '1200 New Office Rd', line2: '', city: 'Maple Grove', state: 'IL', postalCode: '61945' }, complete: true });
+        const reloaded = await mGet(ORG_A);
+        expect(reloaded.body).toEqual(saved.body);
+        const after = orgRow();
+        for (const k of Object.keys(before).filter((k) => !k.startsWith('mailing_'))) expect(after[k]).toEqual(before[k]);
+        expect(after.delivery_address).toBe('Loading Dock B, 5 Warehouse Rd, Maple Grove, IL 61944');
+        expect(orgRow(ORG_A2).mailing_address_line1).toBe('88 Cedar Ave');
+        expect(orgRow(ORG_B).mailing_address_line1).toBe('9 Birch Rd');
+        // And the very next prepared draft carries the NEW address.
+        const d = await draft(refOf(JAMIE));
+        expect(parseMailto(d.body.mailto).body).toContain('1200 New Office Rd\r\nMaple Grove, IL 61945');
+    });
+
+    it('CRM: an incomplete or malformed address is refused and nothing is written', async () => {
+        const before = orgRow();
+        for (const bad of [
+            { line1: 'Community Hall', city: 'Maple Grove', state: 'IL', postalCode: '61944' },
+            { line1: '1 Main St', city: 'Maple Grove', state: 'Illinois', postalCode: '61944' },
+            { line1: '1 Main St', city: 'Maple Grove', state: 'IL', postalCode: '' },
+            { city: 'Maple Grove' },
+        ]) {
+            const r = await mPut(ORG_A, bad);
+            expect(r.status).toBe(400);
+            expect(r.body.error).toBe('Enter a complete mailing address: street address, city, two-letter state and ZIP code.');
+        }
+        expect(orgRow()).toEqual(before);
+        expect(world.writes).toEqual([]);
+    });
+
+    it('CRM: another tenant cannot change this organization\'s address', async () => {
+        (global as any).__pse2Auth = { user: { businessId: BIZ_B } };
+        const before = orgRow();
+        expect((await mPut(ORG_A, { line1: '1 Hijack St', city: 'Elsewhere', state: 'IN', postalCode: '47000' })).status).toBe(404);
+        expect(orgRow()).toEqual(before);
+    });
+
+    it('end to end: clearing the address turns prepared drafts OFF; saving one turns them back ON — FreezerIQ stays blocked', async () => {
+        expect((await mPut(ORG_A, { line1: '', line2: '', city: '', state: '', postalCode: '' })).body.complete).toBe(false);
+        let view = (await get()).body;
+        expect(view.personal).toEqual({ available: false, code: 'mailing_address_required', reason: 'Email draft unavailable — organization mailing address required.' });
+        expect(view.supporters.some((s: SupporterRow) => s.canOpenEmail)).toBe(false);
+        const off = await draft(refOf(JAMIE));
+        expect(off).toEqual({ status: 409, body: { ok: false, code: 'mailing_address_required', error: 'Email draft unavailable — organization mailing address required.' } });
+
+        await mPut(ORG_A, { line1: '742 Fixture Lane', line2: 'Suite 3', city: 'Maple Grove', state: 'IL', postalCode: '61944' });
+        view = (await get()).body;
+        expect(view.personal.available).toBe(true);
+        expect(rowFor(view, 'Jamie Example').canOpenEmail).toBe(true);
+        const on = await draft(refOf(JAMIE));
+        expect(on.status).toBe(200);
+        expect(parseMailto(on.body.mailto).to).toBe(JAMIE);
+        // The address alone never turns on FreezerIQ's own sending.
+        expect(view.automated.code).toBe('consent_not_recorded');
+        expect(view.supporters.some((s: SupporterRow) => s.selectable)).toBe(false);
+        expect(sent).toHaveLength(0);
+    });
+
+    it('the old "send to everyone" body — and any send — still cannot get past the consent gate', async () => {
+        const legacy = await post({ subject: 'Hi', text: 'Words' });
+        expect(legacy.status).toBe(409);
+        expect(legacy.body.code).toBe('consent_not_recorded');
+        const confirmed = await send([refOf(JAMIE), refOf(CASEY), refOf(ALEX)]);
+        expect(confirmed.status).toBe(409);
+        expect(sent).toHaveLength(0);
+        expect(world.writes).toEqual([]);
+    });
+
+    it('only the current organization\'s address appears — never another organization\'s, another tenant\'s, the delivery dock or the pickup hall', async () => {
+        grantAutomated();
+        await send([refOf(JAMIE)]);
+        const d = await draft(refOf(CASEY));
+        const texts = [sentTo(JAMIE)[0].text, parseMailto(d.body.mailto).body.replace(/\r\n/g, '\n')];
+        for (const t of texts) {
+            // The organization footer starts at its own "--" line (the engine's unsubscribe block uses "---").
+            const start = t.indexOf('\n--\n');
+            expect(start).toBeGreaterThan(-1);
+            const footer = t.slice(start);
+            expect(footer).toContain('742 Fixture Lane');
+            expect(footer).toContain('Maple Grove, IL 61944');
+            for (const notOurs of ['88 Cedar Ave', 'Cedarville', '9 Birch Rd', 'Birchton', 'Loading Dock', '5 Warehouse Rd', 'Community Hall', '100 Example Ave']) {
+                expect(footer).not.toContain(notOurs);
+            }
+        }
+    });
+
+    it('the CRM card: clearly labelled, explained, and separate from the delivery address', () => {
+        const noop = () => { /* */ };
+        const saved = { line1: '742 Fixture Lane', line2: 'Suite 3', city: 'Maple Grove', state: 'IL', postalCode: '61944' };
+        const view = textOf(MailingAddressCardView({ saved, complete: true, editing: false, draft: saved, state: 'idle', error: null, onEdit: noop, onCancel: noop, onChange: noop, onSave: noop }));
+        expect(view).toContain('Organization mailing address');
+        expect(view).toContain('Used in fundraiser email footer information.');
+        expect(view).toContain('742 Fixture Lane');
+        expect(view).toContain('Maple Grove, IL 61944');
+        expect(view).not.toMatch(/Loading Dock|unavailable/);
+        const empty = textOf(MailingAddressCardView({ saved: null, complete: false, editing: false, draft: saved, state: 'idle', error: null, onEdit: noop, onCancel: noop, onChange: noop, onSave: noop }));
+        expect(empty).toContain('Not on file');
+        expect(empty).toContain('Prepared fundraiser emails stay unavailable until a complete mailing address is on file.');
+
+        const calls: string[] = [];
+        const form = MailingAddressCardView({ saved, complete: true, editing: true, draft: saved, state: 'idle', error: 'Enter a complete mailing address: street address, city, two-letter state and ZIP code.',
+            onEdit: noop, onCancel: () => calls.push('cancel'), onChange: (f, v) => calls.push(`${f}=${v}`), onSave: () => calls.push('save') });
+        const inputs = findAll(form, (el) => el.type === 'input');
+        expect(inputs.map((i) => i.props.id)).toEqual(['org-mailing-line1', 'org-mailing-line2', 'org-mailing-city', 'org-mailing-state', 'org-mailing-postalCode']);
+        expect(inputs.map((i) => i.props.autoComplete)).toEqual(['address-line1', 'address-line2', 'address-level2', 'address-level1', 'postal-code']);
+        const labels = findAll(form, (el) => el.type === 'label').map((l) => [l.props.htmlFor, textOf(l)]);
+        expect(labels).toEqual([['org-mailing-line1', 'Street address'], ['org-mailing-line2', 'Address line 2 (optional)'], ['org-mailing-city', 'City'],
+            ['org-mailing-state', 'State'], ['org-mailing-postalCode', 'ZIP code']]);
+        inputs[2].props.onChange({ target: { value: 'Oak Park' } });
+        findAll(form, (el) => el.type === 'form')[0].props.onSubmit({ preventDefault() { /* */ } });
+        findAll(form, (el) => el.type === 'button' && textOf(el) === 'Cancel')[0].props.onClick();
+        expect(calls).toEqual(['city=Oak Park', 'save', 'cancel']);
+        expect(textOf(findAll(form, (el) => el.props?.role === 'alert')[0])).toContain('Enter a complete mailing address');
+        for (const b of findAll(form, (el) => el.type === 'button' || el.type === 'input')) expect(String(b.props.className)).toMatch(/min-h-\[44px\]/);
+    });
+
+    it('the CRM card lives in Organization Details, for organizations, and saves only through its own route', () => {
+        const section = R('components/crm2/orgDashboard/OrganizationDetailsSection.tsx');
+        expect(section).toContain('{isOrganization && <OrganizationMailingAddressCard organizationId={customer.id} />}');
+        const card = strip(R('components/crm2/orgDashboard/OrganizationMailingAddressCard.tsx'));
+        expect(card.match(/fetch\(`\/api\/customers\/\$\{encodeURIComponent\(organizationId\)\}\/mailing-address`/g) ?? []).toHaveLength(2);
+        expect(card).toContain("method: 'PUT'");
+        expect(card).not.toMatch(/delivery_address|pickup_location/);
+        const route = strip(R('app/api/customers/[id]/mailing-address/route.ts'));
+        expect(route).not.toMatch(/delivery_address|pickup_location|origin_address|prisma\.customer\.(update|upsert)/);
+        const update = route.slice(route.indexOf('UPDATE customers'), route.indexOf('WHERE id', route.indexOf('UPDATE customers')));
+        expect([...update.matchAll(/(\w+) = \$\{/g)].map((m) => m[1])).toEqual(['mailing_address_line1', 'mailing_address_line2', 'mailing_city', 'mailing_state', 'mailing_postal_code']);
+        expect(route).toContain("if (!session?.user?.businessId) {");
+    });
+
+    it('migration: one additive step — five nullable TEXT columns on customers, applied after every earlier migration', () => {
+        const dir = '20261031120000_prev_supporter_email_2b_org_mailing_address';
+        const all = fs.readdirSync(path.join(ROOT, 'prisma', 'migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+        expect(all[all.length - 1]).toBe(dir);
+        const sql = R(`prisma/migrations/${dir}/migration.sql`);
+        const statements = sql.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('--'));
+        expect(statements).toEqual(['mailing_address_line1', 'mailing_address_line2', 'mailing_city', 'mailing_state', 'mailing_postal_code']
+            .map((c) => `ALTER TABLE "customers" ADD COLUMN IF NOT EXISTS "${c}" TEXT;`));
+        expect(statements.join('\n')).not.toMatch(/DROP|ALTER COLUMN|RENAME|UPDATE|DELETE|INSERT|NOT NULL|DEFAULT|delivery_address/i);
+        const schema = R('prisma/schema.prisma');
+        const customer = schema.slice(schema.indexOf('model Customer {'), schema.indexOf('\n}', schema.indexOf('model Customer {')));
+        for (const c of ['mailing_address_line1', 'mailing_address_line2', 'mailing_city', 'mailing_state', 'mailing_postal_code']) {
+            expect(customer).toMatch(new RegExp(`\\n\\s+${c}\\s+String\\?\\n`));
+        }
+        expect(customer).toMatch(/\n\s+delivery_address String\?\n/);
+    });
+
+    it('nothing in this release touches order, payment, tax, closeout, release or QuickBooks code', () => {
+        const guarded = ['app/api/public/order', 'app/api/orders', 'app/api/checkout', 'app/api/coordinator/route.ts', 'app/api/campaigns',
+            'app/api/tenant/invoices', 'app/api/integrations/quickbooks', 'lib/quickbooks', 'lib/fundraiserTax.ts', 'lib/pricing.ts',
+            'lib/fundraiserCloseoutMath.ts', 'lib/invoiceSettlementTransition.ts', 'lib/orderStatus.ts', 'lib/supporterPayment.ts', 'lib/delivery'];
+        const changed = execSync(`git --literal-pathspecs diff --name-only b215aa74601aa614b2f91cb904eef590b437898c -- ${guarded.join(' ')}`, { encoding: 'utf8', cwd: ROOT });
+        const untracked = execSync(`git --literal-pathspecs ls-files --others --exclude-standard -- ${guarded.join(' ')}`, { encoding: 'utf8', cwd: ROOT });
+        expect(`${changed}${untracked}`.trim()).toBe('');
     });
 });

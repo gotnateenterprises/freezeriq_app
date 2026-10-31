@@ -258,9 +258,10 @@ function statusFor(s: PreviousSupporter, history: Map<string, CampaignEmailHisto
 const RETRYABLE: ReadonlySet<SupporterEmailStatus> = new Set(['ready', 'failed']);
 
 /**
- * "Open in my email" needs only an address we would write to, no opt-out, and an
- * open fundraiser. An earlier FreezerIQ send does not take it away: the personal
- * path stays available for everyone it is safe for.
+ * "Open in my email" needs an address we would write to, no opt-out, and an open
+ * fundraiser — and (2.0B, applied by the caller) the organization's mailing
+ * address. An earlier FreezerIQ send does not take it away: the personal path
+ * stays available for everyone it is safe for.
  */
 function canOpenEmailFor(status: SupporterEmailStatus, invitationsOpen: boolean): boolean {
     return invitationsOpen && status !== 'no_email' && status !== 'invalid_email' && status !== 'opted_out';
@@ -293,6 +294,8 @@ export interface SupporterRowContext {
     gate: AutomatedSendGate;
     /** Normalized addresses with RECORDED future-email permission — lib/previousSupporterAuthorities. */
     consent: ReadonlySet<string>;
+    /** 2.0B: the organization's mailing address is recorded, so prepared drafts may be offered. */
+    personalAvailable: boolean;
 }
 
 /**
@@ -303,7 +306,7 @@ export interface SupporterRowContext {
 export function buildSupporterRows(input: SupporterRowContext & { limit: number }): SupporterRow[] {
     const rows = input.audience.supporters.map((s): SupporterRow => {
         const { status, at } = statusFor(s, input.history);
-        const canOpenEmail = canOpenEmailFor(status, input.invitationsOpen);
+        const canOpenEmail = input.personalAvailable && canOpenEmailFor(status, input.invitationsOpen);
         const automated = automatedFor({ address: s.email, status, invitationsOpen: input.invitationsOpen, gate: input.gate, consent: input.consent });
         const selectable = automated.eligible && RETRYABLE.has(status);
         return {

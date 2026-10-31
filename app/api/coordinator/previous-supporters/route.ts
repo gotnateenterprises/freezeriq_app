@@ -66,6 +66,7 @@ import {
 } from '@/lib/previousSupporterInvitation';
 import {
     describeAutomatedSend,
+    describePersonalEmail,
     loadExplicitEmailConsent,
     loadOrganizationMailingAddress,
     type AutomatedSendGate,
@@ -232,10 +233,12 @@ export async function GET(req: Request) {
         const history = await loadCampaignEmailHistory(prisma, {
             businessId, customerId: organizationCustomerId, campaignId,
         });
-        const { consent, consentedCount, automated } = await loadAutomatedAuthorities(ctx, audience);
+        const { mailingAddress, consent, consentedCount, automated } = await loadAutomatedAuthorities(ctx, audience);
+        // 2.0B: the coordinator's own prepared email needs the organization's mailing address too.
+        const personal = describePersonalEmail(mailingAddress);
         const supporters = buildSupporterRows({
             campaignId, audience, history, invitationsOpen: availability.open,
-            gate: automated, consent, limit: SUPPORTER_PREVIEW_LIMIT,
+            gate: automated, consent, personalAvailable: personal.available, limit: SUPPORTER_PREVIEW_LIMIT,
         });
 
         return NextResponse.json({
@@ -259,6 +262,8 @@ export async function GET(req: Request) {
             // FreezerIQ's own sending: available only with the organization's
             // mailing address AND recorded permission. Coordinator-facing wording.
             automated: { available: automated.available, code: automated.code, reason: automated.reason },
+            // "Open in my email": available once the organization's mailing address is recorded.
+            personal: { available: personal.available, code: personal.code, reason: personal.reason },
             // The coordinator edits the subject and the message. The facts below
             // are shown read-only: the server adds them to every email.
             draft: {

@@ -364,6 +364,18 @@ model Customer {
   secondary_phone  String?
   type             OrgType              @default(fundraiser_org)
   delivery_address String?
+  // ── PREVIOUS-SUPPORTER-EMAIL-2.0B: the ORGANIZATION's mailing address ───────
+  // The organization is the designated sender of its fundraiser emails, so this is
+  // the physical address printed in their footer. A different business concept
+  // from `delivery_address` (where meals go) and from a campaign's
+  // `pickup_location` (where supporters collect them); neither is ever read in
+  // its place. All nullable: an organization without one simply cannot have
+  // prepared fundraiser email until a tenant records it in the CRM.
+  mailing_address_line1 String?
+  mailing_address_line2 String?
+  mailing_city          String?
+  mailing_state         String?
+  mailing_postal_code   String?
   notes            String?
   external_id      String?              @unique
   source           String?              @default("Manual")

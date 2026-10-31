@@ -406,8 +406,12 @@ describe('SUPPORTERS · ONE loader for the dashboard and the real invitation', (
         expect(coord.body.counts.reachable).toBe(direct.reachableCount);
         expect(coord.body.counts.supporters).toBe(5);        // New (campaign D) is a CURRENT supporter there
         expect(coord.body.counts.reachable).toBe(2);         // Pat, Kim
-        // Nothing was written by viewing the audience.
-        for (const c of coordinatorWorld.calls) expect(['findFirst', 'findMany', 'findUnique']).toContain(c.method);
+        // Nothing was written by viewing the audience. REVISED (PREVIOUS-SUPPORTER-EMAIL-2.0B): the
+        // GET also reads the organization's mailing address — one raw SELECT, still a read.
+        for (const c of coordinatorWorld.calls) {
+            if (c.method === 'raw') expect(String(c.args?.sql ?? '')).toMatch(/^\s*SELECT mailing_address_line1/);
+            else expect(['findFirst', 'findMany', 'findUnique']).toContain(c.method);
+        }
     });
 
     it('12d. the shipped code paths: the route delegates, the dashboard loader passes null, the builder derives', () => {

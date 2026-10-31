@@ -16,6 +16,7 @@ import { useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp, Edit2, FileCheck, Mail, MapPin, Phone, StickyNote, User } from 'lucide-react';
 import OrganizationTaxPanel from '@/components/crm/OrganizationTaxPanel';
 import DocumentsTab from '@/components/crm/DocumentsTab';
+import OrganizationMailingAddressCard from '@/components/crm2/orgDashboard/OrganizationMailingAddressCard';
 
 type NotesState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -103,6 +104,11 @@ export function OrganizationDetailsSection({
                         </ContactRow>
                     </ul>
                 </div>
+
+                {/* ── Organization mailing address (PREVIOUS-SUPPORTER-EMAIL-2.0B) — its own
+                    card and its own save route, so it can never be confused with, or
+                    overwrite, the delivery address above. ── */}
+                {isOrganization && <OrganizationMailingAddressCard organizationId={customer.id} />}
 
                 {/* ── Customer Notes ── */}
                 <div className="relative min-w-0 overflow-hidden rounded-2xl border border-yellow-200/60 bg-yellow-50/80 p-4 sm:p-5 dark:border-yellow-900/30 dark:bg-yellow-900/10">

@@ -1,13 +1,16 @@
 /**
- * PREVIOUS-SUPPORTER-EMAIL-2.0A — the two facts FreezerIQ must PROVE before it may
- * send a previous supporter a fundraiser email itself (Resend), and the honest
- * answer today for both: it cannot.
+ * PREVIOUS-SUPPORTER-EMAIL-2.0A / 2.0B — the two facts that must be PROVEN before a
+ * previous supporter may be sent a prepared fundraiser email.
  *
- *   previous supporter + usable email + not opted out          → may be emailed PERSONALLY
- *                                                                ("Open in my email" — the
- *                                                                coordinator's own mailbox)
- *   … + explicit future-email permission + organization address → may ALSO be sent
- *                                                                automatically by FreezerIQ
+ *   previous supporter + usable email + not opted out
+ *     + the organization's mailing address                   → may be emailed PERSONALLY
+ *                                                              ("Open in my email" — the
+ *                                                              coordinator's own mailbox)
+ *   … + explicit future-email permission                      → may ALSO be sent
+ *                                                              automatically by FreezerIQ
+ *
+ * Today the address can be recorded (2.0B) and the permission cannot, so FreezerIQ's
+ * own sending stays closed for everyone, by design.
  *
  * ── 1. EXPLICIT FUTURE-EMAIL PERMISSION ─────────────────────────────────────
  *
@@ -22,23 +25,24 @@
  * "Keep me updated by email about future fundraisers from this organization"
  * choice, THIS function is where it is read.
  *
- * ── 2. THE DESIGNATED SENDER'S MAILING ADDRESS ──────────────────────────────
+ * ── 2. THE DESIGNATED SENDER'S MAILING ADDRESS (PREVIOUS-SUPPORTER-EMAIL-2.0B) ─
  *
  * The organization is the sender of a re-engagement email (FreezerIQ / the tenant
  * only delivers it), so the footer's physical address must be the ORGANIZATION's.
- * Audited 2026-10-31: no organization mailing address exists. Customer has a single
- * free-text `delivery_address` — labelled "Delivery address" in the CRM and used to
- * route meal deliveries — which is a different business concept and is never read
- * here; a fundraiser's pickup_location is a third concept and is never read either.
- * The tenant's StorefrontConfig.origin_address is the kitchen's delivery origin and
- * belongs to a different entity. So this authority returns null, and automated
- * sending stays closed until an organization mailing address is recorded.
+ * It lives in its own owner-approved columns on the organization's Customer row
+ * (customers.mailing_address_line1 … mailing_postal_code, migration
+ * 20261031120000), edited in the CRM's Organization Details. It is read for
+ * exactly ONE organization, inside ONE tenant, and validated before use.
  *
- * Both functions are deliberately free of database reads today: there is nothing
- * true to read. They exist so the gate is one place, testable, and so the day the
- * data exists the change is a loader, not a rewrite of the send path.
+ * Never read in its place: Customer.delivery_address (where meals are delivered —
+ * a routing concept), a campaign's pickup_location (where supporters collect), the
+ * tenant's StorefrontConfig.origin_address (the kitchen) or any platform address.
+ * A missing or incomplete address means NO prepared email of either kind.
+ *
+ * The consent authority above deliberately reads nothing: there is nothing true
+ * to read yet.
  */
-
+import { prisma } from '@/lib/db';
 /** A US-style mailing address, complete enough to print in a commercial-email footer. */
 export interface OrganizationMailingAddress {
     line1: string;
@@ -87,15 +91,84 @@ export function mailingAddressLines(a: OrganizationMailingAddress): string[] {
 }
 
 /**
- * The designated sender's mailing address — the organization running THIS campaign.
- * Today: no authority exists, so null (see header). Takes the organization id so a
- * future loader is scoped by construction; it is never given another organization.
+ * What the CRM may store. All five blank clears the address; anything else must be
+ * a COMPLETE, well-formed address — a half-typed one is refused with a reason
+ * rather than stored and silently failing later.
  */
-export async function loadOrganizationMailingAddress(_scope: {
-    businessId: string;
-    organizationCustomerId: string;
-}): Promise<OrganizationMailingAddress | null> {
-    return null;
+export function parseMailingAddressInput(body: unknown):
+    | { kind: 'clear' }
+    | { kind: 'set'; address: OrganizationMailingAddress }
+    | { kind: 'invalid'; error: string } {
+    const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+    const fields = ['line1', 'line2', 'city', 'state', 'postalCode'].map((k) => (typeof b[k] === 'string' ? (b[k] as string).trim() : ''));
+    if (fields.every((v) => !v)) return { kind: 'clear' };
+    const address = validateOrganizationMailingAddress({ line1: b.line1, line2: b.line2, city: b.city, state: b.state, postalCode: b.postalCode });
+    if (!address) {
+        return {
+            kind: 'invalid',
+            error: 'Enter a complete mailing address: street address, city, two-letter state and ZIP code.',
+        };
+    }
+    return { kind: 'set', address };
+}
+
+/** "Open in my email" needs the organization's address too (2.0B); FreezerIQ's own send needs more. */
+export function describePersonalEmail(mailingAddress: OrganizationMailingAddress | null): {
+    available: boolean;
+    code: 'available' | 'mailing_address_required';
+    reason: string;
+} {
+    return mailingAddress
+        ? { available: true, code: 'available', reason: 'Prepared emails include the organization’s mailing address.' }
+        : { available: false, code: 'mailing_address_required', reason: 'Email draft unavailable — organization mailing address required.' };
+}
+
+/** The raw columns, exactly as stored. */
+export interface OrganizationMailingAddressRow {
+    mailing_address_line1: string | null;
+    mailing_address_line2: string | null;
+    mailing_city: string | null;
+    mailing_state: string | null;
+    mailing_postal_code: string | null;
+}
+
+export function mailingAddressFromRow(row: OrganizationMailingAddressRow | null | undefined): OrganizationMailingAddress | null {
+    if (!row) return null;
+    return validateOrganizationMailingAddress({
+        line1: row.mailing_address_line1,
+        line2: row.mailing_address_line2,
+        city: row.mailing_city,
+        state: row.mailing_state,
+        postalCode: row.mailing_postal_code,
+    });
+}
+
+/** Just enough of a Prisma client to read one row by raw SQL — injectable for tests. */
+export interface MailingAddressDb {
+    $queryRaw: <T = unknown>(query: TemplateStringsArray, ...values: unknown[]) => Promise<T>;
+}
+
+/**
+ * The designated sender's mailing address — the organization running THIS campaign,
+ * in THIS tenant, or null when it is missing or incomplete.
+ *
+ * Read by raw SQL on purpose: these columns are newer than some locally generated
+ * Prisma clients, and the WHERE clause must carry both the organization id AND the
+ * tenant id, so another organization's or another tenant's address can never come
+ * back. Only the five mailing columns are selected — never delivery_address.
+ */
+export async function loadOrganizationMailingAddress(
+    scope: { businessId: string; organizationCustomerId: string },
+    db: MailingAddressDb = prisma as unknown as MailingAddressDb,
+): Promise<OrganizationMailingAddress | null> {
+    if (!scope.businessId || !scope.organizationCustomerId) return null;
+    const rows = await db.$queryRaw<OrganizationMailingAddressRow[]>`
+        SELECT mailing_address_line1, mailing_address_line2, mailing_city, mailing_state, mailing_postal_code
+        FROM customers
+        WHERE id = ${scope.organizationCustomerId} AND business_id = ${scope.businessId}
+        LIMIT 1
+    `;
+    return mailingAddressFromRow(Array.isArray(rows) ? rows[0] : null);
 }
 
 /**
@@ -133,7 +206,7 @@ export function describeAutomatedSend(input: {
         return {
             available: false,
             code: 'mailing_address_required',
-            reason: 'Automated email unavailable — organization mailing address required. You can still email supporters yourself with "Open in my email".',
+            reason: 'Automated email unavailable — organization mailing address required.',
         };
     }
     if (input.consentedCount <= 0) {

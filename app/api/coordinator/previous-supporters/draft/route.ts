@@ -7,9 +7,13 @@
  * The coordinator reviews and sends the draft from their own mailbox. FreezerIQ
  * sends nothing here, records nothing as sent, and writes nothing at all — the
  * handler only reads. That is why this path does not need the recorded
- * future-email permission or the organization mailing address that FreezerIQ's
- * own automated send does: it is the coordinator personally writing to someone
- * who supported their organization before.
+ * future-email permission FreezerIQ's own automated send does: it is the
+ * coordinator personally writing to someone who supported their organization.
+ *
+ * PREVIOUS-SUPPORTER-EMAIL-2.0B: it DOES need the organization's mailing address —
+ * the draft's footer names the organization and gives that address — and fails
+ * closed without one. Nothing else (delivery address, pickup location, the
+ * tenant's kitchen) is ever used in its place.
  *
  * ── AUTHORITY ───────────────────────────────────────────────────────────────
  *
@@ -38,6 +42,7 @@ import {
     loadInvitationFacts,
     personalEmailAllowed,
 } from '@/lib/previousSupporterInvitation';
+import { describePersonalEmail, loadOrganizationMailingAddress } from '@/lib/previousSupporterAuthorities';
 
 /** One answer for every reference that names nobody this coordinator may email. */
 function notAvailable() {
@@ -63,6 +68,13 @@ export async function POST(req: Request) {
             return NextResponse.json({ ok: false, code: availability.code, error: availability.reason }, { status: 409 });
         }
 
+        // 2.0B: THIS organization's own mailing address, in THIS tenant — or no draft.
+        const mailingAddress = await loadOrganizationMailingAddress({ businessId, organizationCustomerId });
+        const personal = describePersonalEmail(mailingAddress);
+        if (!mailingAddress) {
+            return NextResponse.json({ ok: false, code: personal.code, error: personal.reason }, { status: 409 });
+        }
+
         let body: any = {};
         try { body = await req.json(); } catch { /* validated below */ }
 
@@ -80,6 +92,7 @@ export async function POST(req: Request) {
             subject: defaultInvitationSubject(campaign.customer?.name),
             message: defaultInvitationMessage(campaign.customer?.name),
             facts,
+            sender: { organizationName: campaign.customer?.name ?? '', mailingAddress },
         });
         if (!mailto) return notAvailable();
 

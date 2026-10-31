@@ -288,6 +288,8 @@ describe('PRESERVATION', () => {
             '20260915170000_qb_invoice_1c_invoice_send',
             // QB-INVOICE-CANCEL-1 (owner-authorized, additive): voided_at / voided_by on the send lifecycle.
             '20260923010000_qb_invoice_cancel_1_voided',
+            // PREVIOUS-SUPPORTER-EMAIL-2.0B (owner-authorized, additive): the organization mailing address on customers.
+            '20261031120000_prev_supporter_email_2b_org_mailing_address',
         ]);
     });
 });
