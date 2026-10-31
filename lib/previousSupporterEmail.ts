@@ -26,12 +26,24 @@
  * The unsubscribe footer is a fourth layer and is not here at all: the send
  * engine (lib/outreachSend.ts) appends it to the OUTPUT of this renderer.
  *
+ * ── TWO WAYS THE SAME MESSAGE LEAVES (PREVIOUS-SUPPORTER-EMAIL-2.0A) ────────
+ *
+ *   "Open in my email"  buildPersonalMailto — a mailto: draft for ONE supporter that
+ *                       opens in the coordinator's own mail app; they review and send
+ *                       it from their own mailbox. FreezerIQ sends nothing.
+ *   automated send      renderPreviousSupporterEmail — FreezerIQ delivers it, so the
+ *                       ORGANIZATION is presented as the sender ("{Org} via {tenant}",
+ *                       from the platform's verified address) and its mailing address
+ *                       and the delivery relationship are stated in the footer. Who
+ *                       may receive it is decided in lib/previousSupporterAuthorities.
+ *
  * SERVER-SIDE (node:crypto for the opaque supporter reference).
  */
 import { createHash } from 'crypto';
 import { firstNameOf } from '@/lib/personName';
 import { safeSubject } from '@/lib/emailTemplates';
 import { normalizeSupporterEmail } from '@/lib/previousSupporters';
+import { mailingAddressLines, type OrganizationMailingAddress } from '@/lib/previousSupporterAuthorities';
 
 /** The button label in the HTML part. The plain-text part always carries the URL itself. */
 export const PREVIOUS_SUPPORTER_CTA_LABEL = 'View Meals & Order';
@@ -67,9 +79,16 @@ export interface InvitationFacts {
     orderUrl: string;
 }
 
-export interface InvitationBrand {
-    name?: string | null;
-    email?: string | null;
+/**
+ * Who an AUTOMATED email presents as its sender. The organization running the
+ * fundraiser is the designated sender; the tenant (Business.name — the same
+ * authority getTenantSender uses for the From header) is the service that delivers
+ * it. The mailing address is the organization's, never the pickup location.
+ */
+export interface InvitationSender {
+    organizationName: string;
+    tenantName: string;
+    mailingAddress: OrganizationMailingAddress;
 }
 
 // ── Identity of one supporter inside one campaign ───────────────────────────
@@ -245,40 +264,57 @@ function cleanMessage(text: string): string {
         .trim();
 }
 
+/** The shared body: greeting, the coordinator's message, the current facts, the link, the thanks. */
+function invitationTextLines(input: { greeting: string; message: string; facts: InvitationFacts; url: string }): string[] {
+    const f = invitationFactSections(input.facts);
+    const org = organizationLabel(input.facts.organizationName);
+    const text: string[] = [input.greeting, ''];
+    if (input.message) text.push(input.message, '');
+    if (f.offering.length) text.push(`This round we're offering:`, ...f.offering.map((n) => `• ${n}`), '');
+    if (f.deadline) text.push(`Ordering ends: ${f.deadline}`, '');
+    if (f.pickup.length) text.push('Pickup:', ...f.pickup, '');
+    text.push(`You can view this round's meals and place your order here:`, input.url, '');
+    text.push(`Thank you for supporting ${org}!`);
+    return text;
+}
+
+/** "Sent on behalf of {org} using {tenant} fundraising services." — the delivery relationship, stated. */
+export function deliveryDisclosure(sender: Pick<InvitationSender, 'organizationName' | 'tenantName'>): string {
+    return `Sent on behalf of ${organizationLabel(sender.organizationName)} using ${oneLine(sender.tenantName, 120) || 'FreezerIQ'} fundraising services.`;
+}
+
 /**
- * ONE supporter's email, rendered by the server.
+ * ONE supporter's AUTOMATED email, rendered by the server.
  *
- * Returns null without a usable ordering URL: an invitation with no way to order
- * is not worth sending, and the caller refuses rather than mailing a dead end.
- * There is exactly one addressee per call — this function has no recipient list
- * to leak, and the greeting is the only per-person value in the result.
+ * Returns null without a usable ordering URL or without a complete sender (the
+ * organization's name and mailing address): an invitation with no way to order is
+ * not worth sending, and one without its sender's address may not be sent. The
+ * caller refuses rather than mailing either. There is exactly one addressee per
+ * call — this function has no recipient list to leak, and the greeting is the only
+ * per-person value in the result.
  */
 export function renderPreviousSupporterEmail(input: {
     greetingName: string | null;
     subject: string;
     message: string;
     facts: InvitationFacts;
-    brand?: InvitationBrand | null;
+    sender: InvitationSender | null;
 }): { subject: string; html: string; text: string } | null {
     const url = safeOrderUrl(input.facts?.orderUrl);
     if (!url) return null;
+    const senderOrg = oneLine(input.sender?.organizationName, 120);
+    const address = input.sender?.mailingAddress ? mailingAddressLines(input.sender.mailingAddress).map((l) => oneLine(l, 120)).filter(Boolean) : [];
+    if (!input.sender || !senderOrg || address.length < 2) return null;
 
     const org = organizationLabel(input.facts.organizationName);
     const greeting = greetingLine(input.greetingName ? supporterGreetingName(input.greetingName) : null);
     const message = cleanMessage(input.message);
     const f = invitationFactSections(input.facts);
-    const brandName = oneLine(input.brand?.name, 120);
-    const brandEmail = oneLine(input.brand?.email, 254);
+    const disclosure = deliveryDisclosure(input.sender);
 
     // ── Plain text ────────────────────────────────────────────────────────
-    const text: string[] = [greeting, ''];
-    if (message) text.push(message, '');
-    if (f.offering.length) text.push(`This round we're offering:`, ...f.offering.map((n) => `• ${n}`), '');
-    if (f.deadline) text.push(`Ordering ends: ${f.deadline}`, '');
-    if (f.pickup.length) text.push('Pickup:', ...f.pickup, '');
-    text.push(`You can view this round's meals and place your order here:`, url, '');
-    text.push(`Thank you for supporting ${org}!`);
-    if (brandName || brandEmail) text.push('', ...[brandName, brandEmail].filter(Boolean));
+    const text = invitationTextLines({ greeting, message, facts: input.facts, url });
+    text.push('', '--', senderOrg, ...address, '', disclosure);
 
     // ── HTML — every variable escaped; the only tags are the ones written here ──
     const P = 'margin:0 0 16px;';
@@ -299,11 +335,9 @@ export function renderPreviousSupporterEmail(input: {
         + `padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;">${esc(PREVIOUS_SUPPORTER_CTA_LABEL)}</a></p>`
         + `<p style="margin:0 0 16px;font-size:13px;"><a href="${esc(url)}" style="color:#4f46e5;">${esc(url)}</a></p>`);
     html.push(`<p style="${P}">Thank you for supporting ${esc(org)}!</p>`);
-    if (brandName || brandEmail) {
-        html.push(`<p style="margin:24px 0 0;color:#64748b;font-size:13px;">`
-            + [brandName ? `<strong>${esc(brandName)}</strong>` : '', brandEmail ? esc(brandEmail) : ''].filter(Boolean).join('<br />')
-            + `</p>`);
-    }
+    html.push(`<p style="margin:24px 0 0;color:#64748b;font-size:13px;"><strong>${esc(senderOrg)}</strong><br />`
+        + `${address.map(esc).join('<br />')}</p>`
+        + `<p style="margin:8px 0 0;color:#64748b;font-size:12px;">${esc(disclosure)}</p>`);
 
     return {
         subject: safeSubject(input.subject),
@@ -311,4 +345,76 @@ export function renderPreviousSupporterEmail(input: {
             + `color:#0f172a;max-width:620px;">\n${html.join('\n')}\n</div>`,
         text: text.join('\n').replace(/\n{3,}/g, '\n\n').trim(),
     };
+}
+
+// ── Sender identity for AUTOMATED email ─────────────────────────────────────
+
+/**
+ * `"{Organization} via {tenant}" <platform address>`.
+ *
+ * The address is taken, unchanged, from the platform sender FreezerIQ already
+ * uses (lib/email.getTenantSender — the verified EMAIL_FROM address); only the
+ * display name changes, so no organization's domain is ever claimed. The name is
+ * quoted, with quotes, backslashes, angle brackets and controls removed, so a
+ * comma or colon in an organization's name cannot split the header.
+ */
+export function organizationFromHeader(input: {
+    organizationName: string | null | undefined;
+    tenantName: string | null | undefined;
+    platformFrom: string | null | undefined;
+}): string | null {
+    const raw = String(input.platformFrom ?? '').trim();
+    const address = (raw.match(/<([^<>\s]+@[^<>\s]+)>\s*$/)?.[1] ?? (/^[^<>\s"]+@[^<>\s"]+$/.test(raw) ? raw : '')).trim();
+    if (!address) return null;
+    const clean = (s: unknown) => oneLine(s, 100).replace(/["\\<>]/g, '').trim();
+    const org = clean(input.organizationName);
+    const tenant = clean(input.tenantName);
+    if (!org || !tenant) return null;
+    return `"${org} via ${tenant}" <${address}>`;
+}
+
+/** Any control character (non-global, so .test carries no state between calls). */
+const HEADER_CONTROL = new RegExp('[\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]');
+
+/**
+ * A Reply-To value only when it is one plain address — no list, no display name,
+ * no header characters. Anything else is refused so the caller falls back.
+ */
+export function headerSafeReplyTo(raw: string | null | undefined): string | null {
+    const v = String(raw ?? '').trim();
+    if (!v || v.length > 254 || !normalizeSupporterEmail(v)) return null;
+    if (/[\s,;<>"()\\]/.test(v) || HEADER_CONTROL.test(v)) return null;
+    return v;
+}
+
+// ── "Open in my email" — the coordinator's own mailbox ──────────────────────
+
+/** Said in the personal draft, because the coordinator — not FreezerIQ — is writing to them. */
+export const PERSONAL_OPT_OUT_LINE = "If you'd rather not hear about future fundraisers, just reply and let me know.";
+
+/**
+ * A mailto: draft for ONE previous supporter, for the coordinator's own mail app.
+ *
+ * Only `to` is the supporter's address, and only when it is a plain single address
+ * (isSendableSupporterAddress), so it can never smuggle a second recipient, a CC or
+ * a header. The subject is header-safe; the body is the same greeting, message,
+ * current facts and canonical link as the automated email, plus a line inviting
+ * them to say no to future contact. Line breaks are %0D%0A, as RFC 6068 asks.
+ * FreezerIQ sends nothing — and records nothing as sent — when this is opened.
+ */
+export function buildPersonalMailto(input: {
+    to: string | null | undefined;
+    greetingName: string | null;
+    subject: string;
+    message: string;
+    facts: InvitationFacts;
+}): string | null {
+    if (!isSendableSupporterAddress(input.to)) return null;
+    const url = safeOrderUrl(input.facts?.orderUrl);
+    if (!url) return null;
+    const greeting = greetingLine(input.greetingName ? supporterGreetingName(input.greetingName) : null);
+    const lines = invitationTextLines({ greeting, message: cleanMessage(input.message), facts: input.facts, url });
+    lines.push('', PERSONAL_OPT_OUT_LINE);
+    const body = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim().replace(/\n/g, '\r\n');
+    return `mailto:${input.to}?subject=${encodeURIComponent(safeSubject(input.subject))}&body=${encodeURIComponent(body)}`;
 }

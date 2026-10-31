@@ -19,7 +19,10 @@ export type SupporterEmailStatus =
     | 'invalid_email'; // something on file, but not an address we will write to
 
 export interface SupporterRow {
-    /** Opaque, campaign-scoped. Null whenever the row cannot be selected. */
+    /**
+     * Opaque, campaign-scoped. Null when the coordinator can do nothing with this
+     * row — no usable address, opted out, or no open fundraiser to invite them to.
+     */
     ref: string | null;
     name: string;
     emailMasked: string | null;
@@ -29,6 +32,18 @@ export interface SupporterRow {
     status: SupporterEmailStatus;
     /** ISO time of the attempt that decided `status`, when there was one. */
     statusAt: string | null;
+    /**
+     * PREVIOUS-SUPPORTER-EMAIL-2.0A — "Open in my email": a usable address, not
+     * opted out, and an open fundraiser. Independent of FreezerIQ sending.
+     */
+    canOpenEmail: boolean;
+    /**
+     * Whether FreezerIQ may email this person ITSELF, and why not. Requires recorded
+     * future-email permission and the organization's mailing address on top of
+     * everything "Open in my email" needs.
+     */
+    automated: { eligible: boolean; reason: string | null };
+    /** Tickable for a FreezerIQ send: automated-eligible and not yet emailed (or failed). */
     selectable: boolean;
 }
 

@@ -36,6 +36,7 @@ import {
     type InvitationFacts,
 } from '@/lib/previousSupporterEmail';
 import type { SupporterEmailStatus, SupporterRow } from '@/lib/previousSupporterSelection';
+import type { AutomatedSendGate } from '@/lib/previousSupporterAuthorities';
 
 /** The campaign columns the invitation needs. Explicit; nothing arrives by default. */
 export const INVITATION_CAMPAIGN_SELECT = {
@@ -55,6 +56,10 @@ export const INVITATION_CAMPAIGN_SELECT = {
         select: {
             id: true,
             name: true,
+            // The organization's own on-file contact: the Reply-To fallback when the
+            // campaign has no assigned coordinator (lib/campaignCoordinatorContact).
+            contact_name: true,
+            contact_email: true,
             business_id: true,
             business: {
                 select: {
@@ -250,25 +255,59 @@ function statusFor(s: PreviousSupporter, history: Map<string, CampaignEmailHisto
     return { status: 'ready', at: null };
 }
 
-const SELECTABLE: ReadonlySet<SupporterEmailStatus> = new Set(['ready', 'failed']);
+const RETRYABLE: ReadonlySet<SupporterEmailStatus> = new Set(['ready', 'failed']);
+
+/**
+ * "Open in my email" needs only an address we would write to, no opt-out, and an
+ * open fundraiser. An earlier FreezerIQ send does not take it away: the personal
+ * path stays available for everyone it is safe for.
+ */
+function canOpenEmailFor(status: SupporterEmailStatus, invitationsOpen: boolean): boolean {
+    return invitationsOpen && status !== 'no_email' && status !== 'invalid_email' && status !== 'opted_out';
+}
+
+/**
+ * Whether FreezerIQ itself may email this person, and why not. EVERY condition must
+ * hold: an open fundraiser, a usable unsuppressed address, the organization's
+ * mailing address (the campaign-wide gate) and this person's RECORDED permission
+ * for future fundraiser email. Purchase history alone never satisfies the last one.
+ */
+function automatedFor(input: {
+    address: string | null;
+    status: SupporterEmailStatus;
+    invitationsOpen: boolean;
+    gate: AutomatedSendGate;
+    consent: ReadonlySet<string>;
+}): { eligible: boolean; reason: string | null } {
+    if (!canOpenEmailFor(input.status, input.invitationsOpen) || !input.address) return { eligible: false, reason: null };
+    if (input.gate.code === 'mailing_address_required') return { eligible: false, reason: 'Automated email unavailable — organization mailing address required' };
+    if (!input.consent.has(input.address)) return { eligible: false, reason: 'FreezerIQ send unavailable — future email permission not recorded' };
+    return { eligible: true, reason: null };
+}
+
+export interface SupporterRowContext {
+    campaignId: string;
+    audience: PreviousSupporterAudience;
+    history: Map<string, CampaignEmailHistoryEntry>;
+    invitationsOpen: boolean;
+    gate: AutomatedSendGate;
+    /** Normalized addresses with RECORDED future-email permission — lib/previousSupporterAuthorities. */
+    consent: ReadonlySet<string>;
+}
 
 /**
  * The rows the card shows: masked addresses and opaque references only. Rows the
  * coordinator can act on come first, so a long history never pushes the people
  * who can be emailed off the page.
  */
-export function buildSupporterRows(input: {
-    campaignId: string;
-    audience: PreviousSupporterAudience;
-    history: Map<string, CampaignEmailHistoryEntry>;
-    invitationsOpen: boolean;
-    limit: number;
-}): SupporterRow[] {
+export function buildSupporterRows(input: SupporterRowContext & { limit: number }): SupporterRow[] {
     const rows = input.audience.supporters.map((s): SupporterRow => {
         const { status, at } = statusFor(s, input.history);
-        const selectable = input.invitationsOpen && SELECTABLE.has(status);
+        const canOpenEmail = canOpenEmailFor(status, input.invitationsOpen);
+        const automated = automatedFor({ address: s.email, status, invitationsOpen: input.invitationsOpen, gate: input.gate, consent: input.consent });
+        const selectable = automated.eligible && RETRYABLE.has(status);
         return {
-            ref: selectable ? previousSupporterRef(input.campaignId, s.email as string) : null,
+            ref: canOpenEmail ? previousSupporterRef(input.campaignId, s.email as string) : null,
             name: s.displayName,
             emailMasked: s.email ? maskSupporterEmail(s.email) : null,
             orderCount: s.orderCount,
@@ -276,15 +315,36 @@ export function buildSupporterRows(input: {
             exclusionReason: s.exclusionReason,
             status,
             statusAt: at ? at.toISOString() : null,
+            canOpenEmail,
+            automated,
             selectable,
         };
     });
-    const order = (r: SupporterRow) => (r.selectable ? (r.status === 'ready' ? 0 : 1) : r.status === 'emailed' || r.status === 'sending' ? 2 : 3);
+    const order = (r: SupporterRow) => (r.selectable ? (r.status === 'ready' ? 0 : 1) : r.canOpenEmail ? 2 : 3);
     return rows
         .map((r, i) => ({ r, i }))
         .sort((a, b) => order(a.r) - order(b.r) || a.i - b.i)
         .map(({ r }) => r)
         .slice(0, input.limit);
+}
+
+/** How many previous supporters FreezerIQ could email itself right now (before history). */
+export function countConsented(audience: PreviousSupporterAudience, consent: ReadonlySet<string>): number {
+    return audience.supporters.filter((s) => s.reachable && !!s.email && isSendableSupporterAddress(s.email) && consent.has(s.email)).length;
+}
+
+/** One supporter, found by the coordinator's opaque reference inside the recomputed audience. */
+export function findSupporterByRef(campaignId: string, ref: unknown, audience: PreviousSupporterAudience): PreviousSupporter | null {
+    if (!isPreviousSupporterRef(ref)) return null;
+    for (const s of audience.supporters) {
+        if (s.email && previousSupporterRef(campaignId, s.email) === ref) return s;
+    }
+    return null;
+}
+
+/** Whether "Open in my email" may be offered for this supporter right now. */
+export function personalEmailAllowed(s: PreviousSupporter, history: Map<string, CampaignEmailHistoryEntry>, invitationsOpen: boolean): boolean {
+    return canOpenEmailFor(statusFor(s, history).status, invitationsOpen);
 }
 
 export interface ResolvedSelection {
@@ -297,6 +357,8 @@ export interface ResolvedSelection {
         optedOut: number;
         noUsableEmail: number;
         alreadyEmailed: number;
+        /** No RECORDED permission for future fundraiser email — never sent by FreezerIQ. */
+        noConsent: number;
     };
 }
 
@@ -305,12 +367,15 @@ export interface ResolvedSelection {
  * recomputed. A reference that matches nobody here — forged, stale, or belonging
  * to another campaign, organization or tenant — sends nothing. The selection can
  * only ever narrow the server's audience; it cannot add a single address to it.
+ * And a person without recorded future-email permission is never sent, whoever
+ * ticked them.
  */
 export function resolveSelection(input: {
     campaignId: string;
     refs: unknown;
     audience: PreviousSupporterAudience;
     history: Map<string, CampaignEmailHistoryEntry>;
+    consent: ReadonlySet<string>;
 }): ResolvedSelection | null {
     if (!Array.isArray(input.refs)) return null;
     const refs = [...new Set(input.refs.filter(isPreviousSupporterRef))];
@@ -323,16 +388,17 @@ export function resolveSelection(input: {
 
     const out: ResolvedSelection = {
         toSend: [], selected: refs.length,
-        notSent: { noLongerEligible: 0, optedOut: 0, noUsableEmail: 0, alreadyEmailed: 0 },
+        notSent: { noLongerEligible: 0, optedOut: 0, noUsableEmail: 0, alreadyEmailed: 0, noConsent: 0 },
     };
     for (const ref of refs) {
         const s = byRef.get(ref);
         if (!s) { out.notSent.noLongerEligible += 1; continue; }
         const { status } = statusFor(s, input.history);
-        if (status === 'ready' || status === 'failed') out.toSend.push(s);
-        else if (status === 'opted_out') out.notSent.optedOut += 1;
+        if (status === 'opted_out') out.notSent.optedOut += 1;
+        else if (status === 'no_email' || status === 'invalid_email') out.notSent.noUsableEmail += 1;
+        else if (!input.consent.has(s.email as string)) out.notSent.noConsent += 1;
         else if (status === 'emailed' || status === 'sending') out.notSent.alreadyEmailed += 1;
-        else out.notSent.noUsableEmail += 1;
+        else out.toSend.push(s);
     }
     return out;
 }

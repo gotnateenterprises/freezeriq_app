@@ -416,7 +416,8 @@ describe('FR-REBOOK-2 · send endpoint authority (shipped source)', () => {
         const args = send.slice(0, send.indexOf('        });'));
         expect(args).toContain('render: (r) => {');
         expect(args).toContain('greetingName: r.displayName');
-        const callback = post.slice(post.indexOf('render: (r) => {'), post.indexOf('from: sender.from,'));
+        const callback = post.slice(post.indexOf('render: (r) => {'), post.indexOf('replyTo,', post.indexOf('render: (r) => {')));
+        expect(callback.length).toBeGreaterThan(0);
         expect(callback).toContain('return rendered;');
         expect(callback).not.toContain('html: body');
         expect(callback).not.toContain('text: body');

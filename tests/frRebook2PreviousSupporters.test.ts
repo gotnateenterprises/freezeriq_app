@@ -477,7 +477,8 @@ describe('FR-REBOOK-2 · coordinator authority (shipped source)', () => {
         expect(post).toContain('subject: body?.subject, text: body?.text');
         const fields = [...new Set([...post.matchAll(/body\?\.(\w+)/g)].map((m) => m[1]))].sort();
         expect(fields).toEqual(['confirm', 'selected', 'subject', 'text']);
-        expect(post).toContain('resolveSelection({ campaignId, refs: body?.selected, audience, history })');
+        // PREVIOUS-SUPPORTER-EMAIL-2.0A: and only people with RECORDED future-email consent.
+        expect(post).toContain('resolveSelection({ campaignId, refs: body?.selected, audience, history, consent })');
     });
 
     // FR-ORG-DASHBOARD-1A moved the audience assembly, unchanged, into

@@ -34,7 +34,6 @@ import { prisma } from '@/lib/db';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 import { describePreviousSupporters } from '@/lib/previousSupporters';
 import { loadPreviousSupporterAudience } from '@/lib/previousSupporterAudience';
-import { customerFacingBusinessName } from '@/lib/tenantBrand';
 import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
 import { validateInviteMessage } from '@/lib/previousSupporterInvite';
 import {
@@ -51,17 +50,27 @@ import {
     defaultInvitationMessage,
     defaultInvitationSubject,
     findPrivateLinkInMessage,
+    headerSafeReplyTo,
+    organizationFromHeader,
     renderPreviousSupporterEmail,
     PREVIOUS_SUPPORTER_SEND_CONFIRMATION,
 } from '@/lib/previousSupporterEmail';
 import {
     buildSupporterRows,
+    countConsented,
     INVITATION_CAMPAIGN_SELECT,
     loadCampaignEmailHistory,
     loadInvitationFacts,
     resolveSelection,
     type InvitationAvailability,
 } from '@/lib/previousSupporterInvitation';
+import {
+    describeAutomatedSend,
+    loadExplicitEmailConsent,
+    loadOrganizationMailingAddress,
+    type AutomatedSendGate,
+} from '@/lib/previousSupporterAuthorities';
+import { CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT, resolveCampaignCoordinator, type CoordinatorAssignmentRow } from '@/lib/campaignCoordinatorContact';
 
 /**
  * A page of names, not a mailing list. Large enough that a real organization's
@@ -81,7 +90,8 @@ export interface SendCapability {
     canSend: boolean;
     code:
         | 'ready' | 'no_reachable_audience' | 'no_order_link' | 'outreach_consent_unavailable'
-        | 'ordering_closed' | 'not_open_yet' | 'menu_pending' | 'menu_unavailable';
+        | 'ordering_closed' | 'not_open_yet' | 'menu_pending' | 'menu_unavailable'
+        | 'mailing_address_required' | 'consent_not_recorded';
     reason: string;
 }
 
@@ -96,12 +106,18 @@ export interface SendCapability {
  * PREVIOUS-SUPPORTER-EMAIL-2.0: `invitation` is whether THIS fundraiser is open
  * for supporter orders right now. An invitation to a closed, unlaunched or
  * menu-less fundraiser is refused with that fundraiser's own reason.
+ *
+ * PREVIOUS-SUPPORTER-EMAIL-2.0A: `automated` is whether FreezerIQ may send at all —
+ * the organization's mailing address and RECORDED future-email permission
+ * (lib/previousSupporterAuthorities). The handlers always pass it, together with a
+ * reachableCount that counts only consented supporters.
  */
 export function resolveSendCapability(input: {
     reachableCount: number;
     orderUrl: string | null;
     unsubscribeReady: boolean;
     invitation?: InvitationAvailability | null;
+    automated?: AutomatedSendGate | null;
 }): SendCapability {
     if (!input.unsubscribeReady) {
         return {
@@ -119,6 +135,9 @@ export function resolveSendCapability(input: {
             code: 'no_order_link',
             reason: 'This fundraiser has no online ordering page yet, so there is nowhere to send supporters.',
         };
+    }
+    if (input.automated && !input.automated.available) {
+        return { canSend: false, code: input.automated.code as SendCapability['code'], reason: input.automated.reason };
     }
     if (input.reachableCount <= 0) {
         return {
@@ -179,11 +198,19 @@ async function computeAudience(input: {
 
 type CampaignContext = NonNullable<Awaited<ReturnType<typeof loadCampaignContext>>>;
 
-/** The tenant as the supporter knows it, for the email's sign-off. */
-function invitationBrand(campaign: CampaignContext['campaign']) {
-    const business = campaign.customer?.business;
-    if (!business) return null;
-    return { name: customerFacingBusinessName(business), email: business.contact_email ?? null };
+/**
+ * PREVIOUS-SUPPORTER-EMAIL-2.0A — what FreezerIQ must PROVE before sending itself:
+ * the organization's mailing address and each person's recorded future-email
+ * permission. Both authorities answer "none" today (lib/previousSupporterAuthorities),
+ * so `automated.available` is false and no previous supporter is selectable — while
+ * "Open in my email" stays available. Read for THIS campaign's organization only.
+ */
+async function loadAutomatedAuthorities(ctx: CampaignContext, audience: Awaited<ReturnType<typeof computeAudience>>) {
+    const scope = { businessId: ctx.businessId, organizationCustomerId: ctx.organizationCustomerId };
+    const mailingAddress = await loadOrganizationMailingAddress(scope);
+    const consent = await loadExplicitEmailConsent(scope);
+    const consentedCount = countConsented(audience, consent);
+    return { mailingAddress, consent, consentedCount, automated: describeAutomatedSend({ mailingAddress, consentedCount }) };
 }
 
 export async function GET(req: Request) {
@@ -205,8 +232,10 @@ export async function GET(req: Request) {
         const history = await loadCampaignEmailHistory(prisma, {
             businessId, customerId: organizationCustomerId, campaignId,
         });
+        const { consent, consentedCount, automated } = await loadAutomatedAuthorities(ctx, audience);
         const supporters = buildSupporterRows({
-            campaignId, audience, history, invitationsOpen: availability.open, limit: SUPPORTER_PREVIEW_LIMIT,
+            campaignId, audience, history, invitationsOpen: availability.open,
+            gate: automated, consent, limit: SUPPORTER_PREVIEW_LIMIT,
         });
 
         return NextResponse.json({
@@ -220,11 +249,16 @@ export async function GET(req: Request) {
                 duplicatesCollapsed: audience.duplicatesCollapsed,
                 // Already handled for THIS fundraiser — not the same as reachable.
                 emailedThisFundraiser: [...history.values()].filter((h) => h.status === 'emailed').length,
+                // With RECORDED future-email permission — the only people FreezerIQ may email itself.
+                consented: consentedCount,
             },
             // Names, masked addresses and opaque references. Never a usable mailing list.
             supporters,
             truncated: audience.supporterCount > SUPPORTER_PREVIEW_LIMIT,
             invitation: { open: availability.open, code: availability.code, reason: availability.reason },
+            // FreezerIQ's own sending: available only with the organization's
+            // mailing address AND recorded permission. Coordinator-facing wording.
+            automated: { available: automated.available, code: automated.code, reason: automated.reason },
             // The coordinator edits the subject and the message. The facts below
             // are shown read-only: the server adds them to every email.
             draft: {
@@ -237,10 +271,11 @@ export async function GET(req: Request) {
                     : null,
             },
             send: resolveSendCapability({
-                reachableCount: audience.reachableCount,
+                reachableCount: consentedCount,
                 orderUrl: facts?.orderUrl ?? null,
                 unsubscribeReady: Boolean(unsubscribeSecret()),
                 invitation: availability,
+                automated,
             }),
         });
     } catch (e) {
@@ -250,8 +285,11 @@ export async function GET(req: Request) {
 }
 
 /**
- * POST — send ONE SEPARATE, PERSONALIZED EMAIL to each previous supporter the
- * coordinator selected and confirmed.
+ * POST — FreezerIQ sends ONE SEPARATE, PERSONALIZED EMAIL to each previous
+ * supporter the coordinator selected and confirmed — and ONLY to those with
+ * recorded permission for future fundraiser email, when the organization's
+ * mailing address is on file. (The coordinator's own "Open in my email" draft is
+ * a different route, ./draft, and sends nothing.)
  *
  * ── WHAT THE CLIENT SENDS ───────────────────────────────────────────────────
  *
@@ -262,11 +300,13 @@ export async function GET(req: Request) {
  * them, and the references are matched only inside that recomputed audience —
  * so a selection can narrow who is emailed, never widen it.
  *
- * ── ONE MESSAGE PER PERSON ──────────────────────────────────────────────────
+ * ── ONE MESSAGE PER PERSON, FROM THE ORGANIZATION ───────────────────────────
  *
  * runSend makes one provider call per recipient with that single address in
  * `to` — no CC, no BCC, no shared list. The greeting is rendered per recipient
- * from that recipient's own row, so nobody can receive someone else's name.
+ * from that recipient's own row. The From display name is "{Organization} via
+ * {tenant}" on the platform's own verified address; Reply-To is the campaign's
+ * coordinator (lib/campaignCoordinatorContact), else the tenant's contact.
  *
  * ── NEVER TWICE ─────────────────────────────────────────────────────────────
  *
@@ -290,19 +330,21 @@ export async function POST(req: Request) {
         const origin = resolveOutreachOrigin(req);
         const audience = await computeAudience({ businessId, organizationCustomerId, campaignId });
         const { availability, facts } = await loadInvitationFacts(campaign);
+        const { mailingAddress, consent, consentedCount, automated } = await loadAutomatedAuthorities(ctx, audience);
 
         // ── CAN WE SEND AT ALL? Re-derived, never trusted from the client. ──
         const capability = resolveSendCapability({
-            reachableCount: audience.reachableCount,
+            reachableCount: consentedCount,
             orderUrl: facts?.orderUrl ?? null,
             unsubscribeReady: Boolean(unsubscribeSecret()),
             invitation: availability,
+            automated,
         });
         if (!capability.canSend) {
             return NextResponse.json({ ok: false, ...capability }, { status: 409 });
         }
-        if (!facts) {
-            return NextResponse.json({ ok: false, code: availability.code, reason: availability.reason }, { status: 409 });
+        if (!facts || !mailingAddress) {
+            return NextResponse.json({ ok: false, code: automated.code, reason: automated.reason }, { status: 409 });
         }
 
         // ── THE EXPLICIT CONFIRMATION, THEN THE COORDINATOR'S WORDS ─────────
@@ -329,7 +371,7 @@ export async function POST(req: Request) {
         const history = await loadCampaignEmailHistory(prisma, {
             businessId, customerId: organizationCustomerId, campaignId,
         });
-        const selection = resolveSelection({ campaignId, refs: body?.selected, audience, history });
+        const selection = resolveSelection({ campaignId, refs: body?.selected, audience, history, consent });
         if (!selection) {
             return NextResponse.json(
                 { ok: false, code: 'nothing_selected', error: 'Choose at least one supporter to email. Nothing was sent.' },
@@ -337,11 +379,28 @@ export async function POST(req: Request) {
             );
         }
 
+        // ── WHO IT IS FROM ──────────────────────────────────────────────────
+        // The organization is the designated sender; the platform's verified
+        // address is the technical From. Never the organization's own domain.
+        const tenantSender = await getTenantSender(businessId);
+        const organizationName = campaign.customer?.name ?? '';
+        const tenantName = campaign.customer?.business?.name ?? '';
+        const from = organizationFromHeader({ organizationName, tenantName, platformFrom: tenantSender.from });
+        if (!from) {
+            return NextResponse.json({ ok: false, code: 'sender_unavailable', error: 'The sender could not be prepared, so nothing was sent.' }, { status: 409 });
+        }
+        const assignment = await prisma.fundraiserCampaignCoordinator.findUnique({
+            where: { campaign_id: campaignId },
+            select: CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT,
+        }) as CoordinatorAssignmentRow | null;
+        const coordinator = resolveCampaignCoordinator({ assignment, organization: campaign.customer });
+        const replyTo = headerSafeReplyTo(coordinator.email) ?? tenantSender.replyTo;
+        const senderIdentity = { organizationName, tenantName, mailingAddress };
+
         const subject = safeSubject(validated.subject);
-        const brand = invitationBrand(campaign);
         // The neutral rendering is what the batch records as "the message": the
         // only per-person difference in what actually goes out is the greeting.
-        const record = renderPreviousSupporterEmail({ greetingName: null, subject, message: validated.text, facts, brand });
+        const record = renderPreviousSupporterEmail({ greetingName: null, subject, message: validated.text, facts, sender: senderIdentity });
         if (!record) {
             return NextResponse.json(
                 { ok: false, code: 'no_order_link', error: capability.reason }, { status: 409 });
@@ -379,7 +438,6 @@ export async function POST(req: Request) {
         const retries = new Map<string, number>();
         for (const a of priorFailed) retries.set(a.outreach_recipient_id, (retries.get(a.outreach_recipient_id) ?? 0) + 1);
 
-        const sender = await getTenantSender(businessId);
         const summary = await runSend({
             prisma,
             provider: new ResendOutreachProvider(),
@@ -400,15 +458,15 @@ export async function POST(req: Request) {
             // footer and headers are added per recipient inside the engine.
             render: (r) => {
                 const rendered = renderPreviousSupporterEmail({
-                    greetingName: r.displayName, subject, message: validated.text, facts, brand,
+                    greetingName: r.displayName, subject, message: validated.text, facts, sender: senderIdentity,
                 });
                 if (!rendered) throw new Error('no ordering link');
                 return rendered;
             },
-            from: sender.from,
-            replyTo: sender.replyTo,
+            from,
+            replyTo,
             now: new Date(),
-            unsubscribe: { origin, brandName: brand?.name ?? null },
+            unsubscribe: { origin, brandName: organizationName || null },
         });
 
         if (summary.refusal) {

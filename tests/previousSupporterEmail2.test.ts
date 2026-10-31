@@ -32,19 +32,49 @@ jest.mock('resend', () => ({
         emails: { send: async (payload: any) => (global as any).__pse2Send(payload) },
     })),
 }));
+// PREVIOUS-SUPPORTER-EMAIL-2.0A: the two authorities FreezerIQ must prove before it
+// sends itself. By DEFAULT the real ones run (today: no consent, no address). A test
+// that needs to exercise the automated path supplies an override FUNCTION of the
+// scope, so a wrong-organization or wrong-tenant lookup gets nothing back.
+jest.mock('@/lib/previousSupporterAuthorities', () => {
+    const actual = jest.requireActual('@/lib/previousSupporterAuthorities');
+    const g = global as any;
+    return {
+        ...actual,
+        loadOrganizationMailingAddress: jest.fn(async (scope: any) => {
+            (g.__pse2AuthCalls ??= []).push(['address', scope]);
+            return g.__pse2Address ? g.__pse2Address(scope) : actual.loadOrganizationMailingAddress(scope);
+        }),
+        loadExplicitEmailConsent: jest.fn(async (scope: any) => {
+            (g.__pse2AuthCalls ??= []).push(['consent', scope]);
+            return g.__pse2Consent ? g.__pse2Consent(scope) : actual.loadExplicitEmailConsent(scope);
+        }),
+    };
+});
 
 import { GET, POST } from '@/app/api/coordinator/previous-supporters/route';
+import { POST as DRAFT } from '@/app/api/coordinator/previous-supporters/draft/route';
 import {
+    describeAutomatedSend,
+    validateOrganizationMailingAddress,
+    type OrganizationMailingAddress,
+} from '@/lib/previousSupporterAuthorities';
+import {
+    buildPersonalMailto,
     defaultInvitationMessage,
     defaultInvitationSubject,
     findPrivateLinkInMessage,
+    headerSafeReplyTo,
     isPreviousSupporterRef,
     isSendableSupporterAddress,
+    organizationFromHeader,
     previousSupporterRef,
     renderPreviousSupporterEmail,
     supporterGreetingName,
+    PERSONAL_OPT_OUT_LINE,
     PREVIOUS_SUPPORTER_CTA_LABEL,
     type InvitationFacts,
+    type InvitationSender,
 } from '@/lib/previousSupporterEmail';
 import { describeInvitationAvailability } from '@/lib/previousSupporterInvitation';
 import {
@@ -201,6 +231,8 @@ function makeWorld() {
         status: 'accepted', is_test: false, created_at: d('2026-04-01T00:00:00Z'), accepted_at: d('2026-04-01T00:00:00Z'),
     }];
     const writes: string[] = [];
+    // FundraiserCampaignCoordinator rows, by campaign id (CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT shape).
+    const assignments: Record<string, any> = {};
 
     const withCustomer = (c: any) => {
         const cust = customers.find((x) => x.id === c.customer_id);
@@ -225,6 +257,9 @@ function makeWorld() {
         customer: {
             findFirst: async ({ where }: any) => customers.find((c) => (!where?.NOT || c.id !== where.NOT.id)
                 && (!where?.business_id || c.business_id === where.business_id) && c.id.startsWith('org-')) ?? null,
+        },
+        fundraiserCampaignCoordinator: {
+            findUnique: async ({ where }: any) => assignments[where.campaign_id] ?? null,
         },
         order: {
             findMany: async ({ where }: any) => orders
@@ -304,7 +339,7 @@ function makeWorld() {
                 .map((a) => ({ ...a, recipient: { normalized_email: recipients.find((r) => r.id === a.outreach_recipient_id)?.normalized_email ?? null } })),
         },
     };
-    return { client, campaigns, prefs, attempts, recipients, messages, batches, writes };
+    return { client, campaigns, prefs, attempts, recipients, messages, batches, writes, assignments };
 }
 
 // ── harness ──────────────────────────────────────────────────────────────────
@@ -336,7 +371,21 @@ beforeEach(() => {
     delete process.env.VERCEL_ENV;
     delete process.env.VERCEL_URL;
     delete process.env.VERCEL;
+    // The REAL authorities by default: no recorded consent, no organization address.
+    (global as any).__pse2Address = undefined;
+    (global as any).__pse2Consent = undefined;
+    (global as any).__pse2AuthCalls = [];
 });
+
+/** A complete, fictional mailing address for Maple Grove's ORGANIZATION (never its pickup hall). */
+const ORG_A_ADDRESS: OrganizationMailingAddress = { line1: '742 Fixture Lane', line2: 'Suite 3', city: 'Maple Grove', state: 'IL', postalCode: '61944' };
+/** Grant the automated path: the address for ORG_A in BIZ_A only, consent for the given addresses in that scope only. */
+function grantAutomated(consented: string[] = [JAMIE, CASEY, ALEX, TAYLOR]) {
+    const ours = (s: any) => s?.businessId === BIZ_A && s?.organizationCustomerId === ORG_A;
+    (global as any).__pse2Address = (s: any) => (ours(s) ? ORG_A_ADDRESS : null);
+    (global as any).__pse2Consent = (s: any) => new Set(ours(s) ? consented : []);
+}
+const EXPECTED_FROM = '"Maple Grove Booster Club (fixture) via Maple Kitchen" <notifications@freezeriq.test>';
 
 const URL_BASE = 'https://www.freezeriqapp.com/api/coordinator/previous-supporters';
 async function get() {
@@ -356,6 +405,19 @@ const send = (selected: string[], over: any = {}) => post({
     subject: defaultInvitationSubject(ORG_A_NAME), text: defaultInvitationMessage(ORG_A_NAME),
     selected, confirm: 'send_individual_emails', ...over,
 });
+async function draft(ref: unknown) {
+    const res = await DRAFT(new Request(`${URL_BASE}/draft`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: 'https://www.freezeriqapp.com' },
+        body: JSON.stringify({ ref }),
+    }));
+    return { status: res.status, body: await res.json() };
+}
+/** A mailto: URL split into its recipient and decoded fields. */
+function parseMailto(m: string) {
+    const u = new URL(m);
+    return { to: decodeURIComponent(u.pathname), params: [...u.searchParams.keys()], subject: u.searchParams.get('subject') ?? '', body: u.searchParams.get('body') ?? '' };
+}
 const toOf = (p: any): string[] => [].concat(p.to ?? []);
 const sentTo = (email: string) => sent.filter((p) => toOf(p).includes(email));
 const rowFor = (body: any, name: string) => body.supporters.find((s: SupporterRow) => s.name === name);
@@ -371,10 +433,12 @@ const FACTS: InvitationFacts = {
     orderUrl: CANONICAL,
 };
 
+const SENDER: InvitationSender = { organizationName: ORG_A_NAME, tenantName: 'Maple Kitchen', mailingAddress: ORG_A_ADDRESS };
+
 describe('1 · the rendered email', () => {
     const render = (over: Partial<Parameters<typeof renderPreviousSupporterEmail>[0]> = {}) => renderPreviousSupporterEmail({
         greetingName: 'Jamie Example', subject: defaultInvitationSubject(ORG_A_NAME),
-        message: defaultInvitationMessage(ORG_A_NAME), facts: FACTS, brand: { name: 'Maple Kitchen', email: 'hello@maple-kitchen.example' },
+        message: defaultInvitationMessage(ORG_A_NAME), facts: FACTS, sender: SENDER,
         ...over,
     })!;
 
@@ -447,8 +511,28 @@ describe('1 · the rendered email', () => {
 
     it('refuses to render without a safe ordering URL rather than mail a dead end', () => {
         for (const bad of ['', 'javascript:alert(1)', '/shop/x', 'http://www.freezeriqapp.com/shop/x', 'https://user:pw@x.test/']) {
-            expect(renderPreviousSupporterEmail({ greetingName: null, subject: 's', message: 'm', facts: { ...FACTS, orderUrl: bad } })).toBeNull();
+            expect(renderPreviousSupporterEmail({ greetingName: null, subject: 's', message: 'm', facts: { ...FACTS, orderUrl: bad }, sender: SENDER })).toBeNull();
         }
+    });
+
+    it('2.0A: refuses to render an automated email without its sender\'s name and mailing address', () => {
+        expect(renderPreviousSupporterEmail({ greetingName: null, subject: 's', message: 'm', facts: FACTS, sender: null })).toBeNull();
+        expect(renderPreviousSupporterEmail({ greetingName: null, subject: 's', message: 'm', facts: FACTS, sender: { ...SENDER, organizationName: '  ' } })).toBeNull();
+        expect(renderPreviousSupporterEmail({ greetingName: null, subject: 's', message: 'm', facts: FACTS, sender: { ...SENDER, mailingAddress: null as any } })).toBeNull();
+    });
+
+    it('2.0A: the footer names the ORGANIZATION, its mailing address and the delivery relationship', () => {
+        const out = render();
+        expect(out.text.endsWith([
+            '--', ORG_A_NAME, '742 Fixture Lane', 'Suite 3', 'Maple Grove, IL 61944', '',
+            'Sent on behalf of Maple Grove Booster Club (fixture) using Maple Kitchen fundraising services.',
+        ].join('\n'))).toBe(true);
+        expect(out.html).toContain('<strong>Maple Grove Booster Club (fixture)</strong><br />742 Fixture Lane<br />Suite 3<br />Maple Grove, IL 61944</p>');
+        expect(out.html).toContain('Sent on behalf of Maple Grove Booster Club (fixture) using Maple Kitchen fundraising services.');
+        // The pickup hall is a pickup fact, printed once in "Pickup:" — never as the sender's address.
+        const footer = out.text.slice(out.text.lastIndexOf('--'));
+        expect(footer).not.toContain('Community Hall');
+        expect(footer).not.toContain('100 Example Ave');
     });
 
     it('refuses a message that would hand supporters a private link', () => {
@@ -480,8 +564,12 @@ describe('1b · addresses and references', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 // 2. SELECTION
 // ═══════════════════════════════════════════════════════════════════════════
-const row = (ref: string | null, status: SupporterRow['status'], selectable: boolean): SupporterRow =>
-    ({ ref, name: `P ${ref}`, emailMasked: ref ? 'p••@example.test' : null, orderCount: 1, reachable: selectable, exclusionReason: null, status, statusAt: null, selectable });
+const row = (ref: string | null, status: SupporterRow['status'], selectable: boolean): SupporterRow => ({
+    ref, name: `P ${ref}`, emailMasked: ref ? 'p••@example.test' : null, orderCount: 1, reachable: selectable, exclusionReason: null,
+    status, statusAt: null, canOpenEmail: !!ref,
+    automated: { eligible: selectable, reason: selectable ? null : 'FreezerIQ send unavailable — future email permission not recorded' },
+    selectable,
+});
 const ROWS: SupporterRow[] = [
     row('ps_aaaaaaaaaaaaaaaaaaaaaaa1', 'ready', true),
     row('ps_aaaaaaaaaaaaaaaaaaaaaaa2', 'ready', true),
@@ -540,13 +628,21 @@ describe('3 · the coordinator view (real GET)', () => {
         expect(status).toBe(200);
         const names = body.supporters.map((s: SupporterRow) => s.name).sort();
         expect(names).toEqual(['Alex Failer', 'Casey Sample', 'Jamie Example', 'Morgan Noemail', 'Pat Oddmail', 'Taylor Optout']);
-        expect(rowFor(body, 'Jamie Example')).toMatchObject({ status: 'ready', selectable: true, orderCount: 2 });
-        expect(rowFor(body, 'Casey Sample')).toMatchObject({ status: 'ready', selectable: true });
-        expect(rowFor(body, 'Morgan Noemail')).toMatchObject({ status: 'no_email', selectable: false, ref: null });
-        expect(rowFor(body, 'Pat Oddmail')).toMatchObject({ status: 'invalid_email', selectable: false, ref: null });
-        expect(rowFor(body, 'Taylor Optout')).toMatchObject({ status: 'opted_out', selectable: false, ref: null });
+        // TODAY (real authorities): everyone with a usable address can be emailed PERSONALLY;
+        // nobody can be sent by FreezerIQ, and each row says why.
+        expect(rowFor(body, 'Jamie Example')).toMatchObject({ status: 'ready', canOpenEmail: true, selectable: false, orderCount: 2, ref: refOf(JAMIE),
+            automated: { eligible: false, reason: 'Automated email unavailable — organization mailing address required' } });
+        expect(rowFor(body, 'Casey Sample')).toMatchObject({ status: 'ready', canOpenEmail: true, selectable: false });
+        expect(rowFor(body, 'Morgan Noemail')).toMatchObject({ status: 'no_email', canOpenEmail: false, selectable: false, ref: null });
+        expect(rowFor(body, 'Pat Oddmail')).toMatchObject({ status: 'invalid_email', canOpenEmail: false, selectable: false, ref: null });
+        expect(rowFor(body, 'Taylor Optout')).toMatchObject({ status: 'opted_out', canOpenEmail: false, selectable: false, ref: null });
         // Rows the coordinator can act on come first.
-        expect(body.supporters.slice(0, 3).every((s: SupporterRow) => s.selectable)).toBe(true);
+        expect(body.supporters.slice(0, 3).every((s: SupporterRow) => s.canOpenEmail)).toBe(true);
+        // With the automated path granted, the same rows become selectable.
+        grantAutomated();
+        const granted = (await get()).body;
+        expect(rowFor(granted, 'Jamie Example')).toMatchObject({ selectable: true, automated: { eligible: true, reason: null } });
+        expect(granted.supporters.slice(0, 3).every((s: SupporterRow) => s.selectable)).toBe(true);
     });
 
     it('dedupe: one person who ordered twice (any letter case) is ONE row with ONE reference', async () => {
@@ -610,10 +706,12 @@ describe('3 · the coordinator view (real GET)', () => {
         expect(body.invitation.open).toBe(false);
         expect(body.invitation.code).toBe(code);
         expect(body.send).toMatchObject({ canSend: false, code });
-        expect(body.supporters.every((s: SupporterRow) => !s.selectable && s.ref === null)).toBe(true);
+        expect(body.supporters.every((s: SupporterRow) => !s.selectable && !s.canOpenEmail && s.ref === null)).toBe(true);
         expect(body.draft.facts).toBeNull();
+        grantAutomated();
         const r = await send([refOf(JAMIE)]);
         expect(r.status).toBe(409);
+        expect((await draft(refOf(JAMIE))).status).toBe(409);       // no personal draft to a closed fundraiser either
         expect(sent).toHaveLength(0);
     });
 
@@ -628,6 +726,10 @@ describe('3 · the coordinator view (real GET)', () => {
 // 4. POST — one separate, personalized email per selected supporter
 // ═══════════════════════════════════════════════════════════════════════════
 describe('4 · individual sends (real POST, real engine)', () => {
+    // Everything in this section exercises FreezerIQ's OWN sending, so the two
+    // authorities it requires are granted for Maple Grove (in BIZ_A) only.
+    beforeEach(() => grantAutomated());
+
     it('nothing is sent without the explicit confirmation', async () => {
         const r = await post({ subject: 'Hi', text: 'Words', selected: [refOf(JAMIE)] });
         expect(r.status).toBe(400);
@@ -685,8 +787,14 @@ describe('4 · individual sends (real POST, real engine)', () => {
                 expect(blob).not.toContain(old);
             }
             expect(blob).not.toMatch(/vercel\.app|\/coordinator|portal/);
-            expect(p.from).toBe('Maple Kitchen via FreezerIQ <notifications@freezeriq.test>');
-            expect(p.replyTo).toBe('hello@maple-kitchen.example');
+            // 2.0A: the ORGANIZATION is the displayed sender, on the platform's own verified
+            // address; replies reach the campaign's coordinator authority (here the
+            // organization's on-file contact, as no coordinator is assigned).
+            expect(p.from).toBe(EXPECTED_FROM);
+            expect(p.replyTo).toBe('coordinator@maple-grove.example');
+            expect(p.text).toContain('742 Fixture Lane\nSuite 3\nMaple Grove, IL 61944');
+            expect(p.text).toContain('Sent on behalf of Maple Grove Booster Club (fixture) using Maple Kitchen fundraising services.');
+            expect(p.text).toContain('You are receiving this because you supported a fundraiser run with Maple Grove Booster Club (fixture).');
         }
     });
 
@@ -721,7 +829,7 @@ describe('4 · individual sends (real POST, real engine)', () => {
         ]);
         expect(r.status).toBe(200);
         expect(r.body).toMatchObject({ accepted: 0, outcome: 'nothing_to_send' });
-        expect(r.body.notSent).toEqual({ noLongerEligible: 6, optedOut: 1, noUsableEmail: 1, alreadyEmailed: 0 });
+        expect(r.body.notSent).toEqual({ noLongerEligible: 6, optedOut: 1, noUsableEmail: 1, alreadyEmailed: 0, noConsent: 0 });
         expect(sent).toHaveLength(0);
     });
 
@@ -845,21 +953,35 @@ describe('5 · tenant and organization isolation', () => {
     });
 
     it('the same address in another tenant is a different supporter with its own history', async () => {
+        // Each tenant's organization has its OWN address and its OWN consent records.
+        const isA = (s: any) => s.businessId === BIZ_A && s.organizationCustomerId === ORG_A;
+        const isB = (s: any) => s.businessId === BIZ_B && s.organizationCustomerId === ORG_B;
+        (global as any).__pse2Address = (s: any) => (isA(s) ? ORG_A_ADDRESS : isB(s) ? { line1: '9 Birch Rd', city: 'Birchton', state: 'IN', postalCode: '47000' } : null);
+        (global as any).__pse2Consent = (s: any) => new Set(isA(s) ? [JAMIE] : isB(s) ? [JAMIE, QUINN] : []);
         await send([refOf(JAMIE)]);                                         // Maple's coordinator emails Jamie
         (global as any).__pse2Session = { ok: true, campaignId: B_CUR, sessionId: 'sess-b' };
         const { body } = await get();
-        expect(rowFor(body, 'Jamie Example')).toMatchObject({ status: 'ready', ref: refOf(JAMIE, B_CUR) });
+        expect(rowFor(body, 'Jamie Example')).toMatchObject({ status: 'ready', ref: refOf(JAMIE, B_CUR), selectable: true });
         // And Maple's reference is meaningless here.
         const r = await send([refOf(JAMIE)]);
         expect(r.body.notSent.noLongerEligible).toBe(1);
         expect(sentTo(JAMIE)).toHaveLength(1);
+        // Tenant B's own send carries tenant B's organization and address — never Maple's.
+        const BIRCH = 'Birch Valley Scouts (fixture)';
+        await send([refOf(JAMIE, B_CUR)], { subject: defaultInvitationSubject(BIRCH), text: defaultInvitationMessage(BIRCH) });
+        const bMail = sentTo(JAMIE)[1];
+        expect(bMail.from).toBe('"Birch Valley Scouts (fixture) via Birch Meals" <notifications@freezeriq.test>');
+        expect(bMail.text).toContain('9 Birch Rd\nBirchton, IN 47000');
+        expect(bMail.text).not.toMatch(/Maple|742 Fixture Lane/);
     });
 
     it('another organization in the same tenant never leaks in', async () => {
+        grantAutomated();
         const { body } = await get();
         expect(JSON.stringify(body)).not.toContain('Riley');
         const r = await send([refOf(RILEY)]);
         expect(r.body.notSent.noLongerEligible).toBe(1);
+        expect((await draft(refOf(RILEY))).status).toBe(404);
         expect(sent).toHaveLength(0);
     });
 
@@ -928,7 +1050,35 @@ describe('6 · the coordinator card', () => {
         expect(card.split('onClick={send}').length - 1).toBe(1);
         expect(card.indexOf("step === 'review'")).toBeLessThan(card.indexOf('onClick={send}'));
         expect(card).toContain('means our email service accepted it. We can&rsquo;t confirm it reached the inbox.');
-        expect(card).not.toMatch(/mailto:|window\.location/);
+        // 2.0A: the ONLY navigation is handing the server-built personal draft to the
+        // coordinator's mail app; the card never assembles a mailto: itself.
+        expect(card).not.toMatch(/['"`]mailto:/);
+        expect(card.match(/window\.location/g) ?? []).toHaveLength(1);
+        expect(card).toContain('window.location.href = json.mailto;');
+        expect(card).toContain("fetch('/api/coordinator/previous-supporters/draft'");
+        expect(card).toContain('body: JSON.stringify({ ref }),');
+    });
+
+    it('2.0A: every row with a usable address offers "Open email to {name}"; opening is never called "sent"', () => {
+        const rows: SupporterRow[] = [
+            { ...row('ps_cccccccccccccccccccccc01', 'ready', false), name: 'Jamie Example' },
+            { ...row('ps_cccccccccccccccccccccc02', 'emailed', false), name: 'Casey Sample', automated: { eligible: false, reason: null } },
+            { ...row(null, 'no_email', false), name: 'Morgan Noemail', canOpenEmail: false, automated: { eligible: false, reason: null } },
+        ];
+        const opened: string[] = [];
+        const tree = SupporterList({ rows, truncated: false, opened: ['ps_cccccccccccccccccccccc01'], busyRef: null,
+            draftFor: { ref: 'ps_cccccccccccccccccccccc01', mailto: 'mailto:jamie.example@example.test?subject=x' }, onOpenEmail: (r) => opened.push(r) });
+        const buttons = findAll(tree, (el) => el.type === 'button');
+        expect(buttons.map((b) => textOf(b))).toEqual(['Open email to Jamie', 'Open email to Casey']);   // a previous FreezerIQ send does not remove it
+        expect(buttons.every((b) => /min-h-\[44px\]/.test(b.props.className) && b.props['aria-label'])).toBe(true);
+        buttons[0].props.onClick();
+        expect(opened).toEqual(['ps_cccccccccccccccccccccc01']);
+        const text = textOf(tree);
+        expect(text).toContain('Email draft opened on this device');
+        expect(text).toContain('FreezerIQ send unavailable — future email permission not recorded');
+        expect(text).not.toMatch(/\bsent\b|deliver/i);
+        const retry = findAll(tree, (el) => el.type === 'a');
+        expect(retry.map((a) => a.props.href)).toEqual(['mailto:jamie.example@example.test?subject=x']);
     });
 });
 
@@ -956,7 +1106,8 @@ describe('7 · shipped-source invariants', () => {
     });
 
     it('reuses the ONE existing provider and engine — no second email system, no CC/BCC', () => {
-        for (const f of ['app/api/coordinator/previous-supporters/route.ts', 'lib/previousSupporterEmail.ts', 'lib/previousSupporterInvitation.ts']) {
+        for (const f of ['app/api/coordinator/previous-supporters/route.ts', 'app/api/coordinator/previous-supporters/draft/route.ts',
+            'lib/previousSupporterEmail.ts', 'lib/previousSupporterInvitation.ts', 'lib/previousSupporterAuthorities.ts']) {
             const src = strip(R(f));
             expect(src).not.toMatch(/from 'resend'|new Resend\(|nodemailer|sendgrid|postmark|mailgun|@aws-sdk\/client-ses/i);
             expect(src).not.toMatch(/\bbcc\b|\bcc:/i);
@@ -982,5 +1133,230 @@ describe('7 · shipped-source invariants', () => {
     it('brings no schema change and no migration', () => {
         const names = execSync('git --literal-pathspecs diff --name-only HEAD -- prisma/', { encoding: 'utf8', cwd: ROOT });
         expect(names.trim()).toBe('');
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8. PREVIOUS-SUPPORTER-EMAIL-2.0A — consent, the organization's address, two paths
+// ═══════════════════════════════════════════════════════════════════════════
+describe('8 · 2.0A — who FreezerIQ may email itself, and "Open in my email"', () => {
+    const ALL_READY = () => [refOf(JAMIE), refOf(CASEY), refOf(ALEX)];
+
+    it('TODAY: no recorded consent and no organization address → FreezerIQ sends to nobody', async () => {
+        const { body } = await get();
+        expect(body.automated).toEqual({ available: false, code: 'mailing_address_required',
+            reason: 'Automated email unavailable — organization mailing address required. You can still email supporters yourself with "Open in my email".' });
+        expect(body.send).toMatchObject({ canSend: false, code: 'mailing_address_required' });
+        expect(body.counts.consented).toBe(0);
+        expect(body.supporters.some((s: SupporterRow) => s.selectable)).toBe(false);
+        expect(selectAllReady(body.supporters)).toEqual([]);
+        const r = await send(ALL_READY());
+        expect(r.status).toBe(409);
+        expect(sent).toHaveLength(0);
+        expect(world.writes).toEqual([]);
+    });
+
+    it('purchase history plus a valid organization address is STILL not permission', async () => {
+        (global as any).__pse2Address = (s: any) => (s.organizationCustomerId === ORG_A ? ORG_A_ADDRESS : null);
+        const { body } = await get();
+        expect(body.automated.code).toBe('consent_not_recorded');
+        expect(body.send).toMatchObject({ canSend: false, code: 'consent_not_recorded' });
+        expect(rowFor(body, 'Jamie Example')).toMatchObject({ canOpenEmail: true, selectable: false,
+            automated: { eligible: false, reason: 'FreezerIQ send unavailable — future email permission not recorded' } });
+        const r = await send(ALL_READY());
+        expect(r.status).toBe(409);
+        expect(sent).toHaveLength(0);
+    });
+
+    it('recorded consent without the organization address is blocked too', async () => {
+        (global as any).__pse2Consent = () => new Set([JAMIE, CASEY, ALEX]);
+        const { body } = await get();
+        expect(body.automated.code).toBe('mailing_address_required');
+        expect(body.supporters.some((s: SupporterRow) => s.selectable)).toBe(false);
+        expect((await send(ALL_READY())).status).toBe(409);
+        expect(sent).toHaveLength(0);
+    });
+
+    it('consent is per person: only the supporter who gave it can be selected and sent', async () => {
+        grantAutomated([JAMIE]);
+        const { body } = await get();
+        expect(body.counts.consented).toBe(1);
+        expect(rowFor(body, 'Jamie Example').selectable).toBe(true);
+        expect(rowFor(body, 'Casey Sample')).toMatchObject({ selectable: false, canOpenEmail: true,
+            automated: { eligible: false, reason: 'FreezerIQ send unavailable — future email permission not recorded' } });
+        expect(selectAllReady(body.supporters)).toEqual([refOf(JAMIE)]);
+        const r = await send([refOf(JAMIE), refOf(CASEY)]);          // a forged tick for Casey is refused
+        expect(r.body).toMatchObject({ accepted: 1 });
+        expect(r.body.notSent.noConsent).toBe(1);
+        expect(sentTo(JAMIE)).toHaveLength(1);
+        expect(sentTo(CASEY)).toHaveLength(0);
+    });
+
+    it('a consent record for someone outside this organization or tenant adds nobody', async () => {
+        grantAutomated([JAMIE, RILEY, QUINN, QUINN_LINKED, SAM]);
+        const r = await send([refOf(RILEY), refOf(QUINN), refOf(QUINN_LINKED), refOf(SAM)]);
+        expect(r.body.accepted).toBe(0);
+        expect(r.body.notSent.noLongerEligible).toBe(4);
+        expect(sent).toHaveLength(0);
+    });
+
+    it('the authorities are asked about THIS organization in THIS tenant — never another', async () => {
+        await get();
+        expect((global as any).__pse2AuthCalls).toEqual([
+            ['address', { businessId: BIZ_A, organizationCustomerId: ORG_A }],
+            ['consent', { businessId: BIZ_A, organizationCustomerId: ORG_A }],
+        ]);
+        (global as any).__pse2AuthCalls = [];
+        (global as any).__pse2Session = { ok: true, campaignId: B_CUR, sessionId: 'sess-b' };
+        await get();
+        expect((global as any).__pse2AuthCalls.every(([, s]: any) => s.businessId === BIZ_B && s.organizationCustomerId === ORG_B)).toBe(true);
+    });
+
+    it('the real authorities read nothing and invent nothing — no consent backfill, no pickup-as-address', async () => {
+        const actual = jest.requireActual('@/lib/previousSupporterAuthorities');
+        expect([...(await actual.loadExplicitEmailConsent({ businessId: BIZ_A, organizationCustomerId: ORG_A }))]).toEqual([]);
+        expect(await actual.loadOrganizationMailingAddress({ businessId: BIZ_A, organizationCustomerId: ORG_A })).toBeNull();
+        const src = strip(R('lib/previousSupporterAuthorities.ts'));
+        expect(src).not.toMatch(/prisma|pickup_location|delivery_address|origin_address|fundraiser_info|\.findMany|\.findFirst|order/);
+        for (const f of ['app/api/coordinator/previous-supporters/route.ts', 'app/api/coordinator/previous-supporters/draft/route.ts']) {
+            const code = strip(R(f));
+            expect(code).not.toMatch(/marketingPreference\.(create|update|upsert)|consent.*\.(create|update|upsert)/);
+            expect(code).not.toMatch(/pickup_location|delivery_address|origin_address/);
+        }
+        // The route takes the address ONLY from the organization authority.
+        const route = strip(R('app/api/coordinator/previous-supporters/route.ts'));
+        expect(route).toContain('const mailingAddress = await loadOrganizationMailingAddress(scope);');
+        expect(route).toContain('const senderIdentity = { organizationName, tenantName, mailingAddress };');
+    });
+
+    it('the organization address must be complete and well-formed', () => {
+        const ok = validateOrganizationMailingAddress({ line1: '742 Fixture Lane', city: 'Maple Grove', state: 'il', postalCode: '61944-1234' });
+        expect(ok).toEqual({ line1: '742 Fixture Lane', line2: null, city: 'Maple Grove', state: 'IL', postalCode: '61944-1234' });
+        for (const bad of [
+            null, {}, { city: 'Maple Grove', state: 'IL', postalCode: '61944' },
+            { line1: '742 Fixture Lane', state: 'IL', postalCode: '61944' },
+            { line1: '742 Fixture Lane', city: 'Maple Grove', postalCode: '61944' },
+            { line1: '742 Fixture Lane', city: 'Maple Grove', state: 'IL' },
+            { line1: 'Community Hall', city: 'Maple Grove', state: 'IL', postalCode: '61944' },     // a place, not a street address
+            { line1: '742 Fixture Lane', city: 'Maple Grove', state: 'Illinois', postalCode: '61944' },
+            { line1: '742 Fixture Lane', city: 'Maple Grove', state: 'IL', postalCode: '6194' },
+            { line1: '742 Fixture Lane', city: 'Maple Grove 2', state: 'IL', postalCode: '61944' },
+        ]) expect(validateOrganizationMailingAddress(bad)).toBeNull();
+        expect(describeAutomatedSend({ mailingAddress: null, consentedCount: 9 }).code).toBe('mailing_address_required');
+        expect(describeAutomatedSend({ mailingAddress: ok, consentedCount: 0 }).code).toBe('consent_not_recorded');
+        expect(describeAutomatedSend({ mailingAddress: ok, consentedCount: 1 })).toMatchObject({ available: true, code: 'available' });
+    });
+
+    it('From shows the ORGANIZATION on the platform\'s own verified address — never another domain', () => {
+        expect(organizationFromHeader({ organizationName: ORG_A_NAME, tenantName: 'Maple Kitchen', platformFrom: 'Maple Kitchen via FreezerIQ <notifications@freezeriq.test>' }))
+            .toBe(EXPECTED_FROM);
+        expect(organizationFromHeader({ organizationName: 'Smith, Jones "&" <Co>', tenantName: 'My Freezer Chef', platformFrom: 'notifications@freezeriq.test' }))
+            .toBe('"Smith, Jones & Co via My Freezer Chef" <notifications@freezeriq.test>');
+        for (const bad of [{ platformFrom: '' }, { platformFrom: 'not an address' }, { organizationName: '' }, { tenantName: '   ' }]) {
+            expect(organizationFromHeader({ organizationName: ORG_A_NAME, tenantName: 'Maple Kitchen', platformFrom: 'x@freezeriq.test', ...bad })).toBeNull();
+        }
+    });
+
+    it('Reply-To: the assigned coordinator, else the organization contact, else the tenant — only a plain address', async () => {
+        grantAutomated();
+        world.assignments[CUR] = { org_contact: { ended_at: null, contact: { display_name: 'Robin Coordinator', contact_points: [{ value: 'robin.coord@maple-grove.example' }] } } };
+        await send([refOf(JAMIE)]);
+        expect(sentTo(JAMIE)[0].replyTo).toBe('robin.coord@maple-grove.example');
+        expect(headerSafeReplyTo('robin.coord@maple-grove.example')).toBe('robin.coord@maple-grove.example');
+        for (const bad of ['a@b.test, c@d.test', 'Robin <r@b.test>', 'r@b.test\r\nBcc: x@y.test', 'not-an-email', '', null]) {
+            expect(headerSafeReplyTo(bad as any)).toBeNull();
+        }
+        const route = strip(R('app/api/coordinator/previous-supporters/route.ts'));
+        expect(route).toContain('const coordinator = resolveCampaignCoordinator({ assignment, organization: campaign.customer });');
+        expect(route).toContain('const replyTo = headerSafeReplyTo(coordinator.email) ?? tenantSender.replyTo;');
+    });
+
+    describe('"Open in my email" (the personal draft route)', () => {
+        it('is available today, without consent or an address, for every supporter it is safe for', async () => {
+            for (const e of [JAMIE, CASEY, ALEX]) {
+                const r = await draft(refOf(e));
+                expect(r.status).toBe(200);
+                expect(parseMailto(r.body.mailto).to).toBe(e);
+            }
+        });
+
+        it('stays available when FreezerIQ sending is allowed too', async () => {
+            grantAutomated();
+            expect((await draft(refOf(JAMIE))).status).toBe(200);
+        });
+
+        it('addresses ONLY the chosen supporter, with the current fundraiser and its canonical link', async () => {
+            const r = await draft(refOf(CASEY));
+            const m = parseMailto(r.body.mailto);
+            expect(m.to).toBe(CASEY);
+            expect(m.params).toEqual(['subject', 'body']);
+            expect(r.body.mailto).not.toMatch(/[?&](cc|bcc|to)=/i);
+            expect(m.subject).toBe('Maple Grove Booster Club (fixture) fundraiser is back — ordering is open');
+            expect(m.body.startsWith('Hi Casey,\r\n\r\nThank you again for supporting Maple Grove Booster Club (fixture)!')).toBe(true);
+            for (const piece of ['• Little Italy\r\n• Harvest Table', 'Ordering ends: Tuesday, November 19',
+                'Pickup:\r\nThursday, November 21\r\n4:00–6:00 PM\r\nMaple Grove Community Hall, 100 Example Ave',
+                `You can view this round's meals and place your order here:\r\n${CANONICAL}`, PERSONAL_OPT_OUT_LINE]) {
+                expect(m.body).toContain(piece);
+            }
+            for (const other of [JAMIE, ALEX, TAYLOR, RILEY, 'Jamie', 'Alex', 'Taylor', 'Spring Comfort Menu', 'April 29', 'Old Gym Lobby', 'pub-previous', PREV, 'vercel.app']) {
+                expect(`${m.subject}${m.body}`).not.toContain(other);
+            }
+            expect(r.body.mailto).toContain('%0D%0A');
+            expect(r.body.mailto.length).toBeLessThan(2000);
+            expect(JSON.stringify(r.body)).not.toMatch(/sent|deliver/i);
+        });
+
+        it('opening a draft sends nothing, writes nothing and never marks anyone emailed', async () => {
+            await draft(refOf(JAMIE));
+            expect(sent).toHaveLength(0);
+            expect(world.writes).toEqual([]);
+            const { body } = await get();
+            expect(rowFor(body, 'Jamie Example').status).toBe('ready');
+            expect(body.counts.emailedThisFundraiser).toBe(0);
+        });
+
+        it('refuses opted-out, unusable, other-organization, other-tenant, other-campaign and made-up references', async () => {
+            for (const ref of [refOf(TAYLOR), refOf(PAT_ODD), refOf(RILEY), refOf(QUINN), refOf(QUINN_LINKED), refOf(SAM), refOf(JAMIE, B_CUR), 'ps_000000000000000000000000', JAMIE, null]) {
+                const r = await draft(ref);
+                expect(r.status).toBe(404);
+                expect(JSON.stringify(r.body)).not.toMatch(/@/);
+            }
+        });
+
+        it('the building block itself refuses anything but one plain address', () => {
+            const facts = FACTS;
+            for (const to of [PAT_ODD, 'a@b.test,c@d.test', 'a@b.test?cc=c@d.test', 'x@y.test\r\nbcc:z@w.test', null]) {
+                expect(buildPersonalMailto({ to: to as any, greetingName: 'Jamie', subject: 's', message: 'm', facts })).toBeNull();
+            }
+            const m = buildPersonalMailto({ to: JAMIE, greetingName: 'Jamie', subject: 'Hi\r\nBcc: x@y.test', message: 'm', facts })!;
+            expect(parseMailto(m).subject).toBe('Hi Bcc: x@y.test');
+            expect(parseMailto(m).params).toEqual(['subject', 'body']);
+        });
+    });
+
+    it('no automated send path reaches previous supporters around the consent gate', () => {
+        const files: string[] = [];
+        const walk = (dir: string) => {
+            for (const e of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+                const rel = `${dir}/${e.name}`;
+                if (e.isDirectory()) walk(rel);
+                else if (/\.(ts|tsx)$/.test(e.name)) files.push(rel);
+            }
+        };
+        walk('app'); walk('lib'); walk('components');
+        const callers = files.filter((f) => f !== 'lib/outreachSend.ts' && /\brunSend\(|new ResendOutreachProvider\(/.test(strip(R(f))));
+        expect(callers.sort()).toEqual([
+            'app/api/coordinator/previous-supporters/route.ts',
+            'app/api/rebooking/seasonal-lineups/[id]/send/route.ts',
+        ]);
+        // The seasonal lineup send mails organizations' contacts, never the previous-supporter audience.
+        expect(strip(R('app/api/rebooking/seasonal-lineups/[id]/send/route.ts'))).not.toMatch(/previousSupporter|derivePreviousSupporters/);
+        // The previous-supporter send consults consent and the address before any write or provider call.
+        const post = strip(R('app/api/coordinator/previous-supporters/route.ts'));
+        const at = (s: string) => { const i = post.indexOf(s, post.indexOf('export async function POST(')); expect(i).toBeGreaterThan(-1); return i; };
+        expect(at('loadAutomatedAuthorities(ctx, audience)')).toBeLessThan(at('if (!capability.canSend)'));
+        expect(at('if (!capability.canSend)')).toBeLessThan(at('resolveCampaignBatch(prisma'));
+        expect(at('resolveSelection({ campaignId, refs: body?.selected, audience, history, consent })')).toBeLessThan(at('await runSend({'));
+        expect(post).toContain('automated,');
     });
 });

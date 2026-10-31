@@ -2,29 +2,39 @@
 
 /**
  * FR-REBOOK-2 — Previous Supporters, in the coordinator portal.
- * PREVIOUS-SUPPORTER-EMAIL-2.0 — choose who, review one email, send each person
- * their own copy.
+ * PREVIOUS-SUPPORTER-EMAIL-2.0 / 2.0A — two ways to reach someone who supported
+ * this organization before, kept clearly apart.
  *
- * ── WHAT THE COORDINATOR SEES ───────────────────────────────────────────────
+ * ── PATH A: "Open in my email" (always, where it is safe) ───────────────────
  *
- *   1. Choose — the previous supporters, each with a checkbox when they can be
- *      emailed for THIS fundraiser, and why not when they cannot. "Select all"
- *      takes only the ones not yet emailed; a failed send is retried only by
- *      ticking that person on purpose.
- *   2. Review — one subject and one message, in ordinary prose they may rewrite,
- *      above the fundraiser facts FreezerIQ adds to every email (this round's
- *      menu, the deadline, pickup, and the "View Meals & Order" link). The counts
- *      say how many will be emailed and who is not included.
- *   3. Send — an explicit "Send N Individual Emails". Each supporter gets a
- *      separate email addressed only to them, starting with their own first name.
+ * Each previous supporter with a usable, not-opted-out address has an "Open email
+ * to {name}" button. The server prepares ONE draft (./draft) — that supporter
+ * only, the current fundraiser's facts and its canonical ordering link — and the
+ * coordinator's own mail app opens it. The coordinator reviews and sends it from
+ * their own mailbox. FreezerIQ sends nothing and never calls it "sent": the row
+ * just remembers, on this device, that a draft was opened.
  *
- * Addresses never reach this component: rows carry a masked address and an
- * opaque reference, and the server matches references only inside the audience
- * it recomputes from this coordinator's session.
+ * ── PATH B: "Send selected supporters" (FreezerIQ sends) ───────────────────
+ *
+ *   1. Choose — checkboxes only for supporters FreezerIQ may email itself: recorded
+ *      permission for future fundraiser email AND the organization's mailing address
+ *      on file. Everyone else shows why not. "Select all" takes only the ones not yet
+ *      emailed; a failed send is retried only by ticking that person on purpose.
+ *   2. Review — one subject and one message above the fundraiser facts FreezerIQ
+ *      adds to every email, with counts of who is and is not included.
+ *   3. Send — an explicit "Send N Individual Emails": a separate email to each
+ *      person, addressed only to them, starting with their own first name.
+ *
+ * Today no previous supporter has recorded permission and no organization has a
+ * mailing address on file, so Path B explains itself and Path A does the work.
+ *
+ * Full addresses never reach this component's state from the list: rows carry a
+ * masked address and an opaque reference. The one exception is the single draft
+ * the coordinator asks to open, which their mail app needs.
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Users, Mail, Lock } from 'lucide-react';
+import { Users, Mail, Lock, Send } from 'lucide-react';
 import {
     buildInviteSendBody,
     pruneSelection,
@@ -53,10 +63,12 @@ export interface PreviousSupportersPayload {
         legitimateOrders: number;
         duplicatesCollapsed: number;
         emailedThisFundraiser?: number;
+        consented?: number;
     };
     supporters: SupporterRow[];
     truncated: boolean;
     invitation?: { open: boolean; code: string; reason: string };
+    automated?: { available: boolean; code: string; reason: string };
     draft: {
         subject: string;
         text: string;
@@ -72,10 +84,19 @@ export interface SendResult {
     failed: number;
     skipped: number;
     alreadySent: number;
-    notSent: { noLongerEligible: number; optedOut: number; noUsableEmail: number; alreadyEmailed: number } | null;
+    notSent: { noLongerEligible: number; optedOut: number; noUsableEmail: number; alreadyEmailed: number; noConsent?: number } | null;
 }
 
 type Step = 'choose' | 'review' | 'done';
+
+/** Per-device memory of which drafts were opened — a convenience, never a delivery record. */
+const OPENED_KEY = 'freezeriq.previousSupporterDraftsOpened.v1';
+function readOpened(): string[] {
+    try { const v = JSON.parse(window.localStorage.getItem(OPENED_KEY) || '[]'); return Array.isArray(v) ? v.slice(-500) : []; } catch { return []; }
+}
+function writeOpened(refs: string[]) {
+    try { window.localStorage.setItem(OPENED_KEY, JSON.stringify(refs.slice(-500))); } catch { /* private mode: in-memory only */ }
+}
 
 export function PreviousSupporters({ onAvailability }: {
     /**
@@ -94,10 +115,14 @@ export function PreviousSupporters({ onAvailability }: {
     const [selected, setSelected] = useState<string[]>([]);
     const [subject, setSubject] = useState('');
     const [text, setText] = useState('');
-    const [showList, setShowList] = useState(false);
+    const [showList, setShowList] = useState(true);
     const [sending, setSending] = useState(false);
     const [result, setResult] = useState<SendResult | null>(null);
     const [sendError, setSendError] = useState<string | null>(null);
+    const [opened, setOpened] = useState<string[]>([]);
+    const [draftFor, setDraftFor] = useState<{ ref: string; mailto: string } | null>(null);
+    const [draftBusy, setDraftBusy] = useState<string | null>(null);
+    const [draftError, setDraftError] = useState<string | null>(null);
     // A second click in the same tick still sees `sending` as false; this does not.
     const inFlight = useRef(false);
     const draftLoaded = useRef(false);
@@ -123,12 +148,43 @@ export function PreviousSupporters({ onAvailability }: {
 
     useEffect(() => {
         let alive = true;
+        setOpened(readOpened());
         (async () => {
             await load();
             if (alive) setLoading(false);
         })();
         return () => { alive = false; };
     }, []);
+
+    /**
+     * Path A. Asks the server for this ONE supporter's draft, then hands it to the
+     * coordinator's mail app. Nothing is sent and nothing is recorded as sent.
+     */
+    async function openEmail(ref: string) {
+        if (draftBusy) return;
+        setDraftBusy(ref);
+        setDraftError(null);
+        try {
+            const res = await fetch('/api/coordinator/previous-supporters/draft', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ ref }),
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || !json?.ok || typeof json.mailto !== 'string') {
+                setDraftError(json?.error || 'We could not prepare that email.');
+                return;
+            }
+            setDraftFor({ ref, mailto: json.mailto });
+            setOpened((prev) => { const next = prev.includes(ref) ? prev : [...prev, ref]; writeOpened(next); return next; });
+            window.location.href = json.mailto;
+        } catch {
+            setDraftError('We could not prepare that email.');
+        } finally {
+            setDraftBusy(null);
+        }
+    }
 
     async function send() {
         if (!data?.send.canSend || sending) return;
@@ -176,6 +232,7 @@ export function PreviousSupporters({ onAvailability }: {
     if (data.counts.supporters === 0) return null;
 
     const c = data.counts;
+    const automatedAvailable = data.automated?.available === true;
 
     return (
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
@@ -199,14 +256,6 @@ export function PreviousSupporters({ onAvailability }: {
             )}
 
             <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                    type="button"
-                    onClick={() => { setResult(null); setSendError(null); setStep('choose'); setOpen(true); }}
-                    disabled={!data.canInvite}
-                    className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
-                >
-                    <Mail size={14} /> Invite Previous Supporters
-                </button>
                 {data.supporters.length > 0 && (
                     <button
                         type="button"
@@ -216,20 +265,47 @@ export function PreviousSupporters({ onAvailability }: {
                         {showList ? 'Hide supporters' : 'View supporters'}
                     </button>
                 )}
+                <button
+                    type="button"
+                    onClick={() => { setResult(null); setSendError(null); setStep('choose'); setOpen(true); }}
+                    disabled={!data.canInvite || !automatedAvailable}
+                    className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                >
+                    <Send size={14} /> Send selected supporters
+                </button>
             </div>
+            {data.canInvite && !automatedAvailable && data.automated?.reason && (
+                <p className="mt-2 text-[12px] text-slate-500 dark:text-slate-400">{data.automated.reason}</p>
+            )}
 
-            {showList && <SupporterList rows={data.supporters} truncated={data.truncated} />}
+            {draftError && (
+                <p role="alert" className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[13px] font-semibold text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                    {draftError}
+                </p>
+            )}
+
+            {showList && (
+                <SupporterList
+                    rows={data.supporters}
+                    truncated={data.truncated}
+                    opened={opened}
+                    busyRef={draftBusy}
+                    draftFor={draftFor}
+                    onOpenEmail={openEmail}
+                />
+            )}
 
             {open && (
                 <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
                     <div role="dialog" aria-modal="true" aria-labelledby="invite-title" className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl dark:bg-slate-900">
                         <div className="mb-3 flex items-start justify-between gap-3">
-                            <h4 id="invite-title" className="text-base font-black text-slate-900 dark:text-slate-100">Invite Previous Supporters</h4>
+                            <h4 id="invite-title" className="text-base font-black text-slate-900 dark:text-slate-100">Send selected supporters</h4>
                             <button onClick={() => setOpen(false)} aria-label="Close" className="min-h-[44px] min-w-[44px] rounded-lg p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">✕</button>
                         </div>
 
                         <p className="mb-3 text-[12px] text-slate-500 dark:text-slate-400">
-                            {c.reachable} previous {c.reachable === 1 ? 'supporter' : 'supporters'} can be invited by email.
+                            {c.reachable} previous {c.reachable === 1 ? 'supporter has' : 'supporters have'} a usable email address;
+                            {' '}{c.consented ?? 0} gave permission for FreezerIQ to email them.
                             {' '}Each one gets their own email, addressed only to them — nobody sees anyone else&rsquo;s address.
                         </p>
 
@@ -343,23 +419,71 @@ export function PreviousSupporters({ onAvailability }: {
 
 // ── Hookless pieces (each renders from props alone) ──────────────────────────
 
-/** Read-only list on the card: who supported before and where each stands for this fundraiser. */
-export function SupporterList({ rows, truncated }: { rows: SupporterRow[]; truncated: boolean }) {
+/** The supporter's first name for a button label, or null for a neutral label. */
+export function firstNameForButton(name: string): string | null {
+    const first = String(name ?? '').trim().split(/\s+/)[0] ?? '';
+    if (!first || /\d|@/.test(first) || first.toLowerCase() === 'previous') return null;
+    return first.slice(0, 30);
+}
+
+/**
+ * The card's list: who supported before, where each stands for this fundraiser,
+ * and the personal "Open email to {name}" action wherever it is safe.
+ */
+export function SupporterList(props: {
+    rows: SupporterRow[];
+    truncated: boolean;
+    opened?: string[];
+    busyRef?: string | null;
+    draftFor?: { ref: string; mailto: string } | null;
+    onOpenEmail?: (ref: string) => void;
+}) {
+    const opened = props.opened ?? [];
     return (
         <ul className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-100 dark:divide-slate-800 dark:border-slate-800">
-            {rows.map((s, i) => (
-                <li key={s.ref ?? `row-${i}`} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-3 py-2 text-[13px]">
-                    <span className="min-w-0 break-words font-semibold text-slate-800 dark:text-slate-200">{s.name}</span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">
-                        {/* Masked, never the full address — a coordinator
-                            needs to recognise people, not harvest them. */}
-                        {s.emailMasked ? `${s.emailMasked} · ` : ''}
-                        {supporterStatusLabel(s)}
-                        {s.orderCount > 1 ? ` · ${s.orderCount} orders` : ''}
-                    </span>
-                </li>
-            ))}
-            {truncated && (
+            {props.rows.map((s, i) => {
+                const first = firstNameForButton(s.name);
+                const wasOpened = !!s.ref && opened.includes(s.ref);
+                return (
+                    <li key={s.ref ?? `row-${i}`} className="px-3 py-2 text-[13px]">
+                        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                            <span className="min-w-0 break-words font-semibold text-slate-800 dark:text-slate-200">{s.name}</span>
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                                {/* Masked, never the full address — a coordinator
+                                    needs to recognise people, not harvest them. */}
+                                {s.emailMasked ? `${s.emailMasked} · ` : ''}
+                                {supporterStatusLabel(s)}
+                                {s.orderCount > 1 ? ` · ${s.orderCount} orders` : ''}
+                            </span>
+                        </div>
+                        {s.canOpenEmail && s.ref && props.onOpenEmail && (
+                            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => props.onOpenEmail!(s.ref as string)}
+                                    disabled={props.busyRef === s.ref}
+                                    aria-label={`Open an email to ${s.name} in your own email app`}
+                                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-indigo-200 px-3 py-2 text-[13px] font-bold text-indigo-700 disabled:opacity-50 dark:border-indigo-800 dark:text-indigo-300"
+                                >
+                                    <Mail size={14} /> {first ? `Open email to ${first}` : 'Open in my email'}
+                                </button>
+                                {wasOpened && (
+                                    <span className="text-[11px] font-semibold text-slate-500">Email draft opened on this device</span>
+                                )}
+                                {props.draftFor?.ref === s.ref && (
+                                    <a href={props.draftFor.mailto} className="text-[11px] font-semibold text-indigo-600 underline">
+                                        Didn&rsquo;t open? Try again
+                                    </a>
+                                )}
+                            </div>
+                        )}
+                        {s.automated?.reason && (
+                            <p className="mt-1 text-[11px] text-slate-400">{s.automated.reason}</p>
+                        )}
+                    </li>
+                );
+            })}
+            {props.truncated && (
                 <li className="px-3 py-2 text-xs text-slate-500">…and more</li>
             )}
         </ul>
@@ -428,6 +552,9 @@ export function ChooseStep(props: {
                                         {s.orderCount > 1 ? `ordered ${s.orderCount} times before · ` : 'ordered before · '}
                                         {supporterStatusLabel(s)}
                                     </span>
+                                    {s.automated?.reason && (
+                                        <span className="block text-[11px] text-slate-400">{s.automated.reason}</span>
+                                    )}
                                 </span>
                             </label>
                         </li>
@@ -508,6 +635,7 @@ export function SendResultDetail({ result }: { result: SendResult }) {
         optedOut > 0 ? `${optedOut} skipped — opted out` : null,
         already > 0 ? `${already} already had this invitation` : null,
         (n?.noUsableEmail ?? 0) > 0 ? `${n!.noUsableEmail} skipped — no usable email address` : null,
+        (n?.noConsent ?? 0) > 0 ? `${n!.noConsent} skipped — no permission for FreezerIQ email` : null,
         (n?.noLongerEligible ?? 0) > 0 ? `${n!.noLongerEligible} skipped — no longer on the list` : null,
     ].filter(Boolean);
     if (bits.length === 0) return null;
