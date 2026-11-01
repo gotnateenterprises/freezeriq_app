@@ -43,6 +43,12 @@ import { SUPPORTER_BUNDLE_DETAIL_CSS } from '@/components/fundraiser/SupporterBu
 
 jest.mock('react', () => require('./helpers/hookRuntime').createReactMock());
 jest.mock('@/lib/db', () => ({ get prisma() { return (global as any).__soc1Prisma; } }));
+// The REAL house focus hook, with what the page tells it recorded (its effects cannot run without a DOM).
+jest.mock('@/components/crm2/useDialogFocus', () => {
+    const actual = jest.requireActual('@/components/crm2/useDialogFocus');
+    return { useDialogFocus: (open: boolean, reKey?: unknown) => { (global as any).__soc1FocusOpen = open; return actual.useDialogFocus(open, reKey); } };
+});
+const focusHookOpen = () => (global as any).__soc1FocusOpen;
 
 const ROOT = process.cwd();
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -321,6 +327,26 @@ describe('C. opening and closing the detail', () => {
         openPhoto(m, bundleS2);
         m.setProps({ business: { ...clientProps().business, bundles: [bundleS5] } });
         expect(dialogOf(m.tree)).toBeNull();
+        expect(focusHookOpen()).toBe(false);
+    });
+
+    it('C9. the focus hook (and its page scroll lock) is open exactly while the dialog is — never once ordering is off screen', async () => {
+        const m = mount();
+        expect(focusHookOpen()).toBe(false);
+        openPhoto(m, bundleS5);
+        expect(focusHookOpen()).toBe(true);
+        m.setProps({ orderMode: { allowed: false, mode: 'closed', safeMessage: 'Closed.' } });
+        expect(dialogOf(m.tree)).toBeNull();
+        expect(focusHookOpen()).toBe(false);                                   // no scroll lock left behind a closed page
+        // and after a completed order the thank-you view replaces ordering
+        const m2 = mount();
+        click(m2, one(m2.tree, `Add ${S5_NAME} to your order`));
+        openPhoto(m2, bundleS2);
+        expect(focusHookOpen()).toBe(true);
+        await fillContactAndSubmit(m2);
+        expect(overlayOf(m2.tree)).toBeNull();                                 // (the success modal is the only dialog now)
+        expect(textOf(dialogOf(m2.tree))).toContain('Order received!');
+        expect(focusHookOpen()).toBe(false);
     });
 });
 
