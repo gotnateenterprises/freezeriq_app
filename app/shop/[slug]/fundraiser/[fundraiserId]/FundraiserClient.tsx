@@ -20,6 +20,11 @@ import { customerFacingBusinessName } from '@/lib/tenantBrand';
 // FR-TAX-CORRECTNESS-1: the SAME rule the server applies, so the figure shown
 // before submit and the figure persisted cannot disagree.
 import { computeSupporterOrderTax } from '@/lib/fundraiserTax';
+// FR-SUPPORTER-ORDER-CONVERSION-1: the bundle detail view, its read-only view of
+// the public meal data, and the house dialog focus behaviour.
+import { useDialogFocus } from '@/components/crm2/useDialogFocus';
+import { SupporterBundleDetail, hideBrokenImage, srOnly } from '@/components/fundraiser/SupporterBundleDetail';
+import { publicImageUrl, publicText, supporterBundleMeals, supporterServesLabel } from '@/lib/supporterBundleDetail';
 
 /**
  * FR-ACCEPTANCE-MOBILE-POLISH-1. Display-only formatting for the per-order
@@ -93,6 +98,18 @@ const shareSecondaryBtn = (primaryColor: string): React.CSSProperties => ({
     minWidth: 0,
     cursor: 'pointer',
     fontFamily: 'inherit',
+});
+
+// FR-SUPPORTER-ORDER-CONVERSION-1: a bundle card's meal names, held to two lines
+// (the full list, with descriptions, is one tap away), and the card's text link
+// to that detail.
+const bundleInsideLine: React.CSSProperties = {
+    margin: '.25rem 0 0', fontSize: '.74rem', color: '#7a6258', lineHeight: 1.45, overflowWrap: 'anywhere',
+    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+};
+const bundleMoreLink = (primaryColor: string): React.CSSProperties => ({
+    background: 'none', border: 0, padding: '.45rem 0', margin: '0 0 .25rem', color: primaryColor, fontSize: '.78rem',
+    fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline', textUnderlineOffset: 3,
 });
 
 const fableCard: React.CSSProperties = {
@@ -332,6 +349,30 @@ export default function FundraiserClient({
     const removeLine = (bundleId: string) => {
         resetSubmissionKey();
         setOrderLines(prev => prev.filter(l => l.bundleId !== bundleId));
+    };
+
+    // ── FR-SUPPORTER-ORDER-CONVERSION-1: bundle detail ────────────────────────
+    // Opening a bundle is read-only browsing: it touches no order line, contact
+    // field or submission key. The detail's one action is the card's own add
+    // (toggleLine) and its steppers are the order card's changeQty, so this page
+    // still has exactly one order and one quantity authority.
+    const [detailBundleId, setDetailBundleId] = useState<string | null>(null);
+    const [detailImageExpanded, setDetailImageExpanded] = useState(false);
+    // Announces "… is in your order" after the detail closes, for screen readers.
+    const [detailStatus, setDetailStatus] = useState<string | null>(null);
+
+    const openDetail = (bundle: any) => {
+        if (!approvedBundleIds.has(bundle.id)) return;
+        setDetailImageExpanded(false);
+        setDetailStatus(null);
+        setDetailBundleId(bundle.id);
+    };
+    const closeDetail = () => setDetailBundleId(null);
+    // Adds THIS bundle (its id, size and price) once; never toggles it back out.
+    const addFromDetail = (bundle: any) => {
+        if (!orderLines.some(l => l.bundleId === bundle.id)) toggleLine(bundle);
+        setDetailStatus(`${bundle.name} (${supporterServesLabel(bundle.serving_tier)}) is in your order.`);
+        closeDetail();
     };
 
     // FR-SUPPORTER-CONTACT-1A — OWNER RULING: all four contact fields are now
@@ -598,6 +639,17 @@ export default function FundraiserClient({
 
     const blocked = orderMode?.mode === 'closed' || orderMode?.mode === 'pending'
         || orderMode?.mode === 'invalid' || (orderMode?.mode === 'selected' && bundles.length === 0);
+
+    // Only a bundle in THIS page's lineup can be shown, and only while ordering is on screen.
+    const detailBundle = detailBundleId && approvedBundleIds.has(detailBundleId)
+        ? (bundles.find((b: any) => b.id === detailBundleId) ?? null)
+        : null;
+    const detailOpen = detailBundle !== null && !thanks && !blocked;
+    const { panelRef: detailPanelRef, containTab: containDetailTab } = useDialogFocus(detailOpen, detailBundleId);
+    const onDetailKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Escape') { e.stopPropagation(); closeDetail(); return; }
+        containDetailTab(e);
+    };
 
     return (
         <div style={{ minHeight: '100vh', background: '#faf5ef', color: '#3b2a2f', paddingBottom: '4rem', fontSize: 14, lineHeight: 1.5 }}>
@@ -1032,16 +1084,36 @@ export default function FundraiserClient({
 
                             {/* Bundle cards — prototype .cards / .bcard (single warm column) */}
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '.85rem' }}>
-                                {bundles.map((bundle: any) => (
+                                <style>{'.fr-bundle-open:focus-visible { outline: 3px solid #3b2a2f; outline-offset: 3px; }'}</style>
+                                {bundles.map((bundle: any, index: number) => (
                                     <BundleCard
                                         key={bundle.id}
                                         bundle={bundle}
                                         primaryColor={primaryColor}
                                         inOrder={orderLines.some(l => l.bundleId === bundle.id)}
                                         onToggle={() => toggleLine(bundle)}
+                                        onOpenDetail={() => openDetail(bundle)}
+                                        eagerImage={index === 0}
                                     />
                                 ))}
                             </div>
+                            <p aria-live="polite" style={srOnly}>{detailStatus}</p>
+
+                            {/* FR-SUPPORTER-ORDER-CONVERSION-1: one bundle's detail, over the page. */}
+                            {detailOpen && detailBundle && (
+                                <SupporterBundleDetail
+                                    bundle={detailBundle}
+                                    primaryColor={primaryColor}
+                                    quantityInOrder={orderLines.find(l => l.bundleId === detailBundle.id)?.quantity ?? 0}
+                                    imageExpanded={detailImageExpanded}
+                                    panelRef={detailPanelRef}
+                                    onKeyDown={onDetailKeyDown}
+                                    onClose={closeDetail}
+                                    onAdd={() => addFromDetail(detailBundle)}
+                                    onChangeQty={(delta) => changeQty(detailBundle.id, delta)}
+                                    onToggleImage={() => setDetailImageExpanded(v => !v)}
+                                />
+                            )}
 
                             {/* OrderForm card — prototype lines 554-567 */}
                             <div style={fableCard}>
@@ -1297,20 +1369,21 @@ export default function FundraiserClient({
 }
 
 // ─── Fable bundle card (prototype .bcard, lines 79-95 / 529-551) ─────────────
-function BundleCard({ bundle, primaryColor, inOrder, onToggle }: {
+// FR-SUPPORTER-ORDER-CONVERSION-1: photo and link open the bundle detail.
+function BundleCard({ bundle, primaryColor, inOrder, onToggle, onOpenDetail, eagerImage = false }: {
     bundle: any;
     primaryColor: string;
     inOrder: boolean;
     onToggle: () => void;
+    onOpenDetail: () => void;
+    eagerImage?: boolean;
 }) {
-    const meals = (bundle.items || [])
-        .map((i: any) => i.recipe)
-        .filter((r: any) => r && r.name);
+    const meals = supporterBundleMeals(bundle);
     // Fable's .inside line lists what's in the bundle; meal names when we have
     // them, otherwise the bundle description.
     const inside = meals.length > 0
-        ? meals.map((m: any) => m.name).join(' · ')
-        : (bundle.description || '');
+        ? meals.map(m => m.displayName).join(' · ')
+        : (publicText(bundle.description) || '');
     // FR-COORD-123 — the label must say what the ORDER will actually record.
     //
     // This was `bundle.serving_tier === 'family' ? 'serves 5' : 'serves 2'`,
@@ -1328,24 +1401,19 @@ function BundleCard({ bundle, primaryColor, inOrder, onToggle }: {
 
     return (
         <div style={{ background: '#fff', border: '1px solid #eee2d6', borderRadius: 20, overflow: 'hidden' }}>
-            {/* .img band — real bundle photo fills the prototype's image slot;
-                warm gradient placeholder when none exists */}
-            <div style={{ height: 120, display: 'grid', placeItems: 'center', fontSize: '2.2rem', background: 'linear-gradient(135deg,#f3d8c8,#eec3ad)', position: 'relative' }}>
-                {bundle.image_url
-                    ? <img src={bundle.image_url} alt={bundle.name} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
-                    : <span aria-hidden="true">🍲</span>}
-            </div>
+            <BundleCardPhoto bundle={bundle} mealCount={meals.length} servesLabel={servesLabel} primaryColor={primaryColor} eager={eagerImage} onOpen={onOpenDetail} />
             <div style={{ padding: '.8rem .95rem .9rem' }}>
-                <h3 style={{ margin: 0, fontFamily: SERIF, fontWeight: 400, fontSize: '1.05rem', color: '#3b2a2f' }}>{bundle.name}</h3>
-                {inside && (
-                    <p style={{ margin: '.25rem 0 .4rem', fontSize: '.7rem', color: '#9a8075', lineHeight: 1.45 }}>{inside}</p>
-                )}
+                <h3 style={{ margin: 0, fontFamily: SERIF, fontWeight: 400, fontSize: '1.05rem', color: '#3b2a2f', overflowWrap: 'anywhere' }}>{bundle.name}</h3>
+                {inside && <p style={bundleInsideLine}>{inside}</p>}
+                <button type="button" className="fr-bundle-open" onClick={onOpenDetail} aria-haspopup="dialog" aria-label={`See what's included in ${bundle.name}`} style={bundleMoreLink(primaryColor)}>
+                    See what&rsquo;s included →
+                </button>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem' }}>
                     <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         <span style={{ fontSize: '.95rem', fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: '#3b2a2f' }}>
                             {hasPrice ? `$${Number(bundle.price).toFixed(2)}` : 'Contact for price'}
                         </span>{' '}
-                        <span style={{ fontSize: '.66rem', color: '#9a8075' }}>· {servesLabel}</span>
+                        <span style={{ fontSize: '.74rem', fontWeight: 700, color: '#3b2a2f' }}>· {servesLabel}</span>
                     </span>
                     <button
                         onClick={onToggle}
@@ -1359,6 +1427,39 @@ function BundleCard({ bundle, primaryColor, inOrder, onToggle }: {
                 </div>
             </div>
         </div>
+    );
+}
+
+// ─── FR-SUPPORTER-ORDER-CONVERSION-1: the bundle card's photo ────────────────
+// A button, because tapping the photo opens the bundle detail (which shows the
+// WHOLE photo). It was a 120px strip that showed 17–30% of the real 4:5 bundle
+// posters; it is now a 5:4 window, upper-anchored so a poster keeps its title and
+// most of its trays. The warm placeholder sits underneath: with no photo it keeps
+// the old short band (no big empty block), and a photo that fails to load hides
+// itself rather than show a broken icon. Only the first card's photo is eager.
+function BundleCardPhoto({ bundle, mealCount, servesLabel, primaryColor, eager, onOpen }: {
+    bundle: any;
+    mealCount: number;
+    servesLabel: string;
+    primaryColor: string;
+    eager: boolean;
+    onOpen: () => void;
+}) {
+    const imageUrl = publicImageUrl(bundle.image_url);
+    const seeMeals = mealCount > 0 ? `See the ${mealCount} meal${mealCount === 1 ? '' : 's'}` : 'See details';
+    return (
+        <button type="button" className="fr-bundle-open" onClick={onOpen} aria-haspopup="dialog" aria-label={`${seeMeals} in ${bundle.name}`} style={{ position: 'relative', display: 'block', width: '100%', ...(imageUrl ? { aspectRatio: '5 / 4' } : { height: 120 }), padding: 0, margin: 0, border: 0, cursor: 'pointer', overflow: 'hidden', background: 'linear-gradient(135deg,#f3d8c8,#eec3ad)' }}>
+            <span aria-hidden="true" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontSize: '2.2rem' }}>🍲</span>
+            {imageUrl && (
+                <img src={imageUrl} alt={`${bundle.name} bundle photo`} loading={eager ? 'eager' : 'lazy'} decoding="async" onError={hideBrokenImage} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 15%' }} />
+            )}
+            <span aria-hidden="true" style={{ position: 'absolute', top: '.6rem', left: '.6rem', background: '#fdf3ee', color: primaryColor, borderRadius: 99, padding: '.28rem .65rem', fontSize: '.72rem', fontWeight: 800 }}>
+                {servesLabel === 'serves 5' ? 'Serves 5' : 'Serves 2'}
+            </span>
+            <span aria-hidden="true" style={{ position: 'absolute', right: '.6rem', bottom: '.6rem', background: 'rgba(255,255,255,.94)', color: '#3b2a2f', borderRadius: 99, padding: '.38rem .75rem', fontSize: '.74rem', fontWeight: 800, boxShadow: '0 2px 8px rgba(59,42,47,.2)' }}>
+                {seeMeals} →
+            </span>
+        </button>
     );
 }
 
