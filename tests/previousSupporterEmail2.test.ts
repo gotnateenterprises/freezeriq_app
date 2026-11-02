@@ -1191,11 +1191,12 @@ describe('7 · shipped-source invariants', () => {
     });
 
     it('REVISED (2.0B, owner-approved schema): the ONLY schema change since Production b215aa7 is the additive mailing-address migration', () => {
-        const names = execSync('git --literal-pathspecs diff --name-only b215aa74601aa614b2f91cb904eef590b437898c -- prisma/', { encoding: 'utf8', cwd: ROOT })
+        // REVISED (COORDINATOR-PAYMENT-METHOD-UX-1): pinned to 2.0B's OWN release range
+        // (b215aa7 → a19ed7d), so it keeps describing what 2.0B shipped — and stays true — after a
+        // later, separately approved phase adds its own migration.
+        const names = execSync('git --literal-pathspecs diff --name-only b215aa74601aa614b2f91cb904eef590b437898c a19ed7d854219e07319a586c490a4a0240df7dd8 -- prisma/', { encoding: 'utf8', cwd: ROOT })
             .split('\n').map((l) => l.trim()).filter(Boolean).sort();
-        const untracked = execSync('git --literal-pathspecs ls-files --others --exclude-standard -- prisma/', { encoding: 'utf8', cwd: ROOT })
-            .split('\n').map((l) => l.trim()).filter(Boolean);
-        expect([...new Set([...names, ...untracked])].sort()).toEqual([
+        expect([...new Set(names)].sort()).toEqual([
             'prisma/migrations/20261031120000_prev_supporter_email_2b_org_mailing_address/migration.sql',
             'prisma/schema.prisma',
         ]);
@@ -1622,7 +1623,9 @@ describe('9 · 2.0B — the organization mailing address (CRM, migration, both e
     it('migration: one additive step — five nullable TEXT columns on customers, applied after every earlier migration', () => {
         const dir = '20261031120000_prev_supporter_email_2b_org_mailing_address';
         const all = fs.readdirSync(path.join(ROOT, 'prisma', 'migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
-        expect(all[all.length - 1]).toBe(dir);
+        // REVISED (COORDINATOR-PAYMENT-METHOD-UX-1): still after every earlier migration; followed
+        // only by that phase's own owner-approved, additive migration.
+        expect(all.slice(all.indexOf(dir) + 1)).toEqual(['20261102120000_coordinator_payment_methods']);
         const sql = R(`prisma/migrations/${dir}/migration.sql`);
         const statements = sql.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('--'));
         expect(statements).toEqual(['mailing_address_line1', 'mailing_address_line2', 'mailing_city', 'mailing_state', 'mailing_postal_code']
@@ -1640,8 +1643,9 @@ describe('9 · 2.0B — the organization mailing address (CRM, migration, both e
         const guarded = ['app/api/public/order', 'app/api/orders', 'app/api/checkout', 'app/api/coordinator/route.ts', 'app/api/campaigns',
             'app/api/tenant/invoices', 'app/api/integrations/quickbooks', 'lib/quickbooks', 'lib/fundraiserTax.ts', 'lib/pricing.ts',
             'lib/fundraiserCloseoutMath.ts', 'lib/invoiceSettlementTransition.ts', 'lib/orderStatus.ts', 'lib/supporterPayment.ts', 'lib/delivery'];
-        const changed = execSync(`git --literal-pathspecs diff --name-only b215aa74601aa614b2f91cb904eef590b437898c -- ${guarded.join(' ')}`, { encoding: 'utf8', cwd: ROOT });
-        const untracked = execSync(`git --literal-pathspecs ls-files --others --exclude-standard -- ${guarded.join(' ')}`, { encoding: 'utf8', cwd: ROOT });
-        expect(`${changed}${untracked}`.trim()).toBe('');
+        // REVISED (COORDINATOR-PAYMENT-METHOD-UX-1): 2.0B's OWN release range (b215aa7 → a19ed7d),
+        // so this keeps stating what 2.0B did after a later phase legitimately edits these paths.
+        const changed = execSync(`git --literal-pathspecs diff --name-only b215aa74601aa614b2f91cb904eef590b437898c a19ed7d854219e07319a586c490a4a0240df7dd8 -- ${guarded.join(' ')}`, { encoding: 'utf8', cwd: ROOT });
+        expect(`${changed}`.trim()).toBe('');
     });
 });

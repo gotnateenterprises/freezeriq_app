@@ -60,6 +60,14 @@ import { LogoutButton } from '@/components/coordinator/LogoutButton';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 import { customerFacingBusinessName } from '@/lib/tenantBrand';
+// COORDINATOR-PAYMENT-METHOD-UX-1: the payment-method checklist (shared with setup) and its panel summary.
+import { CoordinatorPaymentFields, type CoordinatorPaymentFieldValues } from '@/components/coordinator/CoordinatorSetupFields';
+import { PaymentMethodsSummary } from '@/components/coordinator/PaymentMethodsSummary';
+import {
+    paymentMethodsFormFromStored,
+    paymentMethodsInputFromForm,
+    toPublicPaymentMethods,
+} from '@/lib/supporterPaymentMethods';
 
 export default function CoordinatorPortal() {
     const { width, height } = useWindowSize();
@@ -790,7 +798,9 @@ export default function CoordinatorPortal() {
 
 
     // Derive setup-checklist state
-    const hasPaymentInfo = !!(campaign.payment_instructions || campaign.external_payment_link);
+    // COORDINATOR-PAYMENT-METHOD-UX-1: a selected payment method counts as payment info too.
+    const hasPaymentInfo = !!(campaign.payment_instructions || campaign.external_payment_link
+        || (toPublicPaymentMethods(campaign.payment_methods, campaign.checks_payable) ?? []).length > 0);
     const activeOrders = (campaign.orders || []);
     const hasFirstOrder = activeOrders.length > 0;
 
@@ -1027,6 +1037,19 @@ export default function CoordinatorPortal() {
                         orderingAllowed={campaign.orderMode?.allowed === true}
                         notifyEmail={notifyEmail}
                         coordinatorFirstName={coordinatorFirstName}
+                    />
+                )}
+
+                {/* COORDINATOR-PAYMENT-METHOD-UX-1: what supporters are told about paying,
+                    in every phase — supporters pay at pickup, often after closeout. Once
+                    setup has saved logistics; before then the setup step owns this. */}
+                {setupComplete && (
+                    <PaymentMethodsSummary
+                        paymentMethods={campaign.payment_methods ?? null}
+                        checksPayable={campaign.checks_payable ?? null}
+                        paymentInstructions={campaign.payment_instructions}
+                        externalPaymentLink={campaign.external_payment_link}
+                        onEdit={() => setShowSettingsModal(true)}
                     />
                 )}
 
@@ -1618,82 +1641,106 @@ export default function CoordinatorPortal() {
                 onClose={() => setShowSettingsModal(false)}
                 initialData={{
                     paymentInstructions: campaign?.payment_instructions,
-                    externalPaymentLink: campaign?.external_payment_link
+                    externalPaymentLink: campaign?.external_payment_link,
+                    checksPayable: campaign?.checks_payable,
+                    paymentMethods: campaign?.payment_methods ?? null,
                 }}
             />
         </div>
     );
 }
 
+/** COORDINATOR-PAYMENT-METHOD-UX-1: the Payment Settings form, seeded from the campaign each time it opens. */
+function paymentSettingsFromCampaign(initialData: any): CoordinatorPaymentFieldValues {
+    return {
+        paymentMethods: paymentMethodsFormFromStored(initialData?.paymentMethods ?? null),
+        checksPayable: initialData?.checksPayable || '',
+        paymentInstructions: initialData?.paymentInstructions || '',
+        paymentLink: initialData?.externalPaymentLink || '',
+    };
+}
+
 function SettingsModal({ isOpen, onClose, initialData }: { isOpen: boolean; onClose: () => void; initialData: any }) {
     const [loading, setLoading] = useState(false);
-    const [formData, setFormData] = useState({
-        paymentInstructions: initialData.paymentInstructions || '',
-        externalPaymentLink: initialData.externalPaymentLink || ''
-    });
+    const [formData, setFormData] = useState<CoordinatorPaymentFieldValues>(() => paymentSettingsFromCampaign(initialData));
+    const [hadPaymentLink, setHadPaymentLink] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
+
+    // Re-seed whenever the modal opens, so it always starts from what supporters
+    // currently see rather than from whatever the page held on its first render.
+    useEffect(() => {
+        if (!isOpen) return;
+        setFormData(paymentSettingsFromCampaign(initialData));
+        setHadPaymentLink(Boolean(initialData?.externalPaymentLink));
+        setSaveError(null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen]);
 
     if (!isOpen) return null;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
+        setSaveError(null);
         try {
             const res = await fetch('/api/coordinator', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formData)
+                // Only the selected methods are sent, each with its own fields. The
+                // server re-validates every value; nothing here touches an order.
+                body: JSON.stringify({
+                    paymentMethods: paymentMethodsInputFromForm(formData.paymentMethods),
+                    checksPayable: formData.checksPayable,
+                    paymentInstructions: formData.paymentInstructions,
+                    externalPaymentLink: formData.paymentLink,
+                })
             });
 
-            if (!res.ok) throw new Error('Failed to update settings');
+            if (!res.ok) {
+                const body = await res.json().catch(() => null);
+                throw new Error(typeof body?.error === 'string' ? body.error : 'We could not save your payment settings.');
+            }
 
-            toast.success('Settings updated!');
+            toast.success('Payment settings saved');
             onClose();
             window.location.reload();
-        } catch (e) {
-            toast.error('Failed to save settings');
+        } catch (err: any) {
+            const message = err?.message || 'We could not save your payment settings.';
+            setSaveError(message);
+            toast.error(message);
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl p-6 animate-in zoom-in-95">
-                <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-xl font-black">Payment Settings</h2>
-                    <button onClick={onClose}><X className="text-slate-400" /></button>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-4">
+            <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="payment-settings-title"
+                className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-md shadow-2xl p-5 sm:p-6 max-h-[92dvh] overflow-y-auto animate-in zoom-in-95"
+            >
+                <div className="flex justify-between items-center mb-4">
+                    <h2 id="payment-settings-title" className="text-xl font-black">Payment Settings</h2>
+                    <button type="button" onClick={onClose} aria-label="Close payment settings" className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl hover:bg-slate-100">
+                        <X className="text-slate-400" />
+                    </button>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">External Payment Link</label>
-                        <input
-                            className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
-                            placeholder="https://venmo.com/..."
-                            value={formData.externalPaymentLink}
-                            onChange={e => setFormData({ ...formData, externalPaymentLink: e.target.value })}
-                        />
-                        <p className="text-xs text-slate-400 mt-1 ml-1">E.g., Venmo, PayPal, or School Portal link.</p>
-                    </div>
+                    <CoordinatorPaymentFields
+                        values={formData}
+                        disabled={loading}
+                        onChange={(patch) => setFormData((prev) => ({ ...prev, ...patch }))}
+                        idPrefix="settings"
+                        showPaymentLink={hadPaymentLink}
+                        showAllErrors={Boolean(saveError)}
+                    />
 
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Payment Instructions</label>
-                        <textarea
-                            className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 min-h-[100px]"
-                            placeholder="Please add your specific payment instructions here"
-                            value={formData.paymentInstructions}
-                            onChange={e => setFormData({ ...formData, paymentInstructions: e.target.value })}
-                        />
-                        {/* COORDINATOR-SUPPORTER-POLISH-1: an example, not a default — it is
-                            never written to formData.paymentInstructions and is shown only
-                            while the field is genuinely empty, exactly like a placeholder. */}
-                        {!formData.paymentInstructions && (
-                            <p className="text-xs text-slate-400 mt-1 ml-1">
-                                Example: Payment is due to the coordinator within 3 days. Venmo @____, checks
-                                payable to ____, or contact ____ with payment questions.
-                            </p>
-                        )}
-                    </div>
+                    {saveError && (
+                        <p role="alert" className="text-sm font-semibold text-rose-600">{saveError}</p>
+                    )}
 
                     <button
                         type="submit"

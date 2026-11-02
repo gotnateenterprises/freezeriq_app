@@ -25,6 +25,8 @@ import { computeSupporterOrderTax } from '@/lib/fundraiserTax';
 import { useDialogFocus } from '@/components/crm2/useDialogFocus';
 import { SupporterBundleDetail, hideBrokenImage, srOnly } from '@/components/fundraiser/SupporterBundleDetail';
 import { publicImageUrl, publicText, supporterBundleMeals, supporterServesLabel } from '@/lib/supporterBundleDetail';
+// COORDINATOR-PAYMENT-METHOD-UX-1: the one supporter-facing "how to pay" view.
+import { SupporterPaymentSection } from '@/components/fundraiser/SupporterPaymentSection';
 
 /**
  * FR-ACCEPTANCE-MOBILE-POLISH-1. Display-only formatting for the per-order
@@ -155,6 +157,8 @@ interface ThanksData {
     participant: string;
     paymentInstructions: string | null;
     externalPaymentLink: string | null;
+    /** COORDINATOR-PAYMENT-METHOD-UX-1: the campaign's supporter-facing methods (null = never configured). */
+    paymentMethods: unknown;
     orgName: string | null;
 }
 
@@ -474,6 +478,11 @@ export default function FundraiserClient({
                 participant: participant.trim(),
                 paymentInstructions: data.paymentData?.paymentInstructions ?? campaign.payment_instructions ?? null,
                 externalPaymentLink: data.paymentData?.externalPaymentLink ?? campaign.external_payment_link ?? null,
+                // The server's answer when it sent one (null included — "never configured"),
+                // otherwise the same projection this page already received.
+                paymentMethods: data.paymentData && 'paymentMethods' in data.paymentData
+                    ? data.paymentData.paymentMethods
+                    : (campaign.payment_methods ?? null),
                 orgName: data.paymentData?.orgName ?? campaign.organization_name ?? null,
             });
             // Confirmed order success only — never shown for a failed submission,
@@ -816,24 +825,21 @@ export default function FundraiserClient({
                             </p>
                         </div>
 
-                        {/* PaymentCard — 2px primary border per the FR handoff */}
-                        <div style={{ margin: '.8rem 0', background: '#fff', border: `2px solid ${primaryColor}`, borderRadius: 18, padding: '.95rem 1.05rem', overflowWrap: 'anywhere' }}>
-                            <b style={{ fontSize: '.82rem', color: '#3b2a2f' }}>💵 One last step — pay your coordinator</b>
-                            <p style={{ margin: '.35rem 0 .5rem', fontSize: '.76rem', color: '#5d463d' }}>
-                                {thanks.paymentInstructions
-                                    ? <>{thanks.paymentInstructions} — <b>${thanks.total.toFixed(2)}</b> for order <b>#{thanks.orderRef}</b>.</>
-                                    : <>Please pay {thanks.orgName || 'your coordinator'} directly — <b>${thanks.total.toFixed(2)}</b> for order <b>#{thanks.orderRef}</b>. They'll confirm the easiest way to pay.</>}
-                            </p>
-                            {thanks.externalPaymentLink && (
-                                <a
-                                    href={thanks.externalPaymentLink}
-                                    target="_blank" rel="noopener noreferrer"
-                                    style={{ display: 'inline-block', background: '#f6ede2', color: primaryColor, borderRadius: 10, fontSize: '.7rem', fontWeight: 800, padding: '.5rem .8rem', textDecoration: 'none', maxWidth: '100%' }}
-                                >
-                                    Open payment link →
-                                </a>
-                            )}
-                        </div>
+                        {/* PaymentCard — 2px primary border per the FR handoff.
+                            COORDINATOR-PAYMENT-METHOD-UX-1: the amount due (the server's
+                            persisted total, unchanged), the due guidance, every method the
+                            coordinator selected with "Open Venmo"-style links, their own
+                            instructions, and a legacy payment link — through the same view
+                            the order card and the confirmation email use. */}
+                        <SupporterPaymentSection
+                            variant="confirmation"
+                            methods={thanks.paymentMethods}
+                            instructions={thanks.paymentInstructions}
+                            legacyLink={thanks.externalPaymentLink}
+                            primaryColor={primaryColor}
+                            amountDue={thanks.total}
+                            orderRef={thanks.orderRef}
+                        />
 
                         {/* ShareGuide — guided step-by-step replacement for the compact
                             three-button ShareRow. Same warm Fable card shell; each step is
@@ -1254,6 +1260,17 @@ export default function FundraiserClient({
                                         style={{ ...fableInput, marginTop: '.25rem', textTransform: 'none', letterSpacing: 'normal' }}
                                     />
                                 </label>
+
+                                {/* COORDINATOR-PAYMENT-METHOD-UX-1: how paying works, read before
+                                    submitting — compact and below the order, so choosing meals stays
+                                    first. No links here: nothing to pay until the order exists. */}
+                                <SupporterPaymentSection
+                                    variant="order"
+                                    methods={campaign.payment_methods ?? null}
+                                    instructions={campaign.payment_instructions}
+                                    legacyLink={campaign.external_payment_link}
+                                    primaryColor={primaryColor}
+                                />
 
                                 {/* PRIVACY-DISCLOSURE-1: proven, not assumed, against
                                     app/api/coordinator/route.ts's GET (deliberately

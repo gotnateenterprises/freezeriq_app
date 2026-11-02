@@ -14,6 +14,9 @@ import { checkPaymentLink } from '@/lib/coordinatorSetup';
 // rather than reading total_amount (the PRE-TAX subtotal) as if it were the
 // amount due.
 import { supporterAmountDue } from '@/lib/fundraiserTax';
+// COORDINATOR-PAYMENT-METHOD-UX-1: the one rule for what a supporter is told about
+// paying — the same view the public page's confirmation renders.
+import { buildSupporterPaymentView, type PublicPaymentMethod, type SupporterPaymentView } from '@/lib/supporterPaymentMethods';
 
 const resend = createResendClient(process.env.RESEND_API_KEY);
 
@@ -160,6 +163,53 @@ function safePaymentHref(raw: unknown): string | null {
     return checked.ok ? checked.value : null;
 }
 
+/**
+ * COORDINATOR-PAYMENT-METHOD-UX-1 — a fundraiser receipt's payment section.
+ *
+ * Every value is escaped; every href is re-checked with safePaymentHref even though
+ * the projection already validated it. Only the template's own tags (div, p,
+ * strong, a) are produced. The wording is the confirmation screen's: links
+ * "Open Venmo", never "Pay now", and nothing claims the order is paid.
+ */
+function fundraiserPaymentHtml(view: SupporterPaymentView): string {
+    const anchor = (href: string, label: string) =>
+        `<a href="${escapeHtml(href)}" style="display: inline-block; margin-top: 6px; background: #2563eb; color: white; padding: 8px 16px; text-decoration: none; border-radius: 6px; font-weight: bold;">${escapeHtml(label)}</a>`;
+    let html = '';
+    if (view.dueLine) {
+        html += `<p style="margin: 0 0 8px 0; font-size: 14px; font-weight: bold; color: #1f2937;">${escapeHtml(view.dueLine)}</p>`;
+    }
+    for (const m of view.methods) {
+        const href = m.href ? safePaymentHref(m.href) : null;
+        html += `
+                <div style="border-top: 1px solid #e5e7eb; padding: 8px 0;">
+                    <p style="margin: 0; font-weight: bold; color: #1f2937;">${escapeHtml(m.label)}</p>
+                    ${m.detail ? `<p style="margin: 2px 0 0 0; font-size: 14px; white-space: pre-wrap; color: #4b5563;">${escapeHtml(m.detail)}</p>` : ''}
+                    ${href && m.actionLabel ? anchor(href, m.actionLabel) : ''}
+                </div>`;
+    }
+    if (view.instructions) {
+        html += `
+                <p style="margin: 10px 0 5px 0; font-weight: bold; color: #374151;">Payment Instructions:</p>
+                <p style="margin: 0; font-size: 14px; white-space: pre-wrap; color: #4b5563;">${escapeHtml(view.instructions)}</p>`;
+    }
+    if (view.legacyLink) {
+        const href = safePaymentHref(view.legacyLink.href);
+        html += href
+            ? `<div style="margin-top: 10px;">${anchor(href, view.legacyLink.actionLabel)}</div>`
+            : `<p style="margin: 10px 0 0 0; font-size: 14px; word-break: break-all; color: #4b5563;">Payment link: ${escapeHtml(view.legacyLink.text)}</p>`;
+    }
+    if (view.fallback) {
+        html += `<p style="margin: 6px 0 0 0; font-size: 14px; color: #4b5563;">${escapeHtml(view.fallback)}</p>`;
+    }
+    return `
+            <div style="background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                <p style="margin: 0 0 8px 0; font-weight: bold; color: #111827;">Payment</p>
+                ${html}
+                <p style="margin: 12px 0 0 0; font-size: 12px; color: #6b7280;">Payment goes to your fundraiser coordinator, not through this email. Opening a payment app does not mark your order paid &mdash; your coordinator confirms it.</p>
+            </div>
+        `;
+}
+
 /** Presentation-only label for a variant size ("serves_5" → "Serves 5"). */
 function formatVariantLabel(variantSize: string | null | undefined): string {
     const raw = (variantSize || '').trim();
@@ -177,7 +227,14 @@ export async function sendOrderConfirmationEmail(
     orgContactEmail?: string | null,
     paymentInstructions?: string | null,
     externalPaymentLink?: string | null,
-    businessId?: string
+    businessId?: string,
+    /**
+     * COORDINATOR-PAYMENT-METHOD-UX-1: present ONLY for a fundraiser order. It
+     * switches on the fundraiser payment section (due guidance, the campaign's
+     * methods, a safe fallback). Absent — every storefront order — the receipt
+     * keeps its previous shape: payment details only if instructions/link exist.
+     */
+    fundraiserPayment?: { methods: readonly PublicPaymentMethod[] | null }
 ) {
     if (!process.env.RESEND_API_KEY) return;
 
@@ -255,19 +312,32 @@ export async function sendOrderConfirmationEmail(
     // attribute-escaped. A value that fails the check is still shown — the
     // supporter should see what their coordinator entered — but as inert text,
     // never as something clickable.
+    //
+    // COORDINATOR-PAYMENT-METHOD-UX-1: the button says what it does — it OPENS a
+    // payment page. It used to say "Pay Now" under "Payment Required", which
+    // claimed an outcome nothing here can see.
     const paymentHref = safePaymentHref(externalPaymentLink);
-    if (paymentHref) {
+    if (fundraiserPayment) {
+        // A fundraiser order: the full payment section — due guidance, every
+        // method the coordinator selected, their instructions, this same legacy
+        // link (re-checked inside), and a safe fallback so it is never empty.
+        paymentHtml += fundraiserPaymentHtml(buildSupporterPaymentView({
+            methods: fundraiserPayment.methods,
+            instructions: paymentInstructions,
+            legacyLink: externalPaymentLink,
+        }));
+    } else if (paymentHref) {
         paymentHtml += `
             <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                <p style="margin: 0 0 10px 0; font-weight: bold; color: #1e3a8a;">Payment Required</p>
-                <p style="margin: 0 0 10px 0; font-size: 14px; color: #1e40af;">Please complete your payment using the link below:</p>
-                <a href="${escapeHtml(paymentHref)}" style="display: inline-block; background: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold;">Pay Now</a>
+                <p style="margin: 0 0 10px 0; font-weight: bold; color: #1e3a8a;">Payment</p>
+                <p style="margin: 0 0 10px 0; font-size: 14px; color: #1e40af;">Your coordinator's payment link:</p>
+                <a href="${escapeHtml(paymentHref)}" style="display: inline-block; background: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold;">Open payment link</a>
             </div>
         `;
     } else if (externalPaymentLink) {
         paymentHtml += `
             <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                <p style="margin: 0 0 10px 0; font-weight: bold; color: #1e3a8a;">Payment Required</p>
+                <p style="margin: 0 0 10px 0; font-weight: bold; color: #1e3a8a;">Payment</p>
                 <p style="margin: 0; font-size: 14px; word-break: break-all; color: #1e40af;">${escapeHtml(externalPaymentLink)}</p>
             </div>
         `;
@@ -276,7 +346,8 @@ export async function sendOrderConfirmationEmail(
     // THE INSTRUCTIONS: human prose, so escaped and shown as text. The
     // surrounding `white-space: pre-wrap` keeps the coordinator's own line
     // breaks without any markup being introduced to represent them.
-    if (paymentInstructions) {
+    // (A fundraiser order's instructions are inside its payment section above.)
+    if (paymentInstructions && !fundraiserPayment) {
         paymentHtml += `
             <div style="background: #f9fafb; padding: 15px; border-radius: 8px; margin: 20px 0;">
                 <p style="margin: 0 0 5px 0; font-weight: bold; color: #374151;">Payment Instructions:</p>

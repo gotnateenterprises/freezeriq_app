@@ -18,6 +18,7 @@ import type { PublicCampaign } from '@/lib/publicFundraiserPayload';
 import type { FundraiserProgressResult } from '@/lib/fundraiserMetrics';
 import type { CampaignOrderBundleMode } from '@/lib/campaignOrderBundles';
 import type { SupporterDeadline } from '@/lib/supporterDeadline';
+import { toPublicPaymentMethods } from '@/lib/supporterPaymentMethods';
 
 /** Not a UUID and cannot match one — never a real campaign id. */
 export const SAMPLE_FUNDRAISER_ID = 'sample';
@@ -69,8 +70,12 @@ export function buildSampleCampaign(now: Date = new Date()): PublicCampaign {
         delivery_date: isoDate(new Date(now.getTime() + 21 * DAY_MS)),
         pickup_location: 'Sample Community Center',
         delivery_time: '4:00 PM – 6:00 PM',
-        payment_instructions: 'Example: pay your coordinator by cash or check at pickup.',
+        // COORDINATOR-PAYMENT-METHOD-UX-1: the sample shows the payment section a
+        // real campaign's supporters see — two everyday methods, no account
+        // handles (a made-up Venmo name could belong to a real person).
+        payment_instructions: 'Example: please include the member\'s name with your payment.',
         external_payment_link: null,
+        payment_methods: toPublicPaymentMethods({ v: 1, methods: [{ type: 'cash' }, { type: 'check' }] }, SAMPLE_ORGANIZATION_NAME),
         tax_status: null,
         tax_rate_percent: null,
         organization_name: SAMPLE_ORGANIZATION_NAME,

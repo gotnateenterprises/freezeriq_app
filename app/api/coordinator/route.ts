@@ -56,6 +56,7 @@ import {
     paymentTransitionWhere,
     type SupporterPaymentAction,
 } from '@/lib/supporterPayment';
+import { checkCoordinatorPaymentSettings, readStoredPaymentMethods } from '@/lib/supporterPaymentMethods';
 
 /**
  * Phase 7E-1C: Returns true if the campaign has been server-closed.
@@ -141,6 +142,14 @@ export async function GET(req: Request) {
                 pickup_location: true,
                 external_payment_link: true,
                 payment_instructions: true,
+                // COORDINATOR-PAYMENT-METHOD-UX-1: what supporters are told about
+                // paying — shown on the panel and edited in Payment Settings. The
+                // Check payee is the coordinator's own setup value.
+                checks_payable: true,
+                // Spread through `{}` so the select keeps its inferred relations: the
+                // local Prisma client predates this column (the deployed build
+                // regenerates it from the schema), and a bare key would not type-check.
+                ...({ payment_methods: true } as {}),
                 bundle_goal: true,
                 total_sales: true,
                 org_share_percent: true,
@@ -425,6 +434,9 @@ export async function GET(req: Request) {
 
         return NextResponse.json({
             ...campaignResponse,
+            // COORDINATOR-PAYMENT-METHOD-UX-1: re-validated on read, so the panel
+            // summary and the Payment Settings form see exactly what supporters do.
+            payment_methods: readStoredPaymentMethods(campaignResponse.payment_methods ?? null),
             orders: (campaign.orders || []).map(shapeOrder),
             total_sales: computedTotalSales,
             canceledOrders: canceledOrders.map(shapeOrder),
@@ -650,8 +662,22 @@ export async function PUT(req: Request) {
         const guard = await requireCoordinatorSession(req);
         if (!guard.ok) return guard.response as NextResponse;
         const campaignId = guard.campaignId;
-        const body = await req.json();
-        const { paymentInstructions, externalPaymentLink } = body;
+        const body = await req.json().catch(() => null);
+
+        // COORDINATOR-PAYMENT-METHOD-UX-1: Payment Settings. This used to write
+        // payment_instructions and external_payment_link exactly as sent — a
+        // `javascript:` link or markup went straight to the column and from there
+        // to the public pages. Every key is now validated with the setup form's
+        // own rules, and only keys the request carries are written (an absent key
+        // leaves its column alone, as before). Nothing here touches an order:
+        // describing how to pay never changes whether anyone has.
+        const settings = checkCoordinatorPaymentSettings(body);
+        if (!settings.ok) {
+            return NextResponse.json({ error: settings.error, code: settings.code }, { status: 400 });
+        }
+        if (Object.keys(settings.values).length === 0) {
+            return NextResponse.json({ error: 'Nothing to update.' }, { status: 400 });
+        }
 
         const campaign = await prisma.fundraiserCampaign.findFirst({
             where: { id: campaignId },
@@ -675,15 +701,18 @@ export async function PUT(req: Request) {
             return NextResponse.json({ error: "Portal unavailable" }, { status: 403 });
         }
 
-        const updated = await prisma.fundraiserCampaign.update({
+        // Validated values only, for this session's campaign only. `as any`: the
+        // local Prisma client predates the payment_methods column (the deployed
+        // build regenerates it from the schema).
+        await prisma.fundraiserCampaign.update({
             where: { id: campaign.id },
-            data: {
-                payment_instructions: paymentInstructions,
-                external_payment_link: externalPaymentLink
-            }
+            data: settings.values as any,
         });
 
-        return NextResponse.json(updated);
+        // The full row used to be echoed back — including portal_token, the
+        // coordinator's own credential, which FR-COORD-SEC-1B keeps off the wire.
+        // The client only needs to know the save worked.
+        return NextResponse.json({ success: true });
 
     } catch (e: any) {
         console.error("Update Coordinator Settings Error:", e);

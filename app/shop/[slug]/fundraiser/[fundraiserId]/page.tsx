@@ -200,6 +200,10 @@ async function getData(slug: string, fundraiserId: string) {
         SELECT fc.id, fc.name, fc.about_text, fc.participant_label,
                fc.end_date, fc.delivery_date, fc.pickup_location, fc.delivery_time,
                fc.payment_instructions, fc.external_payment_link,
+               -- COORDINATOR-PAYMENT-METHOD-UX-1: server-side inputs to the
+               -- payment-method PROJECTION (toPublicCampaign). Neither crosses
+               -- raw: the payee is shown only inside a selected Check method.
+               fc.payment_methods, fc.checks_payable,
                fc.bundle_goal, fc.total_sales,
                fc.status, fc.closed_at,
                -- FR-TAX-CORRECTNESS-1: the campaign's FROZEN tax treatment, so

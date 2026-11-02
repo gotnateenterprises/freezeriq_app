@@ -24,6 +24,11 @@ import {
     type CoordinatorLockedInfo,
 } from '@/components/coordinator/CoordinatorSetupFields';
 import {
+    emptyPaymentMethodsForm,
+    paymentMethodsFormFromStored,
+    paymentMethodsInputFromForm,
+} from '@/lib/supporterPaymentMethods';
+import {
     Loader2,
     CheckCircle2,
     AlertCircle,
@@ -130,8 +135,12 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
     const [setupFields, setSetupFields] = useState<CoordinatorSetupFieldValues>({
         checksPayable: '', pickupLocation: '', deliveryTime: '',
         paymentInstructions: '', paymentLink: '',
+        paymentMethods: emptyPaymentMethodsForm(),
     });
     const [lockedInfo, setLockedInfo] = useState<CoordinatorLockedInfo | null>(null);
+    // COORDINATOR-PAYMENT-METHOD-UX-1: the legacy campaign-wide link field is shown
+    // only to a campaign that already had one (decided once, on load).
+    const [hadPaymentLink, setHadPaymentLink] = useState(false);
 
     const apiPath = '/api/coordinator/bundle-selection';
 
@@ -182,7 +191,7 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
 
             // FR-FLOW-3: seed the logistics form and the read-only tenant facts.
             const extra = data as unknown as {
-                setup?: Record<string, string | null>;
+                setup?: Record<string, string | null> & { paymentMethods?: unknown };
                 locked?: CoordinatorLockedInfo;
             };
             if (extra.setup) {
@@ -192,7 +201,11 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
                     deliveryTime: extra.setup.deliveryTime ?? '',
                     paymentInstructions: extra.setup.paymentInstructions ?? '',
                     paymentLink: extra.setup.paymentLink ?? '',
+                    // Seeded from the stored methods only — a legacy campaign starts
+                    // with nothing selected; its old prose is never parsed into a guess.
+                    paymentMethods: paymentMethodsFormFromStored(extra.setup.paymentMethods ?? null),
                 });
+                setHadPaymentLink(Boolean(extra.setup.paymentLink));
             }
             if (extra.locked) setLockedInfo(extra.locked);
 
@@ -284,6 +297,9 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
                     deliveryTime: setupFields.deliveryTime,
                     paymentInstructions: setupFields.paymentInstructions,
                     paymentLink: setupFields.paymentLink,
+                    // COORDINATOR-PAYMENT-METHOD-UX-1: only the SELECTED methods, each
+                    // with its own fields — a deselected method sends nothing at all.
+                    paymentMethods: paymentMethodsInputFromForm(setupFields.paymentMethods),
                 }),
             });
 
@@ -603,6 +619,8 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
                         locked={lockedInfo}
                         disabled={state.submitting}
                         onChange={(patch) => setSetupFields((prev) => ({ ...prev, ...patch }))}
+                        showPaymentLink={hadPaymentLink}
+                        showAllErrors={Boolean(state.error)}
                     />
                     <button
                         onClick={handleSubmit}

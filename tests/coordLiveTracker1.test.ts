@@ -342,7 +342,10 @@ describe('COORD-LIVE-TRACKER-1: live refresh — the existing FR-COORD-123 mecha
     it('the three RecentOrders call sites now pass the existing hasPaymentInfo boolean, not a new definition', () => {
         const matches = src.match(/hasExternalPaymentLink=\{hasPaymentInfo\}/g) || [];
         expect(matches.length).toBe(3);
-        expect(src).toMatch(/const hasPaymentInfo = !!\(campaign\.payment_instructions \|\| campaign\.external_payment_link\)/);
+        // REVISED (COORDINATOR-PAYMENT-METHOD-UX-1): the same one definition, now also counting a
+        // selected payment method (Venmo, Cash App, …) as "the coordinator told supporters how to pay".
+        expect(src).toMatch(/const hasPaymentInfo = !!\(campaign\.payment_instructions \|\| campaign\.external_payment_link\s*\|\| \(toPublicPaymentMethods\(campaign\.payment_methods, campaign\.checks_payable\) \?\? \[\]\)\.length > 0\)/);
+        expect(src.match(/const hasPaymentInfo =/g)).toHaveLength(1);
     });
 });
 

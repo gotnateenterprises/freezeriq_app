@@ -46,6 +46,11 @@ import {
   isSetupRefusal,
   type CoordinatorSetupValues,
 } from '@/lib/coordinatorSetup';
+import {
+  checkPaymentMethods,
+  readStoredPaymentMethods,
+  type StoredPaymentMethods,
+} from '@/lib/supporterPaymentMethods';
 
 // ── Concurrency config ───────────────────────────────────────────────────────
 
@@ -57,6 +62,9 @@ const MAX_TX_ATTEMPTS = 3;
  * Prisma surfaces PostgreSQL's serialization_failure (40001) as P2034.
  */
 const PRISMA_SERIALIZATION_ERROR = 'P2034';
+
+/** The five FR-FLOW-3 logistics columns, plus the payment-method checklist when the client sent one. */
+type SetupWriteValues = CoordinatorSetupValues & { payment_methods?: StoredPaymentMethods };
 
 // ── GET ───────────────────────────────────────────────────────────────────────
 
@@ -133,6 +141,10 @@ export async function GET(req: Request): Promise<NextResponse> {
         delivery_time: true,
         payment_instructions: true,
         external_payment_link: true,
+        // COORDINATOR-PAYMENT-METHOD-UX-1 (column added by this phase's migration).
+        // Spread through `{}` so the select keeps its inferred relations: the local
+        // Prisma client predates this column (the deployed build regenerates it).
+        ...({ payment_methods: true } as {}),
         customer: {
           select: {
             name: true,
@@ -169,6 +181,8 @@ export async function GET(req: Request): Promise<NextResponse> {
         deliveryTime: setup?.delivery_time ?? null,
         paymentInstructions: setup?.payment_instructions ?? null,
         paymentLink: setup?.external_payment_link ?? null,
+        // Re-validated on read; null for a campaign that never configured methods.
+        paymentMethods: readStoredPaymentMethods((setup as { payment_methods?: unknown } | null)?.payment_methods ?? null),
       },
       // True once a supporter has ordered: bundle choices are then locked.
       ordersStarted: liveOrders > 0,
@@ -245,9 +259,9 @@ export async function POST(req: Request): Promise<NextResponse> {
     // Absent entirely when the client sends none, which keeps every pre-FR-FLOW-3
     // caller working. Present-but-invalid is refused here rather than inside the
     // transaction, so a bad payment link costs no database work.
-    const sentSetup = ['checksPayable', 'pickupLocation', 'deliveryTime', 'paymentInstructions', 'paymentLink']
+    const sentSetup = ['checksPayable', 'pickupLocation', 'deliveryTime', 'paymentInstructions', 'paymentLink', 'paymentMethods']
       .some((k) => rawBody[k] !== undefined);
-    let setupValues: CoordinatorSetupValues | null = null;
+    let setupValues: SetupWriteValues | null = null;
     if (sentSetup) {
       const setup = checkCoordinatorSetup({
         checksPayable: rawBody.checksPayable,
@@ -260,6 +274,16 @@ export async function POST(req: Request): Promise<NextResponse> {
         return NextResponse.json({ error: setup.error, code: setup.code }, { status: 400 });
       }
       setupValues = setup.values;
+      // COORDINATOR-PAYMENT-METHOD-UX-1: the payment-method checklist, validated
+      // with the same rules the form shows. Absent (an older client) leaves the
+      // column exactly as it was, like every other setup key.
+      if (rawBody.paymentMethods !== undefined) {
+        const methods = checkPaymentMethods(rawBody.paymentMethods);
+        if (isSetupRefusal(methods)) {
+          return NextResponse.json({ error: methods.error, code: methods.code }, { status: 400 });
+        }
+        setupValues = { ...setupValues, payment_methods: methods.value };
+      }
     }
 
     if (familyIds.length === 0) {
@@ -387,7 +411,7 @@ async function runActivationTransaction(
    * that submits only familyIds keeps working and leaves the logistics columns
    * exactly as they were.
    */
-  setupValues: CoordinatorSetupValues | null
+  setupValues: SetupWriteValues | null
 ): Promise<NextResponse> {
   return await prisma.$transaction(
     async (tx) => {

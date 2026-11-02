@@ -23,6 +23,8 @@ import {
     type CoordinatorAssignmentRow,
 } from '@/lib/campaignCoordinatorContact';
 import { roundCents } from '@/lib/fundraiserCloseoutMath';
+// COORDINATOR-PAYMENT-METHOD-UX-1: what the campaign tells supporters about paying — display only.
+import { toPublicPaymentMethods, offersOnlinePayment, type PublicPaymentMethod } from '@/lib/supporterPaymentMethods';
 
 /**
  * FR-LAUNCH-1E: sentinel used to abort the order transaction when the campaign
@@ -158,6 +160,7 @@ export async function POST(req: Request) {
         let campaignCoordinator: CampaignCoordinatorContact | null = null;
         let paymentInstructions: string | null = null;
         let externalPaymentLink: string | null = null;
+        let paymentMethods: PublicPaymentMethod[] | null = null;
         let orgName: string | null = null;
 
         // FR-LAUNCH-1A: campaign behavior is driven by a campaign the SERVER
@@ -188,6 +191,11 @@ export async function POST(req: Request) {
 
             paymentInstructions = campaign.payment_instructions;
             externalPaymentLink = campaign.external_payment_link;
+            // COORDINATOR-PAYMENT-METHOD-UX-1: the supporter-facing projection only —
+            // the same one the public page received. Read for DISPLAY in the
+            // confirmation and receipt; nothing about the order depends on it, and
+            // no payment state is written from it.
+            paymentMethods = toPublicPaymentMethods((campaign as any).payment_methods, campaign.checks_payable);
             orgName = campaign.customer?.name || null;
 
             // ── FR-COORD-ROUTING-DATE-1 ─────────────────────────────────────
@@ -403,6 +411,7 @@ export async function POST(req: Request) {
                 paymentData: {
                     paymentInstructions,
                     externalPaymentLink,
+                    paymentMethods,
                     orgName
                 }
             });
@@ -768,7 +777,11 @@ export async function POST(req: Request) {
                 (order as any).items, // Cast to any because TS isn't inferring the include
                 orgContactEmail,
                 paymentInstructions,
-                externalPaymentLink
+                externalPaymentLink,
+                undefined,
+                // COORDINATOR-PAYMENT-METHOD-UX-1: campaign orders only — a storefront
+                // receipt gets no fundraiser payment guidance.
+                campaign ? { methods: paymentMethods } : undefined
             );
         } catch (confirmErr) {
             console.error('[FR-1E] Customer confirmation failed after commit:', confirmErr);
@@ -815,7 +828,9 @@ export async function POST(req: Request) {
                         // "no online payment was taken". Instructions count:
                         // they are shown to the supporter on the confirmation
                         // screen and in their receipt exactly like the link is.
-                        hasExternalPaymentLink: Boolean(externalPaymentLink) || Boolean(paymentInstructions?.trim()),
+                        // COORDINATOR-PAYMENT-METHOD-UX-1: a Venmo / PayPal / Cash App /
+                        // Other method is the same kind of "may already have paid" route.
+                        hasExternalPaymentLink: Boolean(externalPaymentLink) || Boolean(paymentInstructions?.trim()) || offersOnlinePayment(paymentMethods),
                     });
 
                     if (!notified) {

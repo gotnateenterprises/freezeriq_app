@@ -26,6 +26,14 @@ export function isSetupRefusal(v: { ok: boolean }): v is SetupRefusal {
 }
 
 /**
+ * COORDINATOR-PAYMENT-METHOD-UX-1: characters no coordinator types on purpose —
+ * C0/C1 controls (tab and line breaks excepted, so a coordinator's own lines in
+ * the payment notes survive), line/paragraph separators and bidi overrides, which
+ * are invisible on the page and can reorder what a supporter reads.
+ */
+const UNSHOWABLE_TEXT = new RegExp('[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F\\u2028\\u2029\\u202A-\\u202E\\u2066-\\u2069]');
+
+/**
  * Bounded free text.
  *
  * Deliberately does NOT strip or escape markup. Escaping at the boundary is how
@@ -51,6 +59,9 @@ function boundedText(
     }
     if (/[<>]/.test(trimmed)) {
         return { ok: false, code: `${field}_unsafe`, error: `${label} cannot contain < or >.` };
+    }
+    if (UNSHOWABLE_TEXT.test(trimmed)) {
+        return { ok: false, code: `${field}_unsafe`, error: `${label} contains characters that can't be shown.` };
     }
     return { ok: true, value: trimmed };
 }

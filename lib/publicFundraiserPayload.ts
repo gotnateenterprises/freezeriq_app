@@ -11,7 +11,11 @@
  * copied. That is the whole point of the shape.
  *
  * Pure and dependency-free so the boundary can be unit-tested directly.
+ * (COORDINATOR-PAYMENT-METHOD-UX-1: its one import is the equally pure
+ * payment-method projection.)
  */
+
+import { toPublicPaymentMethods } from '@/lib/supporterPaymentMethods';
 
 /**
  * Campaign fields the supporter page legitimately renders.
@@ -31,6 +35,12 @@ export const PUBLIC_CAMPAIGN_FIELDS = [
     'delivery_time',
     'payment_instructions',
     'external_payment_link',
+    // COORDINATOR-PAYMENT-METHOD-UX-1: the supporter-facing PROJECTION of the
+    // coordinator's payment methods (lib/supporterPaymentMethods.toPublicPaymentMethods)
+    // — never the stored column. Null for a campaign that never configured them.
+    // The Check payee rides inside the projection only when Check is selected;
+    // checks_payable itself stays on the forbidden list below.
+    'payment_methods',
     // FR-TAX-CORRECTNESS-1: this campaign's FROZEN tax treatment. Deliberately
     // public — the supporter is the one being charged the tax, so the page must
     // be able to show them the same figure the server will persist. Contrast
@@ -111,6 +121,9 @@ export function toPublicCampaign(row: Record<string, any> | null | undefined): P
     for (const field of PUBLIC_CAMPAIGN_FIELDS) {
         out[field] = row[field] ?? null;
     }
+    // Projected, not copied: the raw JSON (and the payee column it is paired
+    // with) never crosses — only the validated supporter-facing list does.
+    out.payment_methods = toPublicPaymentMethods(row.payment_methods, row.checks_payable);
 
     out.customer_fundraiser_info = {
         delivery_date: info.delivery_date ?? null,

@@ -140,7 +140,10 @@ describe('SUPPORTER-CONFIRM-HTML-1 · payment link', () => {
     it('a valid https URL stays clickable', async () => {
         const { html } = await confirm({ link: 'https://venmo.com/our-boosters' });
         expect(html).toContain('href="https://venmo.com/our-boosters"');
-        expect(html).toContain('Pay Now');
+        // COORDINATOR-PAYMENT-METHOD-UX-1: the button says what it does — it opens a page. It said
+        // "Pay Now", an outcome nothing here can see (the owner's rule: never "Pay now").
+        expect(html).toContain('Open payment link');
+        expect(html).not.toContain('Pay Now');
     });
 
     it('query-string ampersands are escaped inside the href', async () => {

@@ -37,7 +37,10 @@ const bundleStep = strip(read(BUNDLE_STEP_PATH));
 const portal = strip(read(PORTAL_PATH));
 const fc = strip(read(FUNDRAISER_CLIENT_PATH));
 
-const EXAMPLE_TEXT = 'Payment is due to the coordinator within 3 days. Venmo @____, checks';
+// COORDINATOR-PAYMENT-METHOD-UX-1 (owner-approved) superseded the example wording: Venmo and the
+// check payee now have their own fields, so the example shows the owner's own phrasing (with a
+// fictional organization) instead of blanks for values that have a structured home.
+const EXAMPLE_TEXT = 'Example: Please pay your coordinator within three days. Checks should be made payable to';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // A. Coordinator payment-instruction helper
@@ -48,32 +51,27 @@ describe('A. coordinator payment-instructions: prompt + non-persisted example', 
         expect(setupFields).not.toContain('Cash or check at pickup');
     });
 
-    it('the ongoing Payment Settings modal (app/coordinator/portal/page.tsx) uses the same prompt', () => {
-        expect(portal).toContain('placeholder="Please add your specific payment instructions here"');
+    it('the ongoing Payment Settings modal (app/coordinator/portal/page.tsx) uses the same prompt — now through the SAME shared form', () => {
+        // COORDINATOR-PAYMENT-METHOD-UX-1: the modal renders CoordinatorPaymentFields, the one form
+        // setup uses, so the prompt cannot drift between the two surfaces.
+        expect(portal).toContain('<CoordinatorPaymentFields');
+        expect(portal).toMatch(/import \{ CoordinatorPaymentFields[^}]*\} from '@\/components\/coordinator\/CoordinatorSetupFields'/);
     });
 
-    it('both surfaces show the SAME example text', () => {
+    it('both surfaces show the SAME example text (one shared component)', () => {
         expect(setupFields).toContain(EXAMPLE_TEXT);
-        expect(portal).toContain(EXAMPLE_TEXT);
+        expect(portal).not.toContain('Example: Payment is due');   // no second, drifting copy
     });
 
-    it('the example is gated on the field being EMPTY, in both surfaces — never a default value', () => {
+    it('the example is gated on the field being EMPTY — never a default value', () => {
         const setupIdx = setupFields.indexOf(EXAMPLE_TEXT);
-        const setupGate = setupFields.slice(Math.max(0, setupIdx - 200), setupIdx);
+        const setupGate = setupFields.slice(Math.max(0, setupIdx - 300), setupIdx);
         expect(setupGate).toMatch(/\{!values\.paymentInstructions\s*&&\s*\(/);
-
-        const modalIdx = portal.indexOf(EXAMPLE_TEXT);
-        const modalGate = portal.slice(Math.max(0, modalIdx - 200), modalIdx);
-        expect(modalGate).toMatch(/\{!formData\.paymentInstructions\s*&&\s*\(/);
     });
 
     it('the example text is never assigned into component state — it is static JSX, not a seeded value', () => {
-        // Every useState/setState call site in both files, searched for the
-        // example text: none should contain it. A regex over the whole
-        // stripped source is deliberately broad — the guarantee this test
-        // wants is "not anywhere as a value", not "not in one specific call".
-        expect(setupFields).not.toMatch(/useState\([^)]*Payment is due/);
-        expect(portal).not.toMatch(/paymentInstructions:\s*['"`][^'"`]*Payment is due/);
+        expect(setupFields).not.toMatch(/useState\([^)]*Please pay your coordinator/);
+        expect(portal).not.toMatch(/paymentInstructions:\s*['"`][^'"`]*Please pay your coordinator/);
     });
 
     it('validation and persistence are untouched: lib/coordinatorSetup.ts was not modified by this phase', () => {
@@ -81,11 +79,13 @@ describe('A. coordinator payment-instructions: prompt + non-persisted example', 
         expect(out.trim()).toBe('');
     });
 
-    it('no structured Cash/Check/Venmo/PayPal/Cash-App/Other payment-METHOD selector was introduced — still one free-text field', () => {
-        for (const src of [setupFields, portal]) {
-            expect(src).not.toMatch(/type=["']radio["']/);
-            expect(src).not.toMatch(/paymentMethod/);
-        }
+    it('the structured Cash/Check/Venmo/PayPal/Cash-App/Other selector is checkboxes (select all that apply), never radios', () => {
+        // COORDINATOR-PAYMENT-METHOD-UX-1 superseded this phase's own scope guard ("no structured
+        // payment-METHOD selector") — the owner asked for exactly that selector. What stays true is
+        // that a coordinator may pick several, so it can never be a radio group.
+        for (const src of [setupFields, portal]) expect(src).not.toMatch(/type=["']radio["']/);
+        expect(setupFields).toContain('type="checkbox"');
+        expect(setupFields).toContain('How should supporters pay you?');
     });
 });
 

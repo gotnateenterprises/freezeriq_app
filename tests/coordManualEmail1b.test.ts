@@ -102,6 +102,9 @@ describe('1. schema and migration', () => {
             // PREVIOUS-SUPPORTER-EMAIL-2.0B: five nullable mailing-address columns on customers (the
             // organization's mailing address). Additive; authorized by the owner's 2.0B brief.
             '20261031120000_prev_supporter_email_2b_org_mailing_address',
+            // COORDINATOR-PAYMENT-METHOD-UX-1: one nullable JSONB column on fundraiser_campaigns (how
+            // supporters may pay their coordinator). Additive; authorized by the owner's brief.
+            '20261102120000_coordinator_payment_methods',
         ]);
     });
 });

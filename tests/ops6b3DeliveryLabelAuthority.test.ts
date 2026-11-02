@@ -290,6 +290,8 @@ describe('PRESERVATION', () => {
             '20260923010000_qb_invoice_cancel_1_voided',
             // PREVIOUS-SUPPORTER-EMAIL-2.0B (owner-authorized, additive): the organization mailing address on customers.
             '20261031120000_prev_supporter_email_2b_org_mailing_address',
+            // COORDINATOR-PAYMENT-METHOD-UX-1 (owner-authorized, additive): how supporters may pay their coordinator.
+            '20261102120000_coordinator_payment_methods',
         ]);
     });
 });

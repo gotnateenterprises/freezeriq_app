@@ -765,6 +765,18 @@ model FundraiserCampaign {
   external_payment_link String?
   mission_text          String?
   payment_instructions  String?
+  // COORDINATOR-PAYMENT-METHOD-UX-1: how the coordinator tells supporters they
+  // may pay (Cash / Check / Venmo / PayPal / Cash App / Other), as
+  // { v: 1, methods: [...] } — validated on write and re-validated on read by
+  // lib/supporterPaymentMethods.ts. What the coordinator ACCEPTS, never a
+  // payment record: nothing reads it to decide an order is paid (that is
+  // Order.paid_at, written only by the coordinator's explicit mark).
+  //
+  // Nullable with no default: NULL means "never configured" — a legacy
+  // campaign, whose free-text payment_instructions keep rendering unchanged.
+  // Nothing is backfilled or parsed from old prose. The Check payee stays in
+  // checks_payable, its existing authority, and is not copied in here.
+  payment_methods       Json?
   // FR-COORD-SEC-1B — the `@default(cuid())` is gone on purpose.
   // CUID v1 is a sortable identifier, not a secret, and a schema default is a
   // silent one: any future create path that forgets this column would have been

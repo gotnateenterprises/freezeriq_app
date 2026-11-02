@@ -206,9 +206,14 @@ describe('PAYMENT — no unsupported cash/check/pickup/Venmo assumption', () => 
     });
 
     it('8b. the post-order generic fallback (already correct) still contains no cash/check/Venmo/pickup assumption', () => {
-        const fallbackIdx = fc.indexOf('Please pay');
+        // COORDINATOR-PAYMENT-METHOD-UX-1 moved the payment card's wording into
+        // lib/supporterPaymentMethods.ts (one view for the page, the confirmation and the email).
+        // The generic fallback is that module's PAYMENT_CONTACT_FALLBACK.
+        const lib = read('lib/supporterPaymentMethods.ts');
+        const fallbackIdx = lib.indexOf('export const PAYMENT_CONTACT_FALLBACK');
         expect(fallbackIdx).toBeGreaterThan(-1);
-        const fallback = fc.slice(fallbackIdx, fallbackIdx + 200);
+        const fallback = lib.slice(fallbackIdx, lib.indexOf(';', fallbackIdx));
+        expect(fallback).toContain('Please contact your fundraiser coordinator');
         expect(fallback).not.toMatch(/venmo/i);
         expect(fallback).not.toMatch(/\bcheck\b/i);
         expect(fallback).not.toMatch(/\bcash\b/i);
@@ -230,20 +235,24 @@ describe('PAYMENT — no unsupported cash/check/pickup/Venmo assumption', () => 
     });
 
     it('9. a configured payment_instructions value still wins over the generic fallback — precedence unchanged', () => {
-        const ternaryIdx = fc.indexOf('thanks.paymentInstructions\n');
-        expect(ternaryIdx).toBeGreaterThan(-1);
-        const block = fc.slice(ternaryIdx, ternaryIdx + 400);
-        expect(block).toMatch(/thanks\.paymentInstructions\s*\n\s*\?\s*<>\{thanks\.paymentInstructions\}/);
-        expect(block).toContain(": <>Please pay");
+        // COORDINATOR-PAYMENT-METHOD-UX-1: the precedence now lives in buildSupporterPaymentView —
+        // the fallback appears only when there are no methods, no instructions and no link.
+        const lib = read('lib/supporterPaymentMethods.ts');
+        expect(lib).toMatch(/const fallback = methods\.length === 0 && !instructions && !legacyLink \? PAYMENT_CONTACT_FALLBACK : null;/);
+        expect(fc).toMatch(/instructions=\{thanks\.paymentInstructions\}/);
     });
 
     it('10. the externalPaymentLink security protections (SUPPORTER-CONFIRM-HTML-1) are untouched', () => {
-        const linkIdx = fc.indexOf('thanks.externalPaymentLink &&');
+        // The legacy link is still passed through, now to the shared payment section, which makes it
+        // clickable only when it passes the shared https rule and opens it in a new tab, no opener.
+        expect(fc).toContain('legacyLink={thanks.externalPaymentLink}');
+        const section = read('components/fundraiser/SupporterPaymentSection.tsx');
+        const linkIdx = section.indexOf('href={view.legacyLink.href}');
         expect(linkIdx).toBeGreaterThan(-1);
-        const block = fc.slice(linkIdx, linkIdx + 400);
+        const block = section.slice(linkIdx, linkIdx + 200);
         expect(block).toContain('target="_blank"');
         expect(block).toContain('rel="noopener noreferrer"');
-        expect(block).toContain('href={thanks.externalPaymentLink}');
+        expect(read('lib/supporterPaymentMethods.ts')).toMatch(/const checked = checkPaymentLink\(input\.legacyLink\);/);
     });
 
     it('the payment_instructions/external_payment_link fields already exist and are already wired — no new schema needed', () => {
