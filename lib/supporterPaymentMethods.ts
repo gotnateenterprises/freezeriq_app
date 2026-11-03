@@ -10,9 +10,10 @@
  * marks the order paid (lib/supporterPayment.ts — Order.paid_at, written by
  * exactly one route). Nothing in this module reads or writes an order.
  *
- * External links built here (Venmo / Cash App / PayPal.Me / an Other link) are
- * conveniences that OPEN another app. They are labelled "Open Venmo", never
- * "Pay now", because nothing here can know whether a payment happened.
+ * External links built here (Venmo / Cash App / PayPal.Me / a Bank / ACH payment
+ * page / an Other link) are conveniences that OPEN another app or site. They are
+ * labelled "Open Venmo", never "Pay now", because nothing here can know whether a
+ * payment happened.
  *
  * ── STORAGE ─────────────────────────────────────────────────────────────────
  *
@@ -49,7 +50,7 @@ import {
 // ── The method list (locked) ─────────────────────────────────────────────────
 
 /** The supported methods, in the order supporters always see them. */
-export const PAYMENT_METHOD_TYPES = ['cash', 'check', 'venmo', 'paypal', 'cashapp', 'other'] as const;
+export const PAYMENT_METHOD_TYPES = ['cash', 'check', 'venmo', 'paypal', 'cashapp', 'bank_ach', 'other'] as const;
 export type PaymentMethodType = (typeof PAYMENT_METHOD_TYPES)[number];
 
 export const PAYMENT_METHOD_LABELS: Readonly<Record<PaymentMethodType, string>> = {
@@ -58,6 +59,7 @@ export const PAYMENT_METHOD_LABELS: Readonly<Record<PaymentMethodType, string>> 
     venmo: 'Venmo',
     paypal: 'PayPal',
     cashapp: 'Cash App',
+    bank_ach: 'Bank / ACH',
     other: 'Other',
 };
 
@@ -78,6 +80,15 @@ export const PAYMENT_CONTACT_FALLBACK = 'Please contact your fundraiser coordina
 export const CASH_GUIDANCE = 'Pay your fundraiser coordinator directly.';
 export const LEGACY_LINK_LABEL = 'Payment link';
 export const LEGACY_LINK_ACTION = 'Open payment link';
+/**
+ * COORDINATOR-BANK-ACH-LINK-1 — the organization's own bank or payment-provider page.
+ * FreezerIQ can say only that the link passed its rules: never "securely", "instant"
+ * or "paid", because it cannot see the outside page or whether anyone completed it.
+ */
+export const BANK_ACH_GUIDANCE = "Pay from your bank account on your organization's payment page.";
+export const BANK_ACH_ACTION = 'Open bank payment';
+/** Before an order exists no payment link is offered; this says when the bank one appears. */
+export const BANK_ACH_AFTER_ORDER = 'The bank payment link appears after you place your order.';
 
 // ── Field limits and formats ─────────────────────────────────────────────────
 
@@ -92,6 +103,8 @@ const EMAIL_RE = /^[^\s@<>"',;]+@[^\s@<>"',;]+\.[A-Za-z]{2,}$/;
 export const EMAIL_MAX = 254;
 export const OTHER_LABEL_MAX = 40;
 export const OTHER_DETAILS_MAX = 300;
+/** The Bank / ACH note follows the same multi-line convention as an Other method's instructions. */
+export const BANK_ACH_NOTE_MAX = OTHER_DETAILS_MAX;
 
 /** C0/C1 control characters. Newlines are handled separately for multi-line fields. */
 const CONTROL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/;
@@ -212,6 +225,7 @@ export type StoredPaymentMethod =
     | { type: 'venmo'; handle: string }
     | { type: 'paypal'; email?: string; me?: string }
     | { type: 'cashapp'; cashtag: string }
+    | { type: 'bank_ach'; link: string; note?: string }
     | { type: 'other'; label: string; details: string; link?: string };
 
 export interface StoredPaymentMethods {
@@ -228,6 +242,7 @@ export interface PaymentMethodInput {
     label?: unknown;
     details?: unknown;
     link?: unknown;
+    note?: unknown;
 }
 
 const methodError = (type: PaymentMethodType, r: SetupRefusal): SetupRefusal & { method: PaymentMethodType } =>
@@ -258,6 +273,19 @@ export function checkPaymentMethod(input: PaymentMethodInput | null | undefined)
             const r = normalizePaypalAccount(input.account);
             if (!r.ok) return methodError(type, r);
             return { ok: true, value: r.value.email ? { type, email: r.value.email } : { type, me: r.value.me } };
+        }
+        case 'bank_ach': {
+            // COORDINATOR-BANK-ACH-LINK-1: the payment page the organization's bank or provider gave
+            // it. The link IS the method, so it is required, and the shared https rule is the only URL
+            // rule (no bank allowlist — every organization banks somewhere different). The optional
+            // note is ordinary supporter-facing text. Nothing else is asked for or stored: never a
+            // routing number, account number or bank login.
+            const link = checkPaymentLink(input.link);
+            if (!link.ok) return methodError(type, link);
+            if (!link.value) return methodError(type, refuse('bank_ach_link_required', 'Paste your bank payment link. It must start with https://'));
+            const note = multiLine(input.note, BANK_ACH_NOTE_MAX, 'bank_ach_note', 'The note for supporters');
+            if (!note.ok) return methodError(type, note);
+            return { ok: true, value: note.value ? { type, link: link.value, note: note.value } : { type, link: link.value } };
         }
         case 'other': {
             const label = singleLine(input.label, OTHER_LABEL_MAX, 'other_label', 'The method name');
@@ -306,6 +334,7 @@ function storedToInput(m: any): PaymentMethodInput | null {
         case 'venmo': return { type: 'venmo', handle: m.handle };
         case 'cashapp': return { type: 'cashapp', cashtag: m.cashtag };
         case 'paypal': return { type: 'paypal', account: typeof m.email === 'string' ? m.email : m.me };
+        case 'bank_ach': return { type: 'bank_ach', link: m.link, note: m.note ?? null };
         case 'other': return { type: 'other', label: m.label, details: m.details, link: m.link ?? null };
         default: return null;
     }
@@ -383,6 +412,14 @@ export function toPublicPaymentMethods(stored: unknown, checksPayable: unknown):
                 return m.me
                     ? { type: 'paypal', label: 'PayPal', detail: `paypal.me/${m.me}`, href: paypalMeUrl(m.me), actionLabel: 'Open PayPal' }
                     : { type: 'paypal', label: 'PayPal', detail: m.email ?? null, href: null, actionLabel: null };
+            case 'bank_ach':
+                return {
+                    type: 'bank_ach',
+                    label: PAYMENT_METHOD_LABELS.bank_ach,
+                    detail: m.note ? `${BANK_ACH_GUIDANCE}\n${m.note}` : BANK_ACH_GUIDANCE,
+                    href: m.link,
+                    actionLabel: BANK_ACH_ACTION,
+                };
             case 'other':
                 return { type: 'other', label: m.label, detail: m.details, href: m.link ?? null, actionLabel: m.link ? 'Open link' : null };
         }
@@ -391,7 +428,20 @@ export function toPublicPaymentMethods(stored: unknown, checksPayable: unknown):
 
 /** True when a supporter could have paid without handing money to the coordinator. */
 export function offersOnlinePayment(methods: readonly PublicPaymentMethod[] | null | undefined): boolean {
-    return (methods ?? []).some((m) => m.type === 'venmo' || m.type === 'paypal' || m.type === 'cashapp' || m.type === 'other');
+    return (methods ?? []).some((m) => m.type === 'venmo' || m.type === 'paypal' || m.type === 'cashapp' || m.type === 'bank_ach' || m.type === 'other');
+}
+
+/**
+ * COORDINATOR-BANK-ACH-LINK-1 — where a payment link goes, for an "Opens pay.examplebank.test"
+ * line: the host of the link as the shared https rule normalises it (an internationalised name
+ * stays in its xn-- form, so a look-alike domain is visible). Parsed from the validated URL, never
+ * cut out of the raw string; never the path or query, and never credentials (the rule refuses
+ * those). null for anything that is not a valid payment link.
+ */
+export function paymentLinkDestination(href: unknown): string | null {
+    const checked = checkPaymentLink(href);
+    if (!checked.ok || !checked.value) return null;
+    return new URL(checked.value).host;
 }
 
 // ── One view, every surface ──────────────────────────────────────────────────
@@ -472,6 +522,8 @@ function renderableMethod(m: unknown): PublicPaymentMethod | null {
         if (!checked.ok || checked.value !== x.href) return null;
         href = checked.value;
     }
+    // A Bank / ACH entry is its link: without a valid one there is nothing truthful to show.
+    if (x.type === 'bank_ach' && !href) return null;
     return {
         type: x.type,
         label: x.label.trim(),
@@ -489,6 +541,8 @@ export interface PaymentMethodsFormValue {
     venmoHandle: string;
     paypalAccount: string;
     cashappTag: string;
+    bankLink: string;
+    bankNote: string;
     otherLabel: string;
     otherDetails: string;
     otherLink: string;
@@ -496,8 +550,8 @@ export interface PaymentMethodsFormValue {
 
 export function emptyPaymentMethodsForm(): PaymentMethodsFormValue {
     return {
-        selected: { cash: false, check: false, venmo: false, paypal: false, cashapp: false, other: false },
-        venmoHandle: '', paypalAccount: '', cashappTag: '', otherLabel: '', otherDetails: '', otherLink: '',
+        selected: { cash: false, check: false, venmo: false, paypal: false, cashapp: false, bank_ach: false, other: false },
+        venmoHandle: '', paypalAccount: '', cashappTag: '', bankLink: '', bankNote: '', otherLabel: '', otherDetails: '', otherLink: '',
     };
 }
 
@@ -511,6 +565,7 @@ export function paymentMethodsFormFromStored(stored: unknown): PaymentMethodsFor
         if (m.type === 'venmo') form.venmoHandle = `@${m.handle}`;
         if (m.type === 'cashapp') form.cashappTag = `$${m.cashtag}`;
         if (m.type === 'paypal') form.paypalAccount = m.email ?? (m.me ? `paypal.me/${m.me}` : '');
+        if (m.type === 'bank_ach') { form.bankLink = m.link; form.bankNote = m.note ?? ''; }
         if (m.type === 'other') { form.otherLabel = m.label; form.otherDetails = m.details; form.otherLink = m.link ?? ''; }
     }
     return form;
@@ -524,6 +579,7 @@ export function paymentMethodsInputFromForm(form: PaymentMethodsFormValue): Paym
         if (type === 'venmo') out.push({ type, handle: form.venmoHandle });
         else if (type === 'paypal') out.push({ type, account: form.paypalAccount });
         else if (type === 'cashapp') out.push({ type, cashtag: form.cashappTag });
+        else if (type === 'bank_ach') out.push({ type, link: form.bankLink, note: form.bankNote });
         else if (type === 'other') out.push({ type, label: form.otherLabel, details: form.otherDetails, link: form.otherLink });
         else out.push({ type });
     }

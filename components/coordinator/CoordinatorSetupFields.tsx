@@ -80,6 +80,15 @@ const METHOD_FIELDS_HINT: Partial<Record<PaymentMethodType, string>> = {
     cash: `Supporters see: “${CASH_GUIDANCE}”`,
 };
 
+/**
+ * COORDINATOR-BANK-ACH-LINK-1 — FreezerIQ needs only the payment-page link. It never asks for, and
+ * has no field for, a routing number, account number or bank login; this says so where the link
+ * is pasted. (Deliberately guidance, not digit-blocking: notes legitimately carry phone numbers,
+ * references and dates.)
+ */
+export const BANK_ACH_LINK_HELP = 'Paste the payment-page link your bank or payment provider gave your organization. It must start with https://.';
+export const BANK_ACH_SAFETY_WARNING = 'Never enter a routing number, account number, or bank login. FreezerIQ only needs the secure payment-page link.';
+
 /** One method's own fields, shown only while that method is selected. */
 function MethodFields({
     type, idPrefix, values, disabled, error, onChange,
@@ -144,6 +153,34 @@ function MethodFields({
             </div>
         );
     }
+    if (type === 'bank_ach') {
+        const helpId = id('help');
+        const warningId = id('warning');
+        return (
+            <div className="min-w-0 space-y-2">
+                <div>
+                    <label htmlFor={id('link')} className="mb-1 block text-sm font-bold text-slate-700">
+                        Bank payment link <span className="font-medium text-slate-500">(required)</span>
+                    </label>
+                    <input id={id('link')} type="url" inputMode="url" autoComplete="off" autoCapitalize="none" spellCheck={false} disabled={disabled}
+                        value={pm.bankLink} onChange={(e) => setPm({ bankLink: e.target.value })} placeholder="https://"
+                        aria-required="true" aria-invalid={Boolean(error)}
+                        aria-describedby={[helpId, warningId, described].filter(Boolean).join(' ')} className={inputCls} />
+                    <p id={helpId} className="mt-1 break-words text-xs text-slate-500">{BANK_ACH_LINK_HELP}</p>
+                </div>
+                <div>
+                    <label htmlFor={id('note')} className="mb-1 block text-sm font-bold text-slate-700">
+                        Note for supporters <span className="font-medium text-slate-400">(optional)</span>
+                    </label>
+                    <textarea id={id('note')} rows={2} disabled={disabled} value={pm.bankNote}
+                        onChange={(e) => setPm({ bankNote: e.target.value })} placeholder="Enter your order total on the bank's payment page."
+                        aria-invalid={Boolean(error)} aria-describedby={described} className={inputCls} />
+                </div>
+                <p id={warningId} className="break-words rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">{BANK_ACH_SAFETY_WARNING}</p>
+                {errorLine}
+            </div>
+        );
+    }
     return (
         <div className="space-y-2">
             <div>
@@ -201,6 +238,7 @@ export function CoordinatorPaymentFields({
         venmo: pm.venmoHandle.trim() !== '',
         paypal: pm.paypalAccount.trim() !== '',
         cashapp: pm.cashappTag.trim() !== '',
+        bank_ach: (pm.bankLink + pm.bankNote).trim() !== '',
         other: (pm.otherLabel + pm.otherDetails + pm.otherLink).trim() !== '',
     };
     const toggle = (type: PaymentMethodType, on: boolean) =>
@@ -291,8 +329,8 @@ export function CoordinatorPaymentFields({
                     and instructions above &mdash; before they order, after they order, and in their confirmation email.
                 </p>
                 <p className="mt-1">
-                    Venmo, PayPal and Cash App links only open the payment app. Following one does not mark an order
-                    paid &mdash; you still collect payment and mark orders paid yourself.
+                    Venmo, PayPal, Cash App and bank payment links only open another app or website. Following one does
+                    not mark an order paid &mdash; you still collect payment and mark orders paid yourself.
                 </p>
             </div>
         </div>

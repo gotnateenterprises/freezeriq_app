@@ -16,7 +16,7 @@ import { checkPaymentLink } from '@/lib/coordinatorSetup';
 import { supporterAmountDue } from '@/lib/fundraiserTax';
 // COORDINATOR-PAYMENT-METHOD-UX-1: the one rule for what a supporter is told about
 // paying — the same view the public page's confirmation renders.
-import { buildSupporterPaymentView, type PublicPaymentMethod, type SupporterPaymentView } from '@/lib/supporterPaymentMethods';
+import { buildSupporterPaymentView, paymentLinkDestination, type PublicPaymentMethod, type SupporterPaymentView } from '@/lib/supporterPaymentMethods';
 
 const resend = createResendClient(process.env.RESEND_API_KEY);
 
@@ -180,11 +180,14 @@ function fundraiserPaymentHtml(view: SupporterPaymentView): string {
     }
     for (const m of view.methods) {
         const href = m.href ? safePaymentHref(m.href) : null;
+        // COORDINATOR-BANK-ACH-LINK-1: a bank payment page names where it goes — the host only.
+        const destination = href && m.actionLabel && m.type === 'bank_ach' ? paymentLinkDestination(href) : null;
         html += `
                 <div style="border-top: 1px solid #e5e7eb; padding: 8px 0;">
                     <p style="margin: 0; font-weight: bold; color: #1f2937;">${escapeHtml(m.label)}</p>
                     ${m.detail ? `<p style="margin: 2px 0 0 0; font-size: 14px; white-space: pre-wrap; color: #4b5563;">${escapeHtml(m.detail)}</p>` : ''}
                     ${href && m.actionLabel ? anchor(href, m.actionLabel) : ''}
+                    ${destination ? `<p style="margin: 4px 0 0 0; font-size: 12px; word-break: break-all; color: #6b7280;">Opens ${escapeHtml(destination)}</p>` : ''}
                 </div>`;
     }
     if (view.instructions) {

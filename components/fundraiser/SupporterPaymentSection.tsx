@@ -18,8 +18,10 @@
  */
 
 import {
+    BANK_ACH_AFTER_ORDER,
     buildSupporterPaymentView,
     LEGACY_LINK_LABEL,
+    paymentLinkDestination,
     type PublicPaymentMethod,
 } from '@/lib/supporterPaymentMethods';
 
@@ -39,22 +41,33 @@ const TEXT = '#3b2a2f';
 const MUTED = '#7a6258';
 
 function MethodRow({ method, linked, primaryColor }: { method: PublicPaymentMethod; linked: boolean; primaryColor: string }) {
+    // COORDINATOR-BANK-ACH-LINK-1: a bank payment page says where it goes (host only), and before an
+    // order exists it says when its link will appear.
+    const destination = method.type === 'bank_ach' ? paymentLinkDestination(method.href) : null;
     return (
         <li style={{ padding: '.5rem 0', borderTop: '1px dashed #eee2d6', listStyle: 'none' }}>
             <b style={{ display: 'block', fontSize: '.76rem', color: TEXT }}>{method.label}</b>
             {method.detail && (
                 <span style={{ display: 'block', fontSize: '.74rem', color: '#5d463d', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{method.detail}</span>
             )}
+            {!linked && method.type === 'bank_ach' && method.href && (
+                <span style={{ display: 'block', marginTop: '.2rem', fontSize: '.7rem', color: MUTED }}>{BANK_ACH_AFTER_ORDER}</span>
+            )}
             {linked && method.href && method.actionLabel && (
                 <a
                     href={method.href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    aria-label={`${method.actionLabel}${method.detail ? ` for ${method.detail}` : ''} (opens in a new tab)`}
+                    aria-label={destination
+                        ? `${method.actionLabel}, opens ${destination} in a new tab`
+                        : `${method.actionLabel}${method.detail ? ` for ${method.detail}` : ''} (opens in a new tab)`}
                     style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 44, width: '100%', boxSizing: 'border-box', marginTop: '.4rem', background: '#f6ede2', color: primaryColor, borderRadius: 11, fontSize: '.74rem', fontWeight: 800, padding: '.55rem .8rem', textDecoration: 'none' }}
                 >
                     {method.actionLabel} ↗
                 </a>
+            )}
+            {linked && destination && method.actionLabel && (
+                <span data-payment-destination style={{ display: 'block', marginTop: '.3rem', fontSize: '.68rem', color: MUTED, overflowWrap: 'anywhere' }}>Opens {destination}</span>
             )}
         </li>
     );

@@ -131,7 +131,22 @@ export function checkPaymentLink(v: unknown): SetupOk<{ value: string | null }> 
         return { ok: false, code: 'payment_link_invalid', error: 'Enter a full link starting with https://' };
     }
 
-    return { ok: true, value: url.toString() };
+    // COORDINATOR-BANK-ACH-LINK-1: the limit applies to what is STORED, not only to
+    // what was typed. Parsing percent-encodes spaces, non-ASCII and invisible
+    // characters, so a link under the limit as typed could serialise past it: the
+    // save succeeded, then every read (which re-checks the stored value with this
+    // same rule) refused it and the method silently vanished for supporters.
+    // Refused here instead — never truncated, because a cut link is a wrong link.
+    const normalized = url.toString();
+    if (normalized.length > PAYMENT_LINK_MAX) {
+        return {
+            ok: false,
+            code: 'payment_link_too_long',
+            error: `Payment link is too long once saved (spaces and special characters take extra room). Use a link of ${PAYMENT_LINK_MAX} characters or fewer.`,
+        };
+    }
+
+    return { ok: true, value: normalized };
 }
 
 /* ── The whole logistics payload ─────────────────────────────────────────── */

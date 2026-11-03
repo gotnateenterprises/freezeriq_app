@@ -113,13 +113,15 @@ beforeEach(() => {
 
 // ═════════════════════════════════════════════════════════════════════════════
 describe('A. the rules — lib/supporterPaymentMethods', () => {
-    it('A1. each of the six methods can be selected on its own (1–6)', () => {
+    it('A1. each method can be selected on its own (1–6; Bank / ACH added by COORDINATOR-BANK-ACH-LINK-1)', () => {
         const single: Record<string, unknown> = {
             cash: { type: 'cash' }, check: { type: 'check' }, venmo: { type: 'venmo', handle: 'maple-fixture' },
             paypal: { type: 'paypal', account: 'maple@example.test' }, cashapp: { type: 'cashapp', cashtag: 'MapleFixture' },
+            bank_ach: { type: 'bank_ach', link: 'https://pay.examplebank.test/maple' },
             other: { type: 'other', label: 'School office', details: 'Drop payment at the front office.' },
         };
-        expect([...PAYMENT_METHOD_TYPES]).toEqual(['cash', 'check', 'venmo', 'paypal', 'cashapp', 'other']);
+        // Superseded pin: the owner-approved seventh method sits after Cash App and before Other.
+        expect([...PAYMENT_METHOD_TYPES]).toEqual(['cash', 'check', 'venmo', 'paypal', 'cashapp', 'bank_ach', 'other']);
         for (const type of PAYMENT_METHOD_TYPES) {
             const r = checkPaymentMethods([single[type]]);
             expect(r.ok).toBe(true);
@@ -232,7 +234,8 @@ describe('A. the rules — lib/supporterPaymentMethods', () => {
 
     it('A11. the form round-trips: what was stored reloads into the form and re-saves identically (10)', () => {
         const reloaded = paymentMethodsFormFromStored(STORED_ALL);
-        expect(reloaded.selected).toEqual({ cash: true, check: true, venmo: true, paypal: true, cashapp: true, other: true });
+        // COORDINATOR-BANK-ACH-LINK-1: the form carries the seventh method too (unselected here).
+        expect(reloaded.selected).toEqual({ cash: true, check: true, venmo: true, paypal: true, cashapp: true, bank_ach: false, other: true });
         expect(reloaded.venmoHandle).toBe('@maple-fixture');
         expect(reloaded.cashappTag).toBe('$MapleFixture');
         expect(reloaded.paypalAccount).toBe('paypal.me/MapleFixture');
@@ -844,12 +847,13 @@ describe('G. the coordinator form', () => {
     const values = (form = emptyPaymentMethodsForm(), over: Row = {}) => ({ paymentMethods: form, checksPayable: '', paymentInstructions: '', paymentLink: '', ...over });
     const render = (props: Row) => CoordinatorPaymentFields({ onChange: () => {}, ...props });
 
-    it('G1. six real checkboxes, each inside its own visible label, reachable by keyboard (42, 43)', () => {
+    it('G1. one real checkbox per method, each inside its own visible label, reachable by keyboard (42, 43)', () => {
         const tree = render({ values: values() });
         const boxes = findAll(tree, (el) => el.type === 'input' && el.props.type === 'checkbox');
-        expect(boxes).toHaveLength(6);
+        // Superseded pin (COORDINATOR-BANK-ACH-LINK-1): seven methods, Bank / ACH before Other.
+        expect(boxes).toHaveLength(7);
         const labels = findAll(tree, (el) => el.type === 'label' && findAll(el, (x) => x.type === 'input' && x.props.type === 'checkbox').length === 1);
-        expect(labels.map((l) => textOf(l))).toEqual(['Cash', 'Check', 'Venmo', 'PayPal', 'Cash App', 'Other']);
+        expect(labels.map((l) => textOf(l))).toEqual(['Cash', 'Check', 'Venmo', 'PayPal', 'Cash App', 'Bank / ACH', 'Other']);
         for (const b of boxes) { expect(b.props.tabIndex).toBeUndefined(); expect(b.props.disabled).toBeUndefined(); }
         expect(findAll(tree, (el) => el.type === 'fieldset')).toHaveLength(1);
         expect(textOf(findAll(tree, (el) => el.type === 'legend')[0])).toBe('How should supporters pay you?');
@@ -873,7 +877,8 @@ describe('G. the coordinator form', () => {
         const tree = render({ values: values(form) });
         const fields = findAll(tree, (el) => (el.type === 'input' && el.props.type !== 'checkbox') || el.type === 'textarea');
         const ids = fields.map((f) => f.props.id);
-        expect(ids).toEqual(['setup-check-payee', 'setup-venmo-handle', 'setup-paypal-account', 'setup-cashapp-tag', 'setup-other-label', 'setup-other-details', 'setup-other-link', 'setup-instructions']);
+        // COORDINATOR-BANK-ACH-LINK-1 adds the bank link and its optional note, between Cash App and Other.
+        expect(ids).toEqual(['setup-check-payee', 'setup-venmo-handle', 'setup-paypal-account', 'setup-cashapp-tag', 'setup-bank_ach-link', 'setup-bank_ach-note', 'setup-other-label', 'setup-other-details', 'setup-other-link', 'setup-instructions']);
         for (const id of ids) expect(findAll(tree, (el) => el.type === 'label' && el.props.htmlFor === id)).toHaveLength(1);
         expect(textOf(tree)).toContain(`Supporters see: “${CASH_GUIDANCE}”`);
     });
@@ -905,7 +910,9 @@ describe('G. the coordinator form', () => {
         const text = textOf(render({ values: values() }));
         expect(text).toContain(PAYMENT_DUE_GUIDANCE);
         expect(text).toMatch(/does not mark an order paid/);
-        expect(text).not.toMatch(/credit card|ACH|Apple Pay|Google Pay|Zelle|Square/i);
+        // Superseded pin: "ACH" left this list when the owner approved the Bank / ACH payment-page link
+        // (COORDINATOR-BANK-ACH-LINK-1). Everything FreezerIQ still does not offer stays forbidden.
+        expect(text).not.toMatch(/credit card|Apple Pay|Google Pay|Zelle|Square/i);
     });
 
     it('G7. setup carries the payment checklist; the tenant\'s locked facts are untouched', () => {

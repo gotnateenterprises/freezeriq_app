@@ -11,6 +11,8 @@
 
 import {
     buildSupporterPaymentView,
+    paymentLinkDestination,
+    readStoredPaymentMethods,
     toPublicPaymentMethods,
 } from '@/lib/supporterPaymentMethods';
 
@@ -31,6 +33,10 @@ export function PaymentMethodsSummary({
     const methods = toPublicPaymentMethods(paymentMethods, checksPayable);
     const view = buildSupporterPaymentView({ methods, instructions: paymentInstructions, legacyLink: externalPaymentLink });
     const nothingSet = view.methods.length === 0 && !view.instructions && !view.legacyLink;
+    // COORDINATOR-BANK-ACH-LINK-1: a bank payment page is summarised by where it goes (host only) plus
+    // the coordinator's own note — not the whole link, and not the fixed sentence every supporter sees.
+    const bank = readStoredPaymentMethods(paymentMethods)?.methods.find((m) => m.type === 'bank_ach');
+    const bankNote = bank && bank.type === 'bank_ach' ? bank.note ?? null : null;
 
     return (
         <section aria-labelledby="supporter-payment-heading" className="bg-white border border-slate-200 rounded-2xl p-4">
@@ -51,9 +57,16 @@ export function PaymentMethodsSummary({
             {view.methods.some((m) => m.detail && m.type !== 'cash') && (
                 <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
                     {view.methods.filter((m) => m.detail && m.type !== 'cash').map((m) => (
-                        <li key={m.type} className="break-words">
-                            <span className="font-semibold text-slate-700">{m.label}:</span> {m.detail}
-                        </li>
+                        m.type === 'bank_ach' ? (
+                            <li key={m.type} className="break-words">
+                                <span className="font-semibold text-slate-700">{m.label}:</span> Opens {paymentLinkDestination(m.href)}
+                                {bankNote && <span className="block whitespace-pre-wrap">{bankNote}</span>}
+                            </li>
+                        ) : (
+                            <li key={m.type} className="break-words">
+                                <span className="font-semibold text-slate-700">{m.label}:</span> {m.detail}
+                            </li>
+                        )
                     ))}
                 </ul>
             )}
