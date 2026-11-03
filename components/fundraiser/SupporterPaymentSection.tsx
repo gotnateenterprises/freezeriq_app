@@ -136,7 +136,7 @@ export function SupporterPaymentSection({ variant, methods, instructions, legacy
             )}
             {body}
             <p style={{ margin: '.6rem 0 0', fontSize: '.66rem', color: '#9a8075' }}>
-                Payment goes to your coordinator, not through this page. Opening a payment app doesn&rsquo;t mark your order paid — your coordinator confirms it.
+                Payment goes to your coordinator, not through this page. Opening a payment link doesn&rsquo;t mark your order paid — your coordinator confirms it.
             </p>
         </div>
     );

@@ -57,7 +57,8 @@ describe('COORDINATOR-PAYMENT-METHOD-UX-1 · confirmation email', () => {
         for (const label of ['Open Venmo', 'Open Cash App', 'Open link']) expect(html).toContain(label);
         expect(html).not.toMatch(/Pay Now|Payment Required/);
         expect(html).not.toMatch(/\bPaid\b/);
-        expect(html).toContain('does not mark your order paid');
+        // Superseded pin (COORDINATOR-BANK-ACH-LINK-1A): "payment link" replaced "payment app" — true for a bank website too.
+        expect(html).toContain('Opening a payment link doesn&rsquo;t mark your order paid &mdash; your coordinator confirms it.');
         // the total in the summary is the persisted figure, unchanged by any of this
         expect(html).toContain('$126.25');
     });

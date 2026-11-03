@@ -208,7 +208,7 @@ function fundraiserPaymentHtml(view: SupporterPaymentView): string {
             <div style="background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; margin: 20px 0;">
                 <p style="margin: 0 0 8px 0; font-weight: bold; color: #111827;">Payment</p>
                 ${html}
-                <p style="margin: 12px 0 0 0; font-size: 12px; color: #6b7280;">Payment goes to your fundraiser coordinator, not through this email. Opening a payment app does not mark your order paid &mdash; your coordinator confirms it.</p>
+                <p style="margin: 12px 0 0 0; font-size: 12px; color: #6b7280;">Payment goes to your fundraiser coordinator, not through this email. Opening a payment link doesn&rsquo;t mark your order paid &mdash; your coordinator confirms it.</p>
             </div>
         `;
 }

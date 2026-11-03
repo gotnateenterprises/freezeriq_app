@@ -84,7 +84,7 @@ const BANK_VENMO_OTHER = storedOf([
     { type: 'bank_ach', link: BANK_LINK, note: BANK_NOTE },
 ]);
 /** Claims FreezerIQ cannot make about an outside page. ("Paid" is checked case-sensitively and separately:
- *  the existing footer truthfully says opening a payment app "doesn't mark your order paid".) */
+ *  the footer truthfully says opening a payment link "doesn't mark your order paid".) */
 const UNTRUTHFUL = /securely|instant|verified|payment complete|pay now/i;
 const PAID_CLAIM = /\bPaid\b/;
 
@@ -384,6 +384,16 @@ describe('D. the supporter page', () => {
         expect(text).not.toMatch(UNTRUTHFUL);
         expect(text).not.toMatch(PAID_CLAIM);
         expect(text).toMatch(/doesn.t mark your order paid/);
+    });
+
+    it('D2a. (1A) the confirmation\'s note says "payment LINK" — true for a bank website as much as an app — and still denies payment', async () => {
+        const m = mountComponent(loadClient(), clientProps(PUBLIC_BANK));
+        await addAndSubmit(m);
+        const text = textOf(section(m.tree, 'confirmation'));
+        expect(text).toContain('Opening a payment link doesn’t mark your order paid — your coordinator confirms it.');
+        expect(text).not.toMatch(/payment app/i);
+        expect(text).not.toMatch(PAID_CLAIM);
+        expect(stripComments(read('components/fundraiser/SupporterPaymentSection.tsx'))).not.toMatch(/payment app/i);
     });
 
     it('D3. a long note and a long host wrap inside the card; the button keeps its 44px, full-width tap target', async () => {

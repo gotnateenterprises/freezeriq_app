@@ -55,7 +55,9 @@ describe('COORDINATOR-BANK-ACH-LINK-1 · confirmation email', () => {
         expect(opensLines(html)).toEqual(['pay.examplebank.test']);
         expect(html).not.toMatch(/Pay Now|Payment Required|securely|instant|verified|payment complete/i);
         expect(html).not.toMatch(/\bPaid\b/);
-        expect(html).toContain('does not mark your order paid');
+        // COORDINATOR-BANK-ACH-LINK-1A: "payment link", not "payment app" — a bank page is a website.
+        expect(html).toContain('Opening a payment link doesn&rsquo;t mark your order paid &mdash; your coordinator confirms it.');
+        expect(html).not.toMatch(/payment app/i);
         expect(html).toContain('$126.25');
     });
 

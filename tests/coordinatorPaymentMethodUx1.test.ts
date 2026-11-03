@@ -767,8 +767,8 @@ describe('F. the supporter page', () => {
             ['Open Cash App ↗', 'https://cash.app/$MapleFixture'],
             ['Open link ↗', 'https://pay.example.test/maple'],
         ]);
-        // No paid STATUS and no "pay now" claim. (The card's own note truthfully says opening an
-        // app "doesn't mark your order paid" — a denial, which is the point.)
+        // No paid STATUS and no "pay now" claim. (The card's own note truthfully says opening a
+        // payment link "doesn't mark your order paid" — a denial, which is the point.)
         expect(text).not.toMatch(/\bPaid\b/);
         expect(text).not.toMatch(/pay now/i);
         expect(text).toContain('doesn’t mark your order paid');
