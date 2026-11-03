@@ -42,6 +42,7 @@ import {
     CHECKS_PAYABLE_MAX,
     DELIVERY_TIME_MAX,
     PICKUP_LOCATION_MAX,
+    checkChecksPayable,
 } from './coordinatorSetup';
 
 /**
@@ -322,6 +323,14 @@ export function decideOperationalDetailsChange(input: {
                 error: `Keep the ${f.label} under ${f.max} characters.`,
             };
         } else {
+            // COORDINATOR-PAYMENT-METHOD-UX-1A: the payee is supporter-facing now (shown
+            // inside a selected Check method), so a tenant correction must pass the same
+            // payee rule the coordinator's setup form uses — no markup, control or
+            // invisible characters. One rule, owned by lib/coordinatorSetup.ts.
+            if (f.key === 'checks_payable') {
+                const payee = checkChecksPayable(trimmed);
+                if (!payee.ok) return { change: false, rejected: true, status: 400, error: payee.error };
+            }
             data[f.key] = trimmed;
         }
     }
@@ -384,7 +393,13 @@ export function operationalFillFromOrgProfile(input: {
         if (typeof offered !== 'string') return;
         const trimmed = offered.trim();
         if (trimmed === '') return;
-        out[into] = trimmed.slice(0, max);
+        const value = trimmed.slice(0, max);
+        // COORDINATOR-PAYMENT-METHOD-UX-1A: a FILLED payee must pass the same payee rule
+        // the coordinator's form uses. This is a fallback fill (the org form defaults it
+        // to the organization's name), so a value that fails is simply not filled — the
+        // campaign keeps no payee — rather than blocking an unrelated profile save.
+        if (into === 'checks_payable' && !checkChecksPayable(value).ok) return;
+        out[into] = value;
     };
 
     fillText(campaign.delivery_time, info.delivery_time, DELIVERY_TIME_MAX, 'delivery_time');

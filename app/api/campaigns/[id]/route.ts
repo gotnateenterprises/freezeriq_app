@@ -9,6 +9,7 @@ import {
     decideOperationalDetailsChange,
     isOperationalDetailsRejected,
 } from '@/lib/campaignOperationalDetails';
+import { checkCoordinatorPaymentSettings } from '@/lib/supporterPaymentMethods';
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
@@ -158,6 +159,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         }
         const operationalData = detailsDecision.change ? detailsDecision.data : {};
 
+        // ── COORDINATOR-PAYMENT-METHOD-UX-1A: the legacy payment fields ────────
+        //
+        // payment_instructions and external_payment_link used to be assigned
+        // straight from the body, so a tenant edit could store a `javascript:` link
+        // or markup that the coordinator's own forms refuse. They now pass the ONE
+        // payment-settings rule the coordinator's Payment Settings uses (plain text,
+        // the setup length bound, no markup / control / invisible characters;
+        // https-only links without credentials). PATCH semantics are unchanged: an
+        // absent key leaves its column alone, and null or blank clears it. Refused
+        // here, before any write.
+        const paymentSettings = checkCoordinatorPaymentSettings({
+            paymentInstructions: body.payment_instructions,
+            externalPaymentLink: body.external_payment_link,
+        });
+        if (!paymentSettings.ok) {
+            return NextResponse.json({ error: paymentSettings.error, code: paymentSettings.code }, { status: 400 });
+        }
+
         // ── FR-TAX-CORRECTNESS-1 HARDENING: the activation tax gate ─────────
         //
         // This route is the ONLY way a campaign reaches 'Active' without going
@@ -228,8 +247,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
                 goal_amount: body.goal_amount ? Number(body.goal_amount) : undefined,
                 about_text: body.about_text,
                 mission_text: body.mission_text,
-                payment_instructions: body.payment_instructions,
-                external_payment_link: body.external_payment_link,
+                // COORDINATOR-PAYMENT-METHOD-UX-1A: validated above, never the raw body.
+                ...paymentSettings.values,
                 checklist: body.checklist ?? undefined,
                 // Terminology labels
                 participant_label: body.participant_label ?? undefined,

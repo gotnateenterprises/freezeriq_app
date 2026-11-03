@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { isOrgTaxStatus } from '@/lib/fundraiserTax';
 import { operationalFillFromOrgProfile } from '@/lib/campaignOperationalDetails';
+import { checkCoordinatorPaymentSettings } from '@/lib/supporterPaymentMethods';
 
 
 export const dynamic = 'force-dynamic';
@@ -290,6 +291,26 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
         const { id } = await params;
         const body = await req.json();
 
+        // ── COORDINATOR-PAYMENT-METHOD-UX-1A: the organization blob's payment keys ──
+        //
+        // The fundraiser_info sync below pushes payment_instructions and
+        // external_payment_link into the organization's latest OPEN campaign. They
+        // used to be copied raw, so this path could store what the coordinator's
+        // own forms refuse. They now pass the same payment-settings rule as
+        // Payment Settings and the tenant campaign editor — checked HERE, before the
+        // organization or any campaign is written, so a refusal leaves nothing
+        // half-saved. Same push semantics as before: a blank value pushes nothing.
+        // (The CRM forms never send these two keys today; this closes the API path.)
+        const fiPayment = body.fundraiser_info && typeof body.fundraiser_info === 'object'
+            ? checkCoordinatorPaymentSettings({
+                paymentInstructions: body.fundraiser_info.payment_instructions || undefined,
+                externalPaymentLink: body.fundraiser_info.external_payment_link || undefined,
+            })
+            : ({ ok: true, values: {} } as const);
+        if (!fiPayment.ok) {
+            return NextResponse.json({ error: fiPayment.error, code: fiPayment.code }, { status: 400 });
+        }
+
         // Validate & Map Status (Handle Title Case from UI -> Upper Case for Prisma Enum)
         const statusMap: Record<string, any> = {
             'Active': 'ACTIVE',
@@ -532,8 +553,9 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
                         participant_label: fi.participant_label || undefined,
                         about_text: fi.about_text || undefined,
                         mission_text: fi.mission_text || undefined,
-                        payment_instructions: fi.payment_instructions || undefined,
-                        external_payment_link: fi.external_payment_link || undefined,
+                        // COORDINATOR-PAYMENT-METHOD-UX-1A: validated at the top of this
+                        // handler, never copied raw from the blob.
+                        ...fiPayment.values,
                         bundle_goal: fi.bundle_goal ? Number(fi.bundle_goal) : undefined,
                         // FR-FLOW-3's delivery_time-only guard used to live here. It is
                         // gone because the spread above now enforces the same thing for

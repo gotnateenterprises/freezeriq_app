@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { openFacebookShare, copyShareText } from '@/lib/supporterShare';
+// COORDINATOR-PAYMENT-METHOD-UX-1A: the one legacy-payment-link rule.
+import { legacyPaymentLinkView } from '@/lib/supporterPaymentMethods';
 
 interface ScoreboardClientProps {
     token: string;
@@ -258,29 +260,57 @@ export default function ScoreboardClient({ token, shareUrl = null }: ScoreboardC
                     </div>
                 )}
 
-                {/* Instructions Box */}
-                {(campaign.payment_instructions || campaign.external_payment_link) && (
-                    <div className="bg-slate-900 rounded-[2rem] p-8 text-white shadow-xl shadow-slate-900/20">
-                        <div className="flex items-center gap-3 mb-4">
-                            <AlertCircle size={24} className="text-indigo-400" />
-                            <h2 className="text-xl font-black italic underline decoration-indigo-500">How to Help</h2>
-                        </div>
-                        <p className="text-slate-300 font-bold mb-6 italic leading-relaxed whitespace-pre-wrap break-words">
-                            {campaign.payment_instructions}
-                        </p>
-                        {campaign.external_payment_link && (
-                            <a
-                                href={campaign.external_payment_link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-5 rounded-2xl font-black flex items-center justify-center gap-3 transition-all active:scale-95 shadow-lg shadow-indigo-600/20"
-                            >
-                                <ExternalLink size={24} /> Take Me to Payment
-                            </a>
-                        )}
-                    </div>
-                )}
+                {/* Instructions Box — COORDINATOR-PAYMENT-METHOD-UX-1A: the legacy link
+                    goes through the shared rule before it can become an href. */}
+                <ScoreboardPaymentInfo
+                    instructions={campaign.payment_instructions}
+                    externalPaymentLink={campaign.external_payment_link}
+                />
             </main>
+        </div>
+    );
+}
+
+/**
+ * COORDINATOR-PAYMENT-METHOD-UX-1A — the scoreboard's legacy "How to Help" box.
+ *
+ * It rendered `external_payment_link` straight into an href, so a value written by a
+ * path that never validated it (the tenant campaign editor did not, until 1A) became a
+ * clickable link on a public page. The link now goes through legacyPaymentLinkView — the
+ * same rule the order page, the confirmation and the email use: clickable only when it
+ * passes the shared https check, otherwise shown as plain text. Its button says what it
+ * does ("Open payment link"); nothing here can mark or imply an order paid. The scoreboard
+ * deliberately shows only the legacy instructions and link, never the structured methods
+ * (the order page is where supporters choose how to pay).
+ */
+export function ScoreboardPaymentInfo({ instructions, externalPaymentLink }: { instructions: unknown; externalPaymentLink: unknown }) {
+    const link = legacyPaymentLinkView(externalPaymentLink);
+    const text = typeof instructions === 'string' && instructions.trim() ? instructions : null;
+    if (!text && !link) return null;
+    return (
+        <div className="bg-slate-900 rounded-[2rem] p-8 text-white shadow-xl shadow-slate-900/20">
+            <div className="flex items-center gap-3 mb-4">
+                <AlertCircle size={24} className="text-indigo-400" />
+                <h2 className="text-xl font-black italic underline decoration-indigo-500">How to Help</h2>
+            </div>
+            {text && (
+                <p className="text-slate-300 font-bold mb-6 italic leading-relaxed whitespace-pre-wrap break-words">
+                    {text}
+                </p>
+            )}
+            {link?.href ? (
+                <a
+                    href={link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`${link.actionLabel} (opens in a new tab)`}
+                    className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-5 rounded-2xl font-black flex items-center justify-center gap-3 transition-all active:scale-95 shadow-lg shadow-indigo-600/20"
+                >
+                    <ExternalLink size={24} /> {link.actionLabel}
+                </a>
+            ) : link ? (
+                <p className="text-slate-400 text-sm break-all">Payment link: {link.text}</p>
+            ) : null}
         </div>
     );
 }

@@ -436,15 +436,24 @@ export function buildSupporterPaymentView(input: {
         ? instructionsCheck.value
         : (typeof input.instructions === 'string' && input.instructions.trim() ? input.instructions.trim() : null);
 
-    let legacyLink: SupporterPaymentView['legacyLink'] = null;
-    if (typeof input.legacyLink === 'string' && input.legacyLink.trim()) {
-        const checked = checkPaymentLink(input.legacyLink);
-        legacyLink = { text: input.legacyLink.trim(), href: checked.ok ? checked.value : null, actionLabel: LEGACY_LINK_ACTION };
-    }
+    const legacyLink = legacyPaymentLinkView(input.legacyLink);
 
     const dueLine = structured || !instructions ? PAYMENT_DUE_GUIDANCE : null;
     const fallback = methods.length === 0 && !instructions && !legacyLink ? PAYMENT_CONTACT_FALLBACK : null;
     return { dueLine, methods, instructions, legacyLink, fallback };
+}
+
+/**
+ * COORDINATOR-PAYMENT-METHOD-UX-1A — a campaign's legacy payment link, the way every
+ * surface must show it (order page, confirmation, email, and the public scoreboard):
+ * clickable only when it passes the shared https rule (checkPaymentLink); a value that
+ * does not is still the coordinator's typing, so it may be shown — as text, never as an
+ * href. Not a second rule: buildSupporterPaymentView uses this very function.
+ */
+export function legacyPaymentLinkView(raw: unknown): SupporterPaymentView['legacyLink'] {
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    const checked = checkPaymentLink(raw);
+    return { text: raw.trim(), href: checked.ok ? checked.value : null, actionLabel: LEGACY_LINK_ACTION };
 }
 
 /**

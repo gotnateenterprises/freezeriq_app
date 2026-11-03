@@ -252,7 +252,11 @@ describe('PAYMENT — no unsupported cash/check/pickup/Venmo assumption', () => 
         const block = section.slice(linkIdx, linkIdx + 200);
         expect(block).toContain('target="_blank"');
         expect(block).toContain('rel="noopener noreferrer"');
-        expect(read('lib/supporterPaymentMethods.ts')).toMatch(/const checked = checkPaymentLink\(input\.legacyLink\);/);
+        // COORDINATOR-PAYMENT-METHOD-UX-1A: the check moved into legacyPaymentLinkView, which the
+        // view (and the public scoreboard) now share.
+        const lib = read('lib/supporterPaymentMethods.ts');
+        expect(lib).toMatch(/const legacyLink = legacyPaymentLinkView\(input\.legacyLink\);/);
+        expect(lib).toMatch(/export function legacyPaymentLinkView\(raw: unknown\)[\s\S]{0,200}const checked = checkPaymentLink\(raw\);/);
     });
 
     it('the payment_instructions/external_payment_link fields already exist and are already wired — no new schema needed', () => {
