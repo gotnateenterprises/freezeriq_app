@@ -727,7 +727,9 @@ describe('the candidate pool survives an active-bundle edit', () => {
 
     it('the PUT recreates rows explicitly as active', () => {
         const code = bundlesRoute().split(/\r?\n/).filter((l) => !l.trim().startsWith('//')).join('\n');
-        const create = code.match(/campaignBundle\.createMany\(\{[\s\S]*?\}\)\]/)![0];
+        // LEGACY-WRITER-GUARDS-1 moved the write into an interactive transaction (behind the campaign
+        // selection lock), so the createMany is no longer the last element of an array — `)]` became `)`.
+        const create = code.match(/campaignBundle\.createMany\(\{[\s\S]*?\}\)/)![0];
         expect(create).toMatch(/state:\s*'active'/);
     });
 

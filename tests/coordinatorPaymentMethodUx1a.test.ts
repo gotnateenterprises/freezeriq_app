@@ -166,35 +166,34 @@ describe('B. the organization-profile save — PUT /api/customers/[id]', () => {
         }
     });
 
-    it('B2. valid values reach the open campaign normalised by the shared rule; blank pushes nothing (as before)', async () => {
+    // LEGACY-WRITER-GUARDS-1 superseded B2–B4's campaign half: the organization profile save no
+    // longer writes any campaign. Valid values are still accepted and saved on the organization
+    // (the blob); they simply stop there. The campaign's payment text is owned by coordinator
+    // setup and Payment Settings.
+    it('B2. valid values are accepted and saved on the organization — no campaign is written', async () => {
         orgMock();
         expect((await putOrg({ name: 'Maple (fixture)', fundraiser_info: { payment_instructions: '  Thanks!  ', external_payment_link: 'https://pay.example.test/x' } })).status).toBe(200);
-        const data = mock.firstCall('fundraiserCampaign.update')!.args.data;
-        expect(data.payment_instructions).toBe('Thanks!');
-        expect(data.external_payment_link).toBe('https://pay.example.test/x');
+        expect(mock.callsTo('customer.update')).toHaveLength(1);
+        expect(mock.callsTo('fundraiserCampaign.update')).toHaveLength(0);
+        expect(mock.callsTo('fundraiserCampaign.updateMany')).toHaveLength(0);
 
         orgMock();
         expect((await putOrg({ name: 'Maple (fixture)', fundraiser_info: { payment_instructions: '', external_payment_link: '', pickup_location: 'Gym' } })).status).toBe(200);
-        const data2 = mock.firstCall('fundraiserCampaign.update')!.args.data;
-        expect(data2).not.toHaveProperty('payment_instructions');
-        expect(data2).not.toHaveProperty('external_payment_link');
+        expect(mock.callsTo('fundraiserCampaign.update')).toHaveLength(0);
     });
 
-    it('B3. the CRM forms\' own saves (no payment keys) behave exactly as before', async () => {
+    it('B3. the CRM forms\' own saves (no payment keys) still succeed and still leave every campaign alone', async () => {
         orgMock();
         const res = await putOrg({ name: 'Maple (fixture)', fundraiser_info: { pickup_location: 'Gym', checks_payable_to: 'Maple Ridge Robotics (fixture)', delivery_time: '4 PM' } });
         expect(res.status).toBe(200);
-        const data = mock.firstCall('fundraiserCampaign.update')!.args.data;
-        expect(data).toMatchObject({ pickup_location: 'Gym', checks_payable: 'Maple Ridge Robotics (fixture)', delivery_time: '4 PM' });
-        expect(data).not.toHaveProperty('payment_instructions');
-        expect(data).not.toHaveProperty('external_payment_link');
-        expect(data).not.toHaveProperty('payment_methods');
+        expect(mock.firstCall('customer.update')!.args.data.fundraiser_info).toMatchObject({ pickup_location: 'Gym', delivery_time: '4 PM' });
+        expect(mock.callsTo('fundraiserCampaign.update')).toHaveLength(0);
     });
 
-    it('B4. a filled payee must pass the payee rule — an unsafe default is simply not filled (the save still succeeds)', async () => {
+    it('B4. an unsafe payee default never reaches a campaign (the save still succeeds); the fill rule is unchanged', async () => {
         orgMock();
         expect((await putOrg({ name: 'Maple (fixture)', fundraiser_info: { checks_payable_to: '<b>Maple</b>' } })).status).toBe(200);
-        expect(mock.firstCall('fundraiserCampaign.update')!.args.data).not.toHaveProperty('checks_payable');
+        expect(mock.callsTo('fundraiserCampaign.update')).toHaveLength(0);
         expect(operationalFillFromOrgProfile({ campaign: { delivery_date: null, delivery_time: null, end_date: null, pickup_location: null, checks_payable: null } as any, info: { checks_payable_to: 'Maple‮' } })).toEqual({});
         expect(operationalFillFromOrgProfile({ campaign: { delivery_date: null, delivery_time: null, end_date: null, pickup_location: null, checks_payable: null } as any, info: { checks_payable_to: 'Maple PTO' } })).toEqual({ checks_payable: 'Maple PTO' });
     });

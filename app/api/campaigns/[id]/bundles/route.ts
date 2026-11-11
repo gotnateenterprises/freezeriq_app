@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { lockCampaignSelection } from '@/lib/campaignSelectionLock';
+import { legacyBundleAssignmentRefusal } from '@/lib/legacyBundleAssignment';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
@@ -128,21 +130,48 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
         // still said 'pending'. That was survivable only while nothing in
         // production had a candidate pool. FR-FLOW-2 creates them, so it is not
         // survivable now.
-        await prisma.$transaction([
-            (prisma as any).campaignBundle.deleteMany({
+        //
+        // LEGACY-WRITER-GUARDS-1 — and it may only act where replacing the menu
+        // cannot corrupt truth (lib/legacyBundleAssignment.ts): never on a closed
+        // campaign, a campaign in the coordinator selection flow, or a campaign
+        // with any order. The campaign selection lock comes first, the same lock
+        // public ordering and coordinator selection take, so an order cannot land
+        // between the order count and the replacement.
+        const outcome = await prisma.$transaction(async (tx) => {
+            await lockCampaignSelection(tx as any, id);
+
+            const fresh = await tx.fundraiserCampaign.findUnique({
+                where: { id },
+                select: { closed_at: true, status: true, bundle_selection_status: true },
+            });
+            if (!fresh) return { ok: false as const, status: 404, error: 'Campaign not found' };
+
+            const orderCount = await tx.order.count({ where: { campaign_id: id } });
+            const refusal = legacyBundleAssignmentRefusal(fresh, orderCount);
+            if (refusal) return { ok: false as const, status: 409, error: refusal.error, code: refusal.code };
+
+            await (tx as any).campaignBundle.deleteMany({
                 where: { campaign_id: id, state: 'active' }
-            }),
-            ...(bundleIds.length > 0
-                ? [(prisma as any).campaignBundle.createMany({
+            });
+            if (bundleIds.length > 0) {
+                await (tx as any).campaignBundle.createMany({
                     data: bundleIds.map((bundleId: string, index: number) => ({
                         campaign_id: id,
                         bundle_id: bundleId,
                         state: 'active',
                         position: index
                     }))
-                })]
-                : [])
-        ]);
+                });
+            }
+            return { ok: true as const };
+        });
+
+        if (!outcome.ok) {
+            return NextResponse.json(
+                { error: outcome.error, ...('code' in outcome ? { code: outcome.code } : {}) },
+                { status: outcome.status },
+            );
+        }
 
         return NextResponse.json({
             campaignId: id,

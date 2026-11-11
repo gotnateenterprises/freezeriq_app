@@ -521,9 +521,11 @@ describe('public gates, Ready/Live and the legacy sync', () => {
             campaign: { delivery_date: null, delivery_time: '4:45 PM', end_date: null, pickup_location: null },
             info: { delivery_time: '9:00 AM' },
         }).delivery_time).toBeUndefined();
-        // And the route reaches that rule instead of pushing the blob through.
+        // LEGACY-WRITER-GUARDS-1 supersedes the route half of this pin: the organization profile no
+        // longer writes ANY campaign, so a coordinator-confirmed time cannot be touched from there at
+        // all. The rule above stays pinned because lib/campaignOperationalDetails.ts still exports it.
         const code = stripComments(read(SYNC_ROUTE));
-        expect(code).toMatch(/operationalFillFromOrgProfile\(/);
+        expect(code).not.toMatch(/fundraiserCampaign\.(update|updateMany)\(/);
         expect(code).not.toMatch(/delivery_time: fi\.delivery_time/);
     });
 

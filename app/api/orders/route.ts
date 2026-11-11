@@ -5,6 +5,7 @@ import { buildBundlePriceMap } from '@/lib/pricing';
 import { resolveSoldVariantSize } from '@/lib/orderItemTier';
 import { toDbSafeOrderStatus, toDbOrderStatusReadCandidates, validateOrderStatusTransition, normalizeOrderStatus } from '@/lib/orderStatus';
 import { LOYALTY_ACCRUAL_ENABLED } from '@/lib/loyalty';
+import { orderDeletionRefusal, ORDER_DELETION_FACTS_SELECT, type DeletableOrderFacts } from '@/lib/orderDeletion';
 
 
 export async function GET(req: NextRequest) {
@@ -279,7 +280,7 @@ export async function DELETE(req: NextRequest) {
         }
 
         // Transaction to ensure cleanup
-        await prisma.$transaction(async (tx) => {
+        const outcome = await prisma.$transaction(async (tx) => {
             // Try finding by internal ID first (UUID)
             let order = await tx.order.findUnique({ where: { id: id } });
 
@@ -292,6 +293,22 @@ export async function DELETE(req: NextRequest) {
                 throw new Error('Order not found or unauthorized');
             }
 
+            // LEGACY-WRITER-GUARDS-1: only a pending, non-fundraiser order with no payment, invoice
+            // or delivery hand-off may be removed (lib/orderDeletion.ts). Lock the row, then judge it
+            // as it is NOW — a release or payment committed a moment ago must win over this delete.
+            await tx.$queryRaw`SELECT id FROM "orders" WHERE id = ${order.id} FOR UPDATE`;
+            const current = await tx.order.findUnique({
+                where: { id: order.id },
+                select: ORDER_DELETION_FACTS_SELECT,
+            });
+            if (!current) {
+                throw new Error('Order not found or unauthorized');
+            }
+            const refusal = orderDeletionRefusal(current as DeletableOrderFacts);
+            if (refusal) {
+                return { ok: false as const, refusal };
+            }
+
             // Find internal ID
             await tx.orderItem.deleteMany({
                 where: { order_id: order.id }
@@ -301,7 +318,15 @@ export async function DELETE(req: NextRequest) {
             await tx.order.delete({
                 where: { id: order.id }
             });
+            return { ok: true as const };
         });
+
+        if (!outcome.ok) {
+            return NextResponse.json(
+                { error: outcome.refusal.error, code: outcome.refusal.code },
+                { status: 409 },
+            );
+        }
 
         return NextResponse.json({ success: true });
 

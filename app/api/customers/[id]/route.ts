@@ -3,7 +3,6 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { isOrgTaxStatus } from '@/lib/fundraiserTax';
-import { operationalFillFromOrgProfile } from '@/lib/campaignOperationalDetails';
 import { checkCoordinatorPaymentSettings } from '@/lib/supporterPaymentMethods';
 
 
@@ -293,14 +292,12 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
         // ── COORDINATOR-PAYMENT-METHOD-UX-1A: the organization blob's payment keys ──
         //
-        // The fundraiser_info sync below pushes payment_instructions and
-        // external_payment_link into the organization's latest OPEN campaign. They
-        // used to be copied raw, so this path could store what the coordinator's
-        // own forms refuse. They now pass the same payment-settings rule as
-        // Payment Settings and the tenant campaign editor — checked HERE, before the
-        // organization or any campaign is written, so a refusal leaves nothing
-        // half-saved. Same push semantics as before: a blank value pushes nothing.
-        // (The CRM forms never send these two keys today; this closes the API path.)
+        // These two keys used to be pushed into the organization's latest OPEN campaign
+        // (LEGACY-WRITER-GUARDS-1 removed that push; see the end of this handler). They
+        // still pass the same payment-settings rule as Payment Settings and the tenant
+        // campaign editor before the organization is written, so the blob cannot store
+        // what the coordinator's own forms refuse, and a refusal leaves nothing
+        // half-saved. (The CRM forms never send these two keys today.)
         const fiPayment = body.fundraiser_info && typeof body.fundraiser_info === 'object'
             ? checkCoordinatorPaymentSettings({
                 paymentInstructions: body.fundraiser_info.payment_instructions || undefined,
@@ -481,92 +478,22 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
             });
         }
 
-        // Sync fundraiser_info fields to the most recent FundraiserCampaign.
-        // The CRM form saves these to customer.fundraiser_info (JSON), but
-        // flyer/packet/tracker download routes read from campaign table columns.
-        // All operational fields must be pushed here to prevent drift.
-        if (body.fundraiser_info) {
-            const fi = body.fundraiser_info;
-            const latestCampaign = await prisma.fundraiserCampaign.findFirst({
-                where: { customer_id: orgId },
-                orderBy: { created_at: 'desc' },
-                // CRM-CAMPAIGN-DETAILS-1: the four operational values are now READ
-                // before the sync, because the rule is no longer "push" but "fill only
-                // what is missing". bundle_selection_status is no longer consulted —
-                // operationalFillFromOrgProfile decides on the campaign's own value
-                // instead of on how far the coordinator got, which is both stricter
-                // and true for campaigns that never had a coordinator flow at all.
-                select: {
-                    id: true, closed_at: true, status: true,
-                    delivery_date: true, delivery_time: true,
-                    end_date: true, pickup_location: true, checks_payable: true,
-                },
-            });
-
-            // ── INV-A boundary ────────────────────────────────────────────────
-            // This route targets "whichever campaign was created most recently"
-            // with no campaign id, so once an organization has a closed campaign
-            // it can silently retarget financially-frozen data. Saving an
-            // ORGANISATION PROFILE must never rewrite a closed fundraiser's
-            // financial configuration (deadline, goal, payment instructions).
-            //
-            // Deliberately narrow: open campaigns keep the existing sync
-            // verbatim — the flyer/packet/tracker routes still read these
-            // columns and removing the sync would reintroduce that drift.
-            // org_share_percent is NOT settable here at all; it is owned by the
-            // campaign create/edit surfaces, never by the generic org form.
-            const latestIsClosed = latestCampaign
-                ? Boolean(latestCampaign.closed_at) ||
-                  ['Closed', 'Settled', 'Completed', 'Archived'].includes(latestCampaign.status)
-                : false;
-
-            if (latestCampaign && !latestIsClosed) {
-                await prisma.fundraiserCampaign.update({
-                    where: { id: latestCampaign.id },
-                    data: {
-                        // ── CRM-CAMPAIGN-DETAILS-1: fill, never overwrite ───────
-                        //
-                        // delivery_date, end_date, delivery_time and pickup_location
-                        // used to be pushed down UNCONDITIONALLY from this blob. That
-                        // made saving an ORGANISATION PROFILE able to revert a
-                        // campaign-level correction from stale JSON — and it was not
-                        // hypothetical: audited 2026-09-25, all 7 open campaigns
-                        // disagreed with their blob on all four fields (one held
-                        // '4:00 pm' against the blob's '3 PM').
-                        //
-                        // operationalFillFromOrgProfile returns only the fields the
-                        // campaign has no meaningful value for, so legacy initial fill
-                        // still works and a correction can no longer be undone. This is
-                        // the rule FR-FLOW-3 already applied to delivery_time, now
-                        // applied to all four and stated in one place.
-                        ...operationalFillFromOrgProfile({
-                            campaign: {
-                                delivery_date: latestCampaign.delivery_date,
-                                delivery_time: latestCampaign.delivery_time,
-                                end_date: latestCampaign.end_date,
-                                pickup_location: latestCampaign.pickup_location,
-                                checks_payable: latestCampaign.checks_payable,
-                            },
-                            info: fi,
-                        }),
-                        start_date: fi.start_date ? new Date(fi.start_date) : undefined,
-                        participant_label: fi.participant_label || undefined,
-                        about_text: fi.about_text || undefined,
-                        mission_text: fi.mission_text || undefined,
-                        // COORDINATOR-PAYMENT-METHOD-UX-1A: validated at the top of this
-                        // handler, never copied raw from the blob.
-                        ...fiPayment.values,
-                        bundle_goal: fi.bundle_goal ? Number(fi.bundle_goal) : undefined,
-                        // FR-FLOW-3's delivery_time-only guard used to live here. It is
-                        // gone because the spread above now enforces the same thing for
-                        // delivery_time and for the three fields that lacked it — and
-                        // enforces it on the campaign's own value rather than on
-                        // bundle_selection_status, so it also protects a campaign that
-                        // never ran the coordinator bundle flow.
-                    },
-                });
-            }
-        }
+        // ── LEGACY-WRITER-GUARDS-1: an organization profile never writes a campaign ──
+        //
+        // This route used to push customer.fundraiser_info into "whichever campaign was created most
+        // recently" (no campaign id), whenever that campaign was open. CRM-CAMPAIGN-DETAILS-1 had
+        // already made five operational fields fill-only, but bundle_goal, start_date,
+        // participant_label, about_text, mission_text and the payment text were still overwritten —
+        // and the org form (components/crm/FundraiserSetup.tsx) defaults bundle_goal to 20, so an
+        // unrelated profile save could reset a campaign's goal. Even the fill-only half wrote the
+        // form's own defaults ("4:45 PM", the organization's name as payee) into a new campaign's
+        // blanks, where they then read as answers nobody gave.
+        //
+        // Every one of those fields has a campaign-owned writer: Edit details and the campaign PATCH
+        // (dates, time, location, payee, goal, labels, text), coordinator setup and Payment Settings
+        // (payment). The blob itself is still saved above, as organization-level notes.
+        // fiPayment's validation is kept, so an invalid payment value is still refused before
+        // anything is written.
 
         return NextResponse.json({ success: true, newId: orgId });
     } catch (e: any) {

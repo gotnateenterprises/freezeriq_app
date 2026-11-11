@@ -456,36 +456,33 @@ describe('CRM-CAMPAIGN-DETAILS-1 / organization profile sync', () => {
         expect(out.delivery_time).toBeUndefined();
     });
 
-    test('E: and it now protects a campaign that never ran the coordinator bundle flow', () => {
-        // The old guard keyed on bundle_selection_status === 'selected'. A campaign at
-        // 'not_required' was therefore unprotected; it no longer is, because the rule
-        // reads the campaign's own value instead.
+    // LEGACY-WRITER-GUARDS-1 superseded the route half of this suite: the organization profile
+    // save no longer writes ANY campaign — not fill-only, not the goal, not the dates. The
+    // operationalFillFromOrgProfile rule pinned above is unchanged and still exported; its
+    // behavioural proof for the route lives in tests/legacyWriterGuards1.test.ts.
+    test('E: the profile save has no campaign writer at all (LEGACY-WRITER-GUARDS-1)', () => {
         const src = R('app/api/customers/[id]/route.ts');
-        const block = src.slice(src.indexOf('if (body.fundraiser_info)'), src.indexOf('return NextResponse.json({ success: true'));
-        expect(block).toContain('operationalFillFromOrgProfile');
-        expect(block).not.toContain("bundle_selection_status === 'selected'");
+        const put = src.slice(src.indexOf('export async function PUT'), src.indexOf('export async function DELETE'));
+        expect(put).not.toMatch(/fundraiserCampaign\.(update|updateMany|upsert)\(/);
+        expect(put).not.toContain('operationalFillFromOrgProfile(');
     });
 
-    test('E: the sync no longer writes the four fields from the raw blob', () => {
+    test('E: none of the old pushes survive in any form', () => {
         const src = R('app/api/customers/[id]/route.ts');
-        const block = src.slice(src.indexOf('if (body.fundraiser_info)'), src.indexOf('return NextResponse.json({ success: true'));
-        expect(block).not.toContain('delivery_date: fi.delivery_date');
-        expect(block).not.toContain('end_date: fi.deadline');
-        expect(block).not.toContain('pickup_location: fi.pickup_location');
-        expect(block).not.toContain('delivery_time: fi.delivery_time');
+        for (const push of [
+            'delivery_date: fi.delivery_date', 'end_date: fi.deadline', 'pickup_location: fi.pickup_location',
+            'delivery_time: fi.delivery_time', 'start_date: fi.start_date', 'bundle_goal: fi.bundle_goal',
+            'checks_payable: fi.checks_payable_to', 'participant_label: fi.participant_label',
+        ]) {
+            expect(src).not.toContain(push);
+        }
     });
 
     test('unrelated organization-profile behaviour is untouched', () => {
         const src = R('app/api/customers/[id]/route.ts');
-        const block = src.slice(src.indexOf('if (body.fundraiser_info)'), src.indexOf('return NextResponse.json({ success: true'));
-        // start_date, labels, copy and the goal still sync as before. checks_payable no
-        // longer appears here at all — CRM-CAMPAIGN-DETAILS-1A moved it into the
-        // fill-never-overwrite rule with the other four.
-        expect(block).toContain('start_date: fi.start_date');
-        expect(block).not.toContain('checks_payable: fi.checks_payable_to');
-        expect(block).toContain('bundle_goal: fi.bundle_goal');
-        // And the INV-A closed-campaign boundary above it still stands.
-        expect(block).toContain('latestIsClosed');
+        // The blob itself is still saved on the organization, and the response is unchanged.
+        expect(src).toContain('fundraiser_info: body.fundraiser_info !== undefined ? body.fundraiser_info : undefined');
+        expect(src).toContain('return NextResponse.json({ success: true, newId: orgId });');
     });
 });
 
