@@ -316,6 +316,154 @@ describe('1. the Bundles list switches never erase price or any unrelated field'
 });
 
 // ===========================================================================
+// 1A. Intentional clearing still works through the real route (LEGACY-WRITER-GUARDS-1A)
+// ===========================================================================
+// Callers traced on 64707f9:
+//   * components/BundleEditor.tsx PUTs its whole react-hook-form state. An emptied Selling Price
+//     input sends price: '' ; an emptied cutoff date input sends order_cutoff_date: '' ; the
+//     "-- No Catalog --" option sends catalog_id: '' ; "Remove image" sends image_url: ''. Typed
+//     numbers arrive as strings ("0", "130.50"). The two flags arrive as real booleans.
+//   * app/bundles/page.tsx (Bundles list switches) PUTs exactly one boolean flag.
+//   * No screen sends null or a numeric price. Both are still part of the API contract
+//     (lib/bundleUpdate.ts) and are pinned here so a future caller gets the same answer.
+describe('1A. the real route still clears what a caller deliberately clears, and nothing else', () => {
+    /** Run one PUT and return the bundle row before and after. */
+    const putAndDiff = async (body: unknown, seedOver: Row = {}) => {
+        const db = makeDb(bundleSeed(seedOver));
+        const before = deepCopy(db.store.bundles[0]);
+        const res = await putBundle(body);
+        return { db, res, before, after: db.store.bundles[0] };
+    };
+    /** Every column except `changed` is exactly what it was. */
+    const onlyChanged = (before: Row, after: Row, changed: string[]) => {
+        const restored = { ...after };
+        for (const k of changed) restored[k] = before[k];
+        expect(restored).toEqual(before);
+    };
+
+    // -- the editor's own blank values (the real UI path) ----------------------------------
+    it.each([
+        ['price', 'emptied Selling Price input'],
+        ['order_cutoff_date', 'emptied cutoff date input'],
+        ['catalog_id', '"-- No Catalog --" option'],
+        ['image_url', 'Remove image'],
+    ])("the editor's blank %s ('' from the %s) clears that column to NULL and touches nothing else", async (key) => {
+        const { res, before, after, db } = await putAndDiff({ [key]: '' });
+        expect(res.status).toBe(200);
+        expect(after[key]).toBeNull();
+        onlyChanged(before, after, [key]);
+        expect(db.store.bundleContents).toHaveLength(2);
+    });
+
+    it('clearing the catalog needs no catalog lookup (nothing to verify), so it cannot be refused as foreign', async () => {
+        const { res, after, db } = await putAndDiff({ catalog_id: '' });
+        expect(res.status).toBe(200);
+        expect(after.catalog_id).toBeNull();
+        expect(db.log).not.toContain('catalog.findFirst');
+    });
+
+    it('a full editor save that clears price, cutoff and catalog at once writes all three as NULL and keeps the rest', async () => {
+        const { res, before, after } = await putAndDiff({
+            name: before0().name, sku: before0().sku, description: before0().description,
+            serving_tier: 'serves_5', catalog_id: '', image_url: before0().image_url, price: '',
+            stock_on_hand: 12, is_active: true, show_on_storefront: false, order_cutoff_date: '',
+        });
+        expect(res.status).toBe(200);
+        expect(after).toMatchObject({ price: null, order_cutoff_date: null, catalog_id: null });
+        onlyChanged(before, after, ['price', 'order_cutoff_date', 'catalog_id']);
+    });
+
+    // -- explicit null (API contract; no screen sends it) -------------------------------------
+    it.each(['price', 'order_cutoff_date', 'catalog_id', 'image_url', 'description'])(
+        'explicit null for the nullable %s clears it to NULL and touches nothing else', async (key) => {
+            const { res, before, after } = await putAndDiff({ [key]: null });
+            expect(res.status).toBe(200);
+            expect(after[key]).toBeNull();
+            onlyChanged(before, after, [key]);
+        });
+
+    it.each(['name', 'sku', 'serving_tier', 'is_active', 'show_on_storefront'])(
+        'explicit null for the required %s is refused with 400 and nothing is written', async (key) => {
+            const db = makeDb(bundleSeed());
+            const before = fingerprint(db.store);
+            expect((await putBundle({ [key]: null })).status).toBe(400);
+            expect(fingerprint(db.store)).toBe(before);
+        });
+
+    it('whitespace-only is blank for price, cutoff and catalog (cleared), exactly like the empty string', async () => {
+        const { res, before, after } = await putAndDiff({ price: '  ', order_cutoff_date: ' ', catalog_id: '   ' });
+        expect(res.status).toBe(200);
+        expect(after).toMatchObject({ price: null, order_cutoff_date: null, catalog_id: null });
+        onlyChanged(before, after, ['price', 'order_cutoff_date', 'catalog_id']);
+    });
+
+    it("an empty description is stored as empty text, not NULL — unchanged from 118a5e0's data.description", async () => {
+        const { res, before, after } = await putAndDiff({ description: '' });
+        expect(res.status).toBe(200);
+        expect(after.description).toBe('');
+        onlyChanged(before, after, ['description']);
+    });
+
+    // -- explicit false -----------------------------------------------------------------------
+    it('explicit false is written as false, never treated as "omitted" — both flags at once, inside a full editor body', async () => {
+        const { res, before, after } = await putAndDiff({
+            name: before0().name, sku: before0().sku, serving_tier: 'serves_5', catalog_id: CATALOG,
+            image_url: before0().image_url, price: '124.99', is_active: false, show_on_storefront: false,
+            order_cutoff_date: '2026-12-01',
+        }, { is_active: true, show_on_storefront: true });
+        expect(res.status).toBe(200);
+        expect(after.is_active).toBe(false);
+        expect(after.show_on_storefront).toBe(false);
+        // The editor re-sends the price it loaded; the column type rounds it, so compare as numbers.
+        expect(Number(after.price)).toBe(124.99);
+        expect(after.catalog_id).toBe(CATALOG);
+        expect(after.order_cutoff_date).toEqual(new Date('2026-12-01'));
+        expect(after.description).toBe(before.description); // omitted by this body → untouched
+    });
+
+    // -- explicit 0 ---------------------------------------------------------------------------
+    it.each([['"0" (what the editor sends for a typed 0)', '0'], ['"0.00"', '0.00'], ['numeric 0 (API only)', 0]])(
+        'price %s is stored as 0, not NULL — and the order routes still refuse it as unpriced', async (_l, price) => {
+            const { res, before, after } = await putAndDiff({ price });
+            expect(res.status).toBe(200);
+            expect(after.price).toBe(0);
+            onlyChanged(before, after, ['price']);
+            const { buildBundlePriceMap } = await import('@/lib/pricing');
+            const p = (await buildBundlePriceMap(TENANT, [BUNDLE])).get(BUNDLE);
+            // The exact test app/api/public/order/route.ts applies before accepting a line.
+            expect(!p || p <= 0).toBe(true);
+        });
+
+    // -- omission -------------------------------------------------------------------------------
+    it('a body naming one field changes that field only; every omitted column keeps its value', async () => {
+        const { res, before, after } = await putAndDiff({ name: 'Renamed Family Bundle (fixture)' });
+        expect(res.status).toBe(200);
+        expect(after.name).toBe('Renamed Family Bundle (fixture)');
+        onlyChanged(before, after, ['name']);
+        expect(after.price).toBe('124.99');
+        expect(after.order_cutoff_date).toEqual(new Date('2026-12-01T00:00:00.000Z'));
+        expect(after.catalog_id).toBe(CATALOG);
+    });
+
+    it('an empty body is a no-op: 200, and the whole store is byte-identical', async () => {
+        const db = makeDb(bundleSeed());
+        const before = fingerprint(db.store);
+        expect((await putBundle({})).status).toBe(200);
+        expect(fingerprint(db.store)).toBe(before);
+    });
+
+    it('omitting contents leaves the recipes alone; an explicit empty list still removes them (unchanged contract)', async () => {
+        const kept = await putAndDiff({ is_active: false });
+        expect(kept.db.store.bundleContents).toHaveLength(2);
+        const cleared = await putAndDiff({ contents: [] });
+        expect(cleared.res.status).toBe(200);
+        expect(cleared.db.store.bundleContents).toHaveLength(0);
+        onlyChanged(cleared.before, cleared.after, []);
+    });
+});
+const before0 = () => pricedBundle();
+
+// ===========================================================================
 // 2. A bundle that history points at is never hard-deleted — DELETE /api/bundles/[id]
 // ===========================================================================
 const deleteBundle = async () => {
@@ -577,6 +725,55 @@ describe('4. saving an organization profile cannot change any existing campaign'
         expect((await putOrg(ORG, { name: 'x', fundraiser_info: ORG_FORM_INFO })).status).toBe(403);
         expect(cmock.callsTo('customer.update')).toHaveLength(0);
         expect(campaignCalls()).toEqual([]);
+    });
+});
+
+// 4A. LEGACY-WRITER-GUARDS-1A — the form that feeds that route tells the truth about what it saves.
+// No DOM environment in this repo, so the copy is pinned at source (the repo's convention).
+describe('4A. the organization notes form never claims to have changed a campaign', () => {
+    const fsx = require('fs');
+    const pathx = require('path');
+    const src = (rel: string) => fsx.readFileSync(pathx.join(__dirname, '..', rel), 'utf8') as string;
+    const FORM = src('components/crm/FundraiserSetup.tsx');
+    const OVERVIEW = src('components/crm/CustomerOverview.tsx');
+
+    it('the success message says organization notes were saved and that no fundraiser changed', () => {
+        expect(FORM).not.toMatch(/Campaign details saved/i);
+        expect(FORM).toContain(
+            `alert("Organization notes saved. These fill in your documents only; no fundraiser's details were changed.")`);
+    });
+
+    it('the heading and subtitle describe organization notes for documents, and say campaigns are edited elsewhere', () => {
+        expect(FORM).not.toMatch(/>\s*Campaign Details\s*</);
+        expect(FORM).toContain('>Organization Notes for Documents<');
+        expect(FORM).toContain("Saving here does not change a fundraiser&apos;s own details");
+        expect(FORM).toContain('use Edit details on the Fundraisers page');
+        // The legacy organization page wraps the form; its own heading no longer says Campaign Details.
+        expect(OVERVIEW).not.toMatch(/>\s*Campaign Details\s*</);
+        expect(OVERVIEW).toContain('>Organization Notes</h4>');
+    });
+
+    it('there is no Participant Label control, and the stored value is carried through unchanged on save', () => {
+        expect(FORM).not.toMatch(/Participant Label/); // the visible label; code comments say "participant label"
+        expect(FORM).not.toMatch(/participant_label:\s*e\.target\.value/);
+        expect(FORM).not.toMatch(/value=\{fundraiserInfo\.participant_label/);
+        // Still in the saved state, initialised from what the organization already has.
+        expect(FORM).toMatch(/participant_label: customer\.fundraiser_info\?\.participant_label \|\| ''/);
+    });
+
+    it('the goal field is labelled as the goal printed on documents, not as a campaign goal', () => {
+        expect(FORM).not.toMatch(/>\s*Bundle Goal\s*</);
+        expect(FORM).not.toMatch(/Used in progress tracking/);
+        expect(FORM).toContain('>Goal Shown on Documents<');
+        expect(FORM).toContain("It does not change a fundraiser&apos;s goal.");
+        // It still feeds the document placeholder that reads it.
+        expect(src('components/DocumentCenter.tsx')).toMatch(/\{\{GoalAmount\}\}\/g, fundraiserInfo\.bundle_goal/);
+    });
+
+    it('the form still saves only the organization (no new write path): its sole outlet is onSave', () => {
+        // It reads recipes and bundles for the pickers, but never writes to a campaign or customer itself.
+        expect(FORM).not.toMatch(/fetch\(\s*[`'"]\/api\/(campaigns|customers)/);
+        expect(FORM.match(/await onSave\(/g) ?? []).toHaveLength(1);
     });
 });
 

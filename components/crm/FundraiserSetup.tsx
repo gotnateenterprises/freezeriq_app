@@ -28,7 +28,12 @@ export default function FundraiserSetup({ customer, onSave, allowCancel, onCance
         bundle2_recipes: customer.fundraiser_info?.bundle2_recipes || '',
         bundle1_name: customer.fundraiser_info?.bundle1_name || '', // NEW: Store Bundle Name
         bundle2_name: customer.fundraiser_info?.bundle2_name || '', // NEW: Store Bundle Name
-        participant_label: customer.fundraiser_info?.participant_label || '', // NEW: Participant Label
+        // LEGACY-WRITER-GUARDS-1A: no control any more (nothing reads the organisation's copy, and a
+        // campaign's participant label is edited on the campaign). Carried through unchanged so a save
+        // here never drops a value already stored in the organisation's notes.
+        participant_label: customer.fundraiser_info?.participant_label || '',
+        // Feeds the {{GoalAmount}} placeholder of documents generated from these notes. It is NOT
+        // a campaign's goal — campaign goals are edited on the campaign.
         bundle_goal: customer.fundraiser_info?.bundle_goal || DEFAULT_BUNDLE_GOAL,
         // Prices removed
     });
@@ -73,7 +78,9 @@ export default function FundraiserSetup({ customer, onSave, allowCancel, onCance
         try {
             console.log("Saving Fundraiser Info:", fundraiserInfo);
             await onSave(fundraiserInfo);
-            alert("Campaign details saved successfully!");
+            // LEGACY-WRITER-GUARDS-1A: truthful — this saves the organisation's notes only. Since
+            // LEGACY-WRITER-GUARDS-1, PUT /api/customers/[id] writes no campaign.
+            alert("Organization notes saved. These fill in your documents only; no fundraiser's details were changed.");
         } catch (e) {
             console.error("Save failed:", e);
             alert("Failed to save changes.");
@@ -84,8 +91,8 @@ export default function FundraiserSetup({ customer, onSave, allowCancel, onCance
 
     return (
         <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 w-full relative">
-            <h3 className="text-xl font-black text-slate-900 dark:text-white mb-2">Campaign Details</h3>
-            <p className="text-slate-500 mb-6">Enter these details to auto-fill the sales sheet.</p>
+            <h3 className="text-xl font-black text-slate-900 dark:text-white mb-2">Organization Notes for Documents</h3>
+            <p className="text-slate-500 mb-6">Saved on this organization to auto-fill the sales sheet and other documents. Saving here does not change a fundraiser&apos;s own details; to change a live fundraiser, use Edit details on the Fundraisers page.</p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                 <div className="flex gap-2">
@@ -174,7 +181,7 @@ export default function FundraiserSetup({ customer, onSave, allowCancel, onCance
                 </div>
             </div>
 
-            <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Flyer Details / Extra Notes</label>
                     <textarea
@@ -185,21 +192,7 @@ export default function FundraiserSetup({ customer, onSave, allowCancel, onCance
                     />
                 </div>
                 <div>
-                    <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Participant Label (Optional)</label>
-                    <input
-                        type="text"
-                        value={fundraiserInfo.participant_label || ''}
-                        // @ts-ignore
-                        onChange={e => setFundraiserInfo({ ...fundraiserInfo, participant_label: e.target.value })}
-                        className="w-full p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold"
-                        placeholder="e.g. Student Name, Athlete, Scout..."
-                    />
-                    <p className="text-[10px] text-slate-400 mt-1">
-                        If set, customers will be asked &quot;Which [Label] are you supporting?&quot;. Leave blank to disable.
-                    </p>
-                </div>
-                <div>
-                    <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Bundle Goal</label>
+                    <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Goal Shown on Documents</label>
                     <input
                         type="number"
                         min={1}
@@ -209,7 +202,7 @@ export default function FundraiserSetup({ customer, onSave, allowCancel, onCance
                         placeholder={String(DEFAULT_BUNDLE_GOAL)}
                     />
                     <p className="text-[10px] text-slate-400 mt-1">
-                        Target number of bundles to sell. Used in progress tracking &amp; emails.
+                        Printed on documents made from these notes. It does not change a fundraiser&apos;s goal.
                     </p>
                 </div>
             </div>
