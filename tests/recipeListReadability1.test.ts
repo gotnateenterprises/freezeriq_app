@@ -39,8 +39,10 @@ describe('RECIPE-LIST-READABILITY-1 · column layout', () => {
         expect(m.split(NEW_MD).length - 1).toBe(4);
         expect(m.split(NEW_SM).length - 1).toBe(4);
         // The old fixed Category/Yield/Cost widths are gone.
-        expect(m).not.toContain('md:grid-cols-[24px_1fr_140px_90px_80px_32px]');
-        expect(SRC).not.toContain('140px_90px_80px');
+        // Built from parts so Tailwind (which also scans tests/) does not emit the old rule into the CSS.
+        const OLD_MD = ['md:grid-cols-[24px', '1fr', '140px', '90px', '80px', '32px]'].join('_');
+        expect(m).not.toContain(OLD_MD);
+        expect(SRC).not.toContain(['140px', '90px', '80px'].join('_'));
     });
 
     it('Tailwind can see the template: it is a complete literal class string in the source', () => {
