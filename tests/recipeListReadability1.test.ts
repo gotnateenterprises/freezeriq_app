@@ -29,11 +29,11 @@ const recipes = [
 const render = () => renderToStaticMarkup(createElement(RecipeList, { recipes, selectedId: 'r2', onSelect: () => undefined }));
 const SRC = fs.readFileSync(path.join(__dirname, '..', 'components/recipes/RecipeList.tsx'), 'utf8');
 
-const NEW_MD = 'md:grid-cols-[24px_minmax(0,1fr)_minmax(0,0.5fr)_44px_64px_32px]';
-const NEW_SM = 'grid-cols-[24px_minmax(0,1fr)_64px_32px]';
+const NEW_MD = 'md:grid-cols-[20px_minmax(0,1fr)_minmax(0,0.45fr)_44px_60px_24px]';
+const NEW_SM = 'grid-cols-[20px_minmax(0,1fr)_60px_24px]';
 
 describe('RECIPE-LIST-READABILITY-1 · column layout', () => {
-    it('header and every row use the same rebalanced template (name dominant, category half its share, narrow yield, compact cost)', () => {
+    it('header and every row use the same rebalanced template (name dominant, category 0.45 of its share, narrow yield, compact cost)', () => {
         const m = render();
         // 1 header + 3 rows.
         expect(m.split(NEW_MD).length - 1).toBe(4);
@@ -44,7 +44,7 @@ describe('RECIPE-LIST-READABILITY-1 · column layout', () => {
     });
 
     it('Tailwind can see the template: it is a complete literal class string in the source', () => {
-        expect(SRC).toContain(`const COLUMNS = '${NEW_SM} ${NEW_MD}';`);
+        expect(SRC).toContain(`const COLUMNS = '${NEW_SM} ${NEW_MD} gap-1.5';`);
     });
 
     it('Category and Yield are still hidden below md (no horizontal scroll on small screens)', () => {

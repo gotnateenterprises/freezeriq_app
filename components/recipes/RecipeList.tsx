@@ -3,9 +3,9 @@ import { DraggableRecipe } from '@/components/DraggableComponents';
 import { Printer } from 'lucide-react';
 
 // RECIPE-LIST-READABILITY-1: the recipe name is the dominant column. Category is a shrinking share
-// (half the name's width); Yield is a narrow number; Cost is compact. Header and rows share this one
+// (0.45 of the name's width); Yield is a narrow number; Cost is compact. Header and rows share this one
 // template so they can never drift apart. Category and Yield stay hidden below md, as before.
-const COLUMNS = 'grid-cols-[24px_minmax(0,1fr)_64px_32px] md:grid-cols-[24px_minmax(0,1fr)_minmax(0,0.5fr)_44px_64px_32px]';
+const COLUMNS = 'grid-cols-[20px_minmax(0,1fr)_60px_24px] md:grid-cols-[20px_minmax(0,1fr)_minmax(0,0.45fr)_44px_60px_24px] gap-1.5';
 
 export function RecipeList({
     recipes, selectedId, onSelect, onPrint,
@@ -15,7 +15,7 @@ export function RecipeList({
     return (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
             {/* Header — Category/Yield columns hidden on small screens to prevent horizontal scroll */}
-            <div className={`grid ${COLUMNS} gap-2 border-b border-slate-200 px-3 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800`}>
+            <div className={`grid ${COLUMNS} border-b border-slate-200 px-3 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800`}>
                 <span /><span>Recipe</span>
                 <span className="hidden md:block">Category</span>
                 <span className="hidden md:block text-center">Yield</span>
@@ -32,7 +32,7 @@ export function RecipeList({
                     <DraggableRecipe key={r.id} id={r.id}>
                         {({ attributes, listeners }) => (
                             <div
-                                className={`grid w-full ${COLUMNS} items-center gap-2 border-b border-slate-100 px-3 py-2.5 last:border-b-0 dark:border-slate-800
+                                className={`grid w-full ${COLUMNS} items-center border-b border-slate-100 px-3 py-2.5 last:border-b-0 dark:border-slate-800
                                     ${selectedId === r.id ? 'bg-indigo-50 dark:bg-indigo-950' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                             >
                                 <span {...attributes} {...listeners} className="cursor-grab text-slate-300" title="Drag to a category">⠿</span>
