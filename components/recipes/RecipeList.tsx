@@ -2,6 +2,11 @@
 import { DraggableRecipe } from '@/components/DraggableComponents';
 import { Printer } from 'lucide-react';
 
+// RECIPE-LIST-READABILITY-1: the recipe name is the dominant column. Category is a shrinking share
+// (half the name's width); Yield is a narrow number; Cost is compact. Header and rows share this one
+// template so they can never drift apart. Category and Yield stay hidden below md, as before.
+const COLUMNS = 'grid-cols-[24px_minmax(0,1fr)_64px_32px] md:grid-cols-[24px_minmax(0,1fr)_minmax(0,0.5fr)_44px_64px_32px]';
+
 export function RecipeList({
     recipes, selectedId, onSelect, onPrint,
 }: {
@@ -10,10 +15,10 @@ export function RecipeList({
     return (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
             {/* Header — Category/Yield columns hidden on small screens to prevent horizontal scroll */}
-            <div className="grid grid-cols-[24px_1fr_80px_32px] md:grid-cols-[24px_1fr_140px_90px_80px_32px] gap-2 border-b border-slate-200 px-3 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800">
+            <div className={`grid ${COLUMNS} gap-2 border-b border-slate-200 px-3 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800`}>
                 <span /><span>Recipe</span>
                 <span className="hidden md:block">Category</span>
-                <span className="hidden md:block">Yield</span>
+                <span className="hidden md:block text-center">Yield</span>
                 <span className="text-right">Cost</span>
                 <span />
             </div>
@@ -22,27 +27,33 @@ export function RecipeList({
             )}
             {recipes.map(r => {
                 const cost = r.calculated_cost; // null ⇒ user can't view financials
+                const categoryText = (r.categories ?? []).map((c: any) => c.name).join(' · ') || '—';
                 return (
                     <DraggableRecipe key={r.id} id={r.id}>
                         {({ attributes, listeners }) => (
                             <div
-                                className={`grid w-full grid-cols-[24px_1fr_80px_32px] md:grid-cols-[24px_1fr_140px_90px_80px_32px] items-center gap-2 border-b border-slate-100 px-3 py-2.5 last:border-b-0 dark:border-slate-800
+                                className={`grid w-full ${COLUMNS} items-center gap-2 border-b border-slate-100 px-3 py-2.5 last:border-b-0 dark:border-slate-800
                                     ${selectedId === r.id ? 'bg-indigo-50 dark:bg-indigo-950' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                             >
                                 <span {...attributes} {...listeners} className="cursor-grab text-slate-300" title="Drag to a category">⠿</span>
                                 {/* Clickable recipe name area */}
                                 <button
                                     onClick={() => onSelect(r.id)}
+                                    title={r.name}
                                     className="min-w-0 truncate text-left text-sm font-semibold text-slate-900 dark:text-white"
                                 >
                                     {r.name}
                                     {r.matchReason && <span className="ml-2 text-[10px] font-medium text-amber-600">{r.matchReason}</span>}
                                 </button>
-                                <span className="hidden md:block truncate text-xs text-slate-500">
-                                    {(r.categories ?? []).map((c: any) => c.name).join(' · ') || '—'}
+                                <span className="hidden md:block min-w-0 truncate text-xs text-slate-500" title={categoryText}>
+                                    {categoryText}
                                 </span>
-                                <span className="hidden md:block whitespace-nowrap text-xs tabular-nums text-slate-500">
-                                    {r.base_yield_qty ? `${r.base_yield_qty} ${r.base_yield_unit ?? ''}` : '—'}
+                                {/* The number only; the unit (e.g. "servings") is in the hover title, not repeated on every row. */}
+                                <span
+                                    className="hidden md:block whitespace-nowrap text-center text-xs tabular-nums text-slate-500"
+                                    title={r.base_yield_qty ? `${r.base_yield_qty} ${r.base_yield_unit ?? ''}`.trim() : undefined}
+                                >
+                                    {r.base_yield_qty ? `${r.base_yield_qty}` : '—'}
                                 </span>
                                 <span className="text-right text-xs font-bold tabular-nums text-emerald-600">
                                     {cost != null ? `$${Number(cost).toFixed(2)}` : ''}
