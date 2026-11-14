@@ -22,37 +22,50 @@ export default function RecipePageClient({ initialRecipes, categories }: { initi
 
         setIsGenerating(true);
         let count = 0;
+        let updated = 0;
+        let failed = 0;
+        let firstError = '';
+        let stoppedEarly = '';
 
         for (const recipe of recipes) {
             try {
-                // 1. Grab Image
+                // RECIPE-AI-IMAGE-MODEL-1: the server generates the photo AND saves only image_url on
+                // this recipe (tenant-checked). The whole list row is no longer PUT back, which reset
+                // yield to 1 and dropped category tags. A failure saves nothing, so the recipe keeps
+                // its current photo.
                 const grabRes = await fetch('/api/recipes/grab-image', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: recipe.name })
+                    body: JSON.stringify({ recipeId: recipe.id, name: recipe.name })
                 });
-                const grabData = await grabRes.json();
+                const grabData = await grabRes.json().catch(() => ({}));
 
-                if (grabData.url) {
-                    // 2. Save Image URL to Recipe
-                    await fetch(`/api/recipes/${recipe.id}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            ...recipe,
-                            image_url: grabData.url
-                        })
-                    });
+                if (grabRes.ok && grabData.saved) {
+                    updated++;
+                } else {
+                    failed++;
+                    if (!firstError) firstError = grabData.error || `HTTP ${grabRes.status}`;
+                    // Out of credits, rate-limited, no key or signed out: every remaining recipe would
+                    // fail the same way, so stop instead of making more billable calls.
+                    if (grabRes.status === 401 || ['AI_QUOTA', 'AI_KEY_MISSING'].includes(grabData.code)) {
+                        stoppedEarly = grabData.error || 'The photo service is unavailable.';
+                    }
                 }
             } catch (e) {
                 console.error(`Failed to grab image for ${recipe.name}`, e);
+                failed++;
+                if (!firstError) firstError = 'Network error';
             }
             count++;
             setBatchProgress(Math.round((count / recipes.length) * 100));
+            if (stoppedEarly) break;
         }
 
         setIsGenerating(false);
-        alert(`Successfully processed ${count} recipes!`);
+        const lines = [`Updated ${updated} of ${recipes.length} recipe photos.`];
+        if (failed > 0) lines.push(`${failed} failed and kept their current photo. First error: ${firstError}`);
+        if (stoppedEarly) lines.push(`Stopped early after ${count} recipes: ${stoppedEarly}`);
+        alert(lines.join('\n'));
         window.location.reload();
     };
 
