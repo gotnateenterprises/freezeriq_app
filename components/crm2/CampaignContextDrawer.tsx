@@ -34,6 +34,7 @@ import { useDialogFocus } from './useDialogFocus';
 import { CampaignHealthBadge } from './CampaignHealthBadge';
 import { StageChip } from './StageChip';
 import { BundleSelectionStatusCard } from './BundleSelectionStatusCard';
+import { CoordinatorSetupEmailCard } from './CoordinatorSetupEmailCard';
 import type { PriorityListCampaign } from './CampaignPriorityList';
 import type { CampaignTriage } from '@/lib/growth/nextAction';
 import { formatBundleProgress } from '@/lib/growth/campaignSections';
@@ -58,6 +59,7 @@ export function CampaignContextDrawer({
     now,
     onClose,
     onCloseout,
+    onCoordinatorEmailChanged,
 }: {
     /** Non-null opens the drawer. Carries the triage the list already derived. */
     campaign: (PriorityListCampaign & { triage: CampaignTriage }) | null;
@@ -65,6 +67,8 @@ export function CampaignContextDrawer({
     onClose: () => void;
     /** The page's existing closeout modal opener. */
     onCloseout: (c: PriorityListCampaign) => void;
+    /** COORDINATOR-EMAIL-REOPEN-1 — lets the page refresh the list after a send attempt. */
+    onCoordinatorEmailChanged?: () => void;
 }) {
     const open = campaign !== null;
 
@@ -201,6 +205,20 @@ export function CampaignContextDrawer({
                                 </button>
                             )}
                         </div>
+                    )}
+
+                    {/* ── COORDINATOR-EMAIL-REOPEN-1: the coordinator setup email, reachable
+                        after the launch dialog has closed. Review & send go through the SAME
+                        route the launch dialog uses; its claim is the one-invitation guard.
+                        Not offered on a closed (completed / awaiting-payment) fundraiser. */}
+                    {!c.is_placeholder && sections.lifecycle !== 'completed' && (
+                        <CoordinatorSetupEmailCard
+                            key={c.id}
+                            campaignId={c.id}
+                            portalToken={c.portal_token ?? null}
+                            knownSentAt={c.coordinator_invite_sent_at ?? null}
+                            onChanged={onCoordinatorEmailChanged}
+                        />
                     )}
 
                     {/* ── Why (GE-3 reasons) ─────────────────────────────── */}

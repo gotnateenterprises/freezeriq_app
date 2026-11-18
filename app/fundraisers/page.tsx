@@ -657,6 +657,7 @@ export default function FundraisersPage() {
             now={triageNow}
             onClose={() => setDetailCampaign(null)}
             onCloseout={(c) => { setDetailCampaign(null); openCloseoutModal(c as Fundraiser); }}
+            onCoordinatorEmailChanged={loadCampaigns}
         />
 
         {/* ── CRM-CAMPAIGN-DETAILS-1: the tenant's Edit details dialog. Writes the
