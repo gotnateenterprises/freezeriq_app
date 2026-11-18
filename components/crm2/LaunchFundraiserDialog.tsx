@@ -13,6 +13,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Rocket, Copy, Check, Lock, UserPlus, Mail, Send, X, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { AWAITING_COORDINATOR_SETUP_LABEL } from '@/lib/campaignDisplayStage';
+// LAUNCH-CONFIRMED-TIME-1: the same message and length bound the launch route enforces.
+// Both modules are pure (no server imports), so they are safe in this client component.
+import { CONFIRMED_TIME_REQUIRED_ERROR } from '@/lib/fundraiserLaunch';
+import { DELIVERY_TIME_MAX } from '@/lib/coordinatorSetup';
 
 interface CoordinatorCandidate {
     orgContactId: string;
@@ -88,6 +92,9 @@ export function LaunchFundraiserDialog({
 
     const [name, setName] = useState('');
     const [endDate, setEndDate] = useState('');
+    // LAUNCH-CONFIRMED-TIME-1: the confirmed pickup/delivery time, required at launch so the
+    // campaign is created with date AND time (the coordinator invitation needs both).
+    const [deliveryTime, setDeliveryTime] = useState('');
     const [orgContactId, setOrgContactId] = useState('');
     const [orgShare, setOrgShare] = useState('20');
     const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -150,6 +157,7 @@ export function LaunchFundraiserDialog({
                 body: JSON.stringify({
                     name,
                     endDate,
+                    deliveryTime,
                     orgContactId,
                     orgSharePercent: orgShare,
                     candidateFamilyIds: [...picked],
@@ -171,7 +179,7 @@ export function LaunchFundraiserDialog({
         } finally {
             setBusy(false);
         }
-    }, [busy, opportunityId, name, endDate, orgContactId, orgShare, picked, selectionLimit, onLaunched]);
+    }, [busy, opportunityId, name, endDate, deliveryTime, orgContactId, orgShare, picked, selectionLimit, onLaunched]);
 
     /**
      * FR-ACCEPTANCE-2A — save a new organization contact, then refresh the picker.
@@ -341,7 +349,7 @@ export function LaunchFundraiserDialog({
 
     const familyCount = picked.size;
     const canSubmit =
-        !busy && !!name.trim() && !!endDate && !!orgContactId && familyCount >= 1
+        !busy && !!name.trim() && !!deliveryTime.trim() && !!endDate && !!orgContactId && familyCount >= 1
         && selectionLimit >= 1 && selectionLimit <= familyCount;
 
     /**
@@ -358,6 +366,7 @@ export function LaunchFundraiserDialog({
      */
     const blockingReason = ((): string | null => {
         if (!name.trim()) return 'Enter a fundraiser name.';
+        if (!deliveryTime.trim()) return CONFIRMED_TIME_REQUIRED_ERROR;
         if (!endDate) return 'Choose the last day supporters may place orders.';
         if (!orgContactId) {
             return ctx && ctx.coordinatorCandidates.length === 0
@@ -522,6 +531,20 @@ export function LaunchFundraiserDialog({
                                 <input readOnly value={ctx.opportunity.confirmedDeliveryDate ?? ''} className={`${inputCls} bg-slate-50 dark:bg-slate-800/60`} />
                                 <p className="mt-1 text-[11px] text-slate-400">
                                     Confirmed with the organization. Change it from the lead, not here.
+                                </p>
+                            </div>
+
+                            <div>
+                                <label htmlFor="lf-time" className="mb-1 block text-xs font-bold text-slate-500">
+                                    Confirmed pickup/delivery time
+                                </label>
+                                <input id="lf-time" className={inputCls} value={deliveryTime}
+                                    required
+                                    maxLength={DELIVERY_TIME_MAX}
+                                    placeholder="e.g. 4:00 PM"
+                                    onChange={(e) => setDeliveryTime(e.target.value)} />
+                                <p className="mt-1 text-[11px] text-slate-400">
+                                    Required. You can still change it later from Edit details.
                                 </p>
                             </div>
 

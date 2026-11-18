@@ -12,7 +12,8 @@
  * endpoint.
  *
  * WHAT IT WRITES, ALL IN ONE TRANSACTION
- *   1. the campaign               (delivery_date from the opportunity, required end_date,
+ *   1. the campaign               (delivery_date from the opportunity, required delivery_time
+ *                                  and end_date,
  *                                  org share, pending selection state, minted credential)
  *   2. the candidate bundle pool  (one row per family, Serves-5 canonical tier only)
  *   3. the primary coordinator    (campaign -> organization-contact relationship)
@@ -36,6 +37,7 @@ import {
     checkCampaignName,
     checkCandidateFamilies,
     checkOpportunityLaunchable,
+    checkConfirmedDeliveryTime,
     checkOrderDeadline,
     checkPrimaryCoordinator,
     checkSelectionLimit,
@@ -231,6 +233,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         });
         if (isRefusal(deadline)) return refuse(deadline);
 
+        // LAUNCH-CONFIRMED-TIME-1: the confirmed pickup/delivery TIME is required too, so the
+        // campaign is born with both halves of its fulfilment slot and the coordinator invitation
+        // passes its readiness rule immediately — no trip through Edit details.
+        const confirmedTime = checkConfirmedDeliveryTime(body?.deliveryTime);
+        if (isRefusal(confirmedTime)) return refuse(confirmedTime);
+
         const eligible = await resolveEligibleBundleFamilies(businessId);
         const candidates = checkCandidateFamilies({
             candidateFamilyIds: body?.candidateFamilyIds,
@@ -301,6 +309,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
                         status: LAUNCHED_CAMPAIGN_STATUS,
                         // PART L: the confirmed date is the DELIVERY day. Never start_date.
                         delivery_date: new Date(`${launchable.confirmedDeliveryDate}T00:00:00.000Z`),
+                        // LAUNCH-CONFIRMED-TIME-1: the confirmed time, validated above.
+                        delivery_time: confirmedTime.deliveryTime,
                         end_date: new Date(`${deadline.endDate}T00:00:00.000Z`),
                         // portal_token has no schema default on purpose; omitting it
                         // would write NULL and produce a campaign with no coordinator access.

@@ -29,6 +29,8 @@ import {
     checkSelectionLimit,
 } from '@/lib/fundraiserLaunch';
 import { campaignDisplayStage, AWAITING_COORDINATOR_SETUP_LABEL } from '@/lib/campaignDisplayStage';
+import { checkConfirmedDeliveryTime, CONFIRMED_TIME_REQUIRED_ERROR } from '@/lib/fundraiserLaunch';
+import { checkCoordinatorSetupReadiness, decideOperationalDetailsChange } from '@/lib/campaignOperationalDetails';
 
 jest.mock('@/lib/db', () => ({ get prisma() { return (global as any).__frFlow2Prisma; } }));
 jest.mock('@/auth', () => ({ auth: jest.fn(async () => (global as any).__frFlow2Session) }));
@@ -86,6 +88,8 @@ function launchMock(overrides: Record<string, any> = {}) {
 const validBody = (extra: Record<string, unknown> = {}) => ({
     name: 'Autumn Fundraiser',
     endDate: '2026-10-10',
+    // LAUNCH-CONFIRMED-TIME-1 (revised pin): launch now requires the confirmed pickup/delivery time.
+    deliveryTime: '4:00 PM',
     orgContactId: REL_A1,
     candidateFamilyIds: ['fam-1', 'fam-2'],
     selectionLimit: 2,
@@ -875,5 +879,109 @@ describe('the campaign-coordinator schema and migration', () => {
         const block = s.slice(s.indexOf('model PasswordResetToken'));
         expect(block.slice(0, block.indexOf('}') + 1)).toMatch(/model PasswordResetToken \{/);
         expect(s.indexOf('model PasswordResetToken')).toBeLessThan(s.indexOf('model FundraiserCampaignCoordinator'));
+    });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════ */
+/* LAUNCH-CONFIRMED-TIME-1 — a fundraiser is launched with its confirmed date AND time, so the
+   coordinator invitation passes its date/time readiness rule without a trip through Edit details. */
+describe('LAUNCH-CONFIRMED-TIME-1 · launch requires and writes the confirmed pickup/delivery time', () => {
+    it('A: a confirmed date with NO time cannot launch — 400 with the tenant message, nothing written', async () => {
+        for (const deliveryTime of [undefined, null, '', '   ']) {
+            mock = launchMock();
+            const res = await post(validBody({ deliveryTime }));
+            expect(res.status).toBe(400);
+            expect(res.body.code).toBe('delivery_time_required');
+            expect(res.body.error).toBe('Enter the confirmed pickup/delivery time before starting this fundraiser.');
+            expect(mock.callsTo('fundraiserCampaign.create')).toHaveLength(0);
+            expect(mock.callsTo('fundraiserOpportunity.updateMany')).toHaveLength(0);
+            expect(mock.callsTo('fundraiserCampaignCoordinator.create')).toHaveLength(0);
+        }
+    });
+
+    it('A: an unusable time is refused by the coordinator form\'s own rule (no new definition of "time")', async () => {
+        for (const [deliveryTime, code] of [
+            [42, 'delivery_time_invalid'],
+            ['x'.repeat(81), 'delivery_time_too_long'],
+            ['<b>4 PM</b>', 'delivery_time_unsafe'],
+            ['4:00‮PM', 'delivery_time_unsafe'],
+        ] as const) {
+            mock = launchMock();
+            const res = await post(validBody({ deliveryTime }));
+            expect(res.status).toBe(400);
+            expect(res.body.code).toBe(code);
+            expect(mock.callsTo('fundraiserCampaign.create')).toHaveLength(0);
+        }
+    });
+
+    it('B + C: a confirmed date AND time launches, and the campaign receives exactly that date and time', async () => {
+        const res = await post(validBody({ deliveryTime: '  5:30 PM  ' }));
+        expect(res.status).toBe(201);
+        const data = mock.firstCall('fundraiserCampaign.create')!.args.data;
+        expect(new Date(data.delivery_date).toISOString().slice(0, 10)).toBe(DELIVERY);
+        expect(data.delivery_time).toBe('5:30 PM'); // trimmed, otherwise exactly as entered
+    });
+
+    it('B: free-text times the rest of the product accepts are accepted here too', async () => {
+        for (const t of ['4:00 PM', '3–5 PM', '4:45 p.m.', 'Noon']) {
+            mock = launchMock();
+            const res = await post(validBody({ deliveryTime: t }));
+            expect(res.status).toBe(201);
+            expect(mock.firstCall('fundraiserCampaign.create')!.args.data.delivery_time).toBe(t);
+        }
+    });
+
+    it('D: the campaign launch creates passes the coordinator-email readiness rule immediately', async () => {
+        await post(validBody({ deliveryTime: '4:00 PM' }));
+        const data = mock.firstCall('fundraiserCampaign.create')!.args.data;
+        expect(checkCoordinatorSetupReadiness({ delivery_date: data.delivery_date, delivery_time: data.delivery_time }))
+            .toEqual({ ready: true });
+        // ...and the readiness rule itself was not weakened: a campaign without a time still fails it.
+        expect(checkCoordinatorSetupReadiness({ delivery_date: data.delivery_date, delivery_time: null }).ready).toBe(false);
+    });
+
+    it('E: after launch, Edit details can still change (and clear) the date and the time', () => {
+        const launched = {
+            delivery_date: new Date(`${DELIVERY}T00:00:00.000Z`), delivery_time: '4:00 PM',
+            end_date: new Date('2026-10-10T00:00:00.000Z'), pickup_location: null, checks_payable: null,
+        };
+        expect(decideOperationalDetailsChange({ requested: { delivery_time: '6:00 PM' }, campaign: launched, campaignClosed: false }))
+            .toEqual({ change: true, data: { delivery_time: '6:00 PM' } });
+        const moved = decideOperationalDetailsChange({ requested: { delivery_date: '2026-10-24' }, campaign: launched, campaignClosed: false }) as any;
+        expect(moved.change).toBe(true);
+        expect(new Date(moved.data.delivery_date).toISOString().slice(0, 10)).toBe('2026-10-24');
+        expect(decideOperationalDetailsChange({ requested: { delivery_time: '' }, campaign: launched, campaignClosed: false }))
+            .toEqual({ change: true, data: { delivery_time: null } });
+    });
+
+    it('F: the coordinator invitation route — readiness gate and one-send claim — is untouched by this task', () => {
+        const route = fs.readFileSync(path.join(ROOT, 'app/api/campaigns/[id]/coordinator-email/route.ts'), 'utf8');
+        expect(route).toContain('checkCoordinatorSetupReadiness');
+        expect(route).toMatch(/where: \{ campaign_id: id, setup_email_claimed_at: null, setup_email_sent_at: null \}/);
+        expect(route).toMatch(/data: \{ setup_email_claimed_at: new Date\(\) \}/);
+        expect(route).toMatch(/if \(claim\.count === 0\)/);
+    });
+
+    it('the helper: required, trimmed, bounded by the shared rule, and carries the exact message', () => {
+        expect(checkConfirmedDeliveryTime(' 4:00 PM ')).toEqual({ ok: true, deliveryTime: '4:00 PM' });
+        expect(checkConfirmedDeliveryTime('')).toEqual({
+            ok: false, code: 'delivery_time_required', error: CONFIRMED_TIME_REQUIRED_ERROR, status: 400,
+        });
+        expect(CONFIRMED_TIME_REQUIRED_ERROR).toBe('Enter the confirmed pickup/delivery time before starting this fundraiser.');
+        expect((checkConfirmedDeliveryTime('x'.repeat(80)) as any).ok).toBe(true);
+        expect((checkConfirmedDeliveryTime('x'.repeat(81)) as any).ok).toBe(false);
+    });
+
+    it('the launch dialog collects the time next to the locked date, gates the button on it, and sends it', () => {
+        const dlg = fs.readFileSync(path.join(ROOT, 'components/crm2/LaunchFundraiserDialog.tsx'), 'utf8');
+        expect(dlg).toContain('Confirmed pickup/delivery time');
+        expect(dlg).toMatch(/<input id="lf-time"[\s\S]{0,200}required[\s\S]{0,80}maxLength=\{DELIVERY_TIME_MAX\}/);
+        expect(dlg).toContain('!!deliveryTime.trim()');
+        expect(dlg).toContain('if (!deliveryTime.trim()) return CONFIRMED_TIME_REQUIRED_ERROR;');
+        // The POST body itself (not the hook's dependency list, which names the same variables).
+        expect(dlg).toMatch(/body: JSON\.stringify\(\{\s*name,\s*endDate,\s*deliveryTime,\s*orgContactId,/);
+        // The confirmed DATE stays locked to the lead; post-launch edits stay in Edit details.
+        expect(dlg).toContain('Change it from the lead, not here.');
+        expect(dlg).toContain('You can still change it later from Edit details.');
     });
 });

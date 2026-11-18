@@ -810,6 +810,8 @@ describe('GUARD 4A · POST /api/opportunities/[id]/launch — at most one campai
         const { POST } = await import('@/app/api/opportunities/[id]/launch/route');
         const res = await POST(jsonReq(`http://localhost/api/opportunities/${OPP}/launch`, 'POST', {
             name: 'Lincoln PTA Fall Fundraiser', endDate: '2026-12-01', orgContactId: 'oc-1', candidateFamilyIds: ['fam1'], selectionLimit: 1,
+            // LAUNCH-CONFIRMED-TIME-1 (revised pin): launch now requires the confirmed time.
+            deliveryTime: '4:00 PM',
         }), ctx(OPP));
         return { status: res.status, body: await res.json() };
     };

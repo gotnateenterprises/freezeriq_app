@@ -14,6 +14,10 @@
  */
 
 import { calendarDateOfDateOnlyValue, isPlausibleCalendarYear } from '@/lib/tenantTimezone';
+// LAUNCH-CONFIRMED-TIME-1: the one rule for what a delivery/pickup time may be (trimmed free
+// text, bounded, no markup or invisible characters) — the same rule the coordinator's own setup
+// form applies. lib/coordinatorSetup has no imports, so this cannot cycle.
+import { checkDeliveryTime, isSetupRefusal } from '@/lib/coordinatorSetup';
 
 /** The one opportunity status that may become a campaign. */
 export const LAUNCHABLE_OPPORTUNITY_STATUS = 'date_confirmed' as const;
@@ -203,6 +207,36 @@ export function checkOrderDeadline(input: {
     }
 
     return { ok: true, endDate: parsed };
+}
+
+/* ── Confirmed delivery/pickup time ──────────────────────────────────────── */
+
+export const CONFIRMED_TIME_REQUIRED_ERROR =
+    'Enter the confirmed pickup/delivery time before starting this fundraiser.';
+
+/**
+ * LAUNCH-CONFIRMED-TIME-1 — a fundraiser is launched with its confirmed TIME as well as its date.
+ *
+ * Before this, launch wrote delivery_date and never delivery_time, so every newly launched
+ * fundraiser failed the coordinator-invitation readiness rule
+ * (checkCoordinatorSetupReadiness, which requires both) until the tenant found Edit details.
+ * The time has no column on the opportunity, so it is entered in the launch dialog next to the
+ * locked confirmed date and written straight onto the campaign at creation.
+ *
+ * REQUIRED here, unlike in Edit details (where an empty value clears it): a launch without a
+ * time is exactly the state this exists to prevent. Its SHAPE is not redefined: it is the
+ * coordinator setup form's own rule (checkDeliveryTime), so launch, the coordinator form and
+ * the readiness check agree on what counts as a time.
+ */
+export function checkConfirmedDeliveryTime(value: unknown): LaunchOk<{ deliveryTime: string }> | LaunchRefusal {
+    const checked = checkDeliveryTime(value);
+    if (isSetupRefusal(checked)) {
+        return { ok: false, code: checked.code, error: checked.error, status: 400 };
+    }
+    if (!checked.value) {
+        return { ok: false, code: 'delivery_time_required', error: CONFIRMED_TIME_REQUIRED_ERROR, status: 400 };
+    }
+    return { ok: true, deliveryTime: checked.value };
 }
 
 /* ── Coordinator selection count ─────────────────────────────────────────── */
