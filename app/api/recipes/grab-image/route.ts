@@ -7,6 +7,23 @@ import { uploadToS3 } from '@/lib/s3';
 
 export const dynamic = 'force-dynamic';
 
+/** The placeholder a recipe shows when it has no generated photo. */
+const PLACEHOLDER_URL = '/images/food-placeholder.png';
+
+/**
+ * RECIPE-AI-RECOVERY-1 — every "no photo was generated" answer has ONE shape.
+ *
+ * `generated: false` and `source: 'placeholder'` say plainly that this is the fallback, and the
+ * placeholder travels as `fallbackUrl` — deliberately NOT as `url`. RecipeEditor treats any
+ * response carrying `url` as success ("Success! Image detected.") and stores it as the recipe's
+ * photo, so a placeholder sent as `url` is exactly how a provider 404 used to look like a working
+ * generator. `code` is a stable, non-sensitive reason; `error` is a tenant-safe sentence, never the
+ * provider's raw body.
+ */
+function notGenerated(code: string, error: string, status: number) {
+    return NextResponse.json({ generated: false, source: 'placeholder', fallbackUrl: PLACEHOLDER_URL, code, error }, { status });
+}
+
 // Helper to save image from URL
 async function saveImageFromUrl(imageUrl: string): Promise<string> {
     const fallbackPath = '/images/food-placeholder.png';
@@ -111,10 +128,7 @@ export async function POST(req: NextRequest) {
         // 1. Fetch Gemini API Key
         const apiKey = await getGeminiApiKey(businessId || '');
         if (!apiKey) {
-            return NextResponse.json({
-                error: 'Gemini API Key missing. Please go to Settings > AI Content to add your key.',
-                code: 'AI_KEY_MISSING',
-            }, { status: 400 });
+            return notGenerated('AI_KEY_MISSING', 'Gemini API Key missing. Please go to Settings > AI Content to add your key.', 400);
         }
 
         const contextText = (ingredients && ingredients.length > 0)
@@ -132,9 +146,10 @@ export async function POST(req: NextRequest) {
             image = await generateRecipeImage(apiKey, visualPrompt);
         } catch (err: any) {
             if (isRecipeImageError(err)) {
-                console.error(`[GrabImage] Image generation failed (${err.code}):`, err.message);
+                // Model, status and error class only — no key, no prompt, no recipe content.
+                console.error(`[GrabImage] Image generation failed: code=${err.code} model=${err.model ?? 'unknown'} status=${err.httpStatus ?? 'n/a'}`);
                 const status = err.code === 'AI_QUOTA' ? 429 : err.code === 'AI_BLOCKED' ? 422 : 502;
-                return NextResponse.json({ error: err.message, code: err.code }, { status });
+                return notGenerated(err.code, err.message, status);
             }
             throw err;
         }
@@ -144,11 +159,8 @@ export async function POST(req: NextRequest) {
         try {
             url = await uploadToS3(image.bytes, `recipe-ai-gen-${uuidv4()}.${image.extension}`, image.mimeType);
         } catch (uploadErr: any) {
-            console.error(`[GrabImage] Image generated but storage upload failed: ${uploadErr?.message}`);
-            return NextResponse.json({
-                error: 'The photo was generated but could not be stored. Please try again.',
-                code: 'STORAGE_FAILED',
-            }, { status: 502 });
+            console.error(`[GrabImage] Image generated but storage upload failed: ${uploadErr?.name ?? 'Error'}`);
+            return notGenerated('STORAGE_FAILED', 'The photo was generated but could not be stored. Please try again.', 502);
         }
 
         // 4. Auto-Grab only: point the recipe at the new photo (tenant-scoped, image_url only).
@@ -165,13 +177,14 @@ export async function POST(req: NextRequest) {
         console.log(`[GrabImage] Generated with ${image.model} and stored: ${url}`);
         return NextResponse.json({
             url,
+            generated: true,
             source: 'gemini-image',
             model: image.model,
             saved: !!targetRecipeId,
         });
 
     } catch (error: any) {
-        console.error('[GrabImage] Global Error:', error);
-        return NextResponse.json({ error: 'Something went wrong. Please try again.', code: 'INTERNAL' }, { status: 500 });
+        console.error('[GrabImage] Global Error:', error?.name ?? 'Error');
+        return notGenerated('INTERNAL', 'Something went wrong. Please try again.', 500);
     }
 }

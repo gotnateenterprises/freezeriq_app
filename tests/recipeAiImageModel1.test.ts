@@ -241,7 +241,9 @@ describe('route', () => {
             expect(r.status).toBe(http);
             expect(r.body.code).toBe(code);
             expect(r.body.url).toBeUndefined();
-            expect(JSON.stringify(r.body)).not.toContain('food-placeholder');
+            // RECIPE-AI-RECOVERY-1 (revised pin): the placeholder is now reported as the FALLBACK,
+            // never as `url` — RecipeEditor saves any `url` as the photo and says "Success!".
+            expect(r.body).toMatchObject({ generated: false, source: 'placeholder', fallbackUrl: '/images/food-placeholder.png' });
             expect(upload).not.toHaveBeenCalled();
             expect(db.writes).toEqual([]);
             expect(db.recipes[0].image_url).toBe('https://media.example.test/old.png'); // existing photo kept
@@ -254,7 +256,8 @@ describe('route', () => {
         upload.mockRejectedValueOnce(new Error('bucket unreachable'));
         const r = await post({ name: 'Fixture Chili', recipeId: RECIPE });
         expect(r.status).toBe(502);
-        expect(r.body).toEqual({ error: expect.any(String), code: 'STORAGE_FAILED' });
+        // RECIPE-AI-RECOVERY-1 (revised pin): same no-`url` rule, plus the explicit not-generated status.
+        expect(r.body).toEqual({ error: expect.any(String), code: 'STORAGE_FAILED', generated: false, source: 'placeholder', fallbackUrl: '/images/food-placeholder.png' });
         expect(db.writes).toEqual([]);
         expect(db.recipes[0].image_url).toBe('https://media.example.test/old.png');
     });

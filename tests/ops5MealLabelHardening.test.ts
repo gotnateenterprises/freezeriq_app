@@ -236,11 +236,17 @@ describe('2. every live meal-label surface uses the ONE authority', () => {
 
     it('the AI authoring-time classifier is a SEPARATE concept and is untouched', () => {
         const src = read('app/api/recipes/detect-allergens/route.ts');
-        expect(src).toMatch(/ALLERGEN_ALLOWLIST/);
         expect(src).toMatch(/product decision: Dairy not Milk, no Gluten/);
         // It must NOT be rewired to the keyword matcher - it understands
         // compound ingredients that keywords cannot.
         expect(src).not.toMatch(/from ['"]@\/lib\/allergens['"]/);
+        // RECIPE-AI-RECOVERY-1 (revised pin): the allowlist + alias rules moved, unchanged, into
+        // lib/ai/allergenClassification.ts. That module takes ONLY the category list from
+        // lib/allergens — never the keyword matcher.
+        const cls = read('lib/ai/allergenClassification.ts');
+        expect(src).toMatch(/from ['"]@\/lib\/ai\/allergenClassification['"]/);
+        expect(cls).toMatch(/import \{ ALLERGEN_CATEGORIES, type AllergenCategory \} from '@\/lib\/allergens';/);
+        expect(cls).not.toMatch(/detectAllergens|resolveLabelAllergens|allergenKeywords/);
     });
 });
 

@@ -1,41 +1,32 @@
-
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
-import { getGeminiApiKey, callGemini } from '@/lib/ai/gemini';
+import { getGeminiApiKey, callGeminiStructured, isStructuredTextError } from '@/lib/ai/gemini';
+import { ALLERGEN_RESPONSE_SCHEMA, parseAllergenResponse } from '@/lib/ai/allergenClassification';
 
 export const dynamic = 'force-dynamic';
 
-// FreezerIQ confirmed-allergen categories (product decision: Dairy not Milk, no Gluten)
-const ALLERGEN_ALLOWLIST = new Set([
-    'Dairy', 'Eggs', 'Fish', 'Crustacean Shellfish', 'Tree Nuts',
-    'Peanuts', 'Wheat', 'Soy', 'Sesame'
-]);
+// FreezerIQ confirmed-allergen categories (product decision: Dairy not Milk, no Gluten).
+// RECIPE-AI-RECOVERY-1: the allowlist, the alias map and the shape check now live in
+// lib/ai/allergenClassification.ts, unchanged in substance, where they are unit-tested.
 
-function normalizeCategory(raw: string): string | null {
-    const trimmed = raw.trim();
-    // Exact match (case-insensitive)
-    for (const allowed of ALLERGEN_ALLOWLIST) {
-        if (trimmed.toLowerCase() === allowed.toLowerCase()) return allowed;
-    }
-    // Alias mapping — normalizes model output to FreezerIQ categories
-    const aliases: Record<string, string> = {
-        // Dairy derivatives
-        'milk': 'Dairy', 'cream': 'Dairy', 'heavy cream': 'Dairy',
-        'heavy whipping cream': 'Dairy', 'sour cream': 'Dairy',
-        'butter': 'Dairy', 'cheese': 'Dairy', 'yogurt': 'Dairy',
-        'whey': 'Dairy', 'casein': 'Dairy', 'milk powder': 'Dairy',
-        'dry milk': 'Dairy',
-        // Egg variants
-        'egg': 'Eggs',
-        // Shellfish
-        'shellfish': 'Crustacean Shellfish', 'crustacean': 'Crustacean Shellfish',
-        // Nuts
-        'peanut': 'Peanuts', 'tree nut': 'Tree Nuts', 'treenut': 'Tree Nuts',
-        'tree nuts': 'Tree Nuts',
-        // Soy variants
-        'soybeans': 'Soy', 'soybean': 'Soy',
-    };
-    return aliases[trimmed.toLowerCase()] || null;
+/**
+ * RECIPE-AI-RECOVERY-1 — the answer when the AI result cannot be trusted.
+ *
+ * Deliberately NO `allergens` key. RecipeEditor writes `data.allergens` straight into the recipe's
+ * allergen field, so the old fallback ("AI analysis could not be parsed…" sent AS `allergens`) could
+ * be saved as the recipe's allergen text and printed on a meal label. With `error` instead, the
+ * editor shows the message and leaves the field as it was. `parseError` / `structured.parseError`
+ * keep the review-required state explicit. Nothing is invented: confirmed stays empty.
+ */
+function reviewFallback(reason: string) {
+    return NextResponse.json({
+        error: 'AI allergen analysis could not be completed. Please review the ingredients manually.',
+        parseError: true,
+        reason,
+        confirmed: [],
+        reviewRequired: [],
+        structured: { confirmed: [], reviewRequired: [], parseError: true },
+    });
 }
 
 export async function POST(req: NextRequest) {
@@ -77,49 +68,38 @@ Respond with ONLY this JSON object:
 If no allergens found, return: {"confirmed": [], "reviewRequired": []}`;
 
         console.log(`[DetectAllergens] Analyzing ${ingredients.length} ingredients`);
-        const responseText = await callGemini(apiKey, prompt, {
-            temperature: 0.1,
-            maxTokens: 500,
-            responseMimeType: 'application/json'
-        });
 
-        // Parse and validate the structured response
-        let parsed: { confirmed?: string[]; reviewRequired?: { ingredient: string; possibleAllergens: string[]; reason: string }[] };
+        let answer;
         try {
-            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-            parsed = JSON.parse(jsonMatch ? jsonMatch[0] : responseText);
-        } catch {
-            // Model returned unparseable output — safe fallback
-            console.error('[DetectAllergens] Failed to parse model JSON, returning review fallback');
-            return NextResponse.json({
-                allergens: 'AI analysis could not be parsed. Please review ingredients manually.',
-                structured: { confirmed: [], reviewRequired: [], parseError: true }
-            });
-        }
-
-        // Normalize and deduplicate confirmed categories against allowlist
-        const confirmedSet = new Set<string>();
-        for (const raw of (parsed.confirmed || [])) {
-            const normalized = normalizeCategory(raw);
-            if (normalized) confirmedSet.add(normalized);
-        }
-
-        // Normalize reviewRequired categories against allowlist
-        const reviewItems: { ingredient: string; possibleAllergens: string[]; reason: string }[] = [];
-        for (const item of (parsed.reviewRequired || [])) {
-            const normalizedAllergens = (item.possibleAllergens || [])
-                .map(a => normalizeCategory(a))
-                .filter((a): a is string => a !== null);
-            if (normalizedAllergens.length > 0) {
-                reviewItems.push({
-                    ingredient: item.ingredient || 'Unknown',
-                    possibleAllergens: [...new Set(normalizedAllergens)],
-                    reason: item.reason || 'Compound ingredient; verify manufacturer label'
-                });
+            answer = await callGeminiStructured(apiKey, prompt, ALLERGEN_RESPONSE_SCHEMA, { temperature: 0.1 });
+        } catch (err) {
+            if (isStructuredTextError(err)) {
+                console.error(`[DetectAllergens] AI call failed: code=${err.code} http=${err.httpStatus ?? 'n/a'}`);
+                if (err.code === 'AI_QUOTA') {
+                    return NextResponse.json({ error: err.message, code: err.code }, { status: 429 });
+                }
+                if (err.code === 'AI_EMPTY' || err.code === 'AI_MALFORMED' || err.code === 'AI_BLOCKED') {
+                    return reviewFallback(err.code.toLowerCase());
+                }
+                return NextResponse.json({ error: 'Failed to analyze allergens', details: 'Something went wrong. Please try again.', code: err.code }, { status: 502 });
             }
+            throw err;
         }
 
-        const confirmed = [...confirmedSet].sort();
+        const parsed = parseAllergenResponse(answer.text, answer.finishReason);
+        if (!parsed.ok) {
+            // Diagnosis without content: why, how it ended, which model, how long — never the text.
+            console.error(
+                `[DetectAllergens] Structured answer rejected: reason=${parsed.reason} finishReason=${answer.finishReason} `
+                + `model=${answer.model} schemaEnforced=${answer.schemaEnforced} textLength=${answer.text.length}`
+            );
+            return reviewFallback(parsed.reason);
+        }
+        if (parsed.droppedCategories > 0) {
+            console.warn(`[DetectAllergens] Dropped ${parsed.droppedCategories} category value(s) outside the FreezerIQ list`);
+        }
+
+        const confirmed = parsed.confirmed;
 
         // allergens field: confirmed categories only, or "None Confirmed".
         // Review-required ingredients are NEVER appended to this string.
@@ -131,11 +111,11 @@ If no allergens found, return: {"confirmed": [], "reviewRequired": []}`;
         return NextResponse.json({
             allergens: allergenDisplayText,
             confirmed,
-            reviewRequired: reviewItems
+            reviewRequired: parsed.reviewRequired
         });
 
     } catch (error: any) {
-        console.error('[DetectAllergens] Error:', error.message);
+        console.error('[DetectAllergens] Error:', error?.name ?? 'Error');
         return NextResponse.json({
             error: 'Failed to analyze allergens',
             details: 'Something went wrong. Please try again.'
