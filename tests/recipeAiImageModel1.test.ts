@@ -97,11 +97,16 @@ describe('model and request', () => {
         expect(body.contents[0].parts).toEqual([{ text: 'A photo of fixture soup. No text, no logos, no people.' }]);
     });
 
-    it('the recipe prompt is unchanged: same dish inputs, still asks for no text, logos or people', () => {
+    // SUPERSEDED PIN (RECIPE-AI-IMAGE-STYLING-1, owner-approved): this used to pin the route's one
+    // hard-coded prompt sentence. The prompt is now composed by lib/ai/recipeImagePrompt.ts from the
+    // same dish inputs plus a style preset; what must survive is pinned here and, in depth, in
+    // tests/recipeAiImageStyling1.test.ts.
+    it('the recipe prompt still uses the dish inputs and still forbids text, logos and people', () => {
         const src = read('app/api/recipes/grab-image/route.ts');
-        expect(src).toContain('A high-end, professional studio food photograph of "${name}"${contextText}${descText}.');
-        expect(src).toContain('No text, no logos, no people.');
-        expect(src).toContain("` with ingredients: ${ingredients.join(', ')}`");
+        expect(src).toMatch(/buildRecipeImagePrompt\(\{\s*name: String\(name\),\s*ingredients,\s*description,/);
+        const builder = read('lib/ai/recipeImagePrompt.ts');
+        expect(builder).toContain('No text, lettering, labels, menus, logos, watermarks');
+        expect(builder).toContain('No people, faces, hands or other body parts.');
     });
 });
 
@@ -224,8 +229,12 @@ describe('route', () => {
         expect(type).toBe('image/jpeg');
         expect(db.writes).toEqual([]);
         // The prompt carries the recipe's own name, ingredients and description.
+        // (SUPERSEDED PIN, RECIPE-AI-IMAGE-STYLING-1: was the single sentence
+        // '"Fixture Chili" with ingredients: beans. Smoky.' — the builder now labels each part.)
         const prompt = JSON.parse(calls[0].init.body).contents[0].parts[0].text;
-        expect(prompt).toContain('"Fixture Chili" with ingredients: beans. Smoky.');
+        expect(prompt).toContain('DISH: "Fixture Chili"');
+        expect(prompt).toContain('Ingredients: beans');
+        expect(prompt).toContain('Description: "Smoky."');
     });
 
     it('a failed generation returns an error and NO url (the placeholder is never offered for saving)', async () => {

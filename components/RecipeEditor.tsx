@@ -6,6 +6,7 @@ import { useFieldArray, useForm } from 'react-hook-form';
 import { Plus, Trash, Save, ArrowLeft, Printer, Wand2, Sparkles, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import RecipeImageStyleControls, { DEFAULT_RECIPE_IMAGE_STYLE, type RecipeImageStyleId } from '@/components/recipes/RecipeImageStyleControls';
 import {
     DndContext,
     closestCenter,
@@ -51,6 +52,8 @@ const UNIT_OPTIONS = ['bunch', 'can', 'case', 'cup', 'each', 'fl oz', 'g', 'kg',
 export default function RecipeEditor({ initialData, costData }: RecipeEditorProps) {
     const [isScaling, setIsScaling] = useState(false);
     const [isGrabbingImage, setIsGrabbingImage] = useState(false);
+    const [imageStyle, setImageStyle] = useState<RecipeImageStyleId>(DEFAULT_RECIPE_IMAGE_STYLE);
+    const [imageInstructions, setImageInstructions] = useState('');
     const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
     const [isGeneratingMacros, setIsGeneratingMacros] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
@@ -447,7 +450,9 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
                 body: JSON.stringify({
                     name: recipeName,
                     ingredients: ingredientNames,
-                    description: description
+                    description: description,
+                    imageStyle,
+                    imageInstructions
                 })
             });
             const data = await res.json();
@@ -1226,6 +1231,13 @@ export default function RecipeEditor({ initialData, costData }: RecipeEditorProp
                                 </button>
                             </div>
                         </div>
+                        <RecipeImageStyleControls
+                            style={imageStyle}
+                            instructions={imageInstructions}
+                            onStyleChange={setImageStyle}
+                            onInstructionsChange={setImageInstructions}
+                            disabled={isScaling || isGrabbingImage}
+                        />
                         <input
                             type="file"
                             ref={fileInputRef}

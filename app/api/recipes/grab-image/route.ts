@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/db';
 import { getGeminiApiKey, generateRecipeImage, isRecipeImageError } from '@/lib/ai/gemini';
+import { buildRecipeImagePrompt, normalizeImageInstructions, resolveRecipeImageStyle } from '@/lib/ai/recipeImagePrompt';
 import { v4 as uuidv4 } from 'uuid';
 import { uploadToS3 } from '@/lib/s3';
 
@@ -98,9 +99,22 @@ export async function POST(req: NextRequest) {
         // businessId might still be undefined here if the user has no associated business.
         // The integration check below will handle this gracefully by not proceeding with AI.
 
-        const { name, ingredients, description, recipeId } = await req.json();
+        const { name, ingredients, description, recipeId, imageStyle, imageInstructions } = await req.json();
         if (!name) {
             return NextResponse.json({ error: 'Recipe name is required' }, { status: 400 });
+        }
+
+        // RECIPE-AI-IMAGE-STYLING-1: the style preset and the optional note are validated BEFORE any
+        // billable call. No style → Restaurant / Menu (so the list page's batch Auto-Grab and any older
+        // client are unchanged); an unknown style or an over-long note is refused, never guessed at.
+        // Both only ever become prompt TEXT — see lib/ai/recipeImagePrompt.ts.
+        const styleResult = resolveRecipeImageStyle(imageStyle);
+        if (!styleResult.ok) {
+            return NextResponse.json({ error: 'Unknown image style. Please pick one from the list.', code: 'INVALID_IMAGE_STYLE' }, { status: 400 });
+        }
+        const notesResult = normalizeImageInstructions(imageInstructions);
+        if (!notesResult.ok) {
+            return NextResponse.json({ error: notesResult.message, code: notesResult.code }, { status: 400 });
         }
 
         // RECIPE-AI-IMAGE-MODEL-1: Auto-Grab passes `recipeId` so this route saves ONLY image_url on that
@@ -131,18 +145,20 @@ export async function POST(req: NextRequest) {
             return notGenerated('AI_KEY_MISSING', 'Gemini API Key missing. Please go to Settings > AI Content to add your key.', 400);
         }
 
-        const contextText = (ingredients && ingredients.length > 0)
-            ? ` with ingredients: ${ingredients.join(', ')}`
-            : "";
-        const descText = description ? `. ${description}` : "";
-
-        const visualPrompt = `A high-end, professional studio food photograph of "${name}"${contextText}${descText}. The lighting is bright and natural, beautifully highlighting textures and colors. The dish is perfectly plated on elegant dinnerware, appearing fresh, delicious and highly appetizing. No text, no logos, no people. 8k resolution, cinematic composition.`;
+        const visualPrompt = buildRecipeImagePrompt({
+            name: String(name),
+            ingredients,
+            description,
+            style: styleResult.style,
+            instructions: notesResult.value,
+        });
 
         // 2. Generate. A failure is reported as an error with NO url, so no caller can ever store the
         //    old placeholder (or an empty / invalid image) as the recipe's photo.
         let image;
         try {
-            console.log(`[GrabImage] Generating recipe photo: ${name}`);
+            // The style id and the note's LENGTH only: never the prompt, the note or the recipe text.
+            console.log(`[GrabImage] Generating recipe photo: style=${styleResult.style.id} notes=${notesResult.value.length} chars`);
             image = await generateRecipeImage(apiKey, visualPrompt);
         } catch (err: any) {
             if (isRecipeImageError(err)) {
@@ -174,12 +190,13 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        console.log(`[GrabImage] Generated with ${image.model} and stored: ${url}`);
+        console.log(`[GrabImage] Generated with ${image.model} (style=${styleResult.style.id}) and stored: ${url}`);
         return NextResponse.json({
             url,
             generated: true,
             source: 'gemini-image',
             model: image.model,
+            imageStyle: styleResult.style.id,
             saved: !!targetRecipeId,
         });
 
