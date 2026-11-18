@@ -22,6 +22,7 @@ import type { FlyerBundle } from '@/lib/generateFlyer';
 import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
 import { buildSupporterOrderUrl } from '@/lib/previousSupporterInvite';
 import { resolveMaterialBundles } from '@/lib/coordinatorMaterialBundles';
+import { priceMaterialBundlesForSupporters } from '@/lib/supporterMaterialPricing';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 import { customerFacingBusinessName } from '@/lib/tenantBrand';
 
@@ -110,7 +111,12 @@ export async function GET(req: Request) {
             `;
         }
 
-        const flyerBundles: FlyerBundle[] = resolved.bundles.map(b => ({
+        // FLYER-TAX-TOTAL-1: the packet's flyer (and its paper tracker, built from the same list)
+        // carries the same supporter-facing prices as /api/flyer/download — one pricing function,
+        // no packet-specific logic.
+        const priced = priceMaterialBundlesForSupporters(resolved.bundles, campaign);
+
+        const flyerBundles: FlyerBundle[] = priced.bundles.map(b => ({
             name: b.name,
             price: b.price,
             servingTier: b.servingTier,
@@ -190,6 +196,7 @@ export async function GET(req: Request) {
             publicUrl,
             coordinatorName,
             bundles: flyerBundles,
+            taxRatePercent: priced.taxRatePercent,
             branding,
         });
 

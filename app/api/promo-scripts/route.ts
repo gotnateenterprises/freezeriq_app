@@ -19,6 +19,7 @@ import { generatePromoScripts, type BundleSummary } from '@/lib/generatePromoScr
 import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
 import { buildSupporterOrderUrl } from '@/lib/previousSupporterInvite';
 import { resolveMaterialBundles, groupMaterialMenus } from '@/lib/coordinatorMaterialBundles';
+import { priceMaterialBundlesForSupporters } from '@/lib/supporterMaterialPricing';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
 
 export async function GET(req: Request) {
@@ -93,7 +94,10 @@ export async function GET(req: Request) {
         if (!resolved.ok) {
             return NextResponse.json({ error: resolved.error, code: resolved.code }, { status: 422 });
         }
-        const menus = groupMaterialMenus(resolved.bundles);
+        // FLYER-TAX-TOTAL-1: advertise what the supporter is charged — the same supporter-facing
+        // prices the flyer prints (frozen campaign tax included).
+        const priced = priceMaterialBundlesForSupporters(resolved.bundles, campaign);
+        const menus = groupMaterialMenus(priced.bundles);
 
         // 4. Supporter ordering URL through the canonical FR-REBOOK-2
         //    authority — coordinators paste these scripts everywhere, so the
@@ -137,6 +141,7 @@ export async function GET(req: Request) {
             publicUrl,
             endDate: campaign.end_date ? campaign.end_date.toISOString() : null,
             bundles: bundleSummaries,
+            taxRatePercent: priced.taxRatePercent,
         });
 
         return NextResponse.json(result);

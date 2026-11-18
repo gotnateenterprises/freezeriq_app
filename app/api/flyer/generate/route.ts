@@ -20,6 +20,7 @@ import { generateFlyer, type FlyerBundle } from '@/lib/generateFlyer';
 import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
 import { buildSupporterOrderUrl } from '@/lib/previousSupporterInvite';
 import { resolveMaterialBundles } from '@/lib/coordinatorMaterialBundles';
+import { priceMaterialBundlesForSupporters } from '@/lib/supporterMaterialPricing';
 import { CLOSED_STATUSES } from '@/lib/campaignBundleSelection';
 import { customerFacingBusinessName } from '@/lib/tenantBrand';
 
@@ -83,6 +84,10 @@ export async function POST(req: Request) {
             pickup_location: true,
             checks_payable: true,
             public_token: true,
+            // FLYER-TAX-TOTAL-1: the campaign's frozen tax treatment, so this flyer prints the
+            // same supporter-facing prices as the coordinator's /api/flyer/download.
+            tax_status: true,
+            tax_rate_percent: true,
         } as const;
 
         const campaign =
@@ -159,7 +164,10 @@ export async function POST(req: Request) {
             `;
         }
 
-        const flyerBundles: FlyerBundle[] = resolved.bundles.map(b => ({
+        // FLYER-TAX-TOTAL-1: supporter-facing prices, priced exactly as the coordinator flyer is.
+        const priced = priceMaterialBundlesForSupporters(resolved.bundles, campaign);
+
+        const flyerBundles: FlyerBundle[] = priced.bundles.map(b => ({
             name: b.name,
             price: b.price,
             servingTier: b.servingTier,
@@ -229,6 +237,7 @@ export async function POST(req: Request) {
             checksPayable: campaign.checks_payable || '',
             publicUrl,
             bundles: flyerBundles,
+            taxRatePercent: priced.taxRatePercent,
             branding,
         });
 

@@ -33,7 +33,10 @@ export interface PacketInput {
     checksPayable: string;
     publicUrl: string;
     coordinatorName?: string;
+    /** FLYER-TAX-TOTAL-1: supporter-facing prices (frozen tax included), as the flyer prints them. */
     bundles: FlyerBundle[];
+    /** FLYER-TAX-TOTAL-1: the rate already inside those prices; passed to the packet's flyer for its note. */
+    taxRatePercent?: number | null;
     branding?: {
         primary_color?: string;
         secondary_color?: string;
@@ -130,6 +133,7 @@ export async function generateFullPacket(input: PacketInput): Promise<Buffer> {
         checksPayable: input.checksPayable,
         publicUrl: input.publicUrl,
         bundles: input.bundles,
+        taxRatePercent: input.taxRatePercent ?? null,
         branding: input.branding,
     };
     const flyerBuffer = await generateFlyer(flyerInput);

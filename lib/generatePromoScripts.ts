@@ -8,6 +8,8 @@
  * for the Coordinator Portal Sales Toolkit.
  */
 
+import { salesTaxIncludedNote } from '@/lib/supporterMaterialPricing';
+
 // ── Types ──────────────────────────────────────────────────
 
 export type BundleSummary = {
@@ -28,7 +30,13 @@ export type PromoScriptInput = {
     organizationName: string;
     publicUrl: string;
     endDate?: string | null;   // ISO date string or null
+    /** FLYER-TAX-TOTAL-1: supporter-facing prices — the campaign's frozen tax already included. */
     bundles: BundleSummary[];
+    /**
+     * FLYER-TAX-TOTAL-1: the rate already inside those prices. Above 0 adds "Prices include N%
+     * sales tax." after the bundle list; 0 or absent leaves every script exactly as before.
+     */
+    taxRatePercent?: number | null;
 };
 
 export type PromoScriptsResponse = {
@@ -45,9 +53,13 @@ export type PromoScriptsResponse = {
 
 // ── Helpers ────────────────────────────────────────────────
 
-function formatPrice(cents: number): string {
-    // Prices stored as dollars (Decimal) in this codebase, not cents
-    return `$${cents.toFixed(0)}`;
+function formatPrice(dollars: number): string {
+    // Prices stored as dollars (Decimal) in this codebase, not cents.
+    // FLYER-TAX-TOTAL-1: whole dollars keep the short "$125" form (every untaxed campaign's copy
+    // is unchanged); anything with cents shows them. toFixed(0) would have advertised a taxed
+    // $126.25 as "$126" and $60.60 as "$61" — neither is what checkout charges.
+    const cents = Math.round(dollars * 100);
+    return cents % 100 === 0 ? `$${(cents / 100).toFixed(0)}` : `$${(cents / 100).toFixed(2)}`;
 }
 
 function formatBundleLine(b: BundleSummary): string {
@@ -121,8 +133,9 @@ function generateFacebook(input: PromoScriptInput): string {
     post += `Stock your freezer AND support a great cause — it's a win-win. `;
     post += `Choose from delicious, ready-to-heat meal bundles:\n\n`;
 
+    const taxNote = salesTaxIncludedNote(input.taxRatePercent);
     if (bundles.length > 0) {
-        post += bundleListShort(bundles, 4) + '\n\n';
+        post += bundleListShort(bundles, 4) + '\n' + (taxNote ? `${taxNote}\n` : '') + '\n';
     }
 
     post += `🛒 Order online in minutes:\n${publicUrl}\n`;
@@ -142,8 +155,10 @@ function generateTextMessage(input: PromoScriptInput): string {
 
     let msg = `Hey! 🍽️ ${organizationName} is running a freezer meal fundraiser. `;
 
+    const taxNote = salesTaxIncludedNote(input.taxRatePercent);
     if (bundles.length > 0) {
         msg += `Easy meal bundles like ${bundleListInline(bundles, 2)}. `;
+        if (taxNote) msg += `${taxNote} `;
     } else {
         msg += `Delicious, ready-to-heat meals — super easy. `;
     }
@@ -165,9 +180,10 @@ function generateEmailBlurb(input: PromoScriptInput): string {
     email += `It's easy — just pick your favorite meal bundles, place your order online, and stock your freezer with `;
     email += `delicious, ready-to-heat meals while supporting ${organizationName}.\n\n`;
 
+    const taxNote = salesTaxIncludedNote(input.taxRatePercent);
     if (bundles.length > 0) {
         email += `Available bundles:\n`;
-        email += bundleListShort(bundles, 4) + '\n\n';
+        email += bundleListShort(bundles, 4) + '\n' + (taxNote ? `${taxNote}\n` : '') + '\n';
     }
 
     email += `👉 Order Your Freezer Meals: ${publicUrl}\n`;
@@ -196,6 +212,8 @@ function generateEmailBlurbHtml(input: PromoScriptInput): string {
         if (bundles.length > 4) {
             html += `<br>and ${bundles.length - 4} more option${bundles.length - 4 > 1 ? 's' : ''}`;
         }
+        const taxNote = salesTaxIncludedNote(input.taxRatePercent);
+        if (taxNote) html += `<br><em>${taxNote}</em>`;
         html += `</p>`;
     }
 

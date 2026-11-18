@@ -26,6 +26,7 @@ import { Prisma } from '@prisma/client';
 import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
 import { buildSupporterOrderUrl } from '@/lib/previousSupporterInvite';
 import { resolveMaterialBundles } from '@/lib/coordinatorMaterialBundles';
+import { priceMaterialBundlesForSupporters } from '@/lib/supporterMaterialPricing';
 import { auth } from '@/auth';
 import { resolveCoordinatorSession } from '@/lib/coordinatorSession';
 import { customerFacingBusinessName } from '@/lib/tenantBrand';
@@ -145,7 +146,12 @@ export async function GET(req: Request) {
             `;
         }
 
-        const flyerBundles: FlyerBundle[] = resolved.bundles.map(b => ({
+        // FLYER-TAX-TOTAL-1: print what the supporter is charged — base price plus the campaign's
+        // FROZEN tax, through the same computeSupporterOrderTax checkout uses. Untaxed and
+        // tax-exempt campaigns come back at the base price with a 0 rate (no note).
+        const priced = priceMaterialBundlesForSupporters(resolved.bundles, campaign);
+
+        const flyerBundles: FlyerBundle[] = priced.bundles.map(b => ({
             name: b.name,
             price: b.price,
             servingTier: b.servingTier,
@@ -221,6 +227,7 @@ export async function GET(req: Request) {
             checksPayable: campaign.checks_payable || '',
             publicUrl,
             bundles: flyerBundles,
+            taxRatePercent: priced.taxRatePercent,
             branding,
         });
 

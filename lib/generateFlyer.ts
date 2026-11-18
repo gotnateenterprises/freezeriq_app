@@ -12,11 +12,18 @@
 
 import { jsPDF } from 'jspdf';
 import { generateQrCode } from '@/lib/generateQrCode';
+import { salesTaxIncludedNote } from '@/lib/supporterMaterialPricing';
 
 // ── Types ────────────────────────────────────────────────────────────
 
 export interface FlyerBundle {
     name: string;
+    /**
+     * FLYER-TAX-TOTAL-1: the SUPPORTER-FACING price — what one supporter pays for one bundle,
+     * frozen campaign tax included. Callers price through
+     * lib/supporterMaterialPricing.priceMaterialBundlesForSupporters; this renderer prints it as
+     * given and never adds tax itself.
+     */
     price: number;
     /**
      * CANONICAL tier only — 'serves_2' | 'serves_5', as produced by
@@ -44,6 +51,12 @@ export interface FlyerInput {
     checksPayable: string;
     publicUrl: string;
     bundles: FlyerBundle[];
+    /**
+     * FLYER-TAX-TOTAL-1: the campaign's frozen supporter tax rate (percent) already included in
+     * every bundle price. Above 0 prints "Prices include N% sales tax." under the page-1 pricing
+     * and beside the page-2 grand total; 0 or absent prints nothing, exactly as before.
+     */
+    taxRatePercent?: number | null;
     branding?: {
         primary_color?: string;
         secondary_color?: string;
@@ -205,6 +218,8 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     };
     const globalFamilyPrice = uniquePrice(menus.map(m => m.familyPrice));
     const globalCouplePrice = uniquePrice(menus.map(m => m.couplePrice));
+    // FLYER-TAX-TOTAL-1: null for a tax-exempt / untaxed campaign, so nothing new is drawn.
+    const taxNote = salesTaxIncludedNote(input.taxRatePercent);
 
     // ═══════════════════════════════════════════════════════════════
     // PAGE 1: Fundraiser Details + Bundle Meals
@@ -287,6 +302,13 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
         doc.text('Serves 2:', rightCol, priceY);
         doc.setTextColor(...hexToRgb(primary));
         doc.text(`$${globalCouplePrice.toFixed(2)}`, rightCol + 28, priceY);
+    }
+    if (taxNote) {
+        // Fixed position inside the 40mm details box, below both price lines.
+        doc.setFontSize(7.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...textLight);
+        doc.text(taxNote, rightCol, detailsY + 27);
     }
 
     y += detailsBoxH + 6;
@@ -536,6 +558,13 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...textDark);
     doc.text('GRAND TOTAL:  $ _______________', MARGIN + CONTENT_W - 6, y + 4, { align: 'right' });
+    if (taxNote) {
+        // Beside the grand total on the order form, so whoever adds it up knows tax is in.
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...textLight);
+        doc.text(taxNote, MARGIN + 6, y + 4);
+    }
     y += 14;
 
     // ── Payment Notes ──
