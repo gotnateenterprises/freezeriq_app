@@ -53,6 +53,19 @@ const textOf = (node: any): string => {
     return textOf(node?.props?.children);
 };
 
+/**
+ * The BundleEditor element in the page's output. SUPERSEDED PIN (BUNDLE-POSTER-FROM-RECIPES-1,
+ * owner-approved feature): for a SAVED bundle the page now returns the editor with the Bundle Poster
+ * panel beneath it, so the editor is found inside that wrapper instead of being the top element.
+ * The properties checked against it are unchanged. (Create mode still returns the bare editor.)
+ */
+const editorOf = (node: any): any => {
+    if (node == null || typeof node !== 'object') return null;
+    if (Array.isArray(node)) { for (const n of node) { const f = editorOf(n); if (f) return f; } return null; }
+    if (node.props && 'knownTiers' in node.props && 'initialData' in node.props) return node;
+    return editorOf(node.props?.children);
+};
+
 beforeEach(() => {
     jest.clearAllMocks();
     db.bundle.findMany.mockResolvedValue([]);
@@ -301,9 +314,10 @@ describe('property 6 — the owning tenant still works', () => {
 
         expect(textOf(out)).not.toContain('Unauthorized');
         expect(textOf(out)).not.toContain('Bundle Not Found');
-        expect(out.props.initialData.name).toBe('Q2 - Comfort Foods');
-        expect(out.props.allRecipes).toEqual([{ id: 'r1', name: 'BBQ Chicken', type: 'menu_item' }]);
-        expect(out.props.knownTiers).toEqual(['family']);
+        const editor = editorOf(out);
+        expect(editor.props.initialData.name).toBe('Q2 - Comfort Foods');
+        expect(editor.props.allRecipes).toEqual([{ id: 'r1', name: 'BBQ Chicken', type: 'menu_item' }]);
+        expect(editor.props.knownTiers).toEqual(['family']);
     });
 
     it('Decimal serialization for the client component is preserved', async () => {
@@ -316,9 +330,10 @@ describe('property 6 — the owning tenant still works', () => {
 
         const out: any = await page({ params: Promise.resolve({ id: 'b1' }) });
 
-        expect(out.props.initialData.price).toBe(120.5);
-        expect(out.props.initialData.stock_on_hand).toBe(7);
-        expect(out.props.initialData.contents[0].recipe.base_yield_qty).toBe(4.5);
+        const editor = editorOf(out);
+        expect(editor.props.initialData.price).toBe(120.5);
+        expect(editor.props.initialData.stock_on_hand).toBe(7);
+        expect(editor.props.initialData.contents[0].recipe.base_yield_qty).toBe(4.5);
     });
 
     it('a create-mode load still works for the owner', async () => {
