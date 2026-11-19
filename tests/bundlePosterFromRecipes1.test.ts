@@ -219,6 +219,9 @@ describe('1–7 · the bundle, its recipes and their photos', () => {
         const order = ['roast', 'chicken', 'soup', 'bake', 'ranch'].map((n) => COLORS[`${MEDIA}/p/${n}.jpg`]);
         for (let i = 0; i < 5; i++) expect(near(await dominant(photos[i].src), order[i])).toBe(true);
         expect(photos.every((p) => p.style.objectFit === 'cover')).toBe(true);
+        // A photo URL can never bounce the server somewhere else.
+        const media = fetchCalls.filter((c) => c.url.startsWith(MEDIA));
+        expect(media.every((c) => c.init.redirect === 'error')).toBe(true);
     });
 
     it('4 · a missing photo gets the neutral card — the poster is still made, and nothing is invented', async () => {
