@@ -12,6 +12,12 @@ const nextConfig = {
     },
     experimental: {
     },
+    // BUNDLE-POSTER-FROM-RECIPES-1: the poster route reads its three bundled fonts from disk at
+    // run time (lib/poster/renderBundlePoster.ts loadPosterFonts); make sure they ship with it.
+    outputFileTracingIncludes: {
+        '/api/bundles/\\[id\\]/poster': ['./lib/poster/fonts/**/*'],
+        '/api/bundles/\\[id\\]/poster/route': ['./lib/poster/fonts/**/*'],
+    },
     typescript: {
         ignoreBuildErrors: true,
     },

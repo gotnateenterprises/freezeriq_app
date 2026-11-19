@@ -1,6 +1,10 @@
 import BundleEditor from '@/components/BundleEditor';
+import BundlePosterPanel, { type BundlePosterPanelProps } from '@/components/bundles/BundlePosterPanel';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/db';
+import { bundleSizeLabel } from '@/lib/bundleSummary';
+import { posterBadge, posterPhotoHosts, posterPhotoSource, POSTER_MAX_MEALS } from '@/lib/poster/posterModel';
+import { defaultPosterTheme } from '@/lib/poster/posterThemes';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,6 +19,8 @@ export default async function BundleDetailPage({ params }: { params: Promise<{ i
     const { id } = await params;
 
     let bundle = null;
+    // BUNDLE-POSTER-FROM-RECIPES-1: the poster section, shown for saved bundles only.
+    let poster: BundlePosterPanelProps | null = null;
 
     // Fetch Bundle if editing
     if (id !== 'new') {
@@ -48,6 +54,18 @@ export default async function BundleDetailPage({ params }: { params: Promise<{ i
             price: rawBundle.price ? Number(rawBundle.price) : null,
             stock_on_hand: Number(rawBundle.stock_on_hand)
         };
+
+        const hosts = posterPhotoHosts();
+        const shown = rawBundle.contents.filter((c) => c.recipe).slice(0, POSTER_MAX_MEALS);
+        poster = {
+            bundleId: rawBundle.id,
+            bundleName: rawBundle.name,
+            sizeLabel: bundleSizeLabel(rawBundle.serving_tier),
+            mealCount: shown.length,
+            photoCount: shown.filter((c) => posterPhotoSource(c.recipe.image_url, hosts).url).length,
+            defaultTheme: defaultPosterTheme(rawBundle.name),
+            derivedBadge: posterBadge(rawBundle.name),
+        };
     }
 
     // Fetch this tenant's Recipes for the "Add Item" dropdown. Unowned legacy
@@ -67,5 +85,13 @@ export default async function BundleDetailPage({ params }: { params: Promise<{ i
     });
     const knownTiers = bundles.map(b => b.serving_tier).filter(Boolean) as string[];
 
-    return <BundleEditor initialData={bundle} allRecipes={allRecipes} knownTiers={knownTiers} />;
+    if (!poster) return <BundleEditor initialData={bundle} allRecipes={allRecipes} knownTiers={knownTiers} />;
+    return (
+        <div className="space-y-8 pb-12">
+            <BundleEditor initialData={bundle} allRecipes={allRecipes} knownTiers={knownTiers} />
+            <div className="max-w-4xl mx-auto">
+                <BundlePosterPanel {...poster} />
+            </div>
+        </div>
+    );
 }
