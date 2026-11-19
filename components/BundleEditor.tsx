@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { Save, Plus, Trash, ArrowLeft, Package, Search, DollarSign, TrendingUp, Sparkles, Image as ImageIcon, Loader2, Download, Copy, Upload } from 'lucide-react';
 import Link from 'next/link';
+import { useBundleImagePublished } from '@/lib/bundles/bundleImageEvents';
 
 interface BundleEditorProps {
     initialData: any;
@@ -61,6 +62,11 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
         control,
         name: 'contents'
     });
+
+    // BUNDLE-POSTER-USE-AS-IMAGE-1. "Use as Bundle Image" in the poster panel below has already SAVED
+    // the poster as this bundle's image; show it here and keep it in the form, so the next Save Bundle
+    // sends the new image instead of putting the previous one back. Only this bundle's announcement counts.
+    useBundleImagePublished(initialData?.id, (url) => setValue('image_url', url));
 
     // Fetch resources on mount
     useEffect(() => {

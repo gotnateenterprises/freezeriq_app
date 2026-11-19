@@ -661,7 +661,7 @@ describe('the Bundle Poster panel', () => {
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 describe('the bundle page and the files this task must not touch', () => {
-    it('the page adds the panel under the editor for saved bundles only; BundleEditor itself is untouched', () => {
+    it('the page adds the panel under the editor for saved bundles only', () => {
         const src = read('app/bundles/[id]/page.tsx').replace(/\r\n/g, '\n');
         expect(src).toContain("if (!poster) return <BundleEditor initialData={bundle} allRecipes={allRecipes} knownTiers={knownTiers} />;");
         expect(src).toContain('<BundlePosterPanel {...poster} />');
@@ -696,13 +696,34 @@ describe('the bundle page and the files this task must not touch', () => {
         'app/api/packet/download/route.ts': 'd0691a6aec17e62f46a2016ad5f83edcbe85e651605c891bb489e386a8a59364',
         'app/api/promo-scripts/route.ts': '950e0d172db4c145c659334ec397b86ade097b68b00d1c615d906042f9514d9a',
         // proposal-first and shared authorities this feature only reads
-        'components/BundleEditor.tsx': '1671ce8c9bcce5963c8e930107a372e261f13c8aef8a57a512e9f70f16cc178d',
+        // (components/BundleEditor.tsx — SUPERSEDED PIN, see the test below.)
         'lib/bundleSummary.ts': 'aac9ddd12d5cb2c5464199e8d887443ae4fd46afdea4149b40c957df7b12b0e3',
         'lib/serving_multipliers.ts': '05f98a0a65789ba0d87e1514389f835db031235976d41d6ce774739521d44674',
         'lib/s3.ts': 'c15bbb9f6fe5cef32efc7bc53ee0ddab832fcf55dc503f25c4842c184d729bde',
     };
     it.each(Object.entries(PINNED))('%s is byte-identical to Production', (rel, digest) => {
         expect(crypto.createHash('sha256').update(read(rel).replace(/\r\n/g, '\n')).digest('hex')).toBe(digest);
+    });
+
+    // SUPERSEDED PIN (BUNDLE-POSTER-USE-AS-IMAGE-1, owner-approved proposal 2026-11-18). This task left
+    // BundleEditor.tsx byte-identical to Production; the follow-on task adds exactly one import and one
+    // listener (with its comment) so a published poster shows in the editor and survives Save Bundle.
+    // Removing exactly those lines must give back the Production file.
+    it('components/BundleEditor.tsx is Production 29b1f27 plus only the approved image listener', () => {
+        const src = read('components/BundleEditor.tsx').replace(/\r\n/g, '\n');
+        const approved = [
+            "import { useBundleImagePublished } from '@/lib/bundles/bundleImageEvents';\n",
+            '\n    // BUNDLE-POSTER-USE-AS-IMAGE-1. "Use as Bundle Image" in the poster panel below has already SAVED\n'
+            + '    // the poster as this bundle\'s image; show it here and keep it in the form, so the next Save Bundle\n'
+            + '    // sends the new image instead of putting the previous one back. Only this bundle\'s announcement counts.\n'
+            + "    useBundleImagePublished(initialData?.id, (url) => setValue('image_url', url));\n",
+        ];
+        let base = src;
+        for (const piece of approved) {
+            expect(base.split(piece)).toHaveLength(2);
+            base = base.replace(piece, '');
+        }
+        expect(crypto.createHash('sha256').update(base).digest('hex')).toBe('1671ce8c9bcce5963c8e930107a372e261f13c8aef8a57a512e9f70f16cc178d');
     });
 
     it('the poster code never writes to the database or storage', () => {

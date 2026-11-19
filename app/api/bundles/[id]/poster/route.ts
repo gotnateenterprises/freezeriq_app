@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db';
 import { getGeminiApiKey } from '@/lib/ai/gemini';
 import { normalizeBackgroundInstructions, posterBackgroundPlan } from '@/lib/poster/backgroundPrompt';
 import { buildPosterModel, posterFileName, posterPhotoHosts } from '@/lib/poster/posterModel';
+import { POSTER_BUNDLE_SELECT, posterBundleFingerprint, posterNotesDigest, posterSigningSecret, sha256Hex, signPosterReceipt } from '@/lib/poster/posterPublish';
 import { resolvePosterTheme } from '@/lib/poster/posterThemes';
 import { isPosterRenderError, renderBundlePoster } from '@/lib/poster/renderBundlePoster';
 
@@ -25,6 +26,11 @@ export const maxDuration = 60;
  *
  * The response is the image itself (same origin, so the editor can preview and download it) with
  * non-sensitive status headers: which backdrop was used and why, and how many meals had a photo.
+ *
+ * BUNDLE-POSTER-USE-AS-IMAGE-1: it also carries `X-Poster-Receipt`, a signed statement of exactly
+ * which bytes were made for which tenant, bundle and settings (lib/poster/posterPublish.ts). Only
+ * that receipt lets POST /api/bundles/[id]/poster/publish turn these bytes into the bundle image.
+ * Generating still writes and stores nothing.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
     const session = await auth();
@@ -53,16 +59,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const bundle = await prisma.bundle.findFirst({
         where: { id, business_id: businessId },
-        select: {
-            id: true,
-            name: true,
-            serving_tier: true,
-            description: true,
-            contents: {
-                orderBy: { position: 'asc' },
-                select: { position: true, recipe: { select: { id: true, name: true, image_url: true } } },
-            },
-        },
+        select: POSTER_BUNDLE_SELECT,
     });
     if (!bundle) return NextResponse.json({ error: 'Bundle not found', code: 'BUNDLE_NOT_FOUND' }, { status: 404 });
 
@@ -81,9 +78,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         const poster = await renderBundlePoster({ model, theme, background: plan, apiKey });
         const missing = poster.photos.filter((p) => p !== 'placed').length;
         console.log(`[BundlePoster] Done: theme=${theme.id} background=${poster.background} note=${poster.backgroundNote ?? 'none'} photos_missing=${missing} bytes=${poster.bytes.length}`);
+        // Without a signing secret the poster is still made; it just cannot be published.
+        const secret = posterSigningSecret();
+        const receipt = secret
+            ? signPosterReceipt({
+                biz: businessId,
+                bundle: bundle.id,
+                sha: sha256Hex(poster.bytes),
+                fp: posterBundleFingerprint(bundle),
+                theme: theme.id,
+                notes: posterNotesDigest(notes.value),
+                badge: body?.showBadge !== false,
+            }, secret)
+            : null;
         return new Response(new Uint8Array(poster.bytes), {
             status: 200,
             headers: {
+                ...(receipt ? { 'X-Poster-Receipt': receipt } : {}),
                 'Content-Type': poster.contentType,
                 'Content-Disposition': `inline; filename="${posterFileName(bundle.name, model.sizeLabel, 'jpg')}"`,
                 'X-Poster-Theme': theme.id,
