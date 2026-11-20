@@ -527,7 +527,7 @@ describe('16 · files this task must not touch are byte-identical to Production 
         'lib/campaignBundleSelection.ts': 'ce1847ee9cd6317650b3f4378e1d091a1761c9ed60e4000006794d5d4109cf5d',
         'components/fundraiser/SupporterBundleDetail.tsx': '0aa15aaac82a1cb54a09b4d4d27f0181fa90a10c879c90a019182c9dad42a3ec',
         'app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx': '648e9dbd035e6346b45d49ea6d8601830b96fc1060bab95a6bfeebba9aebdda0',
-        'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx': 'b343f4a7a54ba5be4c57b99ca50ed73436980bca5005f0d791942891a66286f8',
+        // (FundraiserClient.tsx — SUPERSEDED PIN, see the history check below.)
         'app/shop/[slug]/raise-funds/page.tsx': 'bed22798f5fde86a37377fcde4d5359a94e1faa22da34ce94a1a13834f124de4',
         'app/shop/[slug]/StorefrontClient.tsx': '06260aa32966b03396c59e7ad4cc24a3395dad5687b20659eee19696f8a84adc',
         'components/storefront/BundleCard.tsx': '4834775f4fd4070ca57f846812a3547a5fea4eb836df2d2e1891352268e3d9b8',
@@ -551,12 +551,24 @@ describe('16 · files this task must not touch are byte-identical to Production 
         'app/coordinator/[token]/page.tsx': '766b0065d505ef1ddde1ab7d9f101f8cf88bfbc0e97d0b6db2e6869e146a7fbb',
         'app/fundraiser/[token]/page.tsx': 'fc4b041e8da10c5765758902568c571226d4b50fee8992490de7aeafc6ac0fb3',
         'app/api/fundraiser/[token]/route.ts': '1d7dcdb3e5bf2245d1b8789ae73363bb45bccfcd9cbbe58f0ae139cf502445ca',
-        'lib/generateFlyer.ts': '8596e5a02613f6b0738a7d47ac57ffff4130c92bd3216e25a553c08b94faada5',
         'lib/quickbooks/config.ts': '6beb0e4019b21c0abaf702849db5d244d247a9697c2110ad619e89722b32fa15',
-        'prisma/schema.prisma': 'e42d3e5b9858344fc49e48a00e15e621227446191633caa713af25cee4e99ffd',
+        // (lib/generateFlyer.ts, prisma/schema.prisma — SUPERSEDED PINS, see below.)
     };
     it.each(Object.entries(PINNED))('%s', (rel, digest) => {
         expect(crypto.createHash('sha256').update(read(rel).replace(/\r\n/g, '\n')).digest('hex')).toBe(digest);
+    });
+
+    // SUPERSEDED PINS (SUPPORTER-CONSENT-1 + FLYER-CLICKABLE-LINK-1, owner-approved 2026-11-19). These
+    // three were pinned to prove the poster work left them alone; later approved releases change them.
+    // The same guarantee is now checked against history: the poster commits (29b1f27..7c9c048)
+    // changed none of them.
+    it.each([
+        'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx',
+        'lib/generateFlyer.ts',
+        'prisma/schema.prisma',
+    ])('%s was not changed by the poster releases (29b1f27..7c9c048)', (rel) => {
+        const out = require('child_process').execSync(`git diff --name-only 29b1f27 7c9c048 -- "${rel}"`, { cwd: ROOT, encoding: 'utf8' });
+        expect(out.trim()).toBe('');
     });
 
     it('no migration was added', () => {

@@ -9,8 +9,9 @@
  *   … + explicit future-email permission                      → may ALSO be sent
  *                                                              automatically by FreezerIQ
  *
- * Today the address can be recorded (2.0B) and the permission cannot, so FreezerIQ's
- * own sending stays closed for everyone, by design.
+ * The address can be recorded (2.0B), and since SUPPORTER-CONSENT-1 so can the
+ * permission (an unticked, optional box on the supporter order page). FreezerIQ's own
+ * sending opens only for supporters who have BOTH, and only when a coordinator sends.
  *
  * ── 1. EXPLICIT FUTURE-EMAIL PERMISSION ─────────────────────────────────────
  *
@@ -19,11 +20,11 @@
  * permission to market. MarketingPreference rows record OPT-OUTS (and a tenant's
  * undoing of one, with a note) for the seasonal rebooking audience; a `subscribed`
  * row means "no longer suppressed", not "opted in", and Production holds none.
- * So the authority below returns an empty set, and nothing — no import, no
- * backfill, no inference from purchase history — may fill it. When the supporter
- * order page starts collecting a separate, unticked, timestamped, withdrawable
- * "Keep me updated by email about future fundraisers from this organization"
- * choice, THIS function is where it is read.
+ * Nothing — no import, no backfill, no inference from purchase history — may fill
+ * the permission set. SUPPORTER-CONSENT-1 added the only source: a separate,
+ * unticked, timestamped, withdrawable "email updates about future fundraisers from
+ * {organization}" choice on the supporter order page, recorded with the order in
+ * supporter_contact_consents. THIS function is where it is read.
  *
  * ── 2. THE DESIGNATED SENDER'S MAILING ADDRESS (PREVIOUS-SUPPORTER-EMAIL-2.0B) ─
  *
@@ -39,10 +40,11 @@
  * tenant's StorefrontConfig.origin_address (the kitchen) or any platform address.
  * A missing or incomplete address means NO prepared email of either kind.
  *
- * The consent authority above deliberately reads nothing: there is nothing true
- * to read yet.
+ * (Until SUPPORTER-CONSENT-1 the consent authority read nothing: there was nothing
+ * true to read. It now reads supporter_contact_consents — see loadExplicitEmailConsent.)
  */
 import { prisma } from '@/lib/db';
+import { loadSupporterEmailConsent } from '@/lib/supporterConsent';
 /** A US-style mailing address, complete enough to print in a commercial-email footer. */
 export interface OrganizationMailingAddress {
     line1: string;
@@ -173,15 +175,19 @@ export async function loadOrganizationMailingAddress(
 
 /**
  * Normalized addresses with recorded, explicit permission for future fundraiser
- * email from THIS organization. Today: none (see header) — an empty set, never a
- * guess. Purchase history, order email and the absence of an opt-out are NOT
- * permission and must never be passed in as if they were.
+ * email from THIS organization. Purchase history, order email and the absence of an
+ * opt-out are NOT permission and must never be passed in as if they were.
+ *
+ * SUPPORTER-CONSENT-1: the "Keep me updated" choice now exists on the supporter
+ * order page, so this reads it — through lib/supporterConsent.ts, the one authority
+ * over supporter_contact_consents: this organization and tenant only, the latest
+ * event per address must be a grant, and an unsubscribed address is never included.
  */
-export async function loadExplicitEmailConsent(_scope: {
-    businessId: string;
-    organizationCustomerId: string;
-}): Promise<ReadonlySet<string>> {
-    return new Set<string>();
+export async function loadExplicitEmailConsent(
+    scope: { businessId: string; organizationCustomerId: string },
+    db?: unknown,
+): Promise<ReadonlySet<string>> {
+    return db === undefined ? loadSupporterEmailConsent(scope) : loadSupporterEmailConsent(scope, db);
 }
 
 export type AutomatedSendCode = 'available' | 'mailing_address_required' | 'consent_not_recorded';

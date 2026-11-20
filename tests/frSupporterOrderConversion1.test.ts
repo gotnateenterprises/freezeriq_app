@@ -834,7 +834,10 @@ describe('J. regression', () => {
         expect(body.items).toEqual([{ bundleId: 'b-s5', quantity: 2, serving_tier: 'family', name: S5_NAME }]);
         expect(body.campaignId).toBe(CAMPAIGN_ID);
         expect(body.slug).toBe(SLUG);
-        expect(Object.keys(body).sort()).toEqual(['campaignId', 'customer', 'items', 'slug', 'submissionKey']);
+        // SUPERSEDED PIN (SUPPORTER-CONSENT-1, owner-approved 2026-11-19): the body gains ONE key, the
+        // two optional checkbox choices, both false unless the supporter ticks them. Nothing else moved.
+        expect(Object.keys(body).sort()).toEqual(['campaignId', 'customer', 'items', 'marketingConsent', 'slug', 'submissionKey']);
+        expect(body.marketingConsent).toEqual({ email: false, sms: false });
     });
 
     it('J2. the pre-order share stays after "Place my order" and in the quiet style; the detail adds no share control', () => {

@@ -25,6 +25,9 @@ import {
 import { roundCents } from '@/lib/fundraiserCloseoutMath';
 // COORDINATOR-PAYMENT-METHOD-UX-1: what the campaign tells supporters about paying — display only.
 import { toPublicPaymentMethods, offersOnlinePayment, type PublicPaymentMethod } from '@/lib/supporterPaymentMethods';
+// SUPPORTER-CONSENT-1: optional permission for future fundraiser email / texts from the organization.
+import { buildSupporterConsentRows, planSupporterConsent, readSupporterConsentIntent } from '@/lib/supporterConsentText';
+import { recordSupporterConsents } from '@/lib/supporterConsent';
 
 /**
  * FR-LAUNCH-1E: sentinel used to abort the order transaction when the campaign
@@ -109,6 +112,16 @@ export async function POST(req: Request) {
                 code: 'CONTACT_INFO_REQUIRED',
                 missingFields: missingContactFields,
             }, { status: 400 });
+        }
+
+        // SUPPORTER-CONSENT-1: two optional, unticked choices — future fundraiser email, and texts,
+        // from THIS fundraiser's organization. The client sends only two booleans
+        // (body.marketingConsent); the wording, the version and the destinations are decided here.
+        // A checked box needs a usable destination, otherwise the order is refused before anything is
+        // written. An unchecked box records nothing and never withdraws an earlier permission.
+        const consentPlan = planSupporterConsent(readSupporterConsentIntent(body?.marketingConsent), { email: customer.email, phone: customer.phone });
+        if (!consentPlan.ok) {
+            return NextResponse.json({ error: consentPlan.error, code: consentPlan.code }, { status: 400 });
         }
 
         if (!slug || typeof slug !== 'string') {
@@ -683,6 +696,21 @@ export async function POST(req: Request) {
                             } as any // Cast to any to avoid partial type mismatch on Decimal decrement
                         });
                     }
+                }
+
+                // SUPPORTER-CONSENT-1: recorded with — and only with — this committed campaign order,
+                // for the campaign's own organization inside this tenant. A failure anywhere in this
+                // transaction rolls the permission back with the order.
+                if (campaign && campaign.customer_id) {
+                    await recordSupporterConsents(tx, buildSupporterConsentRows({
+                        businessId,
+                        organizationCustomerId: campaign.customer_id,
+                        organizationName: campaign.customer?.name ?? null,
+                        campaignId: campaign.id,
+                        orderId: order.id,
+                        supporterCustomerId: dbCustomer.id,
+                        plan: consentPlan,
+                    }));
                 }
 
                 return { order, createdCustomer };

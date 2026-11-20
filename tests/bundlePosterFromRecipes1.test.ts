@@ -687,7 +687,7 @@ describe('the bundle page and the files this task must not touch', () => {
         'components/RecipeEditor.tsx': '0b82a23a55aefae75b6c5691592e0c6d6b9c48dad5e956abf811fb6bde47cf9a',
         'components/recipes/RecipeImageStyleControls.tsx': '89fcaa5bb0189744ce46c2f686ce5467d54900bf14ff9f65d16e09f24ba1d4d4',
         // 20 · fundraiser flyer, packet and promo
-        'lib/generateFlyer.ts': '8596e5a02613f6b0738a7d47ac57ffff4130c92bd3216e25a553c08b94faada5',
+        // (lib/generateFlyer.ts — SUPERSEDED PIN: FLYER-CLICKABLE-LINK-1 changes it; checked by history below.)
         'lib/generateFullPacket.ts': '3ca82b18f376bd291b231450911c4facc7da593c58371ec82377024f404ed495',
         'lib/generatePromoScripts.ts': '5a07017bd9b0693fb405767a8597209f1d097077de7b05a8dcfd9aa061cf3421',
         'lib/supporterMaterialPricing.ts': 'e85372f7897b82f641bdf15971a4a7162b47cd9a0b80692124245e83547c69e0',
@@ -703,6 +703,11 @@ describe('the bundle page and the files this task must not touch', () => {
     };
     it.each(Object.entries(PINNED))('%s is byte-identical to Production', (rel, digest) => {
         expect(crypto.createHash('sha256').update(read(rel).replace(/\r\n/g, '\n')).digest('hex')).toBe(digest);
+    });
+
+    it('lib/generateFlyer.ts was not changed by this release (29b1f27..498b816)', () => {
+        const out = require('child_process').execSync('git diff --name-only 29b1f27 498b816 -- lib/generateFlyer.ts', { cwd: ROOT, encoding: 'utf8' });
+        expect(out.trim()).toBe('');
     });
 
     // SUPERSEDED PIN (BUNDLE-POSTER-USE-AS-IMAGE-1, owner-approved proposal 2026-11-18). This task left

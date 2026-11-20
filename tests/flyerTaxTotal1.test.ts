@@ -317,21 +317,31 @@ describe('I · the tax note shows only when tax applies, with the campaign\'s ow
 // ── J · checkout is untouched ───────────────────────────────────────────────
 describe('J · supporter checkout and the order page are untouched', () => {
     it.each([
-        'app/api/public/order/route.ts',
         'lib/fundraiserTax.ts',
         'lib/fundraiserCloseoutMath.ts',
-        'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx',
         'app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx',
         'lib/pricing.ts',
         'lib/coordinatorMaterialBundles.ts',
         'app/api/tracker/download/route.ts',
-        'prisma/schema.prisma',
     ])('%s is byte-identical to Production c4e528b', (p) => {
         expect(lf(R(p))).toBe(lf(git(`show c4e528b:"${p}"`)));
     });
 
+    // SUPERSEDED PIN (SUPPORTER-CONSENT-1, owner-approved 2026-11-19). These three were pinned to
+    // c4e528b to prove FLYER-TAX-TOTAL-1 left checkout alone. A later, separately approved release
+    // adds the optional consent checkboxes to them, so the same guarantee is now checked against
+    // history: this release's own commit (b1af1d7, on c4e528b) changed none of them.
+    it.each([
+        'app/api/public/order/route.ts',
+        'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx',
+        'prisma/schema.prisma',
+    ])('%s was not changed by FLYER-TAX-TOTAL-1 (c4e528b..b1af1d7)', (p) => {
+        expect(git(`diff --name-only c4e528b b1af1d7 -- "${p}"`).trim()).toBe('');
+    });
+
     it('no migration was added', () => {
-        expect(git('diff --name-only c4e528b -- prisma').trim()).toBe('');
+        // SUPERSEDED PIN (SUPPORTER-CONSENT-1): FLYER-TAX-TOTAL-1's own commit range, not the working tree.
+        expect(git('diff --name-only c4e528b b1af1d7 -- prisma').trim()).toBe('');
     });
 
     it('every material route prices through the one helper, after validation', () => {

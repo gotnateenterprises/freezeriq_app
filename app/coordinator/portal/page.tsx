@@ -854,7 +854,9 @@ export default function CoordinatorPortal() {
     const flyerAsset = campaignAssets.find(a => a.key === 'flyer' && a.available);
 
     // Coordinator first name for setup checklist
-    const coordinatorFirstName = campaign?.customer?.contact_name?.split(" ")[0] || undefined;
+    // COORD-GREETING-1: the CURRENT campaign's assigned coordinator (server-resolved), never the
+    // organization's on-file contact; no assignment → the neutral "It's easy as 1-2-3".
+    const coordinatorFirstName = campaign?.share?.greetingFirstName || undefined;
 
     // Delivery date label for DeliveryPrep / WhatsNext. COORDINATOR-CONTACT-DATE-1:
     // delivery_date is a DATE column; date-fns `format(new Date(...))` read it in

@@ -152,6 +152,14 @@ const PAGE_H = 279.4; // Letter height in mm
 const MARGIN = 18;
 const CONTENT_W = PAGE_W - MARGIN * 2;
 
+/** FLYER-CLICKABLE-LINK-1: the visible text of the explicit online-order link on page 1. */
+export const ORDER_ONLINE_LABEL = 'Order online here';
+
+/** One line of text at the current font size, in mm — what jsPDF itself uses between wrapped lines. */
+function lineHeightMm(doc: jsPDF): number {
+    return (doc.getFontSize() * doc.getLineHeightFactor()) / doc.internal.scaleFactor;
+}
+
 // ── Main Function ────────────────────────────────────────────────────
 
 export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
@@ -411,16 +419,31 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     y += uniformCardH + 6;
 
     // ── QR CODE + CTA ──
+    // FLYER-CLICKABLE-LINK-1. The printed address wraps onto several lines, and a PDF viewer that
+    // guesses links from text links only the FIRST line — a truncated address that 404s. So every
+    // clickable area here is an explicit PDF link annotation whose target is `orderUrl`: the one
+    // string the QR code encodes (input.publicUrl, from buildSupporterOrderUrl in the routes).
     try {
-        const qr = await generateQrCode(input.publicUrl);
+        const orderUrl = input.publicUrl;
+        const qr = await generateQrCode(orderUrl);
         const qrSize = 28;
+        const qrX = MARGIN + CONTENT_W - qrSize - 8;
+        const ctaX = MARGIN + 8;
+
+        // The full address is still printed, for typing; it may wrap.
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'bold');
+        const maxUrlW = CONTENT_W - qrSize - 24;
+        const urlLines = doc.splitTextToSize(orderUrl, maxUrlW) as string[];
+        const urlLineH = lineHeightMm(doc);
+        const buttonY = y + 20;
+        const buttonH = 7.5;
+        const urlTop = buttonY + buttonH + 5;
+        const boxH = Math.max(qrSize + 10, urlTop - y + (urlLines.length - 1) * urlLineH + 4);
 
         // CTA box
         doc.setFillColor(241, 245, 249);
-        roundedRect(doc, MARGIN, y, CONTENT_W, qrSize + 10, 4, 'F');
-
-        const qrX = MARGIN + CONTENT_W - qrSize - 8;
-        const ctaX = MARGIN + 8;
+        roundedRect(doc, MARGIN, y, CONTENT_W, boxH, 4, 'F');
 
         doc.setFontSize(14);
         doc.setFont('helvetica', 'bold');
@@ -430,24 +453,39 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
         doc.setFontSize(9);
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(...textDark);
-        doc.text('Scan with your phone or visit the link:', ctaX, y + 17);
+        doc.text('Scan with your phone or visit the link:', ctaX, y + 16);
 
+        // The explicit clickable button.
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        const buttonLabel = ORDER_ONLINE_LABEL;
+        const buttonW = doc.getTextWidth(buttonLabel) + 12;
+        doc.setFillColor(...hexToRgb(primary));
+        roundedRect(doc, ctaX, buttonY, buttonW, buttonH, 2, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.text(buttonLabel, ctaX + 6, buttonY + 5.2);
+        doc.link(ctaX, buttonY, buttonW, buttonH, { url: orderUrl });
+
+        // Each printed line of the address links to the WHOLE address, never to its own fragment.
         doc.setFontSize(8);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...hexToRgb(secondary));
-        const maxUrlW = CONTENT_W - qrSize - 24;
-        const urlLines = doc.splitTextToSize(input.publicUrl, maxUrlW);
-        doc.text(urlLines, ctaX, y + 23);
+        urlLines.forEach((line, i) => {
+            const baseline = urlTop + i * urlLineH;
+            doc.text(line, ctaX, baseline);
+            doc.link(ctaX, baseline - urlLineH * 0.8, doc.getTextWidth(line), urlLineH, { url: orderUrl });
+        });
 
-        // QR code image
+        // QR code image — clickable too in an electronic copy.
         doc.addImage(qr.dataUrl, 'PNG', qrX, y + 4, qrSize, qrSize);
+        doc.link(qrX, y + 4, qrSize, qrSize, { url: orderUrl });
 
         doc.setFontSize(7);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...hexToRgb(primary));
         doc.text('SCAN TO ORDER', qrX + qrSize / 2, y + qrSize + 7, { align: 'center' });
 
-        y += qrSize + 14;
+        y += boxH + 4;
     } catch (qrErr) {
         console.warn('QR code generation failed, skipping QR section:', qrErr);
     }
@@ -596,22 +634,33 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
     y += logReminders.length * 6 + 6;
 
     // ── QR on page 2 as well (small) ──
+    // FLYER-CLICKABLE-LINK-1: the label, the QR and every printed line link to the whole address.
     try {
-        const qr = await generateQrCode(input.publicUrl);
+        const orderUrl = input.publicUrl;
+        const qr = await generateQrCode(orderUrl);
         const qrSize = 22;
         const qrX = MARGIN + CONTENT_W - qrSize - 4;
 
         doc.setFontSize(8);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...hexToRgb(primary));
-        doc.text('Or order online:', qrX - 2, y + 4, { align: 'right' });
+        const label = 'Or order online:';
+        doc.text(label, qrX - 2, y + 4, { align: 'right' });
+        const labelW = doc.getTextWidth(label);
+        doc.link(qrX - 2 - labelW, y + 4 - lineHeightMm(doc) * 0.8, labelW, lineHeightMm(doc), { url: orderUrl });
         doc.addImage(qr.dataUrl, 'PNG', qrX, y - 2, qrSize, qrSize);
+        doc.link(qrX, y - 2, qrSize, qrSize, { url: orderUrl });
 
         doc.setFontSize(7);
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(...hexToRgb(secondary));
-        const smallUrlLines = doc.splitTextToSize(input.publicUrl, qrSize + 10);
-        doc.text(smallUrlLines, qrX, y + qrSize + 2);
+        const smallUrlLines = doc.splitTextToSize(orderUrl, qrSize + 10) as string[];
+        const smallLineH = lineHeightMm(doc);
+        smallUrlLines.forEach((line, i) => {
+            const baseline = y + qrSize + 2 + i * smallLineH;
+            doc.text(line, qrX, baseline);
+            doc.link(qrX, baseline - smallLineH * 0.8, doc.getTextWidth(line), smallLineH, { url: orderUrl });
+        });
     } catch {
         // Non-fatal
     }

@@ -361,7 +361,7 @@ describe('this patch changed presentation only', () => {
         //       ("the smallest additive schema/migration necessary"). Additive: no existing column
         //       or row changes, no default, no backfill. Applying it to Production is gated on
         //       owner review and must precede the code built from it.
-        expect(migrations).toHaveLength(30);
+        expect(migrations).toHaveLength(31);
         expect(migrations[15]).toBe('20260823010000_fr_acceptance_2a2_human_followup');
         expect(migrations[16]).toBe('20260825000000_inv_d_settlement_truth');
         expect(migrations[17]).toBe('20260826000000_m18_outreach_batch_campaign_ownership');
@@ -378,6 +378,9 @@ describe('this patch changed presentation only', () => {
         expect(migrations[27]).toBe('20260923010000_qb_invoice_cancel_1_voided');
         expect(migrations[28]).toBe('20261031120000_prev_supporter_email_2b_org_mailing_address');
         expect(migrations[29]).toBe('20261102120000_coordinator_payment_methods');
+        // SUPPORTER-CONSENT-1 (owner-approved 2026-11-19): one new append-only table,
+        // supporter_contact_consents, plus two enums. Additive; no existing column or row changes.
+        expect(migrations[30]).toBe('20261119120000_supporter_consent_1');
     });
 
     it('the acknowledgement and follow-up contracts are untouched', () => {

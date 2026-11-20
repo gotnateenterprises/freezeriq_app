@@ -93,6 +93,8 @@ model Business {
   automation_policies    AutomationPolicy[]      @relation("BusinessAutomationPolicies")
   automation_actions     AutomationAction[]      @relation("BusinessAutomationActions")
   suppression_events     EmailSuppressionEvent[] @relation("BusinessSuppressionEvents")
+  // SUPPORTER-CONSENT-1
+  supporter_consents     SupporterContactConsent[] @relation("BusinessSupporterConsents")
   // FR-RETENTION-3
   outreach_messages      OutreachMessage[]       @relation("BusinessOutreachMessages")
   delivery_attempts      EmailDeliveryAttempt[]  @relation("BusinessDeliveryAttempts")
@@ -426,6 +428,10 @@ model Customer {
   funnel_opportunities    FundraiserOpportunity[]         @relation("OrgFunnelOpportunities")
   // QB-INVOICE-1B: the organization's QuickBooks customer, for the current connection.
   quickbooks_customer_link QuickBooksCustomerLink?        @relation("CustomerQuickBooksLink")
+  // SUPPORTER-CONSENT-1: permissions given FOR this organization, and (for a supporter's own
+  // direct_customer row) the permissions this supporter gave.
+  supporter_consents_received SupporterContactConsent[] @relation("OrganizationSupporterConsents")
+  supporter_consents_given    SupporterContactConsent[] @relation("SupporterOwnConsents")
 
   // FR-RETENTION-1: composite parent key so tenant-scoped children can reference
   // (business_id, customer_id) and have Postgres enforce same-tenant ownership.
@@ -520,6 +526,8 @@ model Order {
   campaign          FundraiserCampaign? @relation(fields: [campaign_id], references: [id])
   customer          Customer?           @relation(fields: [customer_id], references: [id])
   invoice           Invoice?            @relation(fields: [invoice_id], references: [id])
+  // SUPPORTER-CONSENT-1: permissions recorded with this order.
+  supporter_consents SupporterContactConsent[] @relation("OrderSupporterConsents")
 
   @@map("orders")
 }
@@ -852,6 +860,8 @@ model FundraiserCampaign {
   // MIGRATION 18: at most one Previous Supporters outreach batch, enforced by
   // the partial unique index outreach_batches_one_per_campaign.
   outreach_batches      OutreachBatch[]                @relation("CampaignOutreachBatches")
+  // SUPPORTER-CONSENT-1: permissions collected on this campaign's order page.
+  supporter_consents    SupporterContactConsent[]      @relation("CampaignSupporterConsents")
 
   // FR-FUNNEL-1: intentionally redundant with the primary key on `id`.
   // FundraiserCampaign has no business_id, so there is no [business_id, id] for
@@ -1688,6 +1698,55 @@ model EmailSuppressionEvent {
   @@index([business_id, contact_id])
   @@index([business_id, created_at])
   @@map("email_suppression_events")
+}
+
+/// SUPPORTER-CONSENT-1 — affirmative permission a supporter gave, on a successfully placed order,
+/// for future fundraiser messages from ONE organization (customer_id) inside ONE tenant
+/// (business_id), on ONE channel, at ONE destination (the exact normalized email address or +1
+/// mobile number accepted). Append-only: a later grant re-affirms, a later `revoked` row withdraws,
+/// and an unchecked box records nothing. Email unsubscribes stay in marketing_preferences and always
+/// win. Never inferred from purchase history, an order's email, or the absence of an opt-out.
+/// Read only through lib/supporterConsent.ts.
+model SupporterContactConsent {
+  id                    String                  @id @default(uuid())
+  business_id           String
+  /// The organization the permission is FOR (the fundraiser's Customer).
+  customer_id           String
+  /// Where it was collected, and the order and supporter record it came with.
+  campaign_id           String?
+  order_id              String?
+  supporter_customer_id String?
+  channel               SupporterConsentChannel
+  action                SupporterConsentAction  @default(granted)
+  /// Normalized email (lowercase) or E.164 mobile number (+1XXXXXXXXXX) at consent time.
+  destination           String
+  /// e.g. supporter-future-email-v1 / supporter-future-sms-v1 (server-defined).
+  consent_version       String
+  /// The exact disclosure shown, organization name included.
+  disclosure_text       String
+  /// e.g. supporter_order_checkout
+  source                String
+  created_at            DateTime                @default(now())
+
+  business     Business            @relation("BusinessSupporterConsents", fields: [business_id], references: [id], onDelete: Cascade)
+  organization Customer            @relation("OrganizationSupporterConsents", fields: [business_id, customer_id], references: [business_id, id], onDelete: Cascade)
+  campaign     FundraiserCampaign? @relation("CampaignSupporterConsents", fields: [campaign_id], references: [id], onDelete: SetNull)
+  order        Order?              @relation("OrderSupporterConsents", fields: [order_id], references: [id], onDelete: SetNull)
+  supporter    Customer?           @relation("SupporterOwnConsents", fields: [supporter_customer_id], references: [id], onDelete: SetNull)
+
+  @@index([business_id, customer_id, channel, destination, created_at], map: "supporter_contact_consents_lookup_idx")
+  @@index([order_id], map: "supporter_contact_consents_order_idx")
+  @@map("supporter_contact_consents")
+}
+
+enum SupporterConsentChannel {
+  email
+  sms
+}
+
+enum SupporterConsentAction {
+  granted
+  revoked
 }
 
 enum SeasonalOfferingStatus {

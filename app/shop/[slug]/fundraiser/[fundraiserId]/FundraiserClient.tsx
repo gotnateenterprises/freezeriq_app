@@ -27,6 +27,11 @@ import { SupporterBundleDetail, hideBrokenImage, srOnly } from '@/components/fun
 import { publicImageUrl, publicText, supporterBundleMeals, supporterServesLabel } from '@/lib/supporterBundleDetail';
 // COORDINATOR-PAYMENT-METHOD-UX-1: the one supporter-facing "how to pay" view.
 import { SupporterPaymentSection } from '@/components/fundraiser/SupporterPaymentSection';
+// SUPPORTER-CONSENT-1: the exact wording the server stores with the order.
+import {
+    EMAIL_CONSENT_NEEDS_EMAIL_MESSAGE, SMS_CONSENT_NEEDS_PHONE_MESSAGE, SUPPORTER_CONSENT_OPTIONAL_NOTE,
+    normalizeConsentEmail, normalizeConsentPhone, supporterEmailConsentText, supporterSmsConsentText,
+} from '@/lib/supporterConsentText';
 
 /**
  * FR-ACCEPTANCE-MOBILE-POLISH-1. Display-only formatting for the per-order
@@ -218,6 +223,9 @@ export default function FundraiserClient({
     const [submitting, setSubmitting] = useState(false);
     const [submitError, setSubmitError] = useState<string | null>(null);
     const [thanks, setThanks] = useState<ThanksData | null>(null);
+    // SUPPORTER-CONSENT-1: both start unchecked; neither is needed to order.
+    const [emailUpdates, setEmailUpdates] = useState(false);
+    const [textUpdates, setTextUpdates] = useState(false);
     // Presentation-only: shows once per successful order, dismissed by the
     // customer. Never re-shown by a replay (no new setThanks call occurs on a
     // replay) and never tied to any API request of its own.
@@ -399,6 +407,9 @@ export default function FundraiserClient({
         // fetch — so no request of any kind leaves the browser in sample mode.
         if (sampleMode) return;
         if (!canSubmit) return;
+        // SUPPORTER-CONSENT-1: a checked box needs somewhere to send to (the server checks again).
+        if (emailUpdates && !normalizeConsentEmail(buyerEmail)) { setSubmitError(EMAIL_CONSENT_NEEDS_EMAIL_MESSAGE); return; }
+        if (textUpdates && !normalizeConsentPhone(buyerPhone)) { setSubmitError(SMS_CONSENT_NEEDS_PHONE_MESSAGE); return; }
         setSubmitting(true);
         setSubmitError(null);
         // Generated once per logical submission; a retry after a failure reuses it
@@ -431,6 +442,8 @@ export default function FundraiserClient({
                     },
                     slug,
                     campaignId: campaign.id,
+                    // Checkbox intent only — the server decides the wording and version it records.
+                    marketingConsent: { email: emailUpdates, sms: textUpdates },
                 }),
             });
             const data = await res.json();
@@ -1249,6 +1262,34 @@ export default function FundraiserClient({
                                         onChange={e => { resetSubmissionKey(); setBuyerPhone(e.target.value); }}
                                         style={{ ...fableInput, minWidth: 0 }}
                                     />
+                                </div>
+
+                                {/* SUPPORTER-CONSENT-1: two separate, optional, unchecked choices, directly
+                                    under the email and phone they apply to — never pre-checked, never
+                                    bundled into terms, never required to order. The sentences are the
+                                    ones the server records (lib/supporterConsentText.ts). */}
+                                <div style={{ marginTop: '.55rem', display: 'grid', gap: '.4rem' }}>
+                                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: '.5rem', fontSize: '.72rem', lineHeight: 1.4, color: '#5c4a42', cursor: 'pointer' }}>
+                                        <input
+                                            type="checkbox"
+                                            aria-label="Email updates about future fundraisers"
+                                            checked={emailUpdates}
+                                            onChange={e => { resetSubmissionKey(); setEmailUpdates(e.target.checked); }}
+                                            style={{ marginTop: '.15rem', flexShrink: 0 }}
+                                        />
+                                        <span>{supporterEmailConsentText(campaign.organization_name)}</span>
+                                    </label>
+                                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: '.5rem', fontSize: '.72rem', lineHeight: 1.4, color: '#5c4a42', cursor: 'pointer' }}>
+                                        <input
+                                            type="checkbox"
+                                            aria-label="Text messages about future fundraisers"
+                                            checked={textUpdates}
+                                            onChange={e => { resetSubmissionKey(); setTextUpdates(e.target.checked); }}
+                                            style={{ marginTop: '.15rem', flexShrink: 0 }}
+                                        />
+                                        <span>{supporterSmsConsentText(campaign.organization_name)}</span>
+                                    </label>
+                                    <p style={{ margin: 0, fontSize: '.64rem', color: '#9a8075' }}>{SUPPORTER_CONSENT_OPTIONAL_NOTE}</p>
                                 </div>
 
                                 <label style={{ display: 'block', marginTop: '.55rem', fontSize: '.64rem', fontWeight: 800, color: '#9a8075', textTransform: 'uppercase', letterSpacing: '.05em' }}>

@@ -35,6 +35,7 @@
  * query shape lives in exactly one exported constant that every caller reuses.
  */
 import { normalizeSupporterEmail } from '@/lib/previousSupporters';
+import { firstNameOf } from '@/lib/personName';
 
 /**
  * The Prisma `select` every caller uses to load a campaign's coordinator
@@ -121,6 +122,20 @@ export function readAssignedCoordinator(
         }
     }
     return { usable: false, reason: 'no_usable_email' };
+}
+
+/**
+ * COORD-GREETING-1 — the first name the coordinator portal greets ("Taylor, it's easy as 1-2-3"):
+ * the CURRENT campaign's assigned coordinator only — the same assignment rule as
+ * readAssignedCoordinator (an assignment exists and the relationship has not ended) — never the
+ * organization's on-file contact, a district or tenant contact, or a previous coordinator. A greeting
+ * is not a delivery, so a usable email is not required. Null means "greet without a name".
+ * First name by the canonical firstNameOf rule (first word: "Mary Ann Jones" → "Mary").
+ */
+export function assignedCoordinatorFirstName(assignment: CoordinatorAssignmentRow | null | undefined): string | null {
+    const orgContact = assignment?.org_contact;
+    if (!assignment || !orgContact || orgContact.ended_at) return null;
+    return firstNameOf(orgContact.contact?.display_name ?? null);
 }
 
 export type CampaignCoordinatorSource = 'assigned' | 'organization' | 'none';

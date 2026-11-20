@@ -92,6 +92,9 @@ const MODELS = [
     // tenant-scoping assertion would fail — or pass — for the wrong reason.
     'marketingPreference', 'outreachRecipientOrg', 'outreachBatch', 'emailDeliveryAttempt',
     'rebookingSubmissionRevisionOrg', 'seasonalOffering',
+    // SUPPORTER-CONSENT-1: the public order route records supporter permission inside its
+    // transaction, and the Previous Supporters authority reads it.
+    'supporterContactConsent',
 ];
 
 const METHODS = [

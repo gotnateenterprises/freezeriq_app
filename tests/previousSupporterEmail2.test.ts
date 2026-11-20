@@ -276,6 +276,10 @@ function makeWorld() {
         fundraiserCampaignCoordinator: {
             findUnique: async ({ where }: any) => assignments[where.campaign_id] ?? null,
         },
+        // SUPPORTER-CONSENT-1 (harness addition): the consent authority now reads this table. This
+        // world records no supporter permission, so it is empty — the "not permission (TODAY)"
+        // tests below keep proving that purchase history alone still grants nothing.
+        supporterContactConsent: { findMany: async () => [] },
         // 2.0B: the two raw statements the mailing-address authority and CRM route use.
         $queryRaw: async (strings: TemplateStringsArray, ...values: any[]) => {
             const sql = strings.join('?');
@@ -1625,7 +1629,9 @@ describe('9 · 2.0B — the organization mailing address (CRM, migration, both e
         const all = fs.readdirSync(path.join(ROOT, 'prisma', 'migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
         // REVISED (COORDINATOR-PAYMENT-METHOD-UX-1): still after every earlier migration; followed
         // only by that phase's own owner-approved, additive migration.
-        expect(all.slice(all.indexOf(dir) + 1)).toEqual(['20261102120000_coordinator_payment_methods']);
+        // REVISED (SUPPORTER-CONSENT-1, owner-approved 2026-11-19): followed next by that phase's own
+        // additive migration — the supporter_contact_consents table this file's consent authority reads.
+        expect(all.slice(all.indexOf(dir) + 1)).toEqual(['20261102120000_coordinator_payment_methods', '20261119120000_supporter_consent_1']);
         const sql = R(`prisma/migrations/${dir}/migration.sql`);
         const statements = sql.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('--'));
         expect(statements).toEqual(['mailing_address_line1', 'mailing_address_line2', 'mailing_city', 'mailing_state', 'mailing_postal_code']
@@ -1647,5 +1653,59 @@ describe('9 · 2.0B — the organization mailing address (CRM, migration, both e
         // so this keeps stating what 2.0B did after a later phase legitimately edits these paths.
         const changed = execSync(`git --literal-pathspecs diff --name-only b215aa74601aa614b2f91cb904eef590b437898c a19ed7d854219e07319a586c490a4a0240df7dd8 -- ${guarded.join(' ')}`, { encoding: 'utf8', cwd: ROOT });
         expect(`${changed}`.trim()).toBe('');
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SUPPORTER-CONSENT-1 — a REAL recorded permission (supporter_contact_consents, read by the real
+// authority) through the real GET and POST. No mock of the consent authority in these tests.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('SUPPORTER-CONSENT-1 · recorded permission through the real Previous Supporters flow', () => {
+    const grant = (email: string, over: Record<string, unknown> = {}) => ({
+        business_id: BIZ_A, customer_id: ORG_A, channel: 'email', destination: email, action: 'granted',
+        created_at: new Date('2026-11-19T12:00:00Z'), ...over,
+    });
+    function record(rows: any[]) {
+        (world.client as any).supporterContactConsent = {
+            findMany: async ({ where }: any) => rows.filter((r) => r.business_id === where.business_id && r.customer_id === where.customer_id && r.channel === where.channel),
+        };
+    }
+
+    it('Jamie ticked "email updates" for Maple Grove → eligible, counted and sent; Casey (no permission) is not', async () => {
+        record([grant(JAMIE)]);
+        const { body } = await get();
+        expect(body.counts.consented).toBe(1);
+        expect(body.automated.code).toBe('available');
+        expect(rowFor(body, 'Jamie Example')).toMatchObject({ selectable: true, automated: { eligible: true } });
+        expect(rowFor(body, 'Casey Sample')).toMatchObject({ selectable: false,
+            automated: { eligible: false, reason: 'FreezerIQ send unavailable — future email permission not recorded' } });
+        const r = await send([refOf(JAMIE), refOf(CASEY)]);
+        expect(r.body).toMatchObject({ accepted: 1 });
+        expect(r.body.notSent.noConsent).toBe(1);
+        expect(sentTo(JAMIE)).toHaveLength(1);
+        expect(sentTo(CASEY)).toHaveLength(0);
+    });
+
+    it('another organization\'s or another tenant\'s permission adds nobody; an unsubscribed address stays opted out', async () => {
+        record([grant(JAMIE, { customer_id: ORG_A2 }), grant(JAMIE, { business_id: BIZ_B }), grant(TAYLOR)]);
+        const { body } = await get();
+        expect(body.counts.consented).toBe(0);
+        expect(body.automated.code).toBe('consent_not_recorded');
+        expect((await send([refOf(JAMIE), refOf(CASEY), refOf(ALEX)])).status).toBe(409);
+        expect(sent).toHaveLength(0);
+    });
+
+    it('a later revocation withdraws the permission', async () => {
+        record([grant(JAMIE), grant(JAMIE, { action: 'revoked', created_at: new Date('2026-11-20T12:00:00Z') })]);
+        expect((await get()).body.counts.consented).toBe(0);
+    });
+
+    it('recorded permission without the organization mailing address still sends nothing', async () => {
+        record([grant(JAMIE)]);
+        clearAddress();
+        const { body } = await get();
+        expect(body.automated.code).toBe('mailing_address_required');
+        expect((await send([refOf(JAMIE)])).status).toBe(409);
+        expect(sent).toHaveLength(0);
     });
 });

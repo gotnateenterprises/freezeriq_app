@@ -40,6 +40,7 @@ import { hasInvalidOrderQuantity } from '@/lib/orderQuantity';
 import { SUPPORTER_ORDER_SELECT, toSupporterOrder } from '@/lib/coordinatorSupporterOrders';
 import {
     CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT,
+    assignedCoordinatorFirstName,
     resolveCampaignCoordinator,
     type CoordinatorAssignmentRow,
 } from '@/lib/campaignCoordinatorContact';
@@ -450,6 +451,10 @@ export async function GET(req: Request) {
                 coordinatorName: shareCoordinatorName,
                 coordinatorEmail: shareCoordinatorEmail,
                 pickupDeliveryLines: sharePickupDeliveryLines,
+                // COORD-GREETING-1: the assigned coordinator's first name for "<Name>, it's easy
+                // as 1-2-3" — null (a neutral greeting) when no current coordinator is assigned.
+                // Deliberately NOT coordinatorName, which falls back to the organization's contact.
+                greetingFirstName: assignedCoordinatorFirstName(coordinatorAssignment),
             },
         });
 

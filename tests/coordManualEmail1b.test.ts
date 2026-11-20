@@ -105,6 +105,9 @@ describe('1. schema and migration', () => {
             // COORDINATOR-PAYMENT-METHOD-UX-1: one nullable JSONB column on fundraiser_campaigns (how
             // supporters may pay their coordinator). Additive; authorized by the owner's brief.
             '20261102120000_coordinator_payment_methods',
+            // SUPPORTER-CONSENT-1: one new append-only table (supporter_contact_consents) + two
+            // enums. Additive; approved by the owner 2026-11-19.
+            '20261119120000_supporter_consent_1',
         ]);
     });
 });
