@@ -292,6 +292,8 @@ describe('PRESERVATION', () => {
             '20261031120000_prev_supporter_email_2b_org_mailing_address',
             // COORDINATOR-PAYMENT-METHOD-UX-1 (owner-authorized, additive): how supporters may pay their coordinator.
             '20261102120000_coordinator_payment_methods',
+            // SUPPORTER-CONSENT-1 (owner-authorized, additive): the supporter_contact_consents table.
+            '20261119120000_supporter_consent_1',
         ]);
     });
 });

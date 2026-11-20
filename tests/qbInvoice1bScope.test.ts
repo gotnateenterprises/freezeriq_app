@@ -189,12 +189,14 @@ describe('QB-INVOICE-1B · the migration is additive', () => {
         // REVISED (PREVIOUS-SUPPORTER-EMAIL-2.0B): one later, owner-approved, additive migration follows.
         // REVISED (COORDINATOR-PAYMENT-METHOD-UX-1): and one more — a nullable JSONB column on
         // fundraiser_campaigns, authorized by the owner's brief.
-        expect(dirs).toHaveLength(30);
+        // REVISED (SUPPORTER-CONSENT-1): and one more — the additive supporter_contact_consents table.
+        expect(dirs).toHaveLength(31);
         expect(dirs[25]).toBe('20260913120000_qb_invoice_1b_quickbooks_links');
         expect(dirs[26]).toBe('20260915170000_qb_invoice_1c_invoice_send');
         expect(dirs[27]).toBe('20260923010000_qb_invoice_cancel_1_voided');
         expect(dirs[28]).toBe('20261031120000_prev_supporter_email_2b_org_mailing_address');
         expect(dirs[29]).toBe('20261102120000_coordinator_payment_methods');
+        expect(dirs[30]).toBe('20261119120000_supporter_consent_1');
         const sql = R(MIGRATION).split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
         expect(sql).not.toMatch(/\bDROP\b|\bRENAME\b|ALTER\s+COLUMN|\bUPDATE\s+"|\bDELETE\s+FROM|\bINSERT\s+INTO|\bTRUNCATE\b/i);
         // Every ALTER TABLE adds a constraint to a NEW table; the only statement on an existing table is one unique index.

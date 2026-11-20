@@ -397,10 +397,11 @@ describe('F · one-send / claim semantics are unchanged', () => {
     });
 
     it('the launch dialog, schema and migrations are untouched', () => {
-        for (const p of ['components/crm2/LaunchFundraiserDialog.tsx', 'prisma/schema.prisma']) {
-            expect(lf(read(p))).toBe(lf(git(`show 1885e17:"${p}"`)));
-        }
-        expect(git('diff --name-only 1885e17 -- prisma').trim()).toBe('');
+        expect(lf(read('components/crm2/LaunchFundraiserDialog.tsx'))).toBe(lf(git('show 1885e17:"components/crm2/LaunchFundraiserDialog.tsx"')));
+        // SUPERSEDED PIN (SUPPORTER-CONSENT-1, owner-approved 2026-11-19): a later release adds an
+        // additive table, so the schema/migration guarantee is checked against THIS release's own
+        // commit (c4e528b, on 1885e17): it changed nothing under prisma/.
+        expect(git('diff --name-only 1885e17 c4e528b -- prisma').trim()).toBe('');
     });
 
     it('the card reaches only the existing route: one GET path, one body-less POST, no direct writes', () => {
