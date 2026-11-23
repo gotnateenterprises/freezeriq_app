@@ -249,6 +249,11 @@ const PUBLIC_ALLOWLIST: Record<string, string> = {
     // covers those paths), so their entries are gone.
     'GET app/api/auth/qbo/route.ts': 'deliberately retired to 410; the file keeps the NextAuth catch-all off the path',
     'GET app/api/auth/qbo/callback/route.ts': 'deliberately retired to 410; the file keeps the NextAuth catch-all off the path',
+    // TWILIO-SMS-ROUTE-RETIRE-1. The legacy SMS relay (any staff account → any number, any message,
+    // no tenant scope, consent, suppression or STOP handling) is retired to a fixed 410 that reads
+    // nothing. It is no longer a session-guarded working SMS capability.
+    'POST app/api/public/send-text/route.ts': 'deliberately retired to 410; legacy SMS relay, reads nothing',
+    'GET app/api/public/send-text/route.ts': 'deliberately retired to 410; legacy SMS relay, reads nothing',
 };
 
 interface Handler { key: string; file: string; verb: string; guard: string | null; }

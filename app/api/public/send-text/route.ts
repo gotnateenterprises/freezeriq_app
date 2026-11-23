@@ -1,89 +1,54 @@
+/**
+ * Legacy SMS relay — RETIRED (TWILIO-SMS-ROUTE-RETIRE-1, owner-approved 2026-11-23).
+ *
+ * ── WHY THIS IS NOW A DEAD END ──────────────────────────────────────────────
+ *
+ * TWILIO-SMS-ROUTE-AUDIT-1 (read-only, on Production 95dff83) found that this POST sent a text from
+ * the platform's single Twilio number to ANY list of numbers, with ANY message, for ANY signed-in
+ * staff account. It had:
+ *
+ *   - no tenant scoping — no business id was read, so one tenant could text another tenant's
+ *     supporters or any number outside FreezerIQ;
+ *   - no supporter consent check (supporter_contact_consents was never read), no suppression,
+ *     and no inbound STOP / revocation handling anywhere in FreezerIQ;
+ *   - no rate, recipient or length limits, international numbers passed straight through, and
+ *     Twilio errors and message ids were echoed back to the caller.
+ *
+ * It had no callers: no page, component, script or library referenced it, and the only SMS UI in
+ * the repository (components/crm/SmsComposeModal.tsx) is imported nowhere. Twilio was not
+ * configured in any Vercel environment, so it answered 503 — but adding the credentials would have
+ * turned it into a live open relay.
+ *
+ * ── WHAT IS EXPLICITLY *NOT* AFFECTED ───────────────────────────────────────
+ *
+ * SUPPORTER-CONSENT-1 keeps capturing SMS permission at supporter checkout (capture only). Marketing
+ * SMS stays disabled: there is no sender, and none may exist until inbound STOP / revocation, SMS
+ * suppression, a send log and abuse limits do. A future sender must be purpose-specific and
+ * server-owned (recipients and wording chosen by the server), not a generic relay like this one.
+ *
+ * ── WHY 410 RATHER THAN DELETION ────────────────────────────────────────────
+ *
+ * The file stays so a stale caller gets a definite answer, and so the retirement is legible where
+ * someone would look for it. Every request, signed in or not, from any tenant, gets the same fixed
+ * response. Nothing is read: no session, no body, no phone number, no message, no environment
+ * variable. Nothing is logged. There is no Twilio import and no code path to any provider.
+ */
+
 import { NextResponse } from 'next/server';
-import { auth } from '@/auth';
-import twilio from 'twilio';
 
-// Initialize the Twilio client if credentials exist in the environment
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const fromPhone = process.env.TWILIO_PHONE_NUMBER;
+/** Identical for every verb and every caller: gone, no work performed, nothing disclosed. */
+function gone() {
+    return NextResponse.json(
+        { error: 'This SMS endpoint is no longer available.' },
+        { status: 410, headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } },
+    );
+}
 
-const client = accountSid && authToken ? twilio(accountSid, authToken) : null;
+export async function POST() {
+    // The request is deliberately never read: no session, no body, no recipients, no message.
+    return gone();
+}
 
-export async function POST(req: Request) {
-    try {
-        const session = await auth();
-        if (!session?.user?.id) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
-
-        const body = await req.json();
-        const { to, message } = body;
-
-        // Basic validation
-        if (!to || !Array.isArray(to) || to.length === 0) {
-            return NextResponse.json({ error: 'Recipient phone numbers (array) are required' }, { status: 400 });
-        }
-        if (!message || message.trim() === '') {
-            return NextResponse.json({ error: 'Message body cannot be empty' }, { status: 400 });
-        }
-
-        // Check if Twilio is configured
-        if (!client || !fromPhone) {
-            console.warn('[Twilio] Attempted to send SMS but Twilio credentials are not fully configured in .env');
-            return NextResponse.json({
-                error: 'SMS service is not configured. Please add Twilio credentials to your environment variables.'
-            }, { status: 503 }); // 503 Service Unavailable
-        }
-
-        console.log(`[Twilio API] Preparing to send SMS blast to ${to.length} recipients...`);
-
-        // Send the SMS messages concurrently
-        // Note: For very large lists (1000+), you would want to batch these or use Twilio Notify/Messaging Services.
-        // For standard small local lists, Promise.all is perfectly fine.
-        const sendPromises = to.map(async (phoneNumber: string) => {
-            // Ensure phone number starts with +1 (US format) if it doesn't already have a country code
-            let formattedPhone = phoneNumber.trim();
-            if (!formattedPhone.startsWith('+')) {
-                // Remove non-numeric characters just to be safe
-                const digitsOnly = formattedPhone.replace(/\D/g, '');
-                if (digitsOnly.length === 10) {
-                    formattedPhone = `+1${digitsOnly}`;
-                } else if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) {
-                    formattedPhone = `+${digitsOnly}`;
-                }
-            }
-
-            try {
-                const result = await client.messages.create({
-                    body: message,
-                    from: fromPhone,
-                    to: formattedPhone
-                });
-                return { success: true, phone: formattedPhone, sid: result.sid };
-            } catch (err: any) {
-                console.error(`[Twilio Error] Failed to send to ${formattedPhone}:`, err.message);
-                return { success: false, phone: formattedPhone, error: err.message };
-            }
-        });
-
-        const results = await Promise.all(sendPromises);
-
-        // Check if there were any failures
-        const failures = results.filter(r => !r.success);
-
-        if (failures.length === results.length) {
-            console.error('[Twilio API] ALL messages failed to send:', failures);
-            return NextResponse.json({ error: 'All messages failed to send', details: failures }, { status: 500 });
-        }
-
-        return NextResponse.json({
-            success: true,
-            message: `Sent ${results.length - failures.length} out of ${results.length} messages successfully.`,
-            results
-        });
-
-    } catch (error: any) {
-        console.error('[Twilio API Generic Error]:', error);
-        return NextResponse.json({ error: 'Internal server error while processing SMS request' }, { status: 500 });
-    }
+export async function GET() {
+    return gone();
 }

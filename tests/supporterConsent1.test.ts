@@ -456,9 +456,22 @@ describe('nothing is sent, and SMS stays locked', () => {
         expect(tableUsers.map((f) => f.replace(/\\/g, '/'))).toEqual(['lib/supporterConsent.ts']);
     });
 
-    it('the existing Twilio route and the unsubscribe path are byte-identical to Production 7c9c048', () => {
-        for (const p of ['app/api/public/send-text/route.ts', 'lib/outreachUnsubscribeWrite.ts', 'lib/outreachUnsubscribeToken.ts', 'app/api/unsubscribe/[token]/route.ts', 'lib/outreachSend.ts']) {
+    it('the unsubscribe path is byte-identical to Production 7c9c048', () => {
+        for (const p of ['lib/outreachUnsubscribeWrite.ts', 'lib/outreachUnsubscribeToken.ts', 'app/api/unsubscribe/[token]/route.ts', 'lib/outreachSend.ts']) {
             expect(R(p)).toBe(execSync(`git show 7c9c048:"${p}"`, { cwd: ROOT, encoding: 'utf8' }).replace(/\r\n/g, '\n'));
         }
+    });
+
+    // SUPERSEDED PIN (TWILIO-SMS-ROUTE-RETIRE-1, owner-approved 2026-11-23). This release pinned the
+    // legacy Twilio relay byte-identical, to prove consent capture added no sender. The relay has
+    // since been retired to an inert 410, so the guarantee is now stated directly: SUPPORTER-CONSENT-1
+    // itself never touched it (its own commits, 7c9c048..95dff83), and no SMS sender exists anywhere —
+    // no Twilio import, no messages.create — so SMS consent stays capture-only.
+    it('SMS stays capture-only: consent never changed the legacy relay, and no SMS sender exists in the app', () => {
+        expect(execSync('git diff --name-only 7c9c048 95dff83 -- app/api/public/send-text', { cwd: ROOT, encoding: 'utf8' }).trim()).toBe('');
+        const code = [...files('app'), ...files('lib'), ...files('components')]
+            .map((f) => R(f).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, ''));
+        expect(code.filter((s) => /from ['"]twilio['"]|require\(['"]twilio['"]\)/.test(s))).toEqual([]);
+        expect(code.filter((s) => /\.messages\.create\(/.test(s))).toEqual([]);
     });
 });
