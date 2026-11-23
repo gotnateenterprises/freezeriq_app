@@ -53,9 +53,9 @@ jest.mock('@/lib/ai/recipe_generator', () => ({
         generateRecipe: jest.fn(async () => ({ name: 'Generated' })),
     })),
 }));
-jest.mock('@/lib/marketing_client', () => ({
-    marketingClient: { getCampaigns: jest.fn(async () => [{ id: 'c1', subject: 'secret' }]) },
-}));
+// MARKETING-PLACEHOLDER-SEND-1 deleted lib/marketing_client.ts (the in-memory
+// mock sender); /api/marketing/send now refuses with 501 and imports nothing to
+// mock. tests/marketingPlaceholderSend1.test.ts covers its authenticated path.
 
 const mockEmailSend = jest.fn(async () => ({ id: 'email-1' }));
 jest.mock('resend', () => ({

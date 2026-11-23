@@ -1,78 +1,54 @@
-
 import { NextResponse } from 'next/server';
-import { marketingClient } from '@/lib/marketing_client';
-import { prisma } from '@/lib/db';
+import { auth } from '@/auth';
 
-export async function POST(request: Request) {
-    try {
-        const { auth } = await import('@/auth');
-        const session = await auth();
-        if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+// MARKETING-PLACEHOLDER-SEND-1.
+//
+// FreezerIQ has no marketing email or SMS sender. This route used to hand every
+// request to an in-memory MockMarketingClient that only console.logged the
+// message, waited 1.5 s and answered `status: 'sent'`, so the /campaigns page
+// told the tenant "Message Sent!" when nothing had been emailed or texted. Its
+// GET returned that mock's process-wide campaign list (two invented demo
+// campaigns with made-up open/click stats, plus anything any tenant had
+// "sent" since cold start), with no tenant filter.
+//
+// Both methods now refuse with 501 instead of pretending. They read no request
+// body, count no customers and touch no database: there is nothing to deliver
+// to, so there is nothing to look up. The session guard stays first so an
+// anonymous caller still gets 401 (SEC-PUBLIC-ROUTE-1).
+//
+// Email that really works lives elsewhere and is untouched by this file:
+// coordinator Previous Supporters invitations and the Fundraiser CRM's
+// seasonal lineup emails (/fundraisers?tab=rebooking). SMS has no sender at
+// all (TWILIO-SMS-ROUTE-RETIRE-1). A real campaign sender is a separate,
+// approved build with its own consent, suppression and send-log design.
 
-        const user = session.user as any;
-        const businessId = user.businessId;
-        const plan = user.plan;
-        const isSuperAdmin = user.isSuperAdmin;
+const MARKETING_SEND_UNAVAILABLE = 'MARKETING_SEND_UNAVAILABLE';
 
-        if (!businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-        const hasAccess = plan === 'ENTERPRISE' || plan === 'ULTIMATE' || plan === 'FREE' || isSuperAdmin;
-        if (!hasAccess) {
-            return NextResponse.json({ error: "Upgrade Now" }, { status: 403 });
-        }
-
-        const body = await request.json();
-        const { subject, body: messageBody, channel, audienceType, targetRecipient } = body;
-
-        if (!subject || !messageBody) {
-            return NextResponse.json({ error: 'Subject and Body are required' }, { status: 400 });
-        }
-
-        let audienceSize = 1;
-
-        if (audienceType === 'all') {
-            audienceSize = await prisma.customer.count({ where: { business_id: businessId, archived: false } });
-        } else if (audienceType === 'individual') {
-            audienceSize = await prisma.customer.count({ where: { business_id: businessId, type: 'direct_customer', archived: false } });
-        } else if (audienceType === 'organization') {
-            audienceSize = await prisma.customer.count({ where: { business_id: businessId, type: { in: ['fundraiser_org', 'organization'] }, archived: false } });
-        } else if (audienceType === 'single') {
-            audienceSize = 1;
-        }
-
-        const result = await marketingClient.sendCampaign({
-            subject,
-            body: messageBody,
-            channel: channel || 'email',
-            audience_size: audienceSize || 1
-        });
-
-        return NextResponse.json(result);
-
-    } catch (e: any) {
-        return NextResponse.json({ error: e.message || 'Failed to send campaign' }, { status: 500 });
-    }
+function unavailable(error: string) {
+    return NextResponse.json(
+        { error, code: MARKETING_SEND_UNAVAILABLE, sent: false },
+        { status: 501 },
+    );
 }
 
-// SEC-PUBLIC-ROUTE-1. The POST above gates correctly; this GET did not gate at
-// all. marketingClient is a module-level singleton (lib/marketing_client.ts:79)
-// whose in-memory campaign array is appended by that authenticated POST, so an
-// anonymous GET returned the subject and body of every campaign any tenant had
-// sent from this server instance since cold start.
-//
-// Scoping note: the mock client stores no business_id, so there is nothing to
-// filter on — the session guard is the whole available fix at this layer. When
-// this is replaced by a real marketing backend, the per-tenant filter belongs in
-// the client, and this comment should go with it.
-export async function GET() {
-    try {
-        const { auth } = await import('@/auth');
-        const session = await auth();
-        if (!session?.user?.businessId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-        const campaigns = await marketingClient.getCampaigns();
-        return NextResponse.json(campaigns);
-    } catch (e: any) {
-        return NextResponse.json({ error: e.message }, { status: 500 });
+export async function POST() {
+    const session = await auth();
+    if (!session?.user?.businessId) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    return unavailable(
+        'Campaign sending is not available yet. FreezerIQ has no marketing email or SMS sender, so nothing was emailed or texted.',
+    );
+}
+
+export async function GET() {
+    const session = await auth();
+    if (!session?.user?.businessId) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    return unavailable(
+        'Campaign history is not available. FreezerIQ has no marketing email or SMS sender, so no campaigns have been sent from this page.',
+    );
 }

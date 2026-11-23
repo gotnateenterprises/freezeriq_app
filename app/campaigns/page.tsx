@@ -1,25 +1,18 @@
 "use client";
 
 import { useState, useEffect, Suspense } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Megaphone, Mail, MessageSquare, Send, CheckCircle, BarChart3, Users, ChevronDown, User } from 'lucide-react';
+import { Megaphone, Mail, MessageSquare, Send, Users, ChevronDown, User, Ban, Info, History, ArrowRight } from 'lucide-react';
 import { useSession } from 'next-auth/react';
 import UpgradeRequired from '@/components/UpgradeRequired';
 
-interface Campaign {
-    id: string;
-    subject: string;
-    body: string;
-    channel: 'email' | 'sms';
-    status: 'draft' | 'sent';
-    sent_at?: string;
-    audience_size: number;
-    stats?: {
-        sent: number;
-        opened: number;
-        clicked: number;
-    };
-}
+// MARKETING-PLACEHOLDER-SEND-1. FreezerIQ has no marketing email or SMS
+// sender. This page used to POST to a mock that only logged the message and
+// then showed "Message Sent!", list two invented demo campaigns with made-up
+// stats, and show hard-coded 42% / 18% open and click rates. It now says
+// plainly that sending is unavailable, keeps Send disabled, and points to the
+// email features that do work. /api/marketing/send refuses with 501.
 
 interface AudienceCounts {
     all: number;
@@ -27,20 +20,19 @@ interface AudienceCounts {
     organization: number;
 }
 
+const SEND_UNAVAILABLE_REASON_ID = 'marketing-send-unavailable-reason';
+
 function CampaignsContent() {
     const { data: session, status } = useSession();
     const searchParams = useSearchParams();
-    const [campaigns, setCampaigns] = useState<Campaign[]>([]);
 
     // Plan Gating
     const userPlan = (session?.user as any)?.plan;
     const isSuperAdmin = (session?.user as any)?.isSuperAdmin;
     const hasAccess = userPlan === 'ENTERPRISE' || userPlan === 'ULTIMATE' || userPlan === 'FREE' || isSuperAdmin;
-    const [isLoading, setIsLoading] = useState(true);
-    const [isSending, setIsSending] = useState(false);
     const [counts, setCounts] = useState<AudienceCounts>({ all: 0, individual: 0, organization: 0 });
 
-    // Form State
+    // Form State (a draft only: nothing here is sent or saved)
     const [subject, setSubject] = useState('');
     const [body, setBody] = useState('');
     const [channel, setChannel] = useState<'email' | 'sms'>('email');
@@ -48,25 +40,16 @@ function CampaignsContent() {
     const [targetRecipient, setTargetRecipient] = useState('');
     const [targetName, setTargetName] = useState('');
 
-    const fetchCampaigns = async () => {
-        setIsLoading(true);
-        try {
-            const [campRes, countRes] = await Promise.all([
-                fetch('/api/marketing/send'),
-                fetch('/api/marketing/audience')
-            ]);
-
-            if (campRes.ok) setCampaigns(await campRes.json());
-            if (countRes.ok) setCounts(await countRes.json());
-        } catch (e) {
-            console.error("Failed to load marketing data");
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
     useEffect(() => {
-        fetchCampaigns();
+        const fetchCounts = async () => {
+            try {
+                const countRes = await fetch('/api/marketing/audience');
+                if (countRes.ok) setCounts(await countRes.json());
+            } catch (e) {
+                console.error("Failed to load customer counts");
+            }
+        };
+        fetchCounts();
 
         // Handle Query Params
         const to = searchParams.get('to');
@@ -81,60 +64,13 @@ function CampaignsContent() {
         }
     }, [searchParams]);
 
-    const handleSend = async () => {
-        if (!subject || !body) return;
-        if (audienceType === 'single' && !targetRecipient) return;
-
-        const audienceDesc =
-            audienceType === 'single' ? targetName || targetRecipient :
-                audienceType === 'all' ? 'ALL customers' :
-                    `${counts[audienceType as keyof AudienceCounts]} ${audienceType}s`;
-
-        if (!confirm(`Ready to send this ${channel.toUpperCase()} to ${audienceDesc}?`)) return;
-
-        setIsSending(true);
-        try {
-            const res = await fetch('/api/marketing/send', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    subject,
-                    body,
-                    channel,
-                    audienceType,
-                    targetRecipient,
-                    // audienceSize is calculated on the backend now
-                })
-            });
-
-            if (res.ok) {
-                alert("Message Sent! 🚀");
-                setSubject('');
-                setBody('');
-                if (audienceType === 'single') {
-                    // Reset if it was a one-off
-                    setTargetRecipient('');
-                    setTargetName('');
-                    setAudienceType('all');
-                }
-                fetchCampaigns();
-            } else {
-                alert("Failed to send.");
-            }
-        } catch (e) {
-            alert("Error sending campaign.");
-        } finally {
-            setIsSending(false);
-        }
-    };
-
     if (status === 'loading') return <div className="p-12 text-center text-slate-500 font-bold animate-pulse">Checking Plan Access...</div>;
 
     if (!hasAccess) {
         return (
             <UpgradeRequired
-                feature="Marketing Automation"
-                description="Reach your customers via Email or SMS, set up automated seasonal reminders, and track conversion rates."
+                feature="Marketing"
+                description="Draft customer campaigns. Email and SMS campaign sending is not available in FreezerIQ yet."
             />
         );
     }
@@ -147,7 +83,22 @@ function CampaignsContent() {
                     <Megaphone size={36} className="text-indigo-600 dark:text-indigo-400" />
                     Campaigns & CRM
                 </h1>
-                <p className="text-slate-500 dark:text-slate-400 text-adaptive-subtle mt-2 text-lg">Send targeted updates or message individual customers.</p>
+                <p className="text-slate-500 dark:text-slate-400 text-adaptive-subtle mt-2 text-lg">Draft customer updates. Sending from this page is not available yet.</p>
+            </div>
+
+            {/* Unavailable notice */}
+            <div
+                role="status"
+                className="flex items-start gap-4 p-6 rounded-2xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 text-amber-900 dark:text-amber-100"
+            >
+                <Info size={24} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                <div className="space-y-1">
+                    <p className="font-black text-lg">Sending isn&apos;t available yet</p>
+                    <p className="font-medium">
+                        FreezerIQ can&apos;t send campaign emails or text messages from this page yet.
+                        You can draft a message below, but nothing is emailed, texted, or saved.
+                    </p>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -161,7 +112,7 @@ function CampaignsContent() {
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                             <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
                                 <Send size={24} className="text-indigo-500" />
-                                {audienceType === 'single' ? `Message to ${targetName || 'Customer'}` : 'Compose Campaign'}
+                                {audienceType === 'single' ? `Draft to ${targetName || 'Customer'}` : 'Draft Campaign'}
                             </h2>
                             <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl">
                                 <button
@@ -238,7 +189,7 @@ function CampaignsContent() {
                                 />
                                 <div className="flex justify-between items-center mt-2">
                                     <p className="text-xs text-slate-400 font-medium">
-                                        {audienceType === 'single' ? 'Sending direct message' : `Targets ~${counts[audienceType as keyof AudienceCounts] || 0} customers`}
+                                        {audienceType === 'single' ? 'Single customer' : `~${counts[audienceType as keyof AudienceCounts] || 0} customers on file`}
                                     </p>
                                     <p className="text-xs text-slate-400 font-medium">
                                         {body.length} / {channel === 'sms' ? '160' : '2000'} chars
@@ -246,107 +197,69 @@ function CampaignsContent() {
                                 </div>
                             </div>
 
-                            <div className="pt-2 flex justify-end">
+                            <div className="pt-2 flex flex-col items-end gap-2">
                                 <button
-                                    onClick={handleSend}
-                                    disabled={isSending || !subject || !body || (audienceType === 'single' && !targetRecipient)}
-                                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-4 rounded-xl font-bold flex items-center gap-3 shadow-lg shadow-indigo-500/20 transition-all transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:shadow-none disabled:transform-none"
+                                    type="button"
+                                    disabled
+                                    aria-disabled="true"
+                                    aria-describedby={SEND_UNAVAILABLE_REASON_ID}
+                                    className="bg-slate-300 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-8 py-4 rounded-xl font-bold flex items-center gap-3 cursor-not-allowed"
                                 >
-                                    {isSending ? (
-                                        <span className="flex items-center gap-2">Sending...</span>
-                                    ) : (
-                                        <>
-                                            <Send size={20} strokeWidth={2.5} />
-                                            {audienceType === 'single' ? `Send to ${targetName || 'Customer'}` : 'Launch Campaign'}
-                                        </>
-                                    )}
+                                    <Ban size={20} strokeWidth={2.5} />
+                                    Sending not available
                                 </button>
+                                <p id={SEND_UNAVAILABLE_REASON_ID} className="text-xs text-slate-500 dark:text-slate-400 font-medium text-right max-w-md">
+                                    {channel === 'sms'
+                                        ? 'FreezerIQ has no text-message sender. Nothing on this page is texted.'
+                                        : 'Campaign email sending is turned off until FreezerIQ has a real sender. Nothing on this page is emailed.'}
+                                </p>
                             </div>
                         </div>
                     </div>
 
-                    {/* Recent History */}
+                    {/* Campaign history: there is none, because nothing has ever been sent from here */}
                     <div className="glass-panel p-8 rounded-3xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
-                        <h3 className="text-lg font-black text-slate-900 dark:text-white mb-6">Recent Activity</h3>
-                        <div className="space-y-4">
-                            {isLoading ? (
-                                <p className="text-slate-400 py-8 text-center">Loading history...</p>
-                            ) : campaigns.length === 0 ? (
-                                <p className="text-slate-400 py-8 text-center">No recent activity.</p>
-                            ) : campaigns.map(camp => (
-                                <div key={camp.id} className="group p-5 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-700 hover:border-indigo-200 dark:hover:border-indigo-800 transition-colors">
-                                    <div className="flex justify-between items-start mb-3">
-                                        <div className="flex items-center gap-3">
-                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${camp.channel === 'email' ? 'bg-blue-100 text-blue-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                                                {camp.channel === 'email' ? <Mail size={18} /> : <MessageSquare size={18} />}
-                                            </div>
-                                            <div>
-                                                <h4 className="font-bold text-slate-800 dark:text-white">{camp.subject}</h4>
-                                                <p className="text-xs text-slate-500 font-medium">{new Date(camp.sent_at!).toLocaleDateString()} • {new Date(camp.sent_at!).toLocaleTimeString()}</p>
-                                            </div>
-                                        </div>
-                                        <span className="px-3 py-1 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold rounded-lg uppercase tracking-wider">
-                                            {camp.audience_size === 1 ? 'Direct' : 'Blast'}
-                                        </span>
-                                    </div>
-                                    <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-slate-200/50 dark:border-slate-700/50">
-                                        <div className="text-center">
-                                            <p className="text-xs text-slate-400 font-bold uppercase">Sent</p>
-                                            <p className="text-lg font-black text-slate-700 dark:text-slate-300">{camp.stats?.sent}</p>
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-xs text-slate-400 font-bold uppercase">Opened</p>
-                                            <p className="text-lg font-black text-slate-700 dark:text-slate-300 text-emerald-600">{camp.stats?.opened}</p>
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-xs text-slate-400 font-bold uppercase">Clicks</p>
-                                            <p className="text-lg font-black text-slate-700 dark:text-slate-300">{camp.stats?.clicked}</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                        <h3 className="text-lg font-black text-slate-900 dark:text-white mb-6 flex items-center gap-2">
+                            <History size={20} className="text-slate-400" />
+                            Campaign History
+                        </h3>
+                        <p className="text-slate-500 dark:text-slate-400 py-6 text-center font-medium">
+                            No campaigns have been sent from FreezerIQ. History will appear here once campaign sending exists.
+                        </p>
                     </div>
                 </div>
 
-                {/* Right: Metrics */}
+                {/* Right: what is real today */}
                 <div className="col-span-1 space-y-6">
                     <div className="glass-panel p-6 rounded-3xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-xl shadow-indigo-500/30">
                         <div className="flex items-center gap-3 mb-4 opacity-80">
                             <Users size={20} />
-                            <span className="font-bold text-sm uppercase tracking-wider">Total Reachable</span>
+                            <span className="font-bold text-sm uppercase tracking-wider">Customers on File</span>
                         </div>
                         <p className="text-5xl font-black mb-1">{counts.all.toLocaleString()}</p>
-                        <p className="text-indigo-100 text-sm font-medium">Reachable via Email/SMS</p>
+                        <p className="text-indigo-100 text-sm font-medium">Active customers in your CRM. Not all have an email address, a phone number, or marketing consent.</p>
                     </div>
 
                     <div className="glass-panel p-6 rounded-3xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
-                        <div className="flex items-center gap-3 mb-6 text-slate-500">
-                            <BarChart3 size={20} />
-                            <span className="font-bold text-xs uppercase tracking-wider">Avg. Performance</span>
+                        <div className="flex items-center gap-3 mb-4 text-slate-500">
+                            <Mail size={20} />
+                            <span className="font-bold text-xs uppercase tracking-wider">Email that works today</span>
                         </div>
-
-                        <div className="space-y-6">
-                            <div>
-                                <div className="flex justify-between text-sm mb-2 font-bold">
-                                    <span className="text-slate-700 dark:text-slate-300">Open Rate</span>
-                                    <span className="text-emerald-500">42%</span>
-                                </div>
-                                <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                                    <div className="h-full bg-emerald-500 w-[42%]"></div>
-                                </div>
-                            </div>
-
-                            <div>
-                                <div className="flex justify-between text-sm mb-2 font-bold">
-                                    <span className="text-slate-700 dark:text-slate-300">Click Rate</span>
-                                    <span className="text-blue-500">18%</span>
-                                </div>
-                                <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                                    <div className="h-full bg-blue-500 w-[18%]"></div>
-                                </div>
-                            </div>
-                        </div>
+                        <ul className="space-y-4 text-sm">
+                            <li>
+                                <Link
+                                    href="/fundraisers?tab=rebooking"
+                                    className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-1"
+                                >
+                                    Seasonal lineup emails <ArrowRight size={14} />
+                                </Link>
+                                <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">Fundraiser CRM, Rebooking tab: review the audience and send a new season&apos;s lineup to coordinators of past fundraisers.</p>
+                            </li>
+                            <li>
+                                <p className="font-bold text-slate-700 dark:text-slate-200">Previous Supporters invitations</p>
+                                <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">While a fundraiser is open, its coordinator can invite past supporters who agreed to future emails, from the coordinator portal.</p>
+                            </li>
+                        </ul>
                     </div>
                 </div>
             </div>
