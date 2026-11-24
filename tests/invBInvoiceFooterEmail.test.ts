@@ -266,7 +266,9 @@ describe('financial figures and layout are untouched by this correction', () => 
         const c = code(PAGE);
         for (const marker of [
             'Subtotal:',
-            'Fundraiser Profit (',
+            // SUPERSEDED (FR-SUPPORTER-ADDON-UPSELL-1 S3): one stable label, no percentage — the stored amount can
+            // combine the meal share with an add-on's separately earned share.
+            'Fundraiser Organization Share:',
             'Final Balance Due to',
             'Congratulations! Your organization earned:',
         ]) {

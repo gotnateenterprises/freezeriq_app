@@ -534,7 +534,9 @@ describe('10. app/api/dashboard/route.ts preserves tier for COGS and demand tile
 describe('11. fundraiserProductionBatch keeps tiers distinct until independently summed (unchanged)', () => {
     it('lineKey includes variantSize in its identity so Keto/Serves5 and Keto/Serves2 never merge', () => {
         const src = strip(read('lib/fundraiserProductionBatch.ts'));
-        expect(src).toMatch(/return `\$\{identity\}\|\$\{variantSize\}`;/);
+        // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S3): an add-on line also gets its own key suffix; a meal line's
+        // key is exactly identity|variantSize, as before.
+        expect(src).toMatch(/return `\$\{identity\}\|\$\{variantSize\}\$\{isAddOnLine\(item\) \? '\|addon' : ''\}`;/);
     });
 
     it('explicitly defers ingredient math to KitchenEngine/OPS-4 — this module does no multiplication', () => {

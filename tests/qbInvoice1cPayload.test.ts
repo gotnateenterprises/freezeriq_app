@@ -32,7 +32,8 @@ describe('QB-INVOICE-1C · the rounding fixture: $557.50 + $5.59 − $111.50 = $
         expect(p.body.Line.map((l) => [l.Description, l.SalesItemLineDetail.ItemRef.value, l.SalesItemLineDetail.Qty, l.SalesItemLineDetail.UnitPrice, l.Amount, l.SalesItemLineDetail.TaxCodeRef.value])).toEqual([
             ['Family Friendly — Serves 5', '11', 7, 62.5, 437.5, 'NON'],
             ['Date Night (Serves 2)', '11', 2, 60, 120, 'NON'],
-            ['Organization fundraiser share — 20%', '12', 1, -111.5, -111.5, 'NON'],
+            // SUPERSEDED (FR-SUPPORTER-ADDON-UPSELL-1 S3): one stable label, no percentage; the amount is unchanged.
+            ['Fundraiser Organization Share', '12', 1, -111.5, -111.5, 'NON'],
             ['Sales tax collected from supporters — 1%', '13', 1, 5.59, 5.59, 'NON'],
         ]);
         const cents = p.body.Line.reduce((s, l) => s + Math.round(l.Amount * 100), 0);

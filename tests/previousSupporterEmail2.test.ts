@@ -1635,7 +1635,7 @@ describe('9 · 2.0B — the organization mailing address (CRM, migration, both e
         // additive migration (bundle_type, item_role, campaign_add_ons).
         // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 S2, owner-approved 2026-11-24): then by S2's own additive
         // migration (the add-on share tiers and the per-order earned add-on share).
-        expect(all.slice(all.indexOf(dir) + 1)).toEqual(['20261102120000_coordinator_payment_methods', '20261119120000_supporter_consent_1', '20261123120000_supporter_addon_s1', '20261124120000_supporter_addon_s2']);
+        expect(all.slice(all.indexOf(dir) + 1)).toEqual(['20261102120000_coordinator_payment_methods', '20261119120000_supporter_consent_1', '20261123120000_supporter_addon_s1', '20261124120000_supporter_addon_s2', '20261125120000_supporter_addon_s3']); // REVISED (S3): + 20261125120000_supporter_addon_s3
         const sql = R(`prisma/migrations/${dir}/migration.sql`);
         const statements = sql.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('--'));
         expect(statements).toEqual(['mailing_address_line1', 'mailing_address_line2', 'mailing_city', 'mailing_state', 'mailing_postal_code']

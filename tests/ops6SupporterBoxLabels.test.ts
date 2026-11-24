@@ -842,7 +842,9 @@ describe('33-40. regression', () => {
         const s = strip(read(MANIFEST));
         expect(s).not.toMatch(/from '@\/lib\/db'|from 'react'|PrismaClient|fetch\(/);
         const imports = s.match(/^import .*$/gm) || [];
-        expect(imports).toHaveLength(2);
+        // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S3): + the one shared add-on display rule, itself pure.
+        expect(imports).toHaveLength(3);
+        expect(imports.join('\n')).toMatch(/ADD_ON_SIZE_LABEL, isAddOnLine.*orderLineDisplay/s);
         expect(imports.join('\n')).toMatch(/servingTierLabel.*mealLabel/s);
         expect(imports.join('\n')).toMatch(/purchaserDisplayName.*purchaserName/s);
     });

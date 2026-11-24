@@ -274,7 +274,11 @@ describe('A. lib/bundleSummary — presentation over existing authorities', () =
             "import { aggregateBundleLines, roundCents, type AggregatedLine } from '@/lib/fundraiserCloseoutMath';",
             "import { servingTierLabel } from '@/lib/mealLabel';",
             "import { normalizeStrictServingTier } from '@/lib/serving_multipliers';",
+            // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S3): the one shared add-on display rule — itself pure, with no
+            // data access (checked below), so the helper stays presentation-only.
+            "import { ADD_ON_SIZE_LABEL, isAddOnLine } from '@/lib/orderLineDisplay';",
         ]);
+        expect(code('lib/orderLineDisplay.ts')).not.toMatch(/@\/lib\/db|prisma|fetch\(|getBundleUnitWeight|computeBundleUnitsFromItems/);
     });
 
     it('money is whole dollars when every figure is whole, and cents for every figure otherwise', () => {

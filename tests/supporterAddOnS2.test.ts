@@ -375,7 +375,10 @@ describe('schema / migration · additive, relational, database-enforced', () => 
 
     it('it is the newest migration; S1\'s migration is byte-identical to S1', () => {
         const dirs = fs.readdirSync(path.join(ROOT, 'prisma/migrations')).filter((d) => /^\d{14}_/.test(d)).sort();
-        expect(dirs.slice(-2)).toEqual(['20261123120000_supporter_addon_s1', '20261124120000_supporter_addon_s2']);
+        // SUPERSEDED PIN (S3): S2's migration directly follows S1's, and only S3's approved one follows it.
+        const i = dirs.indexOf('20261124120000_supporter_addon_s2');
+        expect(dirs[i - 1]).toBe('20261123120000_supporter_addon_s1');
+        expect(dirs.slice(i + 1)).toEqual(['20261125120000_supporter_addon_s3']);
         const s1 = 'prisma/migrations/20261123120000_supporter_addon_s1/migration.sql';
         expect(R(s1)).toBe(atS1(s1));
     });
@@ -832,7 +835,8 @@ describe('closeout · meal share at the campaign rate + the add-on share as reco
         expect(inv.fundraiser_profit_percent).toBe(20);
         expect(inv.total_amount).toBe(122.5);
         expect(inv.items.create.map((l: any) => [l.description, l.quantity, l.unit_price])).toEqual(
-            expect.arrayContaining([['Comfort Foods (Serves 5)', 1, 125], ['Sides & Dessert Bundle', 1, 25]]));
+            // SUPERSEDED (S3): the add-on's invoice line is named "<bundle> (Add-On)" with no serving size.
+            expect.arrayContaining([['Comfort Foods (Serves 5)', 1, 125], ['Sides & Dessert Bundle (Add-On)', 1, 25]]));
     });
 
     it('a threshold-crossing campaign closes on the recorded slices: 9 @10% then 3 split 1@10% + 2@15%', async () => {
@@ -1056,7 +1060,9 @@ describe('boundaries · storefront, public supporter page, money and kitchen eng
         'app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx', 'lib/publicFundraiserPayload.ts', 'app/api/fundraiser/[token]/route.ts',
         // money / kitchen / tax / status
         'lib/pricing.ts', 'lib/serving_multipliers.ts', 'lib/kitchen_engine.ts', 'lib/cost_engine.ts', 'lib/fundraiserTax.ts', 'lib/statusWorkflow.ts',
-        'lib/fundraiserOrgShare.ts', 'lib/quickbooks/invoicePayload.ts', 'lib/quickbooks/invoiceSend.ts', 'app/invoices/page.tsx',
+        'lib/fundraiserOrgShare.ts', 'lib/quickbooks/invoiceSend.ts',
+        // (lib/quickbooks/invoicePayload.ts and app/invoices/page.tsx — SUPERSEDED PINS (S3): one stable
+        //  "Fundraiser Organization Share" label; checked as history below.)
         'app/api/orders/route.ts', 'lib/campaignAddOns.ts', 'lib/campaignSelectionLock.ts', 'lib/coordinatorSupporterOrders.ts',
     ];
     it('these files are byte-identical to S1 (one git call, so a busy machine cannot flake it)', () => {
@@ -1065,6 +1071,11 @@ describe('boundaries · storefront, public supporter page, money and kitchen eng
         expect(changed).toEqual([]);
         // and each path really exists (a typo would otherwise pass vacuously)
         for (const p of unchangedFromS1) expect(fs.existsSync(path.join(ROOT, p))).toBe(true);
+    });
+
+    it('the S3-changed share labels were byte-identical to S1 through S2 (4f93b3a..e7c7f5d)', () => {
+        const changed = execSync(`git diff --name-only ${S1_HEAD} e7c7f5d -- "lib/quickbooks/invoicePayload.ts" "app/invoices/page.tsx"`, { cwd: ROOT, encoding: 'utf8' }).trim();
+        expect(changed).toBe('');
     });
 
     it('35 · no public supporter surface reads the add-on yet (no card, no popup, no copy)', () => {

@@ -193,7 +193,8 @@ describe('QB-INVOICE-1B · the migration is additive', () => {
         // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 S1): and one more — bundle_type, item_role, campaign_add_ons.
         // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 S2): and one more — the add-on share tiers and the
         // per-order earned add-on share (two new tables plus CHECKs; no existing row changed).
-        expect(dirs).toHaveLength(33);
+        // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 S3 (owner-approved 2026-11-24): invoice_items.item_role (constant default + CHECK)): one more.
+        expect(dirs).toHaveLength(34);
         expect(dirs[25]).toBe('20260913120000_qb_invoice_1b_quickbooks_links');
         expect(dirs[26]).toBe('20260915170000_qb_invoice_1c_invoice_send');
         expect(dirs[27]).toBe('20260923010000_qb_invoice_cancel_1_voided');
@@ -202,6 +203,7 @@ describe('QB-INVOICE-1B · the migration is additive', () => {
         expect(dirs[30]).toBe('20261119120000_supporter_consent_1');
         expect(dirs[31]).toBe('20261123120000_supporter_addon_s1');
         expect(dirs[32]).toBe('20261124120000_supporter_addon_s2');
+        expect(dirs[33]).toBe('20261125120000_supporter_addon_s3');
         const sql = R(MIGRATION).split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
         expect(sql).not.toMatch(/\bDROP\b|\bRENAME\b|ALTER\s+COLUMN|\bUPDATE\s+"|\bDELETE\s+FROM|\bINSERT\s+INTO|\bTRUNCATE\b/i);
         // Every ALTER TABLE adds a constraint to a NEW table; the only statement on an existing table is one unique index.

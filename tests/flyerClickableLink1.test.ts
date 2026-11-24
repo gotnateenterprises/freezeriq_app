@@ -213,8 +213,13 @@ describe('7–9 · nothing else changed', () => {
             'app/api/packet/download/route.ts': 'd0691a6aec17e62f46a2016ad5f83edcbe85e651605c891bb489e386a8a59364',
             'lib/supporterMaterialPricing.ts': 'e85372f7897b82f641bdf15971a4a7162b47cd9a0b80692124245e83547c69e0',
         };
+        // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S3, owner-approved 2026-11-24): the three flyer routes now also look
+        // up the campaign's optional add-on for the order form. What this pin proved still holds as HISTORY: through S2
+        // (e7c7f5d) each route was byte-identical to its digest. supporterMaterialPricing.ts is still pinned as-is.
+        const atS2 = (rel: string) => require('child_process').execSync(`git show e7c7f5d:"${rel}"`, { cwd: ROOT, encoding: 'utf8' }) as string;
         for (const [rel, digest] of Object.entries(PINNED)) {
-            expect([rel, crypto.createHash('sha256').update(R(rel).replace(/\r\n/g, '\n')).digest('hex')]).toEqual([rel, digest]);
+            const src = rel === 'lib/supporterMaterialPricing.ts' ? R(rel) : atS2(rel);
+            expect([rel, crypto.createHash('sha256').update(src.replace(/\r\n/g, '\n')).digest('hex')]).toEqual([rel, digest]);
         }
         expect(R('lib/previousSupporterInvite.ts')).toContain('export function buildSupporterOrderUrl(');
     });

@@ -363,7 +363,8 @@ describe('this patch changed presentation only', () => {
         //       owner review and must precede the code built from it.
         // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 S1, owner-approved 2026-11-23): one more additive migration.
         // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 S2, owner-approved 2026-11-24): and one more additive migration.
-        expect(migrations).toHaveLength(33);
+        // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 S3 (owner-approved 2026-11-24): invoice_items.item_role (constant default + CHECK)): one more.
+        expect(migrations).toHaveLength(34);
         expect(migrations[15]).toBe('20260823010000_fr_acceptance_2a2_human_followup');
         expect(migrations[16]).toBe('20260825000000_inv_d_settlement_truth');
         expect(migrations[17]).toBe('20260826000000_m18_outreach_batch_campaign_ownership');
@@ -388,6 +389,8 @@ describe('this patch changed presentation only', () => {
         expect(migrations[31]).toBe('20261123120000_supporter_addon_s1');
         // FR-SUPPORTER-ADDON-UPSELL-1 S2 (owner-approved 2026-11-24): the add-on share tiers and earned share.
         expect(migrations[32]).toBe('20261124120000_supporter_addon_s2');
+        // FR-SUPPORTER-ADDON-UPSELL-1 S3 (owner-approved 2026-11-24): invoice_items.item_role (constant default + CHECK).
+        expect(migrations[33]).toBe('20261125120000_supporter_addon_s3');
     });
 
     it('the acknowledgement and follow-up contracts are untouched', () => {

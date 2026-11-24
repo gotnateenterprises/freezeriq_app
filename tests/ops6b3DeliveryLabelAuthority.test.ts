@@ -298,6 +298,8 @@ describe('PRESERVATION', () => {
             '20261123120000_supporter_addon_s1',
             // FR-SUPPORTER-ADDON-UPSELL-1 S2 (owner-authorized, additive): add-on share tiers + earned add-on share.
             '20261124120000_supporter_addon_s2',
+            // FR-SUPPORTER-ADDON-UPSELL-1 S3 (owner-approved 2026-11-24): invoice_items.item_role (constant default + CHECK).
+            '20261125120000_supporter_addon_s3',
         ]);
     });
 });

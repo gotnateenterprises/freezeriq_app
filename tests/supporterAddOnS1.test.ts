@@ -260,7 +260,8 @@ describe('1–5 · schema and migration: additive, defaults, database-enforced i
         const dirs = fs.readdirSync(path.join(ROOT, 'prisma/migrations')).filter((d) => /^\d{14}_/.test(d)).sort();
         const s1 = dirs.indexOf('20261123120000_supporter_addon_s1');
         expect(dirs[s1 - 1]).toBe('20261119120000_supporter_consent_1');
-        expect(dirs.slice(s1 + 1)).toEqual(['20261124120000_supporter_addon_s2']);
+        // REVISED (S3): and S3's own approved, additive migration after S2.
+        expect(dirs.slice(s1 + 1)).toEqual(['20261124120000_supporter_addon_s2', '20261125120000_supporter_addon_s3']);
     });
 
     it('the add-on is NOT a CampaignBundle and serving_tier is not its classifier', () => {
@@ -775,8 +776,8 @@ describe('boundaries · one authority, nothing else moved', () => {
         'lib/campaignOrderBundles.ts', 'lib/campaignBundleSelection.ts', 'lib/campaignBundleOverride.ts',
         'app/api/coordinator/bundle-selection/route.ts', 'lib/campaignSelectionLock.ts', 'lib/pricing.ts',
         'lib/serving_multipliers.ts', 'lib/kitchen_engine.ts', 'lib/fundraiserTax.ts', 'lib/fundraiserOrgShare.ts',
-        'lib/orderItemTier.ts', 'lib/publicFundraiserPayload.ts', 'lib/quickbooks/invoicePayload.ts',
-        'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx', 'lib/generateFlyer.ts', 'lib/email.ts',
+        'lib/orderItemTier.ts', 'lib/publicFundraiserPayload.ts',
+        'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx',
     ])('%s is byte-identical to Production e9f0f4a', (rel) => {
         const out = execSync(`git diff --name-only e9f0f4a -- "${rel}"`, { cwd: ROOT, encoding: 'utf8' });
         expect(out.trim()).toBe('');
@@ -788,6 +789,9 @@ describe('boundaries · one authority, nothing else moved', () => {
     // did not touch them. tests/supporterAddOnS2.test.ts pins what S2 changed.
     it.each([
         'lib/fundraiserCloseoutMath.ts', 'components/BundleEditor.tsx', 'app/api/campaigns/[id]/closeout/route.ts',
+        // SUPERSEDED PINS (FR-SUPPORTER-ADDON-UPSELL-1 S3, owner-approved 2026-11-24): S3 shows add-on lines correctly
+        // in the emails, adds the add-on row to the flyer and one stable organization-share label to QuickBooks.
+        'lib/quickbooks/invoicePayload.ts', 'lib/generateFlyer.ts', 'lib/email.ts',
     ])('%s was not changed by S1 (e9f0f4a..4f93b3a)', (rel) => {
         const out = execSync(`git diff --name-only e9f0f4a 4f93b3a -- "${rel}"`, { cwd: ROOT, encoding: 'utf8' });
         expect(out.trim()).toBe('');

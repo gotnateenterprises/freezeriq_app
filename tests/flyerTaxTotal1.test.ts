@@ -322,7 +322,7 @@ describe('J · supporter checkout and the order page are untouched', () => {
         // (app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx — SUPERSEDED PIN, see the history check below.)
         'lib/pricing.ts',
         'lib/coordinatorMaterialBundles.ts',
-        'app/api/tracker/download/route.ts',
+        // (app/api/tracker/download/route.ts — SUPERSEDED PIN (S3), see the history check below.)
     ])('%s is byte-identical to Production c4e528b', (p) => {
         expect(lf(R(p))).toBe(lf(git(`show c4e528b:"${p}"`)));
     });
@@ -342,6 +342,9 @@ describe('J · supporter checkout and the order page are untouched', () => {
         // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S2, owner-approved 2026-11-24): the closeout money
         // model now adds the add-on's recorded, tiered share to the meal share; FLYER-TAX-TOTAL-1 never touched it.
         'lib/fundraiserCloseoutMath.ts',
+        // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S3): the tracker route now picks the add-on variant of the
+        // template when the campaign has an add-on; FLYER-TAX-TOTAL-1 never touched it.
+        'app/api/tracker/download/route.ts',
     ])('%s was not changed by FLYER-TAX-TOTAL-1 (c4e528b..b1af1d7)', (p) => {
         expect(git(`diff --name-only c4e528b b1af1d7 -- "${p}"`).trim()).toBe('');
     });

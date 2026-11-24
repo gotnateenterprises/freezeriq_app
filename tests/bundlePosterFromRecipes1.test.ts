@@ -688,21 +688,34 @@ describe('the bundle page and the files this task must not touch', () => {
         'components/recipes/RecipeImageStyleControls.tsx': '89fcaa5bb0189744ce46c2f686ce5467d54900bf14ff9f65d16e09f24ba1d4d4',
         // 20 · fundraiser flyer, packet and promo
         // (lib/generateFlyer.ts — SUPERSEDED PIN: FLYER-CLICKABLE-LINK-1 changes it; checked by history below.)
-        'lib/generateFullPacket.ts': '3ca82b18f376bd291b231450911c4facc7da593c58371ec82377024f404ed495',
+        // (lib/generateFullPacket.ts — SUPERSEDED PIN (S3), see S3_HISTORY below.)
         'lib/generatePromoScripts.ts': '5a07017bd9b0693fb405767a8597209f1d097077de7b05a8dcfd9aa061cf3421',
         'lib/supporterMaterialPricing.ts': 'e85372f7897b82f641bdf15971a4a7162b47cd9a0b80692124245e83547c69e0',
-        'app/api/flyer/download/route.ts': 'fc6426bff93282f5ce784c51df9a40971be046ff2d6ffa7147befbb7bf4a4599',
-        'app/api/flyer/generate/route.ts': '6510a879224ca07d761f54e118c5be6e766587937b19e854cb34f04c2bb4a84e',
-        'app/api/packet/download/route.ts': 'd0691a6aec17e62f46a2016ad5f83edcbe85e651605c891bb489e386a8a59364',
+        // (the flyer download / generate and packet routes — SUPERSEDED PINS (S3), see S3_HISTORY below.)
         'app/api/promo-scripts/route.ts': '950e0d172db4c145c659334ec397b86ade097b68b00d1c615d906042f9514d9a',
         // proposal-first and shared authorities this feature only reads
         // (components/BundleEditor.tsx — SUPERSEDED PIN, see the test below.)
-        'lib/bundleSummary.ts': 'aac9ddd12d5cb2c5464199e8d887443ae4fd46afdea4149b40c957df7b12b0e3',
+        // (lib/bundleSummary.ts — SUPERSEDED PIN (S3), see S3_HISTORY below.)
         'lib/serving_multipliers.ts': '05f98a0a65789ba0d87e1514389f835db031235976d41d6ce774739521d44674',
         'lib/s3.ts': 'c15bbb9f6fe5cef32efc7bc53ee0ddab832fcf55dc503f25c4842c184d729bde',
     };
     it.each(Object.entries(PINNED))('%s is byte-identical to Production', (rel, digest) => {
         expect(crypto.createHash('sha256').update(read(rel).replace(/\r\n/g, '\n')).digest('hex')).toBe(digest);
+    });
+
+    // SUPERSEDED PINS (FR-SUPPORTER-ADDON-UPSELL-1 S3, owner-approved 2026-11-24): S3 adds the add-on row to the
+    // flyer/packet routes and lists add-ons apart in the bundle summary. What these pins proved — this poster work
+    // left them alone — still holds as HISTORY: at the S2 head (e7c7f5d) each was byte-identical to its digest.
+    const S3_HISTORY: Record<string, string> = {
+        'lib/generateFullPacket.ts': '3ca82b18f376bd291b231450911c4facc7da593c58371ec82377024f404ed495',
+        'app/api/flyer/download/route.ts': 'fc6426bff93282f5ce784c51df9a40971be046ff2d6ffa7147befbb7bf4a4599',
+        'app/api/flyer/generate/route.ts': '6510a879224ca07d761f54e118c5be6e766587937b19e854cb34f04c2bb4a84e',
+        'app/api/packet/download/route.ts': 'd0691a6aec17e62f46a2016ad5f83edcbe85e651605c891bb489e386a8a59364',
+        'lib/bundleSummary.ts': 'aac9ddd12d5cb2c5464199e8d887443ae4fd46afdea4149b40c957df7b12b0e3',
+    };
+    it.each(Object.entries(S3_HISTORY))('%s was byte-identical to Production through S2 (e7c7f5d)', (rel, digest) => {
+        const was = require('child_process').execSync(`git show e7c7f5d:"${rel}"`, { cwd: ROOT, encoding: 'utf8' }) as string;
+        expect(crypto.createHash('sha256').update(was.replace(/\r\n/g, '\n')).digest('hex')).toBe(digest);
     });
 
     it('lib/generateFlyer.ts was not changed by this release (29b1f27..498b816)', () => {

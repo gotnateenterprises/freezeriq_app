@@ -114,6 +114,8 @@ describe('1. schema and migration', () => {
             // FR-SUPPORTER-ADDON-UPSELL-1 S2: the add-on share tiers and the per-order earned add-on share. Two
             // new tables plus CHECKs; additive; authorized by the owner's S2 brief.
             '20261124120000_supporter_addon_s2',
+            // FR-SUPPORTER-ADDON-UPSELL-1 S3 (owner-approved 2026-11-24): invoice_items.item_role (constant default + CHECK).
+            '20261125120000_supporter_addon_s3',
         ]);
     });
 });

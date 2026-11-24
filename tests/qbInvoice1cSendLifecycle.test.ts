@@ -73,7 +73,8 @@ describe('QB-INVOICE-1C · the review shows exactly what QuickBooks will get', (
             lines: [
                 { role: 'bundle', description: 'Family Friendly — Serves 5', quantity: 7, unitPrice: 62.5, amount: 437.5 },
                 { role: 'bundle', description: 'Date Night (Serves 2)', quantity: 2, unitPrice: 60, amount: 120 },
-                { role: 'share', description: 'Organization fundraiser share — 20%', quantity: 1, unitPrice: -111.5, amount: -111.5 },
+                // SUPERSEDED (S3): one stable label, no percentage; the amount is unchanged.
+                { role: 'share', description: 'Fundraiser Organization Share', quantity: 1, unitPrice: -111.5, amount: -111.5 },
                 { role: 'tax', description: 'Sales tax collected from supporters — 1%', quantity: 1, unitPrice: 5.59, amount: 5.59 },
             ],
             totals: { bundles: 557.5, share: 111.5, tax: 5.59, total: 451.59 },
@@ -136,7 +137,7 @@ describe('QB-INVOICE-1C · explicit Send branch', () => {
             Line: [
                 { DetailType: 'SalesItemLineDetail', Amount: 437.5, Description: 'Family Friendly — Serves 5', SalesItemLineDetail: { ItemRef: { value: w.items.sales.Id }, Qty: 7, UnitPrice: 62.5, TaxCodeRef: { value: 'NON' } } },
                 { DetailType: 'SalesItemLineDetail', Amount: 120, Description: 'Date Night (Serves 2)', SalesItemLineDetail: { ItemRef: { value: w.items.sales.Id }, Qty: 2, UnitPrice: 60, TaxCodeRef: { value: 'NON' } } },
-                { DetailType: 'SalesItemLineDetail', Amount: -111.5, Description: 'Organization fundraiser share — 20%', SalesItemLineDetail: { ItemRef: { value: w.items.share.Id }, Qty: 1, UnitPrice: -111.5, TaxCodeRef: { value: 'NON' } } },
+                { DetailType: 'SalesItemLineDetail', Amount: -111.5, Description: 'Fundraiser Organization Share', SalesItemLineDetail: { ItemRef: { value: w.items.share.Id }, Qty: 1, UnitPrice: -111.5, TaxCodeRef: { value: 'NON' } } },
                 { DetailType: 'SalesItemLineDetail', Amount: 5.59, Description: 'Sales tax collected from supporters — 1%', SalesItemLineDetail: { ItemRef: { value: w.items.tax.Id }, Qty: 1, UnitPrice: 5.59, TaxCodeRef: { value: 'NON' } } },
             ],
         });
