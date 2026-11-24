@@ -213,9 +213,22 @@ describe('GUARDS-1A.1 · 8–10. the false-start rule and every live classificat
         const at = (file: string) => execFileSync('git', ['show', `588c547713552c311f5fe17b4e2e7cd91494f089:${file}`],
             { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }).replace(/\r\n/g, '\n');
         for (const file of ['lib/growth/impact.ts', 'lib/growth/campaignLifecycle.ts', 'lib/growth/nextAction.ts', 'lib/invoiceRemoval.ts',
-            'app/api/campaigns/route.ts', 'lib/fundraiserWizardSubmit.ts']) {
+            'lib/fundraiserWizardSubmit.ts']) {
             expect([file, read(file) === at(file)]).toEqual([file, true]);
         }
+    });
+
+    it('9–10c. REVISED BY FR-SUPPORTER-ADDON-UPSELL-1 S1: the campaigns route was byte-identical to 588c547 through Production e9f0f4a, and S1 adds only the goal-role lines', () => {
+        // S1 (owner-approved 2026-11-23) makes the weighted-bundle count skip add-on lines, which needs
+        // each item's item_role selected and passed through. Nothing else in the route may move: with
+        // those lines removed, the file must equal Production e9f0f4a — which itself equals 588c547.
+        const { execFileSync } = require('child_process');
+        const show = (rev: string, file: string) => execFileSync('git', ['show', `${rev}:${file}`],
+            { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }).replace(/\r\n/g, '\n');
+        const file = 'app/api/campaigns/route.ts';
+        expect(show('e9f0f4a', file)).toBe(show('588c547713552c311f5fe17b4e2e7cd91494f089', file));
+        const withoutS1 = read(file).split('\n').filter((l) => !/item_role|FR-SUPPORTER-ADDON-UPSELL-1/.test(l)).join('\n');
+        expect(withoutS1).toBe(show('e9f0f4a', file));
     });
 
     it('9–10b. REVISED BY WAVES-CLOSEOUT-1A: the closeout route\'s CODE is identical to the GUARDS-1 Preview; only its header comments were corrected', () => {

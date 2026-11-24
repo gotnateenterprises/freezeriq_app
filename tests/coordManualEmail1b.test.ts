@@ -108,6 +108,9 @@ describe('1. schema and migration', () => {
             // SUPPORTER-CONSENT-1: one new append-only table (supporter_contact_consents) + two
             // enums. Additive; approved by the owner 2026-11-19.
             '20261119120000_supporter_consent_1',
+            // FR-SUPPORTER-ADDON-UPSELL-1 S1: bundles.bundle_type, order_items.item_role (both with
+            // constant defaults) and the campaign_add_ons table. Additive; approved by the owner 2026-11-23.
+            '20261123120000_supporter_addon_s1',
         ]);
     });
 });

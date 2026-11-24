@@ -1631,7 +1631,9 @@ describe('9 · 2.0B — the organization mailing address (CRM, migration, both e
         // only by that phase's own owner-approved, additive migration.
         // REVISED (SUPPORTER-CONSENT-1, owner-approved 2026-11-19): followed next by that phase's own
         // additive migration — the supporter_contact_consents table this file's consent authority reads.
-        expect(all.slice(all.indexOf(dir) + 1)).toEqual(['20261102120000_coordinator_payment_methods', '20261119120000_supporter_consent_1']);
+        // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 S1, owner-approved 2026-11-23): then by that phase's own
+        // additive migration (bundle_type, item_role, campaign_add_ons).
+        expect(all.slice(all.indexOf(dir) + 1)).toEqual(['20261102120000_coordinator_payment_methods', '20261119120000_supporter_consent_1', '20261123120000_supporter_addon_s1']);
         const sql = R(`prisma/migrations/${dir}/migration.sql`);
         const statements = sql.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('--'));
         expect(statements).toEqual(['mailing_address_line1', 'mailing_address_line2', 'mailing_city', 'mailing_state', 'mailing_postal_code']

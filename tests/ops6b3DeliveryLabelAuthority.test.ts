@@ -294,6 +294,8 @@ describe('PRESERVATION', () => {
             '20261102120000_coordinator_payment_methods',
             // SUPPORTER-CONSENT-1 (owner-authorized, additive): the supporter_contact_consents table.
             '20261119120000_supporter_consent_1',
+            // FR-SUPPORTER-ADDON-UPSELL-1 S1 (owner-authorized, additive): bundle_type, item_role, campaign_add_ons.
+            '20261123120000_supporter_addon_s1',
         ]);
     });
 });

@@ -719,6 +719,7 @@ describe('20–22, 25, 34 · goal units: the role decides; money still counts', 
         'lib/bundleSummary.ts': { must: [], why: 'comment reference only (physical counts; add-on display is S3)' },
         'lib/growth/health.ts': { must: [], why: 'comment reference only; consumes weighted_bundles_sold from app/api/campaigns/route.ts' },
         'lib/serving_multipliers.ts': { must: [], why: 'comment reference only' },
+        'lib/campaignAddOns.ts': { must: [], why: 'comment reference only (isAddOnItemRole, which the rule imports, lives here)' },
     };
     it('static sweep · every goal-math reader is registered and carries the role', () => {
         const found = execSync('git grep -l -E "computeBundleUnitsFromItems|computeFundraiserProgress|getBundleUnitWeight" -- app lib components', { cwd: ROOT, encoding: 'utf8' })

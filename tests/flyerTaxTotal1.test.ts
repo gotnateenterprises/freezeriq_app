@@ -319,7 +319,7 @@ describe('J · supporter checkout and the order page are untouched', () => {
     it.each([
         'lib/fundraiserTax.ts',
         'lib/fundraiserCloseoutMath.ts',
-        'app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx',
+        // (app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx — SUPERSEDED PIN, see the history check below.)
         'lib/pricing.ts',
         'lib/coordinatorMaterialBundles.ts',
         'app/api/tracker/download/route.ts',
@@ -331,10 +331,14 @@ describe('J · supporter checkout and the order page are untouched', () => {
     // c4e528b to prove FLYER-TAX-TOTAL-1 left checkout alone. A later, separately approved release
     // adds the optional consent checkboxes to them, so the same guarantee is now checked against
     // history: this release's own commit (b1af1d7, on c4e528b) changed none of them.
+    // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S1, owner-approved 2026-11-23): the order page's
+    // progress query now also selects each line's item_role (an add-on counts 0 bundle units), so it
+    // joins this history check.
     it.each([
         'app/api/public/order/route.ts',
         'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx',
         'prisma/schema.prisma',
+        'app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx',
     ])('%s was not changed by FLYER-TAX-TOTAL-1 (c4e528b..b1af1d7)', (p) => {
         expect(git(`diff --name-only c4e528b b1af1d7 -- "${p}"`).trim()).toBe('');
     });
