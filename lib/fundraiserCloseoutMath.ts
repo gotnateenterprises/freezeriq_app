@@ -137,6 +137,18 @@ export function sumLineTotals(lines: AggregatedLine[]): number {
 export interface CloseoutFinancials {
     grossSales: number;
     orgSharePercent: number;
+    /**
+     * FR-SUPPORTER-ADDON-UPSELL-1 (S2): the gross the MEAL share applies to — gross minus the campaign
+     * add-on's sales. Equal to grossSales for every campaign without an add-on.
+     */
+    mainGrossSales: number;
+    /** mainGrossSales × orgSharePercent, rounded to the cent. */
+    mainOrganizationAmount: number;
+    /** The campaign add-on's sales (0 without an add-on). */
+    addOnGrossSales: number;
+    /** The add-on share EARNED at sale time (sum of order_item_add_on_shares), never re-derived. */
+    addOnOrganizationAmount: number;
+    /** mainOrganizationAmount + addOnOrganizationAmount — the ONE authoritative organization share. */
     organizationAmount: number;
     baseRemit: number;
     taxApplied: boolean;
@@ -192,13 +204,27 @@ export function computeCloseoutFinancials(input: {
      * charged 1% and an organization billed a different 1%.
      */
     taxRatePercent?: number | null;
+    /**
+     * FR-SUPPORTER-ADDON-UPSELL-1 (S2): the campaign add-on's PRE-TAX sales (already inside grossSales)
+     * and the organization share those sales EARNED when they were sold (tiered, frozen per order). The
+     * meal share is then taken on gross MINUS the add-on sales, and the earned add-on share is added —
+     * never gross × one percentage. Omitted or zero: the arithmetic is exactly the pre-S2 arithmetic.
+     */
+    addOn?: { grossSales: number; earnedShare: number } | null;
 }): CloseoutFinancials {
     const grossSales = roundCents(input.grossSales);
     const orgSharePercent = Number(input.orgSharePercent);
 
+    const addOnGrossSales = roundCents(Number(input.addOn?.grossSales) || 0);
+    const addOnOrganizationAmount = roundCents(Number(input.addOn?.earnedShare) || 0);
+    const mainGrossSales = roundCents(grossSales - addOnGrossSales);
+
     // The organization's share is taken on PRE-TAX food sales only. Tax is
     // pass-through money the organization never earns a percentage of.
-    const organizationAmount = roundCents(grossSales * orgSharePercent / 100);
+    // S2: the campaign's meal percentage applies to MEAL sales only; the
+    // add-on's own (tiered) share was earned order by order and is added as is.
+    const mainOrganizationAmount = roundCents(mainGrossSales * orgSharePercent / 100);
+    const organizationAmount = roundCents(mainOrganizationAmount + addOnOrganizationAmount);
     // Subtraction, not a second percentage — see ROUNDING above.
     const baseRemit = roundCents(grossSales - organizationAmount);
 
@@ -215,6 +241,10 @@ export function computeCloseoutFinancials(input: {
     return {
         grossSales,
         orgSharePercent,
+        mainGrossSales,
+        mainOrganizationAmount,
+        addOnGrossSales,
+        addOnOrganizationAmount,
         organizationAmount,
         baseRemit,
         taxApplied,
@@ -278,6 +308,72 @@ export class CloseoutReconciliationError extends Error {
         this.grossSales = grossSales;
         this.detail = detail;
     }
+}
+
+/**
+ * FR-SUPPORTER-ADDON-UPSELL-1 (S2) — the campaign add-on's money at closeout, from what was RECORDED.
+ *
+ * Every add-on order line (`item_role = 'addon'`) carries the share it earned when it was sold, as one
+ * or more tier slices (order_item_add_on_shares). This sums them — it never re-applies the current
+ * schedule — and refuses to guess: a line whose slices do not cover exactly its quantity at its own unit
+ * price is an offender, and closeout stops with a diagnosable 409 rather than inventing a share.
+ */
+export interface AddOnLineForCloseout {
+    orderId: string;
+    quantity: number;
+    unitPrice: number;
+    slices: Array<{ quantity: number; unitPrice: number; shareAmount: number }>;
+}
+
+export function summarizeAddOnEarnings(lines: AddOnLineForCloseout[]): {
+    grossSales: number;
+    earnedShare: number;
+    offenders: Array<{ orderId: string; detail: string }>;
+} {
+    const cents = (v: number) => Math.round((Number(v) || 0) * 100);
+    let grossCents = 0;
+    let shareCents = 0;
+    const offenders: Array<{ orderId: string; detail: string }> = [];
+    for (const line of lines) {
+        const qty = Number(line.quantity) || 0;
+        if (qty <= 0) continue;
+        const priceCents = cents(line.unitPrice);
+        grossCents += qty * priceCents;
+        const sliceQty = line.slices.reduce((s, x) => s + (Number(x.quantity) || 0), 0);
+        const priceMismatch = line.slices.some((x) => cents(x.unitPrice) !== priceCents);
+        if (line.slices.length === 0 || sliceQty !== qty || priceMismatch) {
+            offenders.push({
+                orderId: line.orderId,
+                detail: line.slices.length === 0
+                    ? `add-on quantity ${qty} has no recorded share`
+                    : `add-on quantity ${qty}, recorded share covers ${sliceQty}${priceMismatch ? ' at a different price' : ''}`,
+            });
+            continue;
+        }
+        shareCents += line.slices.reduce((s, x) => s + cents(x.shareAmount), 0);
+    }
+    return { grossSales: grossCents / 100, earnedShare: shareCents / 100, offenders };
+}
+
+/**
+ * Marker-field error (not instanceof: the build targets ES5, see CloseoutReconciliationError) for an
+ * add-on line whose recorded share does not reconcile. The closeout route answers 409 with the orders.
+ */
+export class AddOnShareReconciliationError extends Error {
+    readonly isAddOnShareReconciliation = true as const;
+    readonly offenders: Array<{ orderId: string; detail: string }>;
+    constructor(offenders: Array<{ orderId: string; detail: string }>) {
+        super(
+            'The add-on share recorded on these orders does not match what they sold: ' +
+            offenders.map((o) => `${o.orderId} (${o.detail})`).join('; '),
+        );
+        this.name = 'AddOnShareReconciliationError';
+        this.offenders = offenders;
+    }
+}
+
+export function isAddOnShareReconciliationError(e: unknown): e is AddOnShareReconciliationError {
+    return typeof e === 'object' && e !== null && (e as any).isAddOnShareReconciliation === true;
 }
 
 /**

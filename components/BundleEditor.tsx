@@ -36,6 +36,8 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
             stock_on_hand: initialData.stock_on_hand || 0,
             is_active: initialData.is_active ?? true,
             show_on_storefront: initialData.show_on_storefront ?? false,
+            // FR-SUPPORTER-ADDON-UPSELL-1 (S2): Meal bundle or Fundraiser add-on.
+            bundle_type: initialData.bundle_type === 'addon' ? 'addon' : 'meal',
             order_cutoff_date: initialData.order_cutoff_date ? new Date(initialData.order_cutoff_date).toISOString().split('T')[0] : '',
             contents: initialData.contents.map((c: any) => ({
                 recipe_id: c.recipe_id,
@@ -53,10 +55,25 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
             stock_on_hand: 0,
             is_active: true,
             show_on_storefront: false,
+            bundle_type: 'meal',
             order_cutoff_date: '',
             contents: []
         }
     });
+
+    // FR-SUPPORTER-ADDON-UPSELL-1 (S2). A Fundraiser add-on (e.g. a Sides & Dessert Bundle) is offered on
+    // a fundraiser only as an optional extra beside a meal bundle. It has ONE size (saved as 'family', an
+    // existing tier — never a fake or zero tier), no Serves 2 version and no storefront listing. The
+    // server enforces all of this (lib/bundleTypeRules.ts); the editor just stops offering what does not
+    // apply. Contents, recipes, image, description and price work exactly as for a meal bundle.
+    const isAddOn = watch('bundle_type') === 'addon';
+    const chooseBundleType = (type: 'meal' | 'addon') => {
+        setValue('bundle_type', type, { shouldDirty: true });
+        if (type === 'addon') {
+            setValue('serving_tier', 'family', { shouldDirty: true });
+            setValue('show_on_storefront', false, { shouldDirty: true });
+        }
+    };
 
     const { fields, append, remove } = useFieldArray({
         control,
@@ -179,9 +196,9 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
             return sum + (recipeCost * quantity);
         }, 0);
 
-        // Determine selling price
+        // Determine selling price (an add-on has no serving-size default price)
         let sellingPrice = manualPrice;
-        if (!sellingPrice) {
+        if (!sellingPrice && watch('bundle_type') !== 'addon') {
             const tierLower = servingTier.toLowerCase();
             if (tierLower.includes('family') || tierLower === 'family') {
                 sellingPrice = 125.00;
@@ -205,7 +222,7 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
             profitPercent,
             foodCostPercent
         };
-    }, [watch('contents'), watch('serving_tier'), watch('price'), recipeCosts]);
+    }, [watch('contents'), watch('serving_tier'), watch('price'), watch('bundle_type'), recipeCosts]);
 
 
     const handleDuplicateAsServes2 = async () => {
@@ -247,7 +264,7 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
                         <p className="text-slate-500 dark:text-slate-400 text-adaptive-subtle">Define the contents of your meal kit.</p>
                     </div>
                 </div>
-                {!isNew && (
+                {!isNew && !isAddOn && (
                     <button
                         onClick={handleDuplicateAsServes2}
                         className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg font-bold transition-colors border border-indigo-100 dark:border-indigo-800"
@@ -387,6 +404,40 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
                             </div>
                         </div>
 
+                        <fieldset>
+                            <legend className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Bundle type</legend>
+                            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Bundle type">
+                                {([
+                                    { value: 'meal', label: 'Meal bundle', hint: 'Sold on its own' },
+                                    { value: 'addon', label: 'Fundraiser add-on', hint: 'Extra beside a meal' },
+                                ] as const).map((opt) => {
+                                    const selected = (watch('bundle_type') || 'meal') === opt.value;
+                                    return (
+                                        <button
+                                            key={opt.value}
+                                            type="button"
+                                            role="radio"
+                                            aria-checked={selected}
+                                            onClick={() => chooseBundleType(opt.value)}
+                                            className={`text-left px-3 py-2 rounded-lg border-2 transition-colors ${selected
+                                                ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/30'
+                                                : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'}`}
+                                        >
+                                            <span className="block text-sm font-bold text-slate-900 dark:text-white">{opt.label}</span>
+                                            <span className="block text-[11px] text-slate-500 dark:text-slate-400">{opt.hint}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            {isAddOn && (
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+                                    A fundraiser add-on is offered on a fundraiser you choose (Supporter Add-On in the fundraiser&apos;s
+                                    details). Supporters can only add it beside at least one meal bundle. It has one size and is never
+                                    shown on the storefront.
+                                </p>
+                            )}
+                        </fieldset>
+
                         <div>
                             <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Bundle Name</label>
                             <input
@@ -412,8 +463,12 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
                         <div>
                             <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Serving Size Tier</label>
 
-                            {/* Custom Tier Input Mode */}
-                            {watch('serving_tier') === 'custom_entry' ? (
+                            {/* FR-SUPPORTER-ADDON-UPSELL-1 (S2): an add-on has one size — no picker, no Serves 2. */}
+                            {isAddOn ? (
+                                <p className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300">
+                                    One size — a fundraiser add-on has no Serves 2 version.
+                                </p>
+                            ) : watch('serving_tier') === 'custom_entry' ? (
                                 <div className="flex gap-2">
                                     <input
                                         autoFocus
@@ -494,12 +549,14 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
                                 </select>
                             )}
 
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                                Determines ingredient scaling base.<br />
-                                • Family = Recipe * 1<br />
-                                • Couple = Recipe / 2<br />
-                                • Single = Recipe / 5
-                            </p>
+                            {!isAddOn && (
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                                    Determines ingredient scaling base.<br />
+                                    • Family = Recipe * 1<br />
+                                    • Couple = Recipe / 2<br />
+                                    • Single = Recipe / 5
+                                </p>
+                            )}
                         </div>
 
 
@@ -650,6 +707,9 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
                                     className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-sm text-slate-900 dark:text-white placeholder:text-slate-400"
                                     placeholder="25.00"
                                 />
+                                {isAddOn && !(Number(watch('price')) > 0) && (
+                                    <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1">Needs a price above $0.00 before a fundraiser can offer it.</p>
+                                )}
                             </div>
                             <div>
                                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Stock Quantity</label>
@@ -689,6 +749,11 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
 
                             <hr className="border-slate-200 dark:border-slate-800" />
 
+                            {isAddOn ? (
+                                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                                    Not on the storefront — a fundraiser add-on is only sold beside a fundraiser meal order.
+                                </p>
+                            ) : (<>
                             <div className="flex items-center gap-3">
                                 <input
                                     {...register('show_on_storefront')}
@@ -715,6 +780,7 @@ export default function BundleEditor({ initialData, allRecipes, knownTiers = [] 
                                     <p className="text-xs text-slate-500 mt-1.5">If set, a global countdown banner will appear on the storefront driving urgency to order before midnight on this date.</p>
                                 </div>
                             )}
+                            </>)}
                         </div>
 
                         <button

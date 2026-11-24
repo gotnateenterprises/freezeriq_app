@@ -101,7 +101,9 @@ export default function FundraisersTab({ customerId, businessSlug }: { customerI
         try {
             const res = await fetch('/api/bundles');
             const data = await res.json();
-            if (res.ok) setAllBundles(data.filter((b: any) => b.is_active));
+            // FR-SUPPORTER-ADDON-UPSELL-1 (S2): a fundraiser add-on is never a lineup (meal) bundle; it is
+            // chosen under the campaign's Supporter Add-On instead (the server refuses it here too).
+            if (res.ok) setAllBundles(data.filter((b: any) => b.is_active && b.bundle_type !== 'addon'));
         } catch (error) {
             console.error('Failed to load bundles', error);
         }

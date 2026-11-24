@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { lockCampaignSelection } from '@/lib/campaignSelectionLock';
 import { legacyBundleAssignmentRefusal } from '@/lib/legacyBundleAssignment';
+import { ADD_ON_BUNDLE_TYPE, BUNDLE_TYPE_SELECT, normalizeBundleType } from '@/lib/campaignAddOns';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
@@ -99,7 +100,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
                     id: { in: bundleIds },
                     business_id: session.user.businessId
                 },
-                select: { id: true }
+                select: { id: true, ...BUNDLE_TYPE_SELECT }
             });
 
             const validIds = new Set(validBundles.map(b => b.id));
@@ -108,6 +109,15 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
             if (invalid.length > 0) {
                 return NextResponse.json({
                     error: `Invalid bundle IDs: ${invalid.join(', ')}`
+                }, { status: 400 });
+            }
+
+            // FR-SUPPORTER-ADDON-UPSELL-1 (S2): a fundraiser add-on is never a lineup (meal) bundle. It is
+            // offered through the campaign's Supporter Add-On setting (campaign_add_ons) instead.
+            if (validBundles.some((b: any) => normalizeBundleType(b.bundle_type) === ADD_ON_BUNDLE_TYPE)) {
+                return NextResponse.json({
+                    error: 'A fundraiser add-on can\'t be one of the fundraiser\'s meal bundles. Choose it under Supporter Add-On instead.',
+                    code: 'ADDON_NOT_A_MEAL_BUNDLE',
                 }, { status: 400 });
             }
         }

@@ -15,6 +15,11 @@ export interface BundleReferenceCounts {
     orderItems: number;
     invoiceItems: number;
     campaignBundles: number;
+    /**
+     * FR-SUPPORTER-ADDON-UPSELL-1 (S2): campaigns offering this bundle as their supporter add-on. The
+     * database already RESTRICTs that delete; counting it here turns the constraint error into words.
+     */
+    campaignAddOns?: number;
 }
 
 /** The narrow Prisma surface the count needs, so a test can supply a double. */
@@ -22,6 +27,8 @@ export interface BundleReferenceReader {
     orderItem: { count(args: { where: { bundle_id: string } }): Promise<number> };
     invoiceItem: { count(args: { where: { bundle_id: string } }): Promise<number> };
     campaignBundle: { count(args: { where: { bundle_id: string } }): Promise<number> };
+    /** Optional so a reader without the S2 model (an older test double) still counts the other three. */
+    campaignAddOn?: { count(args: { where: { bundle_id: string } }): Promise<number> };
 }
 
 /**
@@ -36,7 +43,9 @@ export async function countBundleReferences(
     const orderItems = await tx.orderItem.count({ where });
     const invoiceItems = await tx.invoiceItem.count({ where });
     const campaignBundles = await tx.campaignBundle.count({ where });
-    return { orderItems, invoiceItems, campaignBundles };
+    if (!tx.campaignAddOn) return { orderItems, invoiceItems, campaignBundles };
+    const campaignAddOns = await tx.campaignAddOn.count({ where });
+    return { orderItems, invoiceItems, campaignBundles, campaignAddOns };
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -47,6 +56,9 @@ export function bundleDeletionRefusal(counts: BundleReferenceCounts): string | n
     if (counts.orderItems > 0) uses.push(plural(counts.orderItems, 'order line', 'order lines'));
     if (counts.invoiceItems > 0) uses.push(plural(counts.invoiceItems, 'invoice line', 'invoice lines'));
     if (counts.campaignBundles > 0) uses.push(plural(counts.campaignBundles, 'fundraiser menu', 'fundraiser menus'));
+    if ((counts.campaignAddOns ?? 0) > 0) {
+        uses.push(plural(counts.campaignAddOns ?? 0, 'fundraiser as its supporter add-on', 'fundraisers as their supporter add-on'));
+    }
     if (uses.length === 0) return null;
 
     const list = uses.length === 1

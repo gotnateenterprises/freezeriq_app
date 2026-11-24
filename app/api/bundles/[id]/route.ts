@@ -9,6 +9,8 @@ import {
 } from '@/lib/bundleContents';
 import { buildBundleUpdateData } from '@/lib/bundleUpdate';
 import { countBundleReferences, bundleDeletionRefusal } from '@/lib/bundleDeletion';
+import { bundleTypeChangeRefusal, parseRequestedBundleType, shapeBundleWriteForType } from '@/lib/bundleTypeRules';
+import { BUNDLE_TYPE_SELECT, normalizeBundleType } from '@/lib/campaignAddOns';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
     const session = await auth();
@@ -64,6 +66,10 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
         const update = buildBundleUpdateData(data, { catalog_id: existing.catalog_id ?? null });
         if (!update.ok) return NextResponse.json({ error: update.error }, { status: update.status });
 
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S2): Meal bundle / Fundraiser add-on (lib/bundleTypeRules.ts).
+        const requestedType = parseRequestedBundleType(data);
+        if (!requestedType.ok) return NextResponse.json({ error: requestedType.error }, { status: 400 });
+
         if (update.catalogIdToVerify) {
             const catalog = await prisma.catalog.findFirst({
                 where: { id: update.catalogIdToVerify, business_id: session.user.businessId },
@@ -98,10 +104,39 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
         // Transaction to update bundle and syncing contents
         const result = await prisma.$transaction(async (tx) => {
-            // 1. Update Bundle Info — only the columns this request actually sent.
+            // 0. FR-SUPPORTER-ADDON-UPSELL-1 (S2): the bundle's type decides how this save is shaped.
+            //    An ordinary save (no type change) only reads it. A save that CHANGES the type first locks
+            //    the bundle row and re-reads: an add-on assignment or a lineup row needs a key-share lock on
+            //    this row for its foreign key, so neither can slip in between the check and the write.
+            const typeSelect = { family_id: true, ...BUNDLE_TYPE_SELECT };
+            let current: any = await tx.bundle.findUnique({ where: { id }, select: typeSelect });
+            let storedType = normalizeBundleType(current?.bundle_type);
+            const effectiveType = requestedType.value ?? storedType;
+            if (effectiveType !== storedType) {
+                await tx.$queryRaw`SELECT id FROM "bundles" WHERE id = ${id} FOR UPDATE`;
+                current = await tx.bundle.findUnique({ where: { id }, select: typeSelect });
+                storedType = normalizeBundleType(current?.bundle_type);
+            }
+            if (effectiveType !== storedType) {
+                const refusal = await bundleTypeChangeRefusal(tx, {
+                    bundleId: id,
+                    from: storedType,
+                    to: effectiveType,
+                    familyId: current?.family_id ?? null,
+                });
+                if (refusal) throw Object.assign(new Error('BUNDLE_TYPE_REFUSED'), { bundleRefusal: { status: 409, error: refusal, code: 'BUNDLE_TYPE_CHANGE_REFUSED' } });
+            }
+            const shaped = shapeBundleWriteForType(update.data, effectiveType);
+            if (!shaped.ok) throw Object.assign(new Error('BUNDLE_TYPE_REFUSED'), { bundleRefusal: { status: 400, error: shaped.error, code: 'ADDON_SHAPE' } });
+
+            // 1. Update Bundle Info — only the columns this request actually sent (an add-on also pins its
+            //    one size and storefront-off, see shapeBundleWriteForType).
             const updatedBundle = await tx.bundle.update({
                 where: { id },
-                data: update.data,
+                data: {
+                    ...shaped.data,
+                    ...(effectiveType !== storedType ? ({ bundle_type: effectiveType } as {}) : {}),
+                },
             });
 
             // 2. Sync Contents if provided — using the set validated above, so
@@ -125,6 +160,9 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
         return NextResponse.json(result);
     } catch (e: any) {
+        if (e?.bundleRefusal) {
+            return NextResponse.json({ error: e.bundleRefusal.error, code: e.bundleRefusal.code }, { status: e.bundleRefusal.status });
+        }
         return NextResponse.json({ error: e.message }, { status: 500 });
     }
 }

@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
+import { ADD_ON_BUNDLE_TYPE, normalizeBundleType } from '@/lib/campaignAddOns';
+import { ADDON_TIER_REFUSAL } from '@/lib/bundleTypeRules';
 
 /**
  * CB-1: Atomic bundle duplication with family linking.
@@ -83,6 +85,16 @@ export async function POST(
       return NextResponse.json(
         { error: 'Forbidden' },
         { status: 403 }
+      );
+    }
+
+    // ── 3b. FR-SUPPORTER-ADDON-UPSELL-1 (S2): a fundraiser add-on has one size ──
+    // It is never a member of a meal family (CHECK bundles_addon_has_no_family), so it never gets a
+    // Serves 2 sibling. Refused here in words rather than by the database.
+    if (normalizeBundleType((source as any).bundle_type) === ADD_ON_BUNDLE_TYPE) {
+      return NextResponse.json(
+        { error: ADDON_TIER_REFUSAL, code: 'ADDON_HAS_NO_SERVES_2' },
+        { status: 409 }
       );
     }
 

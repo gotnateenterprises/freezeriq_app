@@ -6,6 +6,8 @@ import {
     isBundleContentsError,
     type ResolvedBundleContent,
 } from '@/lib/bundleContents';
+import { parseRequestedBundleType, shapeBundleWriteForType } from '@/lib/bundleTypeRules';
+import { MEAL_BUNDLE_TYPE } from '@/lib/campaignAddOns';
 
 export async function GET(req: Request) {
     try {
@@ -103,6 +105,22 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'Name and SKU are required' }, { status: 400 });
         }
 
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S2): Meal bundle (default) or Fundraiser add-on. An add-on is
+        // saved with its one size and off the storefront (lib/bundleTypeRules.ts); a contradiction is
+        // refused rather than silently changed.
+        const requestedType = parseRequestedBundleType(data);
+        if (!requestedType.ok) {
+            return NextResponse.json({ error: requestedType.error }, { status: 400 });
+        }
+        const bundleType = requestedType.value ?? MEAL_BUNDLE_TYPE;
+        const shaped = shapeBundleWriteForType(
+            { serving_tier: data.serving_tier || 'family', show_on_storefront: data.show_on_storefront ?? false },
+            bundleType,
+        );
+        if (!shaped.ok) {
+            return NextResponse.json({ error: shaped.error, code: 'ADDON_SHAPE' }, { status: 400 });
+        }
+
         // BUNDLE-PERSISTENCE-FIX. Resolve and validate the entire intended
         // recipe set BEFORE anything is written. This also carries the
         // BUNDLE-SECURITY-1 ownership guarantee: resolveBundleContents proves
@@ -131,9 +149,10 @@ export async function POST(req: Request) {
                     name: data.name,
                     sku: data.sku,
                     description: data.description,
-                    serving_tier: data.serving_tier || 'family',
+                    serving_tier: shaped.data.serving_tier,
                     is_active: data.is_active ?? true,
-                    show_on_storefront: data.show_on_storefront ?? false,
+                    show_on_storefront: shaped.data.show_on_storefront,
+                    ...({ bundle_type: bundleType } as {}),
                     order_cutoff_date: data.order_cutoff_date ? new Date(data.order_cutoff_date) : null,
                     price: data.price ? Number(data.price) : null,
                     catalog_id: data.catalog_id || null, // Added catalog_id

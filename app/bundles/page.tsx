@@ -392,7 +392,8 @@ function BundlesList({ bundles, isLoading, refresh }: { bundles: any[], isLoadin
             if (res.ok) {
                 refresh();
             } else {
-                alert("Failed to update visibility");
+                const err = await res.json().catch(() => null);
+                alert(err?.error || "Failed to update visibility");
             }
         } catch (e) {
             alert("Error updating visibility");
@@ -462,7 +463,15 @@ function BundlesList({ bundles, isLoading, refresh }: { bundles: any[], isLoadin
                                                 <Package size={20} />
                                             </div>
                                             <div>
-                                                <div className="font-medium text-slate-900 dark:text-white text-adaptive">{bundle.name}</div>
+                                                <div className="font-medium text-slate-900 dark:text-white text-adaptive">
+                                                    {bundle.name}
+                                                    {/* FR-SUPPORTER-ADDON-UPSELL-1 (S2) */}
+                                                    {bundle.bundle_type === 'addon' && (
+                                                        <span className="ml-2 align-middle px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                                                            Fundraiser add-on
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 <div className="text-xs text-slate-500 dark:text-slate-400 text-adaptive-subtle truncate max-w-xs">{bundle.description || 'No description'}</div>
                                             </div>
                                         </div>
@@ -474,12 +483,16 @@ function BundlesList({ bundles, isLoading, refresh }: { bundles: any[], isLoadin
                                         {bundle._count?.contents || 0} items
                                     </td>
                                     <td className="px-6 py-4 text-center">
+                                        {bundle.bundle_type === 'addon' ? (
+                                            <span className="text-xs text-slate-400" title="A fundraiser add-on is never shown on the storefront.">Never</span>
+                                        ) : (
                                         <button
                                             onClick={() => toggleStorefront(bundle)}
                                             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${bundle.show_on_storefront ? 'bg-indigo-600' : 'bg-slate-200 dark:bg-slate-700'}`}
                                         >
                                             <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${bundle.show_on_storefront ? 'translate-x-6' : 'translate-x-1'}`} />
                                         </button>
+                                        )}
                                     </td>
                                     <td className="px-6 py-4 text-right text-sm font-medium text-slate-900 dark:text-white">
                                         ${Number(bundle.menu_price || 0).toFixed(2)}

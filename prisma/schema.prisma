@@ -343,6 +343,9 @@ model Bundle {
   // Database CHECKs (raw SQL in the migration): the value is 'meal' or 'addon',
   // and bundle_type = 'meal' OR family_id IS NULL. Never inferred from
   // serving_tier. lib/campaignAddOns.ts is the one authority that reads it.
+  // S2 adds bundles_addon_not_on_storefront (bundle_type = 'meal' OR
+  // show_on_storefront = false), so every lineup that lists storefront bundles
+  // can never list an add-on.
   bundle_type        String             @default("meal")
   // ─────────────────────────────────────────────────────────────────────────
   contents           BundleContent[]
@@ -574,6 +577,9 @@ model OrderItem {
   // ─────────────────────────────────────────────────────────────────────────
   bundle          Bundle?     @relation(fields: [bundle_id], references: [id])
   order           Order?      @relation(fields: [order_id], references: [id])
+  // FR-SUPPORTER-ADDON-UPSELL-1 (S2): an add-on line's organization share as
+  // EARNED when it was sold — one row per share-tier slice.
+  add_on_shares   OrderItemAddOnShare[]
 
   @@map("order_items")
 }
@@ -1803,10 +1809,68 @@ model CampaignAddOn {
   campaign     FundraiserCampaign @relation(fields: [customer_id, campaign_id], references: [customer_id, id], onDelete: Cascade)
   // Restrict: an assigned add-on bundle cannot be deleted out from under a campaign.
   bundle       Bundle             @relation(fields: [business_id, bundle_id], references: [business_id, id], onDelete: Restrict)
+  // S2: the organization-share schedule for this campaign's add-on.
+  share_tiers  CampaignAddOnShareTier[]
 
   @@unique([campaign_id], map: "campaign_add_ons_one_per_campaign")
   @@index([bundle_id], map: "campaign_add_ons_bundle_id_idx")
   @@map("campaign_add_ons")
+}
+
+// ── FR-SUPPORTER-ADDON-UPSELL-1 (S2): the add-on's organization-share schedule ──
+// A campaign-specific, MARGINAL tier schedule over the campaign's cumulative
+// add-on units sold: { start 1 → 10%, start 11 → 15% } means the first ten
+// add-ons earn 10% and the eleventh onward 15%; reaching a tier never re-rates
+// earlier units. It belongs to the campaign's add-on assignment, never to the
+// Bundle, so one Bundle can pay 10% on one campaign and 15% on another.
+//
+// Created with ONE tier (start 1 at the campaign's org_share_percent) when the
+// add-on is first assigned; independent of the meal share afterwards. Tiers at
+// or below the units already sold are locked (lib/campaignAddOnShare.ts).
+// Removing the assignment removes its schedule (cascade); money already earned
+// lives in order_item_add_on_shares and is never recomputed from here.
+// CHECKs in the migration: starting_quantity >= 1, percent 0–100.
+model CampaignAddOnShareTier {
+  id                 String   @id @default(uuid())
+  campaign_add_on_id String
+  /// The cumulative add-on unit at which this rate begins (1 = the first add-on sold).
+  starting_quantity  Int
+  /// A percent, 10.00 = 10% — the same storage and range as FundraiserCampaign.org_share_percent.
+  percent            Decimal  @db.Decimal(5, 2)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @default(now()) @updatedAt
+
+  campaign_add_on CampaignAddOn @relation(fields: [campaign_add_on_id], references: [id], onDelete: Cascade)
+
+  @@unique([campaign_add_on_id, starting_quantity], map: "campaign_add_on_share_tiers_one_per_start")
+  @@map("campaign_add_on_share_tiers")
+}
+
+// ── FR-SUPPORTER-ADDON-UPSELL-1 (S2): the add-on share EARNED, frozen at sale ──
+// Written in the same locked transaction as the order (supporter and
+// coordinator routes alike): each add-on order line is split across the share
+// tiers by the campaign's cumulative add-on count at that moment, one row per
+// slice. "9 sold, then an order of 3" with 1–10 @10% / 11+ @15% records
+// { first_unit 10, quantity 1, 10% } and { first_unit 11, quantity 2, 15% }.
+// share_amount = quantity × unit_price × percent / 100, rounded half-up to the
+// cent. Closeout sums these rows; later schedule edits never change them.
+// CHECKs in the migration: first_unit >= 1, quantity >= 1, percent 0–100,
+// share_amount >= 0.
+model OrderItemAddOnShare {
+  id            String   @id @default(uuid())
+  order_item_id String
+  /// The campaign-wide position of this slice's first unit (1 = the first add-on ever sold).
+  first_unit    Int
+  quantity      Int
+  percent       Decimal  @db.Decimal(5, 2)
+  unit_price    Decimal  @db.Decimal(10, 2)
+  share_amount  Decimal  @db.Decimal(10, 2)
+  created_at    DateTime @default(now())
+
+  order_item OrderItem @relation(fields: [order_item_id], references: [id], onDelete: Cascade)
+
+  @@unique([order_item_id, first_unit], map: "order_item_add_on_shares_one_per_slice")
+  @@map("order_item_add_on_shares")
 }
 
 enum SupporterConsentChannel {

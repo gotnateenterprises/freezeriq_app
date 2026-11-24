@@ -49,6 +49,8 @@ import {
     orderLinesNeedAddOnAuthority,
 } from '@/lib/campaignAddOns';
 import { lockCampaignSelection } from '@/lib/campaignSelectionLock';
+// FR-SUPPORTER-ADDON-UPSELL-1 (S2): the add-on share a paper order earns, and the read-only add-on view.
+import { loadCoordinatorAddOnView, recordAddOnShareEarnings } from '@/lib/campaignAddOnEarnings';
 import {
     CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT,
     assignedCoordinatorFirstName,
@@ -444,8 +446,20 @@ export async function GET(req: Request) {
         // coordinator's payload.
         const { customer_id: _campaignCustomerId, ...campaignResponse } = campaign as any;
 
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S2): the campaign's supporter add-on, READ-ONLY here — name,
+        // price, how the organization earns on it in plain words, and how many have sold. The tenant
+        // sets it; a coordinator can only record it on a paper order (the server decides the share).
+        // Null when the campaign has no sellable add-on. Never blocks the portal.
+        let addOn: Awaited<ReturnType<typeof loadCoordinatorAddOnView>> = null;
+        try {
+            addOn = businessId ? await loadCoordinatorAddOnView(prisma, { campaignId: campaign.id, businessId }) : null;
+        } catch (addOnErr) {
+            console.error('Coordinator add-on view error (non-blocking):', addOnErr);
+        }
+
         return NextResponse.json({
             ...campaignResponse,
+            addOn,
             // COORDINATOR-PAYMENT-METHOD-UX-1: re-validated on read, so the panel
             // summary and the Payment Settings form see exactly what supporters do.
             payment_methods: readStoredPaymentMethods(campaignResponse.payment_methods ?? null),
@@ -720,7 +734,12 @@ export async function POST(req: Request) {
                         businessId,
                         expectedBundleIds: lineRoles.addOnBundleIds,
                     });
-                    return writeOrder(tx as typeof prisma);
+                    const created = await writeOrder(tx as typeof prisma);
+                    // S2: freeze the add-on share this paper order earned — the SAME recorder, under the
+                    // SAME lock, as a supporter's own order, so a threshold-crossing quantity is split by
+                    // tier here too. The coordinator never supplies or sees a percentage.
+                    await recordAddOnShareEarnings(tx, { campaignId: campaign.id, businessId, orderId: created.id });
+                    return created;
                 });
             } catch (txErr: any) {
                 if (isAddOnChanged(txErr)) {

@@ -42,6 +42,7 @@ import { calendarDaysUntil } from '@/lib/tenantTimezone';
 import CopyButton from '@/components/coordinator/CopyButton';
 import { ActionBar } from '@/components/coordinator/ActionBar';
 import { ProgressHero } from '@/components/coordinator/ProgressHero';
+import { AddOnShareCard } from '@/components/coordinator/AddOnShareCard';
 // FR-COORD-123: SetupChecklist's three nudges live on in LaunchSteps, which is
 // mounted in EVERY active phase (the old card vanished the moment the first
 // order arrived) and anchors completion to durable server truth.
@@ -624,6 +625,9 @@ export default function CoordinatorPortal() {
 
     // State for selected items in manual order
     const [selectedItems, setSelectedItems] = useState<any[]>([]);
+    // FR-SUPPORTER-ADDON-UPSELL-1 (S2): the paper order's optional add-on quantity (0 = none). Sent as its
+    // own line; the server decides it is the add-on, prices it and records its share.
+    const [addOnQty, setAddOnQty] = useState(0);
 
     const toggleItem = (bundle: any) => {
         const exists = selectedItems.find(i => i.id === bundle.id);
@@ -641,12 +645,14 @@ export default function CoordinatorPortal() {
     };
 
     // Auto-calculate total
+    const addOnPrice = Number(campaign?.addOn?.price) || 0;
+    const addOnLineTotal = campaign?.addOn ? addOnQty * addOnPrice : 0;
     useEffect(() => {
-        const total = selectedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+        const total = selectedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0) + addOnLineTotal;
         if (total > 0) {
             setFormData(prev => ({ ...prev, totalAmount: total.toString() }));
         }
-    }, [selectedItems]);
+    }, [selectedItems, addOnLineTotal]);
 
     const handleAddOrder = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -662,13 +668,20 @@ export default function CoordinatorPortal() {
                 body: JSON.stringify({
                     ...formData,
                     totalAmount: parseFloat(formData.totalAmount),
-                    items: selectedItems.map(i => ({
-                        bundleId: i.id,
-                        quantity: i.quantity,
-                        serving_tier: i.serving_tier || 'family',
-                        name: i.name,
-                        price: i.price
-                    }))
+                    items: [
+                        ...selectedItems.map(i => ({
+                            bundleId: i.id,
+                            quantity: i.quantity,
+                            serving_tier: i.serving_tier || 'family',
+                            name: i.name,
+                            price: i.price
+                        })),
+                        // FR-SUPPORTER-ADDON-UPSELL-1 (S2): the add-on as its own line. No role, share
+                        // or percentage is sent — the server decides all of them.
+                        ...(campaign.addOn && addOnQty > 0
+                            ? [{ bundleId: campaign.addOn.bundleId, quantity: addOnQty, name: campaign.addOn.name, price: campaign.addOn.price }]
+                            : []),
+                    ]
                 })
             });
 
@@ -677,6 +690,7 @@ export default function CoordinatorPortal() {
                 setShowOrderModal(false);
                 setFormData({ customerName: '', participantName: '', email: '', phone: '', totalAmount: '', deliveryAddress: '' });
                 setSelectedItems([]);
+                setAddOnQty(0);
                 fetchCampaign(); // Refresh data
             } else {
                 const errBody = await res.json().catch(() => null);
@@ -717,7 +731,13 @@ export default function CoordinatorPortal() {
     // configured rate (INV-A, prisma default 20.00, never null) — passing it
     // through is what makes metrics.raisedAmount the organization's real
     // money raised instead of gross sales relabeled.
-    const metrics = computeFundraiserProgress(campaign.bundle_goal, campaign.total_sales, campaign.orders || [], campaign.org_share_percent);
+    // FR-SUPPORTER-ADDON-UPSELL-1 (S2): add-on sales earn the add-on's own (tiered) share, recorded at
+    // sale; the campaign percentage applies to meal sales only. Without an add-on this is unchanged.
+    const metrics = computeFundraiserProgress(
+        campaign.bundle_goal, campaign.total_sales, campaign.orders || [], campaign.org_share_percent,
+        campaign.addOn ? { grossSales: campaign.addOn.grossSales, earnedShare: campaign.addOn.earnedShare } : null,
+    );
+    const addOnCard = campaign.addOn ? <AddOnShareCard addOn={campaign.addOn} /> : null;
     const progress = metrics.progressPercent;
     const totalBundlesSold = metrics.totalBundlesSold;
     const bundleGoal = metrics.bundleGoal;
@@ -1083,7 +1103,9 @@ export default function CoordinatorPortal() {
                         daysRemaining={daysRemaining}
                         orgLabel={orgLabel}
                         orgSharePercent={Number(campaign.org_share_percent) || 0}
+                        addOnShareIncluded={Boolean(campaign.addOn)}
                     />
+                    {addOnCard}
                     <ShareCenter
                         shareUrl={shareUrl}
                         onCopy={handleCopy}
@@ -1109,7 +1131,9 @@ export default function CoordinatorPortal() {
                         paceText={`${coachingTip.emoji} ${coachingTip.text}`}
                         orgLabel={orgLabel}
                         orgSharePercent={Number(campaign.org_share_percent) || 0}
+                        addOnShareIncluded={Boolean(campaign.addOn)}
                     />
+                    {addOnCard}
                     <ShareCenter
                         shareUrl={shareUrl}
                         onCopy={handleCopy}
@@ -1160,7 +1184,9 @@ export default function CoordinatorPortal() {
                         paceText={`${coachingTip.emoji} ${coachingTip.text}`}
                         orgLabel={orgLabel}
                         orgSharePercent={Number(campaign.org_share_percent) || 0}
+                        addOnShareIncluded={Boolean(campaign.addOn)}
                     />
+                    {addOnCard}
                     <DeliveryPrep
                         deliveryDateLabel={deliveryDateLabel}
                         pickupLocation={campaign.pickup_location || undefined}
@@ -1211,7 +1237,9 @@ export default function CoordinatorPortal() {
                         paceText={`${coachingTip.emoji} ${coachingTip.text}`}
                         orgLabel={orgLabel}
                         orgSharePercent={Number(campaign.org_share_percent) || 0}
+                        addOnShareIncluded={Boolean(campaign.addOn)}
                     />
+                    {addOnCard}
                     <WhatsNext
                         tenantName={tenantName || 'Your fundraiser organizer'}
                         deliveryWindowLabel={deliveryDateLabel}
@@ -1418,15 +1446,50 @@ export default function CoordinatorPortal() {
                                 </div>
                             </div>
 
+                            {/* FR-SUPPORTER-ADDON-UPSELL-1 (S2): the optional add-on, as its own row.
+                                Only with at least one meal bundle above — the server refuses an
+                                add-on-only order and decides the add-on's share itself. */}
+                            {campaign.addOn && (
+                                <div className="space-y-2 rounded-2xl border-2 border-amber-100 bg-amber-50/50 p-3">
+                                    <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Optional add-on</label>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <p className="text-xs font-black break-words">{campaign.addOn.name}</p>
+                                            <p className="text-[10px] font-black text-slate-500">
+                                                ${Number(campaign.addOn.price).toFixed(2)} each · only with a meal bundle above
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-none">
+                                            <button
+                                                type="button"
+                                                aria-label="One fewer add-on"
+                                                onClick={() => setAddOnQty((q) => Math.max(0, q - 1))}
+                                                className="w-8 h-8 rounded-lg bg-slate-200 text-slate-600 text-sm font-bold flex items-center justify-center"
+                                            >−</button>
+                                            <span className="text-sm font-black w-6 text-center" aria-live="polite">{addOnQty}</span>
+                                            <button
+                                                type="button"
+                                                aria-label="One more add-on"
+                                                onClick={() => setAddOnQty((q) => q + 1)}
+                                                className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 text-sm font-bold flex items-center justify-center"
+                                            >+</button>
+                                        </div>
+                                    </div>
+                                    {addOnQty > 0 && selectedItems.length === 0 && (
+                                        <p className="text-[11px] font-semibold text-amber-700 ml-1">Add at least one meal bundle above to include the add-on.</p>
+                                    )}
+                                </div>
+                            )}
+
                             {/* Order total display */}
                             {selectedItems.length > 0 && (
                                 <div className="bg-indigo-50/50 rounded-2xl p-4 border border-indigo-100">
                                     <div className="flex justify-between items-center">
                                         <span className="text-sm font-bold text-slate-600">
-                                            {selectedItems.reduce((sum: number, i: any) => sum + i.quantity, 0)} items selected
+                                            {selectedItems.reduce((sum: number, i: any) => sum + i.quantity, 0) + (campaign.addOn ? addOnQty : 0)} items selected
                                         </span>
                                         <span className="text-xl font-black text-indigo-600">
-                                            ${selectedItems.reduce((sum: number, i: any) => sum + (i.price * i.quantity), 0).toFixed(2)}
+                                            ${(selectedItems.reduce((sum: number, i: any) => sum + (i.price * i.quantity), 0) + addOnLineTotal).toFixed(2)}
                                         </span>
                                     </div>
                                 </div>

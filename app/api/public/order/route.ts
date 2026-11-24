@@ -38,6 +38,8 @@ import {
     loadOrderBundleFacts,
     orderLinesNeedAddOnAuthority,
 } from '@/lib/campaignAddOns';
+// FR-SUPPORTER-ADDON-UPSELL-1 (S2): the add-on share each order earns, frozen in the order's transaction.
+import { recordAddOnShareEarnings } from '@/lib/campaignAddOnEarnings';
 
 /**
  * FR-LAUNCH-1E: sentinel used to abort the order transaction when the campaign
@@ -724,6 +726,13 @@ export async function POST(req: Request) {
                         }
                     }
                 });
+
+                // FR-SUPPORTER-ADDON-UPSELL-1 (S2): freeze the organization share the add-on line EARNED,
+                // under the campaign lock taken above, split by the campaign's cumulative add-on count
+                // (lib/campaignAddOnEarnings.ts). Closeout sums these rows; nothing re-derives them.
+                if (campaign && lineRoles.addOnBundleIds.length > 0) {
+                    await recordAddOnShareEarnings(tx, { campaignId: campaign.id, businessId, orderId: order.id });
+                }
 
                 // 4. Update Stock (family-equivalent units)
                 //    stock_on_hand represents family-size-equivalent bundle units.

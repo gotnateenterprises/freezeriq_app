@@ -265,7 +265,13 @@ export function computeFundraiserProgress(
     bundleGoalInput: number | string | null | undefined,
     totalSales: number | string | null | undefined,
     orders: OrderForMetrics[] = [],
-    orgSharePercent?: number | string | null
+    orgSharePercent?: number | string | null,
+    /**
+     * FR-SUPPORTER-ADDON-UPSELL-1 (S2): the campaign add-on's sales (already inside totalSales) and the
+     * share they EARNED when sold. The campaign percentage then applies to meal sales only and the
+     * earned add-on share is added as recorded — the same arithmetic closeout uses. Omitted: unchanged.
+     */
+    addOnMoney?: { grossSales: number; earnedShare: number } | null
 ): FundraiserProgressResult {
     const bundleGoal = resolveBundleGoal(bundleGoalInput);
     const dollarSales = Number(totalSales) || 0;
@@ -281,9 +287,13 @@ export function computeFundraiserProgress(
     // (from raise-funds page: "Your organization keeps 20% of the proceeds")
     const estimatedEarnings = dollarSales * ESTIMATED_FUNDRAISER_ORG_SHARE;
 
+    const addOnGross = Number(addOnMoney?.grossSales) || 0;
+    const addOnEarned = Number(addOnMoney?.earnedShare) || 0;
     const raisedAmount = orgSharePercent === undefined || orgSharePercent === null
         ? null
-        : organizationShareAmount(dollarSales, Number(orgSharePercent));
+        : Math.round(
+            (organizationShareAmount(dollarSales - addOnGross, Number(orgSharePercent)) + addOnEarned) * 100
+        ) / 100;
 
     return {
         totalBundlesSold,

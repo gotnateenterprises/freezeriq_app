@@ -99,6 +99,9 @@ const MODELS = [
     // every fundraiser order path when a line is an add-on; and the storefront config the
     // storefront checkout route reads before its add-on refusal.
     'campaignAddOn', 'storefrontConfig',
+    // FR-SUPPORTER-ADDON-UPSELL-1 (S2): the add-on's share schedule, and the share each add-on order
+    // line earned (written inside the order transaction by lib/campaignAddOnEarnings.ts).
+    'campaignAddOnShareTier', 'orderItemAddOnShare',
 ];
 
 const METHODS = [

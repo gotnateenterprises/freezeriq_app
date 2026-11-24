@@ -167,6 +167,10 @@ export default function FundraisersPage() {
         financials?: {
             gross_sales: number;
             org_share_percent: number;
+            // FR-SUPPORTER-ADDON-UPSELL-1 (S2): meal share and the add-on's earned share, separately.
+            main_organization_amount?: number;
+            add_on_gross_sales?: number;
+            add_on_organization_amount?: number;
             organization_amount: number;
             base_remit: number;
             tax_applied: boolean;
@@ -746,12 +750,35 @@ export default function FundraisersPage() {
                                         <span className="font-bold">Total fundraiser sales</span>
                                         <span className="font-black">${money(closeoutResult.financials.gross_sales)}</span>
                                     </div>
+                                    {(closeoutResult.financials.add_on_gross_sales ?? 0) > 0 ? (
+                                        <>
+                                            {/* S2: meal share at the campaign rate, then the add-on's own
+                                                (tiered, earned-at-sale) share, then their total. */}
+                                            <div className="flex justify-between text-emerald-700 dark:text-emerald-400">
+                                                <span className="font-bold">
+                                                    Organization earned on meals ({closeoutResult.financials.org_share_percent}%)
+                                                </span>
+                                                <span className="font-black">${money(closeoutResult.financials.main_organization_amount ?? 0)}</span>
+                                            </div>
+                                            <div className="flex justify-between text-emerald-700 dark:text-emerald-400">
+                                                <span className="font-bold">
+                                                    Organization earned on add-ons (${money(closeoutResult.financials.add_on_gross_sales ?? 0)} sold)
+                                                </span>
+                                                <span className="font-black">${money(closeoutResult.financials.add_on_organization_amount ?? 0)}</span>
+                                            </div>
+                                            <div className="flex justify-between text-emerald-700 dark:text-emerald-400">
+                                                <span className="font-bold">Organization earned</span>
+                                                <span className="font-black">${money(closeoutResult.financials.organization_amount)}</span>
+                                            </div>
+                                        </>
+                                    ) : (
                                     <div className="flex justify-between text-emerald-700 dark:text-emerald-400">
                                         <span className="font-bold">
                                             Organization earned ({closeoutResult.financials.org_share_percent}%)
                                         </span>
                                         <span className="font-black">${money(closeoutResult.financials.organization_amount)}</span>
                                     </div>
+                                    )}
                                     <div className="flex justify-between text-emerald-700 dark:text-emerald-400">
                                         <span className="font-bold">Base amount to remit</span>
                                         <span className="font-black">${money(closeoutResult.financials.base_remit)}</span>

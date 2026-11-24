@@ -35,6 +35,7 @@ import { CampaignHealthBadge } from './CampaignHealthBadge';
 import { StageChip } from './StageChip';
 import { BundleSelectionStatusCard } from './BundleSelectionStatusCard';
 import { CoordinatorSetupEmailCard } from './CoordinatorSetupEmailCard';
+import { CampaignAddOnCard } from './CampaignAddOnCard';
 import type { PriorityListCampaign } from './CampaignPriorityList';
 import type { CampaignTriage } from '@/lib/growth/nextAction';
 import { formatBundleProgress } from '@/lib/growth/campaignSections';
@@ -263,6 +264,13 @@ export function CampaignContextDrawer({
                         heading would orphan above nothing. */}
                     {sections.showBundleSelection && (
                         <BundleSelectionStatusCard campaignId={c.id} />
+                    )}
+
+                    {/* ── FR-SUPPORTER-ADDON-UPSELL-1 (S2): the fundraiser's Supporter Add-On and
+                        what the organization earns on it. Tenant-only; read-only once closed out
+                        or for a non-administrator. Never shown to supporters in S2. */}
+                    {!c.is_placeholder && (
+                        <CampaignAddOnCard key={c.id} campaignId={c.id} />
                     )}
 
                     {/* ── Coordinator & organization ─────────────────────── */}

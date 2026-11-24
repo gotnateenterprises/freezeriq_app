@@ -11,14 +11,18 @@
  */
 export function ProgressHero({
     sold, goal, progress, totalSales, raisedAmount, orderCount, daysRemaining,
-    paceText, hot = false, dimmed = false, orgLabel = 'your group', orgSharePercent,
+    paceText, hot = false, dimmed = false, orgLabel = 'your group', orgSharePercent, addOnShareIncluded = false,
 }: {
     sold: number; goal: number; progress: number;
     totalSales: number; raisedAmount: number; orderCount: number; daysRemaining: number | null;
     paceText?: string; hot?: boolean; dimmed?: boolean; orgLabel?: string; orgSharePercent?: number;
+    /** FR-SUPPORTER-ADDON-UPSELL-1 (S2): raisedAmount also includes the add-on's own share. */
+    addOnShareIncluded?: boolean;
 }) {
     const sharePercentLabel = orgSharePercent && orgSharePercent > 0
-        ? `${parseFloat(orgSharePercent.toFixed(2))}% share`
+        ? addOnShareIncluded
+            ? `${parseFloat(orgSharePercent.toFixed(2))}% on meals + add-on share`
+            : `${parseFloat(orgSharePercent.toFixed(2))}% share`
         : undefined;
 
     return (

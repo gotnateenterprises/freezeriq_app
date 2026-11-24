@@ -79,7 +79,12 @@ import {
     FOOD_TAX_DEFAULT_APPLIED,
     roundCents,
     type AggregatedLine,
+    // FR-SUPPORTER-ADDON-UPSELL-1 (S2): the add-on's recorded, tiered share.
+    AddOnShareReconciliationError,
+    isAddOnShareReconciliationError,
+    summarizeAddOnEarnings,
 } from '@/lib/fundraiserCloseoutMath';
+import { isAddOnItemRole } from '@/lib/campaignAddOns';
 // FR-TAX-1B: the campaign's frozen tax rate, and the explicit rule for
 // campaigns that carry no snapshot at all.
 import { resolveCloseoutTaxRate } from '@/lib/fundraiserTax';
@@ -292,6 +297,12 @@ export async function POST(
                                 variant_size: true,
                                 item_name: true,
                                 bundle: { select: { name: true } },
+                                // FR-SUPPORTER-ADDON-UPSELL-1 (S2): the line's role at sale and,
+                                // for an add-on line, the share it EARNED then (tier slices).
+                                ...({
+                                    item_role: true,
+                                    add_on_shares: { select: { quantity: true, unit_price: true, share_amount: true } },
+                                } as {}),
                             },
                         },
                     }
@@ -365,12 +376,38 @@ export async function POST(
                     taxRatePercent: (campaign as any).tax_rate_percent ?? null,
                 });
 
+                // FR-SUPPORTER-ADDON-UPSELL-1 (S2): the add-on's money comes from what each add-on line
+                // RECORDED when it was sold — its gross and its tiered share slices — never from the
+                // add-on's current schedule. A line whose slices do not cover exactly its quantity at its
+                // own price stops closeout here (409), before the claim or the invoice.
+                const addOnEarnings = summarizeAddOnEarnings(
+                    activeOrders.flatMap((o) =>
+                        o.items
+                            .filter((it: any) => isAddOnItemRole(it.item_role))
+                            .map((it: any) => ({
+                                orderId: o.id,
+                                quantity: Number(it.quantity) || 0,
+                                unitPrice: Number(it.unit_price ?? 0),
+                                slices: (it.add_on_shares ?? []).map((s: any) => ({
+                                    quantity: Number(s.quantity) || 0,
+                                    unitPrice: Number(s.unit_price ?? 0),
+                                    shareAmount: Number(s.share_amount ?? 0),
+                                })),
+                            }))
+                    )
+                );
+                if (addOnEarnings.offenders.length > 0) {
+                    throw new AddOnShareReconciliationError(addOnEarnings.offenders);
+                }
+
                 const financials = computeCloseoutFinancials({
                     grossSales: settlementTotal,
                     orgSharePercent: Number(campaign.org_share_percent),
                     applyFoodTax,
                     taxCollected,
                     taxRatePercent: closeoutTaxRate,
+                    // Meal share on (gross − add-on gross); the add-on's earned share added as recorded.
+                    addOn: { grossSales: addOnEarnings.grossSales, earnedShare: addOnEarnings.earnedShare },
                 });
 
                 // DATA-CLEANUP-GUARDS-1: decided from the same snapshot, inside the
@@ -572,6 +609,15 @@ export async function POST(
                     },
                 }, { status: 409 });
             }
+            // FR-SUPPORTER-ADDON-UPSELL-1 (S2): an add-on line whose recorded share does not cover
+            // what it sold. Nothing was claimed or written; the orders are named so they can be fixed.
+            if (isAddOnShareReconciliationError(txErr)) {
+                return NextResponse.json({
+                    error: txErr.message,
+                    code: 'ADDON_SHARE_DOES_NOT_RECONCILE',
+                    add_on_reconciliation: { offenders: txErr.offenders },
+                }, { status: 409 });
+            }
             throw txErr;
         }
 
@@ -591,6 +637,11 @@ export async function POST(
             financials: {
                 gross_sales: result.financials.grossSales,
                 org_share_percent: result.financials.orgSharePercent,
+                // S2: the meal share and the add-on's earned share, then their total.
+                main_gross_sales: result.financials.mainGrossSales,
+                main_organization_amount: result.financials.mainOrganizationAmount,
+                add_on_gross_sales: result.financials.addOnGrossSales,
+                add_on_organization_amount: result.financials.addOnOrganizationAmount,
                 organization_amount: result.financials.organizationAmount,
                 base_remit: result.financials.baseRemit,
                 tax_applied: result.financials.taxApplied,
