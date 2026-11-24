@@ -581,6 +581,13 @@ describe('30–33 · paper / manual and staff orders obey the SAME rules (D7)', 
         // written under the campaign lock, after the same recheck as the supporter route
         expect(mock.client.$transaction).toHaveBeenCalledTimes(1);
         expect(mock.callsTo('campaignAddOn.findUnique')).toHaveLength(2);
+        const lock = mock.calls.findIndex((c) => c.model === '$executeRawUnsafe');
+        const recheck = mock.calls.map((c, i) => ({ c, i })).filter(({ c }) => c.model === 'campaignAddOn')[1].i;
+        const write = mock.calls.findIndex((c) => c.model === 'order' && c.method === 'create');
+        expect(lock).toBeGreaterThanOrEqual(0);
+        expect(mock.calls[lock].args.values).toEqual([`freezeriq:campaign-bundle-selection:${CAMP_LEGACY}`]);
+        expect(recheck).toBeGreaterThan(lock);
+        expect(write).toBeGreaterThan(recheck);
     });
 
     it('32 · an add-on-only paper order → 400 with the safe message, nothing written', async () => {
