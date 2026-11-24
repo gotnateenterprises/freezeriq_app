@@ -116,6 +116,8 @@ describe('1. schema and migration', () => {
             '20261124120000_supporter_addon_s2',
             // FR-SUPPORTER-ADDON-UPSELL-1 S3 (owner-approved 2026-11-24): invoice_items.item_role (constant default + CHECK).
             '20261125120000_supporter_addon_s3',
+            // FR-SUPPORTER-ADDON-UPSELL-1 S4 (owner-approved 2026-11-24): campaign_add_ons.show_share_percent (constant default).
+            '20261126120000_supporter_addon_s4',
         ]);
     });
 });

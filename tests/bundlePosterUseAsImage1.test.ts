@@ -522,10 +522,10 @@ describe('16 · files this task must not touch are byte-identical to Production 
     // sha256 at 29b1f27, line endings normalized to LF.
     const PINNED: Record<string, string> = {
         // downstream readers of the bundle image
-        'lib/publicFundraiserPayload.ts': 'ab49439872b3f3e69ccbcaee5ade04ba87294780f3bcc1cae6adaaab71cdb9a7',
+        // (lib/publicFundraiserPayload.ts — SUPERSEDED PIN (S4), see the history check below.)
         'lib/supporterBundleDetail.ts': '6263c7ddc075a9844540a954bf2424aaf4687cca50e0e961af51f0029e68e639',
         'lib/campaignBundleSelection.ts': 'ce1847ee9cd6317650b3f4378e1d091a1761c9ed60e4000006794d5d4109cf5d',
-        'components/fundraiser/SupporterBundleDetail.tsx': '0aa15aaac82a1cb54a09b4d4d27f0181fa90a10c879c90a019182c9dad42a3ec',
+        // (components/fundraiser/SupporterBundleDetail.tsx — SUPERSEDED PIN (S4), see the history check below.)
         // (page.tsx and FundraiserClient.tsx — SUPERSEDED PINS, see the history check below.)
         'app/shop/[slug]/raise-funds/page.tsx': 'bed22798f5fde86a37377fcde4d5359a94e1faa22da34ce94a1a13834f124de4',
         'app/shop/[slug]/StorefrontClient.tsx': '06260aa32966b03396c59e7ad4cc24a3395dad5687b20659eee19696f8a84adc',
@@ -574,6 +574,11 @@ describe('16 · files this task must not touch are byte-identical to Production 
         'app/api/fundraiser/[token]/route.ts',
         'app/api/bundles/[id]/route.ts',
         'app/api/bundles/route.ts',
+        // FR-SUPPORTER-ADDON-UPSELL-1 S4 (owner-approved 2026-11-24) adds two more: the public page's payload gains
+        // the add-on include-list, and the bundle detail gains its opt-in add-on mode (meal output byte-identical,
+        // proven in tests/supporterAddOnS4.test.ts D6). The poster work never touched them.
+        'lib/publicFundraiserPayload.ts',
+        'components/fundraiser/SupporterBundleDetail.tsx',
     ])('%s was not changed by the poster releases (29b1f27..7c9c048)', (rel) => {
         const out = require('child_process').execSync(`git diff --name-only 29b1f27 7c9c048 -- "${rel}"`, { cwd: ROOT, encoding: 'utf8' });
         expect(out.trim()).toBe('');
