@@ -332,7 +332,6 @@ function InvoicesContent() {
         y += 20;
         const itemsSubtotal = invoice.items?.reduce((acc, curr) => acc + Number(curr.total), 0) || 0;
         const profitAmount = Number(invoice.fundraiser_profit_amount) || 0;
-        const profitPercent = Number(invoice.fundraiser_profit_percent) || 0;
         const taxAmountValue = Number(invoice.tax_amount) || 0;
 
         doc.setFont('helvetica', 'normal');
@@ -342,7 +341,10 @@ function InvoicesContent() {
         if (profitAmount > 0) {
             y += 25;
             doc.setTextColor(22, 163, 74); // Green for profit deduction
-            doc.text(`Fundraiser Profit (${profitPercent}%):`, 40, y);
+            // FR-SUPPORTER-ADDON-UPSELL-1 (S3): ONE stable label, no percentage. The amount is the stored,
+            // authoritative fundraiser_profit_amount, which can combine the meal share with an add-on's
+            // separately earned (tiered) share — so "(20%)" would misdescribe it.
+            doc.text('Fundraiser Organization Share:', 40, y);
             doc.text('-$' + profitAmount.toFixed(2), 560, y, { align: 'right' });
             doc.setTextColor(0, 0, 0); // Reset
         }

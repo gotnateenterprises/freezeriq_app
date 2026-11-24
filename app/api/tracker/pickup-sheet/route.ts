@@ -47,6 +47,7 @@ import {
 } from '@/lib/coordinatorSupporterOrders';
 import { supporterAmountDue } from '@/lib/fundraiserTax';
 import { roundCents } from '@/lib/fundraiserCloseoutMath';
+import { isAddOnLine } from '@/lib/orderLineDisplay';
 import { PAYMENT_NOT_MARKED_LABEL, PAYMENT_PAID_LABEL, supporterPaymentState } from '@/lib/supporterPayment';
 
 /**
@@ -154,6 +155,18 @@ export async function GET(req: Request) {
             ...[...orderedBundles].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
         ];
 
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S3): the campaign's optional add-on is NOT a meal bundle. It gets
+        // its own "(Add-On)" column after "Total Bundles", is never counted in "Total Bundles", and its
+        // money is already in Amount Due. Decided from each line's stored role, never the bundle name.
+        const addOnBundles = new Map<string, string>();
+        for (const order of orders) {
+            for (const item of order.items) {
+                if (isAddOnLine(item as any) && item.bundle) addOnBundles.set(item.bundle.id, item.bundle.name);
+            }
+        }
+        bundles = bundles.filter((b) => !addOnBundles.has(b.id));
+        const addOnColumnsList = [...addOnBundles].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+
         // --- Helper: shorten a bundle name for column headers ---
         const shortenBundleName = (name: string): string => {
             // e.g. "Q1 - Comfort Foods (Serves a Family of 4)" → "Q1 - Comfort Foods\n(Family)"
@@ -220,6 +233,7 @@ export async function GET(req: Request) {
             { header: 'Phone', key: 'phone', width: 16 },
             ...bundleColumns,
             { header: 'Total\nBundles', key: 'totalBundles', width: 12 },
+            ...addOnColumnsList.map((a) => ({ header: `${shortenBundleName(a.name)}\n(Add-On)`, key: `addon_${a.id}`, width: 16 })),
             // COORD-CLOSEOUT-PICKUP-1: what this order owes (pre-tax total + its
             // persisted tax) and the coordinator's own payment mark.
             { header: 'Amount\nDue', key: 'amountDue', width: 13 },
@@ -259,10 +273,11 @@ export async function GET(req: Request) {
             bundleTotals[b.id] = 0;
         }
         let grandTotal = 0;
+        const addOnTotals: Record<string, number> = {};
         // COORD-CLOSEOUT-PICKUP-1: collection figures, per order.
         let amountDueTotal = 0;
         let paidMarks = 0;
-        const amountDueColumn = 3 + bundles.length + 2;
+        const amountDueColumn = 3 + bundles.length + 2 + addOnColumnsList.length;
         const paymentColumn = amountDueColumn + 1;
         const MONEY_FORMAT = '$#,##0.00';
 
@@ -277,7 +292,7 @@ export async function GET(req: Request) {
             let orderTotal = 0;
             for (const b of bundles) {
                 const matchingItems = order.items.filter(
-                    item => item.bundle_id === b.id
+                    item => item.bundle_id === b.id && !isAddOnLine(item as any)
                 );
                 const qty = matchingItems.reduce((sum, item) => sum + item.quantity, 0);
                 rowValues.push(qty || '');
@@ -287,6 +302,14 @@ export async function GET(req: Request) {
 
             rowValues.push(orderTotal);
             grandTotal += orderTotal;
+            // S3: add-on quantities, after the meal-bundle total and never part of it.
+            for (const a of addOnColumnsList) {
+                const qty = order.items
+                    .filter((item) => item.bundle_id === a.id && isAddOnLine(item as any))
+                    .reduce((sum, item) => sum + item.quantity, 0);
+                rowValues.push(qty || '');
+                addOnTotals[a.id] = (addOnTotals[a.id] || 0) + qty;
+            }
 
             // The one derivation of what a supporter owes, and the one meaning of
             // a recorded payment. Never "Unpaid": no order carries evidence that
@@ -309,7 +332,7 @@ export async function GET(req: Request) {
                 }
             }
             // Center-align quantity columns
-            for (let c = 4; c <= 3 + bundles.length + 1; c++) {
+            for (let c = 4; c <= 3 + bundles.length + 1 + addOnColumnsList.length; c++) {
                 dataRow.getCell(c).alignment = { horizontal: 'center' };
             }
             dataRow.getCell(amountDueColumn).numFmt = MONEY_FORMAT;
@@ -326,6 +349,7 @@ export async function GET(req: Request) {
             totalsValues.push(bundleTotals[b.id]);
         }
         totalsValues.push(grandTotal);
+        for (const a of addOnColumnsList) totalsValues.push(addOnTotals[a.id] || 0);
         totalsValues.push(amountDueTotal, `${paidMarks} of ${orders.length} marked paid`);
 
         const totalsRow = worksheet.addRow(totalsValues);

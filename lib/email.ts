@@ -14,6 +14,8 @@ import { checkPaymentLink } from '@/lib/coordinatorSetup';
 // rather than reading total_amount (the PRE-TAX subtotal) as if it were the
 // amount due.
 import { supporterAmountDue } from '@/lib/fundraiserTax';
+// FR-SUPPORTER-ADDON-UPSELL-1 (S3): the one order-line display rule (add-on vs meal).
+import { addOnDisplayName, isAddOnLine, orderLineSizeLabel } from '@/lib/orderLineDisplay';
 // COORDINATOR-PAYMENT-METHOD-UX-1: the one rule for what a supporter is told about
 // paying — the same view the public page's confirmation renders.
 import { buildSupporterPaymentView, type PublicPaymentMethod, type SupporterPaymentView } from '@/lib/supporterPaymentMethods';
@@ -292,12 +294,20 @@ export async function sendOrderConfirmationEmail(
     // SUPPORTER-CONFIRM-HTML-1: every interpolated value is escaped, matching
     // the convention sendFundraiserCoordinatorNotification already follows.
     // Bundle names are tenant-authored free text and reach this template raw.
-    const itemsHtml = items.map(i => `
+    // FR-SUPPORTER-ADDON-UPSELL-1 (S3): one shared line rule (lib/orderLineDisplay.ts). A meal line says
+    // "Size: Serves 5" — no longer the raw "serves_5" (owner-approved) — and the add-on line reads
+    // "2x Sides & Dessert Bundle (Add-On)" with NO size, because an add-on is not a Serves 5 meal.
+    const itemsHtml = items.map(i => {
+        const addOn = isAddOnLine(i);
+        const lineName = addOn ? addOnDisplayName(i.bundle?.name || i.item_name) : (i.bundle?.name || 'Item');
+        const sizeLabel = addOn ? null : orderLineSizeLabel(i);
+        return `
         <div style="border-bottom: 1px solid #e5e7eb; padding: 10px 0;">
-            <p style="margin: 0; font-weight: bold; color: #1f2937;">${escapeHtml(i.quantity)}x ${escapeHtml(i.bundle?.name || 'Item')}</p>
-            <p style="margin: 0; font-size: 12px; color: #6b7280;">Size: ${escapeHtml(i.variant_size)}</p>
+            <p style="margin: 0; font-weight: bold; color: #1f2937;">${escapeHtml(i.quantity)}x ${escapeHtml(lineName)}</p>
+            ${sizeLabel ? `<p style="margin: 0; font-size: 12px; color: #6b7280;">Size: ${escapeHtml(sizeLabel)}</p>` : ''}
         </div>
-    `).join('');
+    `;
+    }).join('');
 
     // ── Payment Section (SUPPORTER-CONFIRM-HTML-1) ──────────────────────────
     //
@@ -422,6 +432,8 @@ export interface FundraiserCoordinatorNotificationItem {
     item_name?: string | null;
     quantity?: number | null;
     variant_size?: string | null;
+    /** FR-SUPPORTER-ADDON-UPSELL-1: 'addon' for the campaign add-on's line (the order row carries it). */
+    item_role?: string | null;
 }
 
 export interface FundraiserCoordinatorNotificationInput {
@@ -549,10 +561,13 @@ export async function sendFundraiserCoordinatorNotification(
         : `${total} to collect`;
 
     const itemsHtml = (items || []).map(i => {
-        const variantLabel = formatVariantLabel(i.variant_size);
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S3): the add-on line reads "1x Sides & Dessert Bundle (Add-On)"
+        // with no serving size; meal lines are unchanged.
+        const addOn = isAddOnLine(i);
+        const variantLabel = addOn ? '' : formatVariantLabel(i.variant_size);
         return `
         <div style="border-bottom: 1px solid #e5e7eb; padding: 8px 0;">
-            <p style="margin: 0; font-weight: bold; color: #1f2937;">${escapeHtml(i.quantity ?? 0)}x ${escapeHtml(i.item_name || 'Item')}</p>
+            <p style="margin: 0; font-weight: bold; color: #1f2937;">${escapeHtml(i.quantity ?? 0)}x ${escapeHtml(addOn ? addOnDisplayName(i.item_name) : (i.item_name || 'Item'))}</p>
             ${variantLabel ? `<p style="margin: 2px 0 0 0; font-size: 12px; color: #6b7280;">${escapeHtml(variantLabel)}</p>` : ''}
         </div>
     `;

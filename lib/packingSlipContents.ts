@@ -53,6 +53,7 @@
 
 import { boxContentLines, buildPhysicalBoxManifest, type PhysicalBox } from './physicalBoxPacking';
 import { type BoxManifestOrder } from './supporterBoxManifest';
+import { ITEM_ROLE_SELECT } from './campaignAddOns';
 
 /** One meal row on a packing slip. */
 export interface PackingSlipMeal {
@@ -271,6 +272,8 @@ export const PACKING_SLIP_ORDER_SELECT = {
             quantity: true,
             variant_size: true,
             item_name: true,
+            // FR-SUPPORTER-ADDON-UPSELL-1 (S3): so an add-on's slip section says "Add-On", not "Serves 5".
+            ...ITEM_ROLE_SELECT,
             bundle: {
                 select: {
                     id: true,

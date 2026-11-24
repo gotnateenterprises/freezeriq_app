@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { type BoxManifestOrder } from '@/lib/supporterBoxManifest';
 import { buildPhysicalBoxManifest } from '@/lib/physicalBoxPacking';
+import { ITEM_ROLE_SELECT } from '@/lib/campaignAddOns';
 
 /**
  * OPS-6 — the tenant-authorized supporter outer-box label manifest.
@@ -114,6 +115,8 @@ export async function POST(request: Request) {
                         quantity: true,
                         variant_size: true,
                         item_name: true,
+                        // FR-SUPPORTER-ADDON-UPSELL-1 (S3): so an add-on box says "Add-On", not "Serves 5".
+                        ...ITEM_ROLE_SELECT,
                         bundle: { select: { id: true, name: true } },
                     },
                     // Part N: an explicit deterministic key, never the database's

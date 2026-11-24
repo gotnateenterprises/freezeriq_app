@@ -37,6 +37,7 @@ import {
     pickupDocumentState,
 } from '@/lib/coordinatorSupporterOrders';
 import { planAllowsCoordinatorPortal } from '@/app/api/coordinator/route';
+import { partitionOrderLines } from '@/lib/orderLineDisplay';
 
 export async function GET(req: Request) {
     try {
@@ -100,8 +101,14 @@ export async function GET(req: Request) {
 
         const groups = groupSupporterRows(listed as any, campaign.customer_id);
 
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S3): "bundles" are MEAL bundles; the optional add-on is counted
+        // on its own (totalAddOns) and never inflates the bundle count. Money is unaffected (g.total).
         const totalBundles = groups.reduce(
-            (sum, g) => sum + g.items.reduce((n, i) => n + Number(i.quantity || 0), 0),
+            (sum, g) => sum + partitionOrderLines(g.items as any[]).main.reduce((n, i: any) => n + Number(i.quantity || 0), 0),
+            0,
+        );
+        const totalAddOns = groups.reduce(
+            (sum, g) => sum + partitionOrderLines(g.items as any[]).addOns.reduce((n, i: any) => n + Number(i.quantity || 0), 0),
             0,
         );
 
@@ -128,6 +135,7 @@ export async function GET(req: Request) {
             groups,
             supporterCount: groups.length,
             totalBundles,
+            totalAddOns,
             generatedAt: new Date().toISOString(),
         });
     } catch (e: any) {

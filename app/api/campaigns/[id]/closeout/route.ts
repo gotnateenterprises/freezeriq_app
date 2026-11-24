@@ -85,6 +85,7 @@ import {
     summarizeAddOnEarnings,
 } from '@/lib/fundraiserCloseoutMath';
 import { isAddOnItemRole } from '@/lib/campaignAddOns';
+import { addOnDisplayName } from '@/lib/orderLineDisplay';
 // FR-TAX-1B: the campaign's frozen tax rate, and the explicit rule for
 // campaigns that carry no snapshot at all.
 import { resolveCloseoutTaxRate } from '@/lib/fundraiserTax';
@@ -328,15 +329,24 @@ export async function POST(
                 ));
 
                 // 2. Aggregate to ONE line per bundle + serving size.
+                // FR-SUPPORTER-ADDON-UPSELL-1 (S3): the campaign add-on's line is its own invoice line,
+                // named "<bundle> (Add-On)", with NO serving size (an add-on is not a Serves 5 meal) and
+                // item_role 'addon' — so the invoice, its bundle summary and QuickBooks all say add-on.
+                // Quantities and prices are unchanged, so the reconciliation gate below is unaffected.
                 const lines = aggregateBundleLines(
                     activeOrders.flatMap((o) =>
-                        o.items.map((it) => ({
-                            bundleId: it.bundle_id ?? null,
-                            description: it.bundle?.name || it.item_name || '(unnamed bundle)',
-                            variantSize: (it.variant_size as string | null) ?? null,
-                            quantity: Number(it.quantity) || 0,
-                            unitPrice: Number(it.unit_price ?? 0),
-                        }))
+                        o.items.map((it: any) => {
+                            const name = it.bundle?.name || it.item_name || '(unnamed bundle)';
+                            const addOn = isAddOnItemRole(it.item_role);
+                            return {
+                                bundleId: it.bundle_id ?? null,
+                                description: addOn ? addOnDisplayName(name) : name,
+                                variantSize: addOn ? null : ((it.variant_size as string | null) ?? null),
+                                quantity: Number(it.quantity) || 0,
+                                unitPrice: Number(it.unit_price ?? 0),
+                                ...(addOn ? { itemRole: 'addon' } : {}),
+                            };
+                        })
                     )
                 );
 
@@ -533,6 +543,9 @@ export async function POST(
                                     unit_price: l.unitPrice,
                                     total: l.total,
                                     variant_size: (l.variantSize as any) ?? null,
+                                    // S3: the add-on line's role, frozen with the invoice (meal lines
+                                    // take the column default 'main' and keep their exact pre-S3 write).
+                                    ...(l.itemRole === 'addon' ? ({ item_role: 'addon' } as {}) : {}),
                                 })),
                             },
                         },

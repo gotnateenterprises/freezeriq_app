@@ -1132,6 +1132,15 @@ model InvoiceItem {
   // historical invoice line said.
   variant_size VariantSize?
   // ─────────────────────────────────────────────────────────────────────────
+  // ── FR-SUPPORTER-ADDON-UPSELL-1 (S3): the line's fundraiser role ──────────
+  // 'main' (default — every existing line, and every manual invoice line) or
+  // 'addon' — the campaign add-on's line, written by closeout from the order
+  // lines' own item_role. A historical snapshot like OrderItem.item_role, so
+  // the invoice, its bundle summary and QuickBooks can describe the line as an
+  // add-on (never "Serves 5") without re-reading the bundle. CHECK in the
+  // migration. Display and counting only; amounts are unaffected.
+  item_role    String  @default("main")
+  // ─────────────────────────────────────────────────────────────────────────
   invoice     Invoice @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
   bundle      Bundle? @relation(fields: [bundle_id], references: [id])
 

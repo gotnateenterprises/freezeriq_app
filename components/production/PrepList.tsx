@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { physicalMealCount } from '@/lib/mealManifest';
 import { servingTierLabel } from '@/lib/mealLabel';
+import { orderLineSizeLabel } from '@/lib/orderLineDisplay';
 import { writePrintBatch, fetchAuthenticatedBusinessId } from '@/lib/printBatchStorage';
 // PREP-WAVES-1: a fundraiser's orders are started / marked packed BY ID, through the exact-id
 // route, one wave at a time. The aggregate cards below stay as the kitchen's combined view.
@@ -110,7 +111,8 @@ export default function PrepList({ items, campaigns, onRefresh }: PrepListProps)
         // writers must agree on what "how many labels" means, and the formula
         // (order quantity x bundle-content quantity, never the serving
         // multiplier) lives in lib/mealManifest.ts.
-        const tier = servingTierLabel(item.variant_size);
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S3): an add-on prep row prints "Add-On"; meal rows are unchanged.
+        const tier = orderLineSizeLabel(item);
         const batch = {
             name: `Production: ${item.bundle_name}`,
             servingTier: tier,

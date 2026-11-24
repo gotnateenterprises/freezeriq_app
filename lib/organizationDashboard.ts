@@ -83,6 +83,8 @@ export interface DashboardInvoiceItemInput {
     variant_size: string | null;
     quantity: NumberLike;
     total: NumberLike;
+    /** S3: 'addon' on the campaign add-on's invoice line only. */
+    item_role?: string | null;
 }
 
 export interface DashboardInvoiceInput {
@@ -104,6 +106,8 @@ export interface DashboardOrderItemInput {
     item_name: string | null;
     variant_size: string | null;
     bundle_id: string | null;
+    /** S3: 'addon' on the campaign add-on's order line only. */
+    item_role?: string | null;
 }
 
 export interface DashboardOrderInput {
@@ -552,6 +556,7 @@ function campaignFacts(
                 variant_size: it.variant_size,
                 item_name: it.item_name,
                 bundle_id: it.bundle_id,
+                item_role: it.item_role ?? null,
             })),
         })))
         : null;

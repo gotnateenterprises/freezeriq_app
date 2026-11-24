@@ -29,6 +29,8 @@
 import { aggregateBundleLines, roundCents, type AggregatedLine } from '@/lib/fundraiserCloseoutMath';
 import { servingTierLabel } from '@/lib/mealLabel';
 import { normalizeStrictServingTier } from '@/lib/serving_multipliers';
+// FR-SUPPORTER-ADDON-UPSELL-1 (S3): the one add-on display rule (pure; its own imports have none).
+import { ADD_ON_SIZE_LABEL, isAddOnLine } from '@/lib/orderLineDisplay';
 
 /** One already-totalled line, as an existing authority produced it. */
 export interface BundleSummaryLine {
@@ -38,6 +40,8 @@ export interface BundleSummaryLine {
     quantity: number;
     /** The line's own total. Summed as given — never re-derived from a price. */
     total: number;
+    /** S3: 'addon' marks the campaign add-on's line (shown apart, never counted as a bundle). */
+    itemRole?: string | null;
 }
 
 export interface BundleSummaryRow {
@@ -51,10 +55,19 @@ export interface BundleSummaryRow {
 }
 
 export interface BundleSummary {
+    /** Meal-bundle rows. */
     rows: BundleSummaryRow[];
-    /** Physical bundles: every unit counted once, whatever its serving size. */
+    /** Physical bundles: every unit counted once, whatever its serving size. Never an add-on (S3). */
     totalQuantity: number;
+    /** Every sale on the summarized lines — meal bundles and, since S3, the add-on. */
     totalSales: number;
+    /**
+     * FR-SUPPORTER-ADDON-UPSELL-1 (S3): the add-on's own rows (size "Add-On") and quantity, kept apart
+     * from the meal bundles. Present only when an add-on was sold, so a summary without one keeps its
+     * exact pre-S3 shape.
+     */
+    addOnRows?: BundleSummaryRow[];
+    addOnQuantity?: number;
 }
 
 export const UNNAMED_BUNDLE = 'Unnamed bundle';
@@ -116,6 +129,7 @@ function sizeRank(label: string | null): number {
  */
 export function summarizeBundleLines(lines: readonly BundleSummaryLine[] | null | undefined): BundleSummary {
     const byKey = new Map<string, BundleSummaryRow>();
+    const addOnByKey = new Map<string, BundleSummaryRow>();
 
     for (const line of lines ?? []) {
         if (!line) continue;
@@ -123,6 +137,22 @@ export function summarizeBundleLines(lines: readonly BundleSummaryLine[] | null 
         const total = roundCents(Number(line.total) || 0);
         // Neither a unit nor a cent: nothing to show.
         if (quantity === 0 && total === 0) continue;
+
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S3): the add-on is its own row group, sized "Add-On" — never a
+        // Serves 5 meal bundle, never in totalQuantity. Its money still counts in totalSales. A trailing
+        // "(Add-On)" in the name is dropped because the size column already says it.
+        if (isAddOnLine({ item_role: line.itemRole })) {
+            const name = String(line.description ?? '').replace(/\s*\(add-on\)\s*$/i, '').trim() || UNNAMED_BUNDLE;
+            const key = `addon|${line.bundleId ? `bundle:${line.bundleId}` : `name:${name.toLowerCase()}`}`;
+            const addOn = addOnByKey.get(key);
+            if (addOn) {
+                addOn.quantity += quantity;
+                addOn.sales = roundCents(addOn.sales + total);
+            } else {
+                addOnByKey.set(key, { key, bundleName: name, sizeLabel: ADD_ON_SIZE_LABEL, quantity, sales: total });
+            }
+            continue;
+        }
 
         const sizeLabel = bundleSizeLabel(line.variantSize);
         const bundleName = bundleDisplayName(line.description, sizeLabel);
@@ -144,10 +174,17 @@ export function summarizeBundleLines(lines: readonly BundleSummaryLine[] | null 
         || sizeRank(a.sizeLabel) - sizeRank(b.sizeLabel)
         || a.key.localeCompare(b.key));
 
+    const addOnRows = [...addOnByKey.values()].sort((a, b) =>
+        a.bundleName.localeCompare(b.bundleName, 'en-US', { sensitivity: 'base' }) || a.key.localeCompare(b.key));
+    const addOnSales = addOnRows.reduce((sum, r) => sum + r.sales, 0);
+
     return {
         rows,
         totalQuantity: rows.reduce((sum, r) => sum + r.quantity, 0),
-        totalSales: roundCents(rows.reduce((sum, r) => sum + r.sales, 0)),
+        totalSales: roundCents(rows.reduce((sum, r) => sum + r.sales, 0) + addOnSales),
+        ...(addOnRows.length > 0
+            ? { addOnRows, addOnQuantity: addOnRows.reduce((sum, r) => sum + r.quantity, 0) }
+            : {}),
     };
 }
 
@@ -164,6 +201,7 @@ export function bundleSummaryFromCloseoutLines(lines: readonly AggregatedLine[] 
         variantSize: l?.variantSize ?? null,
         quantity: Number(l?.quantity) || 0,
         total: Number(l?.total) || 0,
+        itemRole: l?.itemRole ?? null,
     })));
 }
 
@@ -174,6 +212,8 @@ export interface FrozenInvoiceItem {
     variant_size?: string | null;
     quantity?: number | string | null;
     total?: number | string | null;
+    /** S3: invoice_items.item_role — 'addon' for the campaign add-on's line. */
+    item_role?: string | null;
 }
 
 /** A fundraiser invoice's own frozen lines — what closeout wrote, not what the orders say today. */
@@ -184,6 +224,7 @@ export function bundleSummaryFromInvoiceItems(items: readonly FrozenInvoiceItem[
         variantSize: it?.variant_size ?? null,
         quantity: Number(it?.quantity) || 0,
         total: Number(it?.total) || 0,
+        itemRole: it?.item_role ?? null,
     })));
 }
 
@@ -195,6 +236,8 @@ export interface SummaryOrder {
         variant_size?: string | null;
         item_name?: string | null;
         bundle_id?: string | null;
+        /** S3: the line's role at sale — 'addon' for the campaign add-on. */
+        item_role?: string | null;
     } | null> | null;
 }
 
@@ -217,6 +260,7 @@ export function bundleSummaryFromSupporterOrders(orders: readonly (SummaryOrder 
             variantSize: it!.variant_size ?? null,
             quantity: Number(it!.quantity) || 0,
             unitPrice: 0,
+            itemRole: it!.item_role ?? null,
         }))));
     return summarizeBundleLines(lines);
 }
@@ -229,7 +273,9 @@ const isWholeDollars = (v: number) => Number.isInteger(roundCents(v));
  * "$1,320.50" — and a real $121.20 is never shown as "$121".
  */
 export function bundleSummaryShowsCents(summary: BundleSummary): boolean {
-    return summary.rows.some((r) => !isWholeDollars(r.sales)) || !isWholeDollars(summary.totalSales);
+    return summary.rows.some((r) => !isWholeDollars(r.sales))
+        || (summary.addOnRows ?? []).some((r) => !isWholeDollars(r.sales))
+        || !isWholeDollars(summary.totalSales);
 }
 
 export function formatSummaryMoney(value: number, showCents: boolean): string {

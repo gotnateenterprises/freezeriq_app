@@ -37,6 +37,8 @@ export interface PacketInput {
     bundles: FlyerBundle[];
     /** FLYER-TAX-TOTAL-1: the rate already inside those prices; passed to the packet's flyer for its note. */
     taxRatePercent?: number | null;
+    /** FR-SUPPORTER-ADDON-UPSELL-1 (S3): the campaign add-on for the flyer's order form (supporter price). */
+    addOn?: { name: string; price: number } | null;
     branding?: {
         primary_color?: string;
         secondary_color?: string;
@@ -134,6 +136,7 @@ export async function generateFullPacket(input: PacketInput): Promise<Buffer> {
         publicUrl: input.publicUrl,
         bundles: input.bundles,
         taxRatePercent: input.taxRatePercent ?? null,
+        addOn: input.addOn ?? null,
         branding: input.branding,
     };
     const flyerBuffer = await generateFlyer(flyerInput);

@@ -57,12 +57,23 @@ export interface FlyerInput {
      * and beside the page-2 grand total; 0 or absent prints nothing, exactly as before.
      */
     taxRatePercent?: number | null;
+    /**
+     * FR-SUPPORTER-ADDON-UPSELL-1 (S3): the campaign's optional add-on, printed as ONE extra row below the
+     * meal rows on the page-2 order form. `price` is the SUPPORTER price — already tax-inclusive under the
+     * campaign's frozen tax settings, exactly like the bundle prices above (base price when tax-exempt).
+     * Absent: the form is unchanged.
+     */
+    addOn?: { name: string; price: number } | null;
     branding?: {
         primary_color?: string;
         secondary_color?: string;
         accent_color?: string;
     };
 }
+
+/** FR-SUPPORTER-ADDON-UPSELL-1 (S3): the add-on row's size cell and its rule, on the page-2 order form. */
+export const FLYER_ADD_ON_SIZE_LABEL = 'Add-On';
+export const FLYER_ADD_ON_NOTE = 'Only available with a meal bundle above';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -588,6 +599,37 @@ export async function generateFlyer(input: FlyerInput): Promise<Buffer> {
             y += ri === rows.length - 1 ? 14 : 12;
         });
     });
+
+    // FR-SUPPORTER-ADDON-UPSELL-1 (S3): the campaign's optional add-on — one row below the meal rows, sized
+    // "Add-On" (never Family Size / Serves 2), with its own Qty and Total blanks and a plain rule underneath:
+    // it is only sold with a meal bundle (a Serves 5 OR a Serves 2 qualifies, so never "full bundle").
+    const addOnPrice = Number(input.addOn?.price);
+    if (input.addOn && Number.isFinite(addOnPrice) && addOnPrice > 0) {
+        doc.setDrawColor(203, 213, 225);
+        doc.setLineWidth(0.2);
+        doc.line(MARGIN + 6, y - 5, MARGIN + CONTENT_W - 6, y - 5);
+        const addOnNameFit = (doc.splitTextToSize(String(input.addOn.name || 'Add-On'), 58) as string[])[0] ?? 'Add-On';
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...textDark);
+        doc.text(addOnNameFit, MARGIN + 6, y + 4);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...textLight);
+        doc.text(FLYER_ADD_ON_SIZE_LABEL, MARGIN + 68, y + 4);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...hexToRgb(primary));
+        doc.text(`$${addOnPrice.toFixed(2)}`, MARGIN + 108, y + 4);
+        doc.setDrawColor(203, 213, 225);
+        doc.setLineWidth(0.3);
+        doc.line(MARGIN + 132, y + 5, MARGIN + 148, y + 5);
+        doc.line(MARGIN + 152, y + 5, MARGIN + CONTENT_W - 6, y + 5);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'italic');
+        doc.setTextColor(...textLight);
+        doc.text(FLYER_ADD_ON_NOTE, MARGIN + 6, y + 9.5);
+        doc.setFontSize(9);
+        y += 16;
+    }
 
     y += 4;
 

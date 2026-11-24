@@ -56,6 +56,7 @@ import {
 } from './packedReadyWaves';
 import { physicalMealCount } from './mealManifest';
 import { servingTierLabel } from './mealLabel';
+import { isAddOnLine, orderLineSizeLabel } from './orderLineDisplay';
 
 export type PrepLaneKey = 'ready' | 'inprod';
 export type PrepAction = 'start_prep' | 'mark_packed';
@@ -96,6 +97,8 @@ export interface PrepRow {
     total_quantity: number;
     order_count?: number;
     variant_size?: string | null;
+    /** FR-SUPPORTER-ADDON-UPSELL-1 (S3): 'addon' on the campaign add-on's row only. */
+    item_role?: string | null;
     /** Raw Order.status shared by every order in this row. */
     status: string;
     recipes?: { id: string; name: string; quantity: number }[];
@@ -123,6 +126,8 @@ export interface PrepOrderLine {
     sku: string | null;
     variantSize: string | null;
     units: number;
+    /** FR-SUPPORTER-ADDON-UPSELL-1 (S3): present ('addon') only on the campaign add-on's line. */
+    itemRole?: string | null;
 }
 
 /**
@@ -202,6 +207,7 @@ export function buildPrepModel(
                 sku: row.sku ?? null,
                 variantSize: row.variant_size ?? null,
                 units: Number(s.quantity) || 0,
+                ...(isAddOnLine(row) ? { itemRole: 'addon' } : {}),
             });
             for (const id of s.order_item_ids || []) order.itemIds.push(id);
         }
@@ -292,7 +298,7 @@ export function waveLines(lane: PrepLane, wave: FundraiserWave): PrepWaveLine[] 
             const key = `${l.bundleId}|${l.variantSize ?? ''}`;
             const line = lines.get(key) ?? {
                 bundleId: l.bundleId, bundleName: l.bundleName, variantSize: l.variantSize,
-                tierLabel: servingTierLabel(l.variantSize), units: 0, orders: 0, orderSet: new Set<string>(),
+                tierLabel: orderLineSizeLabel({ item_role: l.itemRole, variant_size: l.variantSize }), units: 0, orders: 0, orderSet: new Set<string>(),
             };
             line.units += l.units;
             line.orderSet.add(order.id);
@@ -449,7 +455,7 @@ export function waveMealLabelItems(
         if (!row || prepLaneOf(row.status) !== laneKey) continue;
         const units = (row.sources || []).reduce((n, s) => (inWave.has(s.order_id) ? n + (Number(s.quantity) || 0) : n), 0);
         if (units <= 0) continue;
-        const tier = servingTierLabel(row.variant_size);
+        const tier = orderLineSizeLabel(row); // S3: "Add-On" on the add-on's meal labels
         for (const r of row.recipes || []) {
             const count = physicalMealCount(units, r.quantity);
             if (count <= 0) continue;

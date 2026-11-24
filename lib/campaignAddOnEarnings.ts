@@ -21,6 +21,7 @@ import {
     ADD_ON_ITEM_ROLE,
     AddOnChangedError,
     BUNDLE_TYPE_SELECT,
+    loadCampaignAddOnAuthority,
     normalizeBundleType,
 } from './campaignAddOns';
 import {
@@ -360,6 +361,54 @@ export async function loadCoordinatorAddOnView(
         grossSales: money.grossSales,
         earnedShare: money.earnedShare,
     };
+}
+
+// ── Printed materials (S3) ───────────────────────────────────────────────────
+
+export interface MaterialAddOn {
+    bundleId: string;
+    name: string;
+    /** The bundle's own price. */
+    basePrice: number;
+    /** What a supporter pays per unit, under the campaign's FROZEN tax settings — the same rule the
+     *  flyer and tracker apply to meal prices (lib/supporterMaterialPricing.supporterBundlePrice). */
+    supporterPrice: number;
+}
+
+/**
+ * The campaign's sellable add-on for the flyer's order form and the paper order tracker, or null. Same
+ * authority as an order (lib/campaignAddOns.loadCampaignAddOnAuthority: same tenant, active, typed add-on)
+ * plus a price above $0 — an unpriced add-on is never printed.
+ */
+export async function loadCampaignAddOnForMaterials(
+    db: any,
+    params: {
+        campaign: { id: string; tax_status?: string | null; tax_rate_percent?: unknown };
+        businessId: string;
+        supporterPrice: (basePrice: number) => number;
+    },
+): Promise<MaterialAddOn | null> {
+    // Never blocks a flyer, packet or tracker: the add-on row is optional, so a failed lookup prints the
+    // material without it (logged) rather than failing the whole document.
+    try {
+        const authority = await loadCampaignAddOnAuthority(db, { campaignId: params.campaign.id, businessId: params.businessId });
+        if (!authority) return null;
+        const row = await db.bundle.findFirst({
+            where: { id: authority.bundleId, business_id: params.businessId },
+            select: { price: true, name: true },
+        });
+        const basePrice = Number(row?.price);
+        if (!(basePrice > 0)) return null;
+        return {
+            bundleId: authority.bundleId,
+            name: (authority.name ?? row?.name ?? '').trim() || 'Add-On',
+            basePrice,
+            supporterPrice: params.supporterPrice(basePrice),
+        };
+    } catch (err) {
+        console.error('[campaign add-on] materials lookup failed; printing without the add-on row:', err);
+        return null;
+    }
 }
 
 // ── The tenant's view ────────────────────────────────────────────────────────

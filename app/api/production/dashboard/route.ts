@@ -5,6 +5,8 @@ import { auth } from '@/auth';
 import { toDbOrderStatusReadCandidates } from '@/lib/orderStatus';
 // OPS-3: pure campaign-level aggregation for the fundraiser waiting lane.
 import { buildFundraiserBatches } from '@/lib/fundraiserProductionBatch';
+import { ITEM_ROLE_SELECT } from '@/lib/campaignAddOns';
+import { isAddOnLine } from '@/lib/orderLineDisplay';
 
 export async function GET() {
     try {
@@ -227,6 +229,9 @@ export async function GET() {
                         sources: new Map(),
                         status: status,
                         variant_size: variantSize,
+                        // S3: marks the campaign add-on's prep row so its labels say "Add-On"
+                        // (only present on add-on rows; meal rows keep their exact shape).
+                        ...(isAddOnLine(item as any) ? { item_role: 'addon' } : {}),
                         recipes: (item.bundle.contents || []).map(c => ({
                             id: c.recipe?.id || 'unknown',
                             name: c.recipe?.name || 'Unknown Recipe',
@@ -304,6 +309,8 @@ export async function GET() {
                         quantity: true,
                         variant_size: true,
                         item_name: true,
+                        // FR-SUPPORTER-ADDON-UPSELL-1 (S3): so the add-on line is labelled "Add-On".
+                        ...ITEM_ROLE_SELECT,
                         bundle: { select: { id: true, name: true } },
                     },
                 },

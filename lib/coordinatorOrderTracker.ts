@@ -174,6 +174,7 @@ export function populateTrackerWorksheet(
     worksheet: Worksheet,
     families: readonly TrackerFamily[],
     campaign: TrackerCampaignInfo,
+    options: TrackerAddOnOptions = {},
 ): void {
     // B4 — order deadline. Unchanged logic, relocated from the route.
     let formattedDeadline = '(Insert Date)';
@@ -271,9 +272,40 @@ export function populateTrackerWorksheet(
     // TAX_EXEMPT one — keeps the original label byte-for-byte. The label only
     // changes where a real, non-zero, frozen rate exists.
     const trackerTaxRate = Number(campaign.taxRatePercent) || 0;
-    worksheet.getCell('I9').value = trackerTaxRate > 0
+    // FR-SUPPORTER-ADDON-UPSELL-1 (S3): with an add-on, the caller loaded tracking_sheet_addon.xlsx, where
+    // Excel inserted one column at H — so "Total Cost" sits one column right (J9) and H9 is the add-on.
+    const addOn = options.addOn ?? null;
+    worksheet.getCell(addOn ? 'J9' : 'I9').value = trackerTaxRate > 0
         ? `Total Cost (incl. ${formatTrackerTaxRate(trackerTaxRate)}% Tax)`
         : 'Total Cost (No Tax)';
+    if (addOn) worksheet.getCell('H9').value = addOnTrackerLabel(addOn.name, addOn.price);
+}
+
+/** S3: the template that matches the options — the add-on variant only when there is an add-on. */
+export const TRACKER_TEMPLATE_FILE = 'tracking_sheet.xlsx';
+export const TRACKER_ADD_ON_TEMPLATE_FILE = 'tracking_sheet_addon.xlsx';
+
+export interface TrackerAddOnOptions {
+    /**
+     * The campaign's optional add-on, at the SUPPORTER price (the campaign's frozen tax rule, same as the
+     * meal prices). Present only with TRACKER_ADD_ON_TEMPLATE_FILE, whose column H is headed "Add-On" /
+     * "with a meal" and whose "Total Sets (meals)" column excludes it. The add-on's dollars belong in Total
+     * Cost like any other purchase.
+     */
+    addOn?: { name: string; price: number } | null;
+}
+
+/**
+ * "Sides & Dessert $25.00" — the add-on column's own header cell (H9). The two cells above it already say
+ * "Add-On" / "with a meal", so the name is not repeated with "Add-On"; it wraps onto three short lines.
+ */
+export function addOnTrackerLabel(name: string, price: number): string {
+    // A little wider than a bundle-choice cell's 14 characters, so "Sides & Dessert" is not cut to "Sides &";
+    // a dangling "&" / "and" is dropped either way.
+    const base = String(name ?? '').replace(/\s*\(add-on\)\s*$/i, '').replace(/\s+add[\s-]?on\s*$/i, '');
+    const short = shortFamilyLabel(base, 18).replace(/\s*(&|and)\s*$/i, '').trim() || base.trim();
+    const amount = Number(price);
+    return Number.isFinite(amount) && amount > 0 ? `${short} $${amount.toFixed(2)}` : short;
 }
 
 /**

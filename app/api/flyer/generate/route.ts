@@ -20,7 +20,8 @@ import { generateFlyer, type FlyerBundle } from '@/lib/generateFlyer';
 import { resolveOutreachOrigin } from '@/lib/fundraiserUrls';
 import { buildSupporterOrderUrl } from '@/lib/previousSupporterInvite';
 import { resolveMaterialBundles } from '@/lib/coordinatorMaterialBundles';
-import { priceMaterialBundlesForSupporters } from '@/lib/supporterMaterialPricing';
+import { priceMaterialBundlesForSupporters, supporterBundlePrice } from '@/lib/supporterMaterialPricing';
+import { loadCampaignAddOnForMaterials } from '@/lib/campaignAddOnEarnings';
 import { CLOSED_STATUSES } from '@/lib/campaignBundleSelection';
 import { customerFacingBusinessName } from '@/lib/tenantBrand';
 
@@ -167,6 +168,16 @@ export async function POST(req: Request) {
         // FLYER-TAX-TOTAL-1: supporter-facing prices, priced exactly as the coordinator flyer is.
         const priced = priceMaterialBundlesForSupporters(resolved.bundles, campaign);
 
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S3): the campaign's optional add-on, for the order form's add-on row,
+        // priced for supporters by the SAME rule as the meal prices above (frozen campaign tax).
+        const materialAddOn = businessId
+            ? await loadCampaignAddOnForMaterials(prisma, {
+                campaign,
+                businessId: businessId,
+                supporterPrice: (basePrice: number) => supporterBundlePrice(basePrice, campaign),
+            })
+            : null;
+
         const flyerBundles: FlyerBundle[] = priced.bundles.map(b => ({
             name: b.name,
             price: b.price,
@@ -238,6 +249,7 @@ export async function POST(req: Request) {
             publicUrl,
             bundles: flyerBundles,
             taxRatePercent: priced.taxRatePercent,
+            addOn: materialAddOn ? { name: materialAddOn.name, price: materialAddOn.supporterPrice } : null,
             branding,
         });
 

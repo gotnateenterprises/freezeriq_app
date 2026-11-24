@@ -74,6 +74,19 @@ export function BundleTotalsCard({
             <p className="mt-2 border-t border-slate-100 pt-2 text-sm font-black text-slate-900">
                 Total physical bundles: {summary.totalQuantity.toLocaleString('en-US')}
             </p>
+            {/* FR-SUPPORTER-ADDON-UPSELL-1 (S3): the optional add-on, listed on its own — never a meal
+                bundle, never in the bundle total above. Its dollars are in the order total below. */}
+            {(summary.addOnRows ?? []).length > 0 && (
+                <div data-add-on-totals className="mt-2 border-t border-slate-100 pt-2">
+                    {(summary.addOnRows ?? []).map((r) => (
+                        <p key={r.key} className="flex justify-between gap-2 text-sm text-slate-800">
+                            <span className="[overflow-wrap:anywhere]">{r.bundleName} <span className="text-slate-500">(Add-On)</span></span>
+                            <span className="font-bold tabular-nums text-slate-900">{r.quantity.toLocaleString('en-US')}</span>
+                        </p>
+                    ))}
+                    <p className="text-[11px] font-medium text-slate-400">Add-ons are not counted as bundles.</p>
+                </div>
+            )}
             {Number.isFinite(sales) && (
                 <p className="text-[12px] font-medium text-slate-500">
                     {pluralCount(active.length, 'supporter order', 'supporter orders')} · {formatDollars(sales)} in orders

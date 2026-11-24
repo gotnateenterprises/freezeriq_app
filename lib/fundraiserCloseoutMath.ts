@@ -79,6 +79,11 @@ export interface AggregatedLineInput {
     variantSize: string | null;
     quantity: number;
     unitPrice: number;
+    /**
+     * FR-SUPPORTER-ADDON-UPSELL-1 (S3): the order line's role. Only 'addon' changes anything — the add-on
+     * aggregates on its own line, marked `itemRole: 'addon'`, so every reader can show it as an add-on.
+     */
+    itemRole?: string | null;
 }
 
 export interface AggregatedLine {
@@ -88,6 +93,8 @@ export interface AggregatedLine {
     quantity: number;
     unitPrice: number;
     total: number;
+    /** Present ('addon') only on the campaign add-on's line; meal lines keep their exact pre-S3 shape. */
+    itemRole?: 'addon';
 }
 
 /**
@@ -109,7 +116,8 @@ export function aggregateBundleLines(items: AggregatedLineInput[]): AggregatedLi
         const price = roundCents(Number(it.unitPrice) || 0);
         if (qty <= 0) continue;
 
-        const key = [it.bundleId ?? 'null', it.variantSize ?? 'null', it.description, price.toFixed(2)].join('\u0000');
+        const isAddOn = it.itemRole === 'addon';
+        const key = [it.bundleId ?? 'null', it.variantSize ?? 'null', it.description, price.toFixed(2), ...(isAddOn ? ['addon'] : [])].join('\u0000');
         const existing = byKey.get(key);
         if (existing) {
             existing.quantity += qty;
@@ -122,6 +130,7 @@ export function aggregateBundleLines(items: AggregatedLineInput[]): AggregatedLi
                 quantity: qty,
                 unitPrice: price,
                 total: roundCents(qty * price),
+                ...(isAddOn ? { itemRole: 'addon' as const } : {}),
             });
         }
     }

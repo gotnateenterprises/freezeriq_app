@@ -66,6 +66,7 @@
 // 100% of what the column can hold; a value it rejects did not come from the
 // enum and must not be guessed at.
 import { servingTierLabel } from './mealLabel';
+import { ADD_ON_SIZE_LABEL, isAddOnLine } from './orderLineDisplay';
 
 // The ONE rule for combining a purchaser's separate first/last name.
 // FR-SUPPORTER-CONTACT-1 made this the single authority; see the guarded call
@@ -90,6 +91,11 @@ export interface BoxManifestOrderItem {
     variant_size: string | null;
     /** The FROZEN sale-time bundle display name. See resolveBundleName. */
     item_name: string | null;
+    /**
+     * FR-SUPPORTER-ADDON-UPSELL-1 (S3): the FROZEN sale-time role. 'addon' = the campaign's add-on, whose
+     * label says "Add-On" (never "Serves 5"). Packing is unchanged: it still packs by variant_size.
+     */
+    item_role?: string | null;
     /** The live Bundle row, when the caller joined it. Fallback name only. */
     bundle?: { id?: string; name?: string | null } | null;
 }
@@ -340,6 +346,9 @@ export function resolveBundleName(item: BoxManifestOrderItem): string | null {
  * arithmetic and wrong on a physical label.
  */
 export function resolveSoldTier(item: BoxManifestOrderItem): string | null {
+    // S3: an add-on's label says "Add-On". It is only a LABEL — resolvePackingVariantSize below still
+    // packs it by its stored variant_size, so boxes, Box N/M and packaging counts are unchanged.
+    if (isAddOnLine(item)) return servingTierLabel(item?.variant_size) ? ADD_ON_SIZE_LABEL : null;
     return servingTierLabel(item?.variant_size);
 }
 

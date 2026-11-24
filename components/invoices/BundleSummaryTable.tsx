@@ -62,6 +62,16 @@ export function BundleSummaryTable({
                                 <td className="py-1.5 text-right tabular-nums whitespace-nowrap">{money(r.sales)}</td>
                             </tr>
                         ))}
+                        {/* FR-SUPPORTER-ADDON-UPSELL-1 (S3): the add-on, sized "Add-On" — its sales are in the
+                            Total; its quantity is not a bundle and stays out of the bundle count. */}
+                        {(summary.addOnRows ?? []).map((r) => (
+                            <tr key={r.key} data-add-on-row>
+                                <td className="py-1.5 pr-2 font-bold text-slate-800 dark:text-slate-100 [overflow-wrap:anywhere]">{r.bundleName}</td>
+                                <td className="py-1.5 pr-2 whitespace-nowrap">{r.sizeLabel ?? '—'}</td>
+                                <td className="py-1.5 pr-2 text-right tabular-nums">{r.quantity.toLocaleString('en-US')}</td>
+                                <td className="py-1.5 text-right tabular-nums whitespace-nowrap">{money(r.sales)}</td>
+                            </tr>
+                        ))}
                     </tbody>
                     <tfoot>
                         <tr className="border-t-2 border-slate-200 dark:border-slate-600 font-black text-slate-900 dark:text-white">
@@ -76,6 +86,7 @@ export function BundleSummaryTable({
             {summary.rows.length > 0 && (
                 <p className="mt-2 text-[11px] font-bold text-slate-500 dark:text-slate-400">
                     {pluralCount(summary.totalQuantity, 'physical bundle', 'physical bundles')}
+                    {(summary.addOnQuantity ?? 0) > 0 && ` · ${pluralCount(summary.addOnQuantity ?? 0, 'add-on', 'add-ons')} (not counted as bundles)`}
                 </p>
             )}
         </section>

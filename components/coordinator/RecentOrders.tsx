@@ -35,6 +35,7 @@ import {
 } from '@/lib/supporterPayment';
 // COORDINATOR-CONTACT-DATE-1: pure, client-safe.
 import { mailtoHref, usableEmailAddress } from '@/lib/mailtoLink';
+import { addOnDisplayName, isAddOnLine } from '@/lib/orderLineDisplay';
 import { formatInstantInTimeZone, isValidIanaTimeZone } from '@/lib/tenantTimezone';
 
 /** How long "Tap again to undo" waits for the confirming tap. */
@@ -99,6 +100,8 @@ interface OrderLineItem {
     quantity: number;
     variant_size?: string | null;
     item_name?: string | null;
+    /** FR-SUPPORTER-ADDON-UPSELL-1: 'addon' for the campaign add-on's line. */
+    item_role?: string | null;
 }
 
 export interface TrackerOrder {
@@ -241,10 +244,13 @@ export function RecentOrders({
                             {items.length > 0 && (
                                 <ul className="pl-0.5 text-[12px] text-slate-500 space-y-0.5">
                                     {items.map((it, idx) => {
-                                        const tier = formatServingTierLabel(it.variant_size);
+                                        // FR-SUPPORTER-ADDON-UPSELL-1 (S3): the add-on reads
+                                        // "2× Sides & Dessert Bundle (Add-On)" — never a serving size.
+                                        const addOn = isAddOnLine(it);
+                                        const tier = addOn ? '' : formatServingTierLabel(it.variant_size);
                                         return (
-                                            <li key={idx} className="truncate">
-                                                {it.quantity}× {it.item_name || 'Item'}{tier ? ` — ${tier}` : ''}
+                                            <li key={idx} className="truncate" {...(addOn ? { 'data-add-on-line': '' } : {})}>
+                                                {it.quantity}× {addOn ? addOnDisplayName(it.item_name) : (it.item_name || 'Item')}{tier ? ` — ${tier}` : ''}
                                             </li>
                                         );
                                     })}

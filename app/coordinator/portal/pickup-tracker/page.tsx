@@ -38,6 +38,7 @@ import {
     type PickupDocumentState,
 } from '@/lib/coordinatorSupporterOrders';
 import type { GroupPaymentSummary } from '@/lib/supporterPayment';
+import { isAddOnLine, orderLineSizeLabel } from '@/lib/orderLineDisplay';
 
 /** The one printed line: final list or not, and the production-release state. */
 const PRINTED_STATUS: Readonly<Record<PickupDocumentState, string>> = {
@@ -58,6 +59,8 @@ interface ManifestItem {
     quantity: number;
     variant_size: string | null;
     item_name: string | null;
+    /** FR-SUPPORTER-ADDON-UPSELL-1: 'addon' for the campaign add-on's line. */
+    item_role?: string | null;
 }
 
 interface ManifestGroup {
@@ -90,6 +93,8 @@ interface Manifest {
     groups: ManifestGroup[];
     supporterCount: number;
     totalBundles: number;
+    /** S3: add-on units, counted apart from the meal bundles (absent from older payloads). */
+    totalAddOns?: number;
     generatedAt: string;
 }
 
@@ -202,6 +207,7 @@ export default function PickupTrackerPage() {
                     <p className="mt-2 text-[12px] text-slate-600">
                         <strong>{manifest.supporterCount}</strong> supporter{manifest.supporterCount === 1 ? '' : 's'}
                         {' · '}<strong>{manifest.totalBundles}</strong> bundle{manifest.totalBundles === 1 ? '' : 's'}
+                        {(manifest.totalAddOns ?? 0) > 0 && <>{' · '}<strong>{manifest.totalAddOns}</strong> add-on{manifest.totalAddOns === 1 ? '' : 's'}</>}
                         {' · '}Printed {formatGeneratedAt(manifest.generatedAt)}
                     </p>
                     {/* COORD-CLOSEOUT-PICKUP-1: the final list and the production
@@ -276,7 +282,10 @@ export default function PickupTrackerPage() {
                                         <td>
                                             <ul className="text-[13px] text-slate-900">
                                                 {g.items.map((it, idx) => {
-                                                    const tier = formatServingTier(it.variant_size);
+                                                    // S3: an add-on line reads "Name | Add-On | Qty N"
+                                                    // and never "Serves 5" (lib/orderLineDisplay.ts).
+                                                    const addOn = isAddOnLine(it);
+                                                    const tier = addOn ? orderLineSizeLabel(it) : formatServingTier(it.variant_size);
                                                     return (
                                                         <li key={idx}>
                                                             <span className="font-bold">{it.item_name || 'Item'}</span>

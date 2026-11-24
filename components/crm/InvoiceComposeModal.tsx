@@ -192,7 +192,14 @@ export default function InvoiceComposeModal({
         }
     };
 
-    const profitAmount = Number((subtotal * (profitPercent / 100)).toFixed(2));
+    // FR-SUPPORTER-ADDON-UPSELL-1 (S3): an invoice that campaign closeout generated keeps its STORED
+    // organization share — the server preserves it on every edit (app/api/tenant/invoices, PUT), and it can
+    // combine the meal share with an add-on's separately earned share, so subtotal × percent would show a
+    // number nobody is billed. Only a manual invoice derives the share from the percent field.
+    const isGeneratedCampaignInvoice = Boolean(invoiceToEdit?.campaign_id);
+    const profitAmount = isGeneratedCampaignInvoice
+        ? Number(Number(invoiceToEdit?.fundraiser_profit_amount ?? 0).toFixed(2))
+        : Number((subtotal * (profitPercent / 100)).toFixed(2));
     const finalBalance = subtotal - profitAmount + Number(taxAmount);
 
     const handleSave = async () => {
@@ -408,6 +415,8 @@ export default function InvoiceComposeModal({
                                         <input
                                             type="number"
                                             value={profitPercent}
+                                            disabled={isGeneratedCampaignInvoice}
+                                            title={isGeneratedCampaignInvoice ? 'Set at fundraiser closeout; the organization share is kept as recorded.' : undefined}
                                             onChange={(e) => setProfitPercent(Number(e.target.value))}
                                             className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border-none focus:ring-2 focus:ring-indigo-500/20 text-sm font-bold"
                                         />
@@ -452,7 +461,7 @@ export default function InvoiceComposeModal({
                             </div>
                             <div className="pt-4 border-t dark:border-slate-700 space-y-2">
                                 <div className="flex justify-between items-center text-sm">
-                                    <span className="font-bold text-emerald-500 uppercase tracking-widest text-[10px]">Less Fundraiser Profit ({profitPercent}%)</span>
+                                    <span className="font-bold text-emerald-500 uppercase tracking-widest text-[10px]">Less Fundraiser Organization Share</span>
                                     <span className="font-bold text-emerald-600">-${profitAmount.toFixed(2)}</span>
                                 </div>
                                 <div className="flex justify-between items-center text-sm">

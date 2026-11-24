@@ -38,6 +38,8 @@
  * reason the key is campaign identity rather than who the group is.
  */
 
+import { ADD_ON_SIZE_LABEL, isAddOnLine } from './orderLineDisplay';
+
 /** VariantSize as it reaches us from Prisma — 'serves_5' | 'serves_2'. */
 export type BatchVariantSize = string;
 
@@ -50,6 +52,8 @@ export interface BatchOrderItem {
     /** Name snapshot taken at order time. */
     item_name: string | null;
     bundle?: { id: string; name: string | null } | null;
+    /** FR-SUPPORTER-ADDON-UPSELL-1 (S3): 'addon' = the campaign add-on, labelled "Add-On" (display only). */
+    item_role?: string | null;
 }
 
 export interface BatchOrderCampaign {
@@ -147,7 +151,8 @@ function lineKey(item: BatchOrderItem, variantSize: string): string {
     const identity = item.bundle_id
         ? `id:${item.bundle_id}`
         : `name:${(item.item_name || '').trim().toLowerCase()}`;
-    return `${identity}|${variantSize}`;
+    // S3: an add-on line never shares a row with a meal line (meal keys are unchanged).
+    return `${identity}|${variantSize}${isAddOnLine(item) ? '|addon' : ''}`;
 }
 
 /**
@@ -204,7 +209,8 @@ export function buildFundraiserBatches(orders: BatchOrder[]): FundraiserBatch[] 
                     bundleId: item.bundle_id ?? null,
                     bundleName: item.bundle?.name || item.item_name || 'Item',
                     variantSize,
-                    servingTierLabel: formatServingTier(variantSize),
+                    // S3: an add-on is labelled "Add-On", never "Serves 5". Quantities are unchanged.
+                    servingTierLabel: isAddOnLine(item) ? ADD_ON_SIZE_LABEL : formatServingTier(variantSize),
                     quantity: 0,
                     sourceOrderItemIds: [],
                 };

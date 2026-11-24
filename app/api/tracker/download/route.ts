@@ -22,8 +22,16 @@ import { prisma } from '@/lib/db';
 import { resolveCampaignOrderMode } from '@/lib/campaignOrderBundles';
 import path from 'path';
 import { requireCoordinatorSession } from '@/lib/coordinatorSession';
-import { buildTrackerFamilies, populateTrackerWorksheet, type TrackerBundleRow } from '@/lib/coordinatorOrderTracker';
+import {
+    buildTrackerFamilies,
+    populateTrackerWorksheet,
+    TRACKER_ADD_ON_TEMPLATE_FILE,
+    TRACKER_TEMPLATE_FILE,
+    type TrackerBundleRow,
+} from '@/lib/coordinatorOrderTracker';
 import { resolveCloseoutTaxRate } from '@/lib/fundraiserTax';
+import { supporterBundlePrice } from '@/lib/supporterMaterialPricing';
+import { loadCampaignAddOnForMaterials } from '@/lib/campaignAddOnEarnings';
 
 export async function GET(req: Request) {
     try {
@@ -134,9 +142,18 @@ export async function GET(req: Request) {
             return NextResponse.json({ error: resolved.error, code: resolved.code }, { status: 422 });
         }
 
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S3): a campaign with a sellable add-on gets the add-on variant of
+        // the template — Excel-built from the same sheet with ONE inserted column, H "Add-On (only with a
+        // meal)", and "Total Sets (meals only)". Every other campaign gets the unchanged template.
+        const materialAddOn = await loadCampaignAddOnForMaterials(prisma, {
+            campaign,
+            businessId,
+            supporterPrice: (basePrice: number) => supporterBundlePrice(basePrice, campaign as any),
+        });
+
         // 4. Load the SAME template used by the marketing packet
         const ExcelJS = (await import('exceljs')).default;
-        const templatePath = path.resolve('./templates/tracking_sheet.xlsx');
+        const templatePath = path.resolve(`./templates/${materialAddOn ? TRACKER_ADD_ON_TEMPLATE_FILE : TRACKER_TEMPLATE_FILE}`);
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.readFile(templatePath);
 
@@ -155,7 +172,7 @@ export async function GET(req: Request) {
                 taxStatus: (campaign as any).tax_status,
                 taxRatePercent: (campaign as any).tax_rate_percent,
             }),
-        });
+        }, { addOn: materialAddOn ? { name: materialAddOn.name, price: materialAddOn.supporterPrice } : null });
 
         // 6. Generate buffer and return
         const buffer = await workbook.xlsx.writeBuffer();

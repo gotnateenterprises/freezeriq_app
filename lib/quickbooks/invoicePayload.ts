@@ -107,6 +107,9 @@ export function formatPercent(value: unknown): string | null {
 
 const SIZE_LABEL: Record<string, string> = { serves_2: 'Serves 2', serves_5: 'Serves 5' };
 
+/** FR-SUPPORTER-ADDON-UPSELL-1 (S3): the organization-share line's one label (also on the invoice PDF). */
+export const FUNDRAISER_ORGANIZATION_SHARE_LABEL = 'Fundraiser Organization Share';
+
 /** "Family Friendly" + serves_5 -> "Family Friendly — Serves 5"; a name that already states its size is kept. */
 export function bundleLineDescription(description: string, variantSize: string | null): string {
     const name = (description ?? '').trim();
@@ -166,10 +169,12 @@ export function planQuickBooksInvoice(input: {
         description: x.description, qtyHundredths: x.qty!, unitPriceCents: x.unit!, amountCents: x.lineTotal!,
     }));
     if (share > 0) {
-        const pct = formatPercent(invoice.sharePercent);
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S3): ONE stable label on every invoice, no percentage. The amount is
+        // Invoice.fundraiser_profit_amount exactly (unchanged arithmetic), and it can combine the campaign's
+        // meal share with an add-on's separately earned, possibly tiered, share — "— 20%" would misstate it.
         expectedLines.push({
             role: 'share', itemId: mapping.shareItemId!, accountId: mapping.shareAccountId!,
-            description: pct ? `Organization fundraiser share — ${pct}%` : 'Organization fundraiser share',
+            description: FUNDRAISER_ORGANIZATION_SHARE_LABEL,
             qtyHundredths: 100, unitPriceCents: -share, amountCents: -share,
         });
     }

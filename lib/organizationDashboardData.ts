@@ -19,6 +19,7 @@
 
 import { loadPreviousSupporterAudienceInputs, type PreviousSupporterAudienceDb } from '@/lib/previousSupporterAudience';
 import { openOpportunityWhere } from '@/lib/fundraiserRebooking';
+import { ITEM_ROLE_SELECT } from '@/lib/campaignAddOns';
 import type {
     DashboardCampaignInput,
     DashboardDeliveryAttemptInput,
@@ -106,7 +107,8 @@ export async function loadOrganizationDashboardInput(
                     total_amount: true,
                     paid_at: true,
                     items: {
-                        select: { bundle_id: true, description: true, variant_size: true, quantity: true, total: true },
+                        // FR-SUPPORTER-ADDON-UPSELL-1 (S3): the add-on's invoice line is not a physical meal bundle.
+                        select: { bundle_id: true, description: true, variant_size: true, quantity: true, total: true, ...ITEM_ROLE_SELECT },
                     },
                 },
             },
@@ -143,6 +145,7 @@ export async function loadOrganizationDashboardInput(
                 variant_size: it.variant_size ?? null,
                 quantity: it.quantity === null || it.quantity === undefined ? null : String(it.quantity),
                 total: it.total === null || it.total === undefined ? null : String(it.total),
+                ...(it.item_role === 'addon' ? { item_role: 'addon' } : {}),
             })),
         })),
         activeBundles: (c.campaign_bundles ?? [])
@@ -162,7 +165,8 @@ export async function loadOrganizationDashboardInput(
                 campaign_id: true,
                 total_amount: true,
                 canceled_at: true,
-                items: { select: { quantity: true, item_name: true, variant_size: true, bundle_id: true } },
+                // S3: the add-on's order line is not a physical meal bundle.
+                items: { select: { quantity: true, item_name: true, variant_size: true, bundle_id: true, ...ITEM_ROLE_SELECT } },
             },
         })
         : [];
@@ -176,6 +180,7 @@ export async function loadOrganizationDashboardInput(
             item_name: it.item_name ?? null,
             variant_size: it.variant_size ?? null,
             bundle_id: it.bundle_id ?? null,
+            ...(it.item_role === 'addon' ? { item_role: 'addon' } : {}),
         })),
     }));
 
