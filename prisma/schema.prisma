@@ -1812,6 +1812,9 @@ model CampaignAddOn {
   created_at  DateTime @default(now())
   /// Who assigned it (a tenant user id), when known.
   created_by  String?
+  /// S4: the tenant's choice to show this add-on's share % on the supporter page. Only ever shown while the
+  /// share schedule has exactly one tier (a tiered schedule never shows a percentage). Off by default.
+  show_share_percent Boolean @default(false)
 
   business     Business           @relation("BusinessCampaignAddOns", fields: [business_id], references: [id], onDelete: Cascade)
   organization Customer           @relation("OrganizationCampaignAddOns", fields: [business_id, customer_id], references: [business_id, id], onDelete: Cascade)

@@ -8,6 +8,8 @@
  *   DELETE  remove the add-on and its schedule. Money already earned stays on its orders.
  *   PATCH   { tiers: [{ startingQuantity, percent }] }  the share schedule. Tiers the campaign's sold
  *           add-ons have reached are locked; new tiers start above the units already sold.
+ *   PATCH   { showSharePercent: boolean }  (S4) whether the supporter page may state the share %. Display
+ *           only; shown only while the schedule has one tier (lib/campaignAddOnShare.publicAddOnSupportPercent).
  *
  * ACCESS: session-authenticated, tenant-scoped. Every WRITE is a financial-terms change, so it needs an
  * ADMIN or super-admin — the same gate as the campaign's organization share
@@ -18,7 +20,9 @@
  * order therefore sees either the old add-on/schedule or the new one, never a mixture; a closed
  * campaign's add-on and schedule never change.
  *
- * Never shown publicly in S2: nothing here is read by a supporter page.
+ * PUBLIC (S4): the supporter page reads the CURRENT add-on through lib/publicCampaignAddOn.ts — its public
+ * bundle fields, and the share % only when showSharePercent is on and the schedule has one tier. Nothing
+ * else here (tier rows, units sold, money earned) ever reaches a supporter.
  */
 
 import { NextResponse } from 'next/server';
@@ -31,6 +35,7 @@ import {
     assignCampaignAddOn,
     loadCampaignAddOnAdminView,
     removeCampaignAddOn,
+    updateCampaignAddOnShareDisplay,
     updateCampaignAddOnShareTiers,
     type AddOnAdminResult,
 } from '@/lib/campaignAddOnEarnings';
@@ -218,6 +223,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         }
         const parsed = await readJson(req);
         if (!parsed.ok) return parsed.response;
+        // S4: the share-display toggle travels alone; a body with tiers is a schedule edit, exactly as before.
+        if (parsed.body && typeof parsed.body === 'object' && 'showSharePercent' in parsed.body && !('tiers' in parsed.body)) {
+            const show = parsed.body.showSharePercent;
+            if (typeof show !== 'boolean') {
+                return NextResponse.json({ error: 'Choose whether to show the share on the supporter page.', code: 'INVALID_SHARE_DISPLAY' }, { status: 400 });
+            }
+            return await runLockedWrite(loaded, (tx) => updateCampaignAddOnShareDisplay(tx, {
+                campaignId: loaded.campaign.id,
+                businessId: loaded.businessId,
+                showSharePercent: show,
+            }));
+        }
         const schedule = parseShareTierSchedule(parsed.body?.tiers);
         if (!schedule.ok) return NextResponse.json({ error: schedule.error, code: schedule.code }, { status: schedule.status });
         return await runLockedWrite(loaded, (tx) => updateCampaignAddOnShareTiers(tx, {

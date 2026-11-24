@@ -13,7 +13,8 @@
  * reached is LOCKED (its rate already paid real sales); new tiers start above the units already sold.
  * The server (app/api/campaigns/[id]/add-on) decides all of it — this card only reflects and asks.
  * Read-only when the campaign is closed out or the signed-in user is not an administrator.
- * Nothing here is shown to supporters.
+ * Supporters see the add-on itself (S4). The share is shown to them only when "Show this share on the
+ * supporter page" is ticked AND the schedule has one tier; tier rows, sales and earnings never are.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -44,6 +45,9 @@ interface AddOnView {
         sellable: boolean;
         tiers: TierRow[];
         next: { nextUnit: number; percent: number; nextTierStart: number | null; nextTierPercent: number | null };
+        /** S4: show the share % on the supporter page (single-tier schedules only). */
+        showSharePercent?: boolean;
+        publicSupportPercent?: number | null;
     };
     unitsSold: number;
     grossSales: number;
@@ -345,6 +349,29 @@ export function CampaignAddOnCard({ campaignId }: { campaignId: string }) {
                             )}
                             . Reaching a new tier never changes what earlier add-ons earned.
                         </p>
+
+                        {/* S4: the tenant decides, per fundraiser, whether supporters see the share %. */}
+                        <label className="flex items-start gap-2 pt-1 text-xs font-bold text-slate-700 dark:text-slate-200">
+                            <input
+                                type="checkbox"
+                                className="mt-0.5 h-4 w-4 shrink-0"
+                                checked={addOn.showSharePercent === true}
+                                disabled={!editable || saving}
+                                onChange={(e) => send(
+                                    'PATCH',
+                                    { showSharePercent: e.target.checked },
+                                    e.target.checked ? 'Supporters will see the add-on share.' : 'The add-on share is hidden from supporters.',
+                                )}
+                            />
+                            <span className="min-w-0">
+                                Show this share on the supporter page
+                                <span className="block font-medium text-slate-500 dark:text-slate-400">
+                                    {addOn.tiers.length === 1
+                                        ? `Supporters see “Your purchase also helps the organization earn ${formatPercent(addOn.tiers[0].percent)} on this add-on.”`
+                                        : 'Only shown while the share has one tier. With more than one tier, supporters see general wording instead.'}
+                                </span>
+                            </span>
+                        </label>
                     </div>
                 )}
 

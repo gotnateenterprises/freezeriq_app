@@ -302,3 +302,22 @@ export function describeShareScheduleForCoordinator(tiers: ShareTier[]): string 
         : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
     return `Your organization earns ${list}.`;
 }
+
+// ── The supporter page (S4) ──────────────────────────────────────────────────
+
+/**
+ * The ONE number the public supporter page may receive about the add-on share, or null.
+ *
+ * Non-null only when the tenant turned the per-fundraiser toggle ON (campaign_add_ons.show_share_percent)
+ * AND the schedule is a usable single tier with a positive rate. A tiered schedule never yields a number:
+ * the rate a supporter's add-on earns depends on how many sold before it, so a fixed percentage would be a
+ * promise the schedule cannot keep. Nothing else about the schedule — tier starts, rows, units sold, money
+ * earned — ever reaches the public payload.
+ */
+export function publicAddOnSupportPercent(tiers: ShareTier[], showSharePercent: unknown): number | null {
+    if (showSharePercent !== true) return null;
+    if (!isUsableSchedule(tiers) || tiers.length !== 1) return null;
+    const pct = Number(tiers[0].percent);
+    if (!Number.isFinite(pct) || pct <= 0) return null;
+    return Math.round(pct * 100) / 100;
+}

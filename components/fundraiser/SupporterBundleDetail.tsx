@@ -80,6 +80,13 @@ export interface SupporterBundleDetailProps {
     /** Change this bundle's quantity through the page's own stepper logic. */
     onChangeQty: (delta: number) => void;
     onToggleImage: () => void;
+    /**
+     * FR-SUPPORTER-ADDON-UPSELL-1 (S4): the campaign's ADD-ON rather than a meal bundle. An add-on is not a
+     * serving size and adds nothing to the bundle goal, so the Serves chip, the "· serves N" note and the
+     * goal-credit line give way to an "Add-On" chip and "Only available with a meal bundle"; the action reads
+     * "Add to my order · $25.00". Absent / false renders a meal bundle exactly as before.
+     */
+    addOn?: boolean;
 }
 
 export function SupporterBundleDetail({
@@ -93,6 +100,7 @@ export function SupporterBundleDetail({
     onAdd,
     onChangeQty,
     onToggleImage,
+    addOn = false,
 }: SupporterBundleDetailProps) {
     const meals = supporterBundleMeals(bundle);
     const serves = supporterServesLabel(bundle.serving_tier);
@@ -118,7 +126,7 @@ export function SupporterBundleDetail({
             >
                 <div className="fr-detail-head">
                     <span className="fr-detail-handle" aria-hidden="true" />
-                    <button type="button" onClick={onClose} aria-label="Close bundle details" style={{ width: 44, height: 44, borderRadius: 99, border: 0, background: '#f6ede2', color: '#3b2a2f', fontSize: '1rem', fontWeight: 800, cursor: 'pointer' }}>
+                    <button type="button" onClick={onClose} aria-label={addOn ? 'Close add-on details' : 'Close bundle details'} style={{ width: 44, height: 44, borderRadius: 99, border: 0, background: '#f6ede2', color: '#3b2a2f', fontSize: '1rem', fontWeight: 800, cursor: 'pointer' }}>
                         ✕
                     </button>
                 </div>
@@ -136,7 +144,7 @@ export function SupporterBundleDetail({
                         >
                             <img
                                 src={imageUrl}
-                                alt={`${bundle.name} — full bundle photo`}
+                                alt={addOn ? `${bundle.name} — add-on photo` : `${bundle.name} — full bundle photo`}
                                 decoding="async"
                                 onError={hideBrokenImage}
                                 style={{ display: 'block', width: '100%', height: 'auto', maxHeight: imageExpanded ? 'none' : 'min(58vh, 30rem)', objectFit: 'contain' }}
@@ -152,7 +160,7 @@ export function SupporterBundleDetail({
                     )}
 
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.4rem', margin: '.85rem 0 .45rem' }}>
-                        <span style={{ ...chip, color: primaryColor }}>{servesTitle}</span>
+                        <span style={{ ...chip, color: primaryColor }}>{addOn ? 'Add-On' : servesTitle}</span>
                         {meals.length > 0 && (
                             <span style={{ ...chip, color: '#6b4d3f', background: '#f6ede2' }}>{meals.length} meal{meals.length === 1 ? '' : 's'}</span>
                         )}
@@ -163,11 +171,17 @@ export function SupporterBundleDetail({
                     </h2>
                     <p style={{ margin: '.35rem 0 0', fontSize: '.9rem', color: '#3b2a2f' }}>
                         <b style={{ fontVariantNumeric: 'tabular-nums' }}>{price}</b>
-                        <span style={{ color: '#7a6258' }}> · {serves}</span>
+                        {!addOn && <span style={{ color: '#7a6258' }}> · {serves}</span>}
                     </p>
-                    <p style={{ margin: '.2rem 0 0', fontSize: '.74rem', color: '#7a6258' }}>
-                        Counts as {supporterGoalCredit(bundle.serving_tier)} toward the fundraiser goal
-                    </p>
+                    {addOn ? (
+                        <p style={{ margin: '.2rem 0 0', fontSize: '.74rem', color: '#7a6258' }}>
+                            Only available with a meal bundle in your order
+                        </p>
+                    ) : (
+                        <p style={{ margin: '.2rem 0 0', fontSize: '.74rem', color: '#7a6258' }}>
+                            Counts as {supporterGoalCredit(bundle.serving_tier)} toward the fundraiser goal
+                        </p>
+                    )}
                     {description && (
                         <p style={{ margin: '.6rem 0 0', fontSize: '.84rem', color: '#5d463d', lineHeight: 1.55, overflowWrap: 'anywhere' }}>{description}</p>
                     )}
@@ -243,7 +257,7 @@ export function SupporterBundleDetail({
                             disabled={!hasPrice}
                             style={{ width: '100%', minHeight: 48, background: primaryColor, color: '#fff', border: 0, borderRadius: 14, padding: '.7rem .9rem', fontSize: '.9rem', fontWeight: 800, cursor: hasPrice ? 'pointer' : 'default', opacity: hasPrice ? 1 : .55, overflowWrap: 'anywhere' }}
                         >
-                            {hasPrice ? `Add to my order · ${servesTitle} · ${price}` : 'Contact for price'}
+                            {hasPrice ? (addOn ? `Add to my order · ${price}` : `Add to my order · ${servesTitle} · ${price}`) : 'Contact for price'}
                         </button>
                     )}
                 </div>

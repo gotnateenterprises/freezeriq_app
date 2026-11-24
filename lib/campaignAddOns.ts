@@ -51,6 +51,8 @@ export const MANUAL_UPSELL_SENTINEL = 'manual_upsell';
  */
 export const BUNDLE_TYPE_SELECT = { bundle_type: true } as {};
 export const ITEM_ROLE_SELECT = { item_role: true } as {};
+/** S4: campaign_add_ons.show_share_percent — the tenant's per-fundraiser "show the share %" choice. */
+export const SHOW_SHARE_PERCENT_SELECT = { show_share_percent: true } as {};
 
 /** A stored classification. Only the exact value 'addon' is an add-on; the column defaults to 'meal'. */
 export function normalizeBundleType(value: unknown): BundleType {

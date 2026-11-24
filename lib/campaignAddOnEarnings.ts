@@ -21,6 +21,7 @@ import {
     ADD_ON_ITEM_ROLE,
     AddOnChangedError,
     BUNDLE_TYPE_SELECT,
+    SHOW_SHARE_PERCENT_SELECT,
     loadCampaignAddOnAuthority,
     normalizeBundleType,
 } from './campaignAddOns';
@@ -31,6 +32,7 @@ import {
     isUsableSchedule,
     nextAddOnRate,
     normalizeStoredTiers,
+    publicAddOnSupportPercent,
     splitAddOnLineIntoSlices,
     validateShareScheduleEdit,
     type ShareSlice,
@@ -311,6 +313,30 @@ export async function updateCampaignAddOnShareTiers(
     return { ok: true, changed };
 }
 
+/**
+ * S4: the tenant's per-fundraiser choice to show the add-on share % on the supporter page. Display only —
+ * no tier, rate or earned share changes. The caller holds the campaign lock and has rechecked that the
+ * campaign is open (the same write path as every other add-on change).
+ */
+export async function updateCampaignAddOnShareDisplay(
+    tx: any,
+    params: { campaignId: string; businessId: string; showSharePercent: boolean },
+): Promise<AddOnAdminResult> {
+    const row = await tx.campaignAddOn.findUnique({
+        where: { campaign_id: params.campaignId },
+        select: { id: true, business_id: true, ...SHOW_SHARE_PERCENT_SELECT },
+    });
+    if (!row || row.business_id !== params.businessId) {
+        return { ok: false, status: 409, code: 'NO_ADDON_ASSIGNED', error: 'Choose a supporter add-on for this fundraiser first.' };
+    }
+    if ((row as any).show_share_percent === params.showSharePercent) return { ok: true, changed: false };
+    await tx.campaignAddOn.update({
+        where: { id: row.id },
+        data: { show_share_percent: params.showSharePercent } as {},
+    });
+    return { ok: true, changed: true };
+}
+
 // ── The coordinator's view (read-only) ───────────────────────────────────────
 
 export interface CoordinatorAddOnView {
@@ -426,6 +452,10 @@ export interface CampaignAddOnAdminView {
         sellable: boolean;
         tiers: ShareTierRow[];
         next: ReturnType<typeof nextAddOnRate>;
+        /** S4: the tenant's "show the share % on the supporter page" choice (off by default). */
+        showSharePercent: boolean;
+        /** S4: what the supporter page shows right now — the percent, or null (toggle off, or a tiered schedule). */
+        publicSupportPercent: number | null;
     };
     unitsSold: number;
     grossSales: number;
@@ -446,6 +476,7 @@ export async function loadCampaignAddOnAdminView(
             select: {
                 business_id: true,
                 bundle_id: true,
+                ...SHOW_SHARE_PERCENT_SELECT,
                 bundle: { select: { id: true, name: true, price: true, is_active: true, business_id: true, ...BUNDLE_TYPE_SELECT } },
                 share_tiers: { select: { starting_quantity: true, percent: true }, orderBy: { starting_quantity: 'asc' } },
             },
@@ -469,6 +500,8 @@ export async function loadCampaignAddOnAdminView(
             sellable: b.is_active === true && normalizeBundleType(b.bundle_type) === ADD_ON_BUNDLE_TYPE && b.business_id === businessId,
             tiers: describeShareTierRanges(tiers, money.unitsSold),
             next: nextAddOnRate(tiers, money.unitsSold),
+            showSharePercent: (assignment as any).show_share_percent === true,
+            publicSupportPercent: publicAddOnSupportPercent(tiers, (assignment as any).show_share_percent),
         };
     }
 

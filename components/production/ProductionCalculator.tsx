@@ -7,6 +7,8 @@ import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { toFraction } from '@/lib/unit_converter';
 import { servingTierLabel } from '@/lib/mealLabel';
+// FR-SUPPORTER-ADDON-UPSELL-1 (S4): an add-on's food is labelled "Add-On", never "Serves 5".
+import { assemblyRowServingLabel } from '@/lib/planAddOnRows';
 import { loadBundles } from '@/lib/bundleLoader';
 import { writePrintBatch, distinctTierCount, fetchAuthenticatedBusinessId } from '@/lib/printBatchStorage';
 
@@ -510,7 +512,7 @@ export function ProductionCalculator() {
                                             // The real physical label count — no `copies || 1`.
                                             copies: row.qty,
                                             variantSize: row.variantSize ?? null,
-                                            servingTier: servingTierLabel(row.variantSize)
+                                            servingTier: assemblyRowServingLabel(row)
                                         }));
 
                                     // OPS-5E: same repair as "Batch Print All Labels" -- this
@@ -1125,7 +1127,7 @@ export function ProductionCalculator() {
                                             // The real physical label count — no `copies || 1`.
                                             copies: row.qty,
                                             variantSize: row.variantSize ?? null,
-                                            servingTier: servingTierLabel(row.variantSize)
+                                            servingTier: assemblyRowServingLabel(row)
                                         }));
 
                                         // OPS-5E: the handoff no longer depends on a client
@@ -1228,7 +1230,7 @@ export function ProductionCalculator() {
                                                                     unit: row.unit,
                                                                     copies: row.qty,
                                                                     variantSize: row.variantSize ?? null,
-                                                                    servingTier: servingTierLabel(row.variantSize)
+                                                                    servingTier: assemblyRowServingLabel(row)
                                                                 })),
                                                                 servingTier: null,
                                                                 businessId: ownerBusinessId

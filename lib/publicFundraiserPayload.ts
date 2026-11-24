@@ -202,6 +202,55 @@ export function toPublicSupporterBusiness(
     };
 }
 
+// ── FR-SUPPORTER-ADDON-UPSELL-1 (S4): the campaign's supporter add-on ─────────────────────────────
+//
+// The ONE add-on the campaign currently offers (lib/publicCampaignAddOn.ts decides whether there is one).
+// Only what the inline card and its detail render: no serving tier (an add-on is never a "Serves 5"), no
+// stock, sku, type or activity flags, and nothing about the share schedule except `supportPercent` — a
+// single number present only when the tenant chose to show it AND the schedule has one tier.
+
+/** Add-on bundle fields the supporter card and detail render. Deliberately no `serving_tier`. */
+export const PUBLIC_SUPPORTER_ADDON_FIELDS = ['id', 'name', 'description', 'image_url'] as const;
+
+/** Named so a test can fail loudly if the projection is ever replaced by a spread. */
+export const FORBIDDEN_PUBLIC_SUPPORTER_ADDON_FIELDS = [
+    'serving_tier', 'sku', 'stock_on_hand', 'business_id', 'catalog_id', 'family_id', 'is_active', 'bundle_type',
+    'show_on_storefront', 'share_tiers', 'starting_quantity', 'show_share_percent', 'unitsSold', 'earnedShare',
+    'grossSales', 'bundle_id', 'campaign_id', 'customer_id', 'created_by',
+] as const;
+
+export interface PublicSupporterAddOn {
+    id: string;
+    name: string;
+    description: unknown;
+    image_url: unknown;
+    price: number;
+    items: PublicSupporterBundle['items'];
+    /** Only when the tenant shows it and the schedule has ONE tier (lib/campaignAddOnShare.publicAddOnSupportPercent). */
+    supportPercent: number | null;
+}
+
+/** The add-on bundle row (with `contents[].recipe`) projected onto the public allow-list. */
+export function toPublicSupporterAddOn(
+    bundle: Record<string, any>,
+    contents: readonly Record<string, any>[] | null | undefined,
+    supportPercent: number | null,
+): PublicSupporterAddOn {
+    const fields = pick(bundle, PUBLIC_SUPPORTER_ADDON_FIELDS);
+    return {
+        id: String(fields.id),
+        name: String(fields.name ?? '').trim(),
+        description: fields.description,
+        image_url: fields.image_url,
+        price: num(bundle?.price) ?? 0,
+        items: (contents || []).map((c: any) => ({
+            quantity: num(c?.quantity),
+            recipe: pick(c?.recipe, PUBLIC_SUPPORTER_RECIPE_FIELDS),
+        })),
+        supportPercent: typeof supportPercent === 'number' && Number.isFinite(supportPercent) && supportPercent > 0 ? supportPercent : null,
+    };
+}
+
 /** Progress: the two weighted-bundle numbers the page shows. No dollar figures. */
 export function toPublicBundleProgress(progress: { totalBundlesSold?: unknown; bundleGoal?: unknown } | null | undefined) {
     return {

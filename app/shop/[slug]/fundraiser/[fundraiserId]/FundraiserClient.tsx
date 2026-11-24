@@ -32,6 +32,14 @@ import {
     EMAIL_CONSENT_NEEDS_EMAIL_MESSAGE, SMS_CONSENT_NEEDS_PHONE_MESSAGE, SUPPORTER_CONSENT_OPTIONAL_NOTE,
     normalizeConsentEmail, normalizeConsentPhone, supporterEmailConsentText, supporterSmsConsentText,
 } from '@/lib/supporterConsentText';
+// FR-SUPPORTER-ADDON-UPSELL-1 (S4): the campaign's add-on — the inline offer, its order line, and the one
+// state machine that decides which of them shows (lib/supporterAddOnOffer.ts).
+import { SupporterAddOnCard, SupporterAddOnOrderLine } from '@/components/fundraiser/SupporterAddOnCard';
+import {
+    ADD_ON_NO_LONGER_AVAILABLE_MESSAGE, INITIAL_ADD_ON_OFFER, addOnOfferView, addOnQuantityInOrder, reduceAddOnOffer,
+    type AddOnOfferEvent,
+} from '@/lib/supporterAddOnOffer';
+import { ADD_ON_ITEM_ROLE, MAIN_ITEM_ROLE } from '@/lib/campaignAddOns';
 
 /**
  * FR-ACCEPTANCE-MOBILE-POLISH-1. Display-only formatting for the per-order
@@ -155,6 +163,27 @@ interface OrderLine {
     serving_tier: string;
 }
 
+// The card's Add toggles a meal bundle in or out of the order. Pure, so the
+// add-on can be told how many meal lines remain after the change
+// (FR-SUPPORTER-ADDON-UPSELL-1 S4) from the same rule that makes the change.
+function toggledMainLines(prev: OrderLine[], bundle: any): OrderLine[] {
+    const exists = prev.some(l => l.bundleId === bundle.id);
+    if (exists) return prev.filter(l => l.bundleId !== bundle.id);
+    return [...prev, {
+        bundleId: bundle.id,
+        name: bundle.name,
+        price: Number(bundle.price || 0),
+        quantity: 1,
+        serving_tier: bundle.serving_tier || 'family',
+    }];
+}
+
+function changedMainLines(prev: OrderLine[], bundleId: string, delta: number): OrderLine[] {
+    return prev
+        .map(l => l.bundleId === bundleId ? { ...l, quantity: l.quantity + delta } : l)
+        .filter(l => l.quantity >= 1);
+}
+
 interface ThanksData {
     orderRef: string;
     total: number;
@@ -184,7 +213,11 @@ export default function FundraiserClient({
     shareUrl = null,
     // FR-SUPPORTER-SHARE-INTEGRITY-1: the ordering deadline as decided on the
     // server in the tenant's calendar (lib/supporterDeadline.ts). Null hides it.
-    deadline = null
+    deadline = null,
+    // FR-SUPPORTER-ADDON-UPSELL-1 (S4): the campaign's current add-on, already
+    // vetted and projected on the server (lib/publicCampaignAddOn.ts). Null —
+    // the default, and every campaign without one — renders nothing new at all.
+    addOn = null
 }: any) {
 
     // FR-SUPPORTER-SHARE-INTEGRITY-1: the goal goes through the single goal rule
@@ -247,7 +280,33 @@ export default function FundraiserClient({
         [bundles]
     );
 
-    const orderTotal = orderLines.reduce((sum, l) => sum + l.price * l.quantity, 0);
+    // ── FR-SUPPORTER-ADDON-UPSELL-1 (S4): the campaign's add-on ─────────────────
+    // `orderLines` stays the MAIN meal-bundle lines only. The add-on lives in its
+    // own small state (lib/supporterAddOnOffer.ts), so "is there a meal in the
+    // basket?" is simply orderLines.length > 0 — whatever the meal's size.
+    const offeredAddOn = addOn && typeof addOn.id === 'string' && Number(addOn.price) > 0 ? addOn : null;
+    const [addOnOffer, setAddOnOffer] = useState(INITIAL_ADD_ON_OFFER);
+    const addOnContext = { hasAddOn: offeredAddOn !== null, mainLineCount: orderLines.length };
+    const addOnView = addOnOfferView(addOnOffer, addOnContext);
+    const addOnQty = addOnQuantityInOrder(addOnOffer, addOnContext);
+    const addOnSubtotal = offeredAddOn ? Number(offeredAddOn.price) * addOnQty : 0;
+    const dispatchAddOn = (event: AddOnOfferEvent) => {
+        if (event.type === 'add' || event.type === 'increase' || event.type === 'decrease' || event.type === 'remove') {
+            setSubmitError(null);
+            resetSubmissionKey();
+        }
+        setAddOnOffer(s => reduceAddOnOffer(s, event));
+    };
+    // Called with the MAIN lines as they will be after a change: the last meal
+    // leaving takes the add-on with it (and says so).
+    const syncAddOnWithMeals = (nextMainLines: OrderLine[]) => {
+        if (!offeredAddOn) return;
+        setAddOnOffer(s => reduceAddOnOffer(s, { type: 'mainLinesChanged', mainLineCount: nextMainLines.length, addOnName: offeredAddOn.name }));
+    };
+
+    // The add-on's dollars are real order dollars: they join the subtotal, and
+    // so the tax and the total below, exactly like a meal line.
+    const orderTotal = orderLines.reduce((sum, l) => sum + l.price * l.quantity, 0) + addOnSubtotal;
 
     // FR-TAX-CORRECTNESS-1: the supporter must see the tax BEFORE submitting.
     // Display only — app/api/public/order/route.ts recomputes this server-side
@@ -338,29 +397,20 @@ export default function FundraiserClient({
         if (!approvedBundleIds.has(bundle.id)) return;
         setSubmitError(null);
         resetSubmissionKey();
-        setOrderLines(prev => {
-            const exists = prev.some(l => l.bundleId === bundle.id);
-            if (exists) return prev.filter(l => l.bundleId !== bundle.id);
-            return [...prev, {
-                bundleId: bundle.id,
-                name: bundle.name,
-                price: Number(bundle.price || 0),
-                quantity: 1,
-                serving_tier: bundle.serving_tier || 'family',
-            }];
-        });
+        setOrderLines(prev => toggledMainLines(prev, bundle));
+        syncAddOnWithMeals(toggledMainLines(orderLines, bundle));
     };
 
     const changeQty = (bundleId: string, delta: number) => {
         resetSubmissionKey();
-        setOrderLines(prev => prev
-            .map(l => l.bundleId === bundleId ? { ...l, quantity: l.quantity + delta } : l)
-            .filter(l => l.quantity >= 1));
+        setOrderLines(prev => changedMainLines(prev, bundleId, delta));
+        syncAddOnWithMeals(changedMainLines(orderLines, bundleId, delta));
     };
 
     const removeLine = (bundleId: string) => {
         resetSubmissionKey();
         setOrderLines(prev => prev.filter(l => l.bundleId !== bundleId));
+        syncAddOnWithMeals(orderLines.filter(l => l.bundleId !== bundleId));
     };
 
     // ── FR-SUPPORTER-ORDER-CONVERSION-1: bundle detail ────────────────────────
@@ -384,6 +434,21 @@ export default function FundraiserClient({
     const addFromDetail = (bundle: any) => {
         if (!orderLines.some(l => l.bundleId === bundle.id)) toggleLine(bundle);
         setDetailStatus(`${bundle.name} (${supporterServesLabel(bundle.serving_tier)}) is in your order.`);
+        closeDetail();
+    };
+    // FR-SUPPORTER-ADDON-UPSELL-1 (S4): the add-on's "See what's included" — the
+    // same detail view and focus behaviour, in its add-on mode. Its Add is the
+    // card's add; its steppers are the add-on line's.
+    const openAddOnDetail = () => {
+        if (!offeredAddOn) return;
+        setDetailImageExpanded(false);
+        setDetailStatus(null);
+        setDetailBundleId(offeredAddOn.id);
+    };
+    const addAddOnFromDetail = () => {
+        if (!offeredAddOn) return;
+        if (addOnQty === 0) dispatchAddOn({ type: 'add' });
+        setDetailStatus(`${offeredAddOn.name} is in your order.`);
         closeDetail();
     };
 
@@ -427,12 +492,20 @@ export default function FundraiserClient({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     submissionKey: submissionKeyRef.current,
-                    items: orderLines.map(l => ({
-                        bundleId: l.bundleId,
-                        quantity: l.quantity,
-                        serving_tier: l.serving_tier,
-                        name: l.name,
-                    })),
+                    items: [
+                        ...orderLines.map(l => ({
+                            bundleId: l.bundleId,
+                            quantity: l.quantity,
+                            serving_tier: l.serving_tier,
+                            name: l.name,
+                        })),
+                        // FR-SUPPORTER-ADDON-UPSELL-1 (S4): the add-on rides as one more
+                        // line. The server decides it is the add-on (and refuses it
+                        // if it is no longer this campaign's), prices it, and names it.
+                        ...(offeredAddOn && addOnQty > 0
+                            ? [{ bundleId: offeredAddOn.id, quantity: addOnQty, name: offeredAddOn.name }]
+                            : []),
+                    ],
                     customer: {
                         firstName: firstName.trim(),
                         lastName: lastName.trim(),
@@ -455,6 +528,15 @@ export default function FundraiserClient({
                     || data.code === 'CAMPAIGN_CLOSED') {
                     resetSubmissionKey();
                 }
+                // FR-SUPPORTER-ADDON-UPSELL-1 (S4): the add-on was removed, changed or
+                // turned off while this page was open. Nothing was placed. Take the
+                // add-on out (hidden for the rest of the visit), keep every meal line,
+                // and let the supporter place the order again.
+                if (data.code === 'ADDON_CHANGED') {
+                    resetSubmissionKey();
+                    setAddOnOffer(s => reduceAddOnOffer(s, { type: 'serverRejected' }));
+                    throw new Error(ADD_ON_NO_LONGER_AVAILABLE_MESSAGE);
+                }
                 const message = data.code === 'CAMPAIGN_NOT_FOUND'
                     ? 'This fundraiser could not be found — please refresh and try again.'
                     : data.code === 'INVALID_QUANTITY'
@@ -465,9 +547,12 @@ export default function FundraiserClient({
                 throw new Error(message);
             }
 
-            const unitsAdded = computeBundleUnitsFromItems(
-                orderLines.map(l => ({ quantity: l.quantity, serving_tier: l.serving_tier }))
-            );
+            // FR-SUPPORTER-ADDON-UPSELL-1 (S4): the add-on goes through the SAME
+            // weighting rule with its role, which gives it 0 bundle units.
+            const unitsAdded = computeBundleUnitsFromItems([
+                ...orderLines.map(l => ({ quantity: l.quantity, serving_tier: l.serving_tier, item_role: MAIN_ITEM_ROLE })),
+                ...(addOnQty > 0 ? [{ quantity: addOnQty, serving_tier: null, item_role: ADD_ON_ITEM_ROLE }] : []),
+            ]);
             // The amount shown to the buyer (and owed to the coordinator) is the
             // SERVER-persisted order total, not the browser's running figure. The
             // client total is only a fallback if an older response omits it.
@@ -507,6 +592,7 @@ export default function FundraiserClient({
             resetSubmissionKey();
             // Clear ONLY the fundraiser order state (success path).
             setOrderLines([]);
+            setAddOnOffer(s => reduceAddOnOffer(s, { type: 'orderPlaced' }));
             if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
         } catch (e: any) {
             // Failure preserves the order lines untouched.
@@ -666,7 +752,9 @@ export default function FundraiserClient({
     const detailBundle = detailBundleId && approvedBundleIds.has(detailBundleId)
         ? (bundles.find((b: any) => b.id === detailBundleId) ?? null)
         : null;
-    const detailOpen = detailBundle !== null && !thanks && !blocked;
+    // FR-SUPPORTER-ADDON-UPSELL-1 (S4): the add-on's detail — only while the add-on is on offer or in the order.
+    const detailAddOn = offeredAddOn && detailBundleId === offeredAddOn.id && addOnView !== 'hidden' ? offeredAddOn : null;
+    const detailOpen = (detailBundle !== null || detailAddOn !== null) && !thanks && !blocked;
     const { panelRef: detailPanelRef, containTab: containDetailTab } = useDialogFocus(detailOpen, detailBundleId);
     const onDetailKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Escape') { e.stopPropagation(); closeDetail(); return; }
@@ -1133,6 +1221,22 @@ export default function FundraiserClient({
                                     onToggleImage={() => setDetailImageExpanded(v => !v)}
                                 />
                             )}
+                            {/* FR-SUPPORTER-ADDON-UPSELL-1 (S4): the add-on's detail — same view, add-on mode. */}
+                            {detailOpen && detailAddOn && (
+                                <SupporterBundleDetail
+                                    addOn
+                                    bundle={detailAddOn}
+                                    primaryColor={primaryColor}
+                                    quantityInOrder={addOnQty}
+                                    imageExpanded={detailImageExpanded}
+                                    panelRef={detailPanelRef}
+                                    onKeyDown={onDetailKeyDown}
+                                    onClose={closeDetail}
+                                    onAdd={addAddOnFromDetail}
+                                    onChangeQty={(delta) => dispatchAddOn({ type: delta > 0 ? 'increase' : 'decrease' })}
+                                    onToggleImage={() => setDetailImageExpanded(v => !v)}
+                                />
+                            )}
 
                             {/* OrderForm card — prototype lines 554-567 */}
                             <div style={fableCard}>
@@ -1167,6 +1271,16 @@ export default function FundraiserClient({
                                                 <button aria-label={`Remove ${line.name}`} onClick={() => removeLine(line.bundleId)} style={{ color: '#d8c3b5', background: 'none', border: 0, cursor: 'pointer', padding: '0 .2rem', fontSize: '.8rem' }}>✕</button>
                                             </div>
                                         ))}
+                                        {/* FR-SUPPORTER-ADDON-UPSELL-1 (S4): the add-on, once added — an ordinary line, never a size. */}
+                                        {addOnView === 'inOrder' && offeredAddOn && (
+                                            <SupporterAddOnOrderLine
+                                                addOn={offeredAddOn}
+                                                quantity={addOnQty}
+                                                onIncrease={() => dispatchAddOn({ type: 'increase' })}
+                                                onDecrease={() => dispatchAddOn({ type: 'decrease' })}
+                                                onRemove={() => dispatchAddOn({ type: 'remove' })}
+                                            />
+                                        )}
                                     </div>
                                 )}
 
@@ -1192,6 +1306,29 @@ export default function FundraiserClient({
                                             <span style={{ fontVariantNumeric: 'tabular-nums' }}>${orderAmountDue.toFixed(2)}</span>
                                         </div>
                                     </div>
+                                )}
+
+                                {/* FR-SUPPORTER-ADDON-UPSELL-1 (S4): the inline add-on offer — below the
+                                    order, above the contact fields, only with a meal line in the basket.
+                                    Never a pop-up; "No thanks" leaves one quiet link. A campaign with no
+                                    add-on renders none of this (offeredAddOn is null). */}
+                                {offeredAddOn && (addOnView === 'card' || addOnView === 'quiet') && (
+                                    <SupporterAddOnCard
+                                        view={addOnView}
+                                        addOn={offeredAddOn}
+                                        organizationName={campaign.organization_name}
+                                        primaryColor={primaryColor}
+                                        onAdd={() => dispatchAddOn({ type: 'add' })}
+                                        onOpenDetail={openAddOnDetail}
+                                        onDecline={() => dispatchAddOn({ type: 'decline' })}
+                                        onReopen={() => dispatchAddOn({ type: 'reopen' })}
+                                    />
+                                )}
+                                {/* Announces (and quietly shows) an automatic change: the add-on leaving with the last meal. */}
+                                {offeredAddOn && (
+                                    <p data-addon-notice="true" role="status" aria-live="polite" style={addOnOffer.notice ? { margin: '.55rem 0 0', fontSize: '.7rem', fontWeight: 700, color: '#7a6258', overflowWrap: 'anywhere' } : srOnly}>
+                                        {addOnOffer.notice}
+                                    </p>
                                 )}
 
                                 {/* FR-SUPPORTER-CONTACT-1: four explicit fields, never a single

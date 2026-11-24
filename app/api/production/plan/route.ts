@@ -5,6 +5,8 @@ import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { resolveVariantSize } from '@/lib/serving_multipliers';
 import { planServingTier } from '@/lib/mealLabel';
+import { ADD_ON_BUNDLE_TYPE, BUNDLE_TYPE_SELECT, normalizeBundleType } from '@/lib/campaignAddOns';
+import { annotateAssemblyTasks, classifyPlanAssemblyRows, planHasAddOnLine } from '@/lib/planAddOnRows';
 
 export async function POST(request: Request) {
     try {
@@ -89,6 +91,37 @@ export async function POST(request: Request) {
 
         const result = await engine.generateProductionRun(orders);
 
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S4): a campaign add-on line carries the stored
+        // 'serves_5' snapshot, so the engine builds its recipes as Serves-5 rows. Mark
+        // those rows (lib/planAddOnRows.ts) so a meal label says "Add-On", never
+        // "Serves 5". Reads only each line's bundle TYPE and contents, tenant-scoped —
+        // never its tier, which stays exactly as OPS-4/OPS-4A resolved it above. Labels
+        // only: no quantity changes. Never blocks the plan: on failure the rows go out
+        // unmarked, as before S4.
+        let assemblyTasks = result.assemblyTasks;
+        let mainLineSizes = orders.map((o: any) => o?.variant_size);
+        let hasMixedAddOnRow = false;
+        try {
+            const planBundleIds = [...new Set(orders.map((o: any) => o?.bundle_id).filter((id: unknown): id is string => typeof id === 'string' && id.length > 0))];
+            const planBundles: any[] = planBundleIds.length
+                ? await prisma.bundle.findMany({
+                    where: { id: { in: planBundleIds }, business_id: session.user.businessId },
+                    select: { id: true, ...BUNDLE_TYPE_SELECT, contents: { select: { recipe_id: true } } } as any,
+                })
+                : [];
+            if (planHasAddOnLine(orders, planBundles ?? [])) {
+                // Every line here already carries its resolved tier (an add-on line always
+                // carries its stored 'serves_5'), so the rows' keys match the engine's.
+                const kinds = classifyPlanAssemblyRows(orders, planBundles ?? []);
+                assemblyTasks = annotateAssemblyTasks(result.assemblyTasks, kinds);
+                hasMixedAddOnRow = [...kinds.values()].includes('mixed');
+                const addOnIds = new Set((planBundles ?? []).filter((b: any) => normalizeBundleType(b.bundle_type) === ADD_ON_BUNDLE_TYPE).map((b: any) => b.id));
+                mainLineSizes = orders.filter((o: any) => !addOnIds.has(o?.bundle_id)).map((o: any) => o?.variant_size);
+            }
+        } catch (addOnErr) {
+            console.error('[campaign add-on] plan add-on row labels skipped:', addOnErr);
+        }
+
         // OPS-5: expose the serving tier this plan can TRUTHFULLY claim, so the
         // meal-label path can consume an already-resolved authority instead of
         // inventing a third one.
@@ -104,9 +137,15 @@ export async function POST(request: Request) {
         // same recipe merge into ONE entry, after which no per-recipe tier is
         // recoverable. A null tier makes the label omit the claim rather than
         // guess. Purely additive - no existing field changes.
+        //
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S4): measured over the MEAL lines only — an
+        // add-on line's stored 'serves_5' is not a serving size — and withheld
+        // entirely when a recipe row mixes add-on and meal food, since that row's
+        // labels cannot then claim either.
         return NextResponse.json({
             ...result,
-            servingTier: planServingTier(orders.map((o: any) => o?.variant_size)),
+            assemblyTasks,
+            servingTier: hasMixedAddOnRow ? null : planServingTier(mainLineSizes),
         });
 
     } catch (e: any) {

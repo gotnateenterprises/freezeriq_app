@@ -8,6 +8,7 @@ import { toPublicCampaign, toPublicSupporterBusiness, toPublicBundleProgress, to
 import { customerFacingBusinessName } from '@/lib/tenantBrand';
 import { resolveCanonicalSupporterUrl } from '@/lib/fundraiserCanonicalUrl';
 import { describeSupporterDeadline } from '@/lib/supporterDeadline';
+import { loadPublicCampaignAddOn } from '@/lib/publicCampaignAddOn';
 import type { Metadata } from 'next';
 
 // ── OG Metadata (controls the Facebook/Twitter link preview) ───────────
@@ -325,6 +326,16 @@ async function getData(slug: string, fundraiserId: string) {
 
     (business as any).bundles = formattedBundles;
 
+    // FR-SUPPORTER-ADDON-UPSELL-1 (S4): the ONE add-on this campaign currently offers, or null — then the
+    // page is exactly what it was before S4. Only while ordering is open on a real lineup; tenant-scoped;
+    // never throws (lib/publicCampaignAddOn.ts). A display only — the order route re-decides the add-on
+    // and its price, and refuses a stale one with 409 ADDON_CHANGED.
+    const addOn = await loadPublicCampaignAddOn(prisma, {
+        campaignId: campaign.id,
+        businessId: business.id,
+        orderable: orderMode.allowed === true && formattedBundles.length > 0,
+    });
+
     // FR-FLOW-1: PUBLIC PROJECTION — the second half of the allowlist.
     //
     // The query above still selects a few tenant-internal columns because the
@@ -379,6 +390,7 @@ async function getData(slug: string, fundraiserId: string) {
         orderMode: toPublicOrderMode(orderMode),
         shareUrl,
         deadline,
+        addOn,
     }));
 
 }
@@ -389,7 +401,7 @@ export default async function FundraiserPage({ params }: { params: Promise<{ slu
 
     if (!data) notFound();
 
-    const { business, campaign, bundleProgress, orderMode, shareUrl, deadline } = data;
+    const { business, campaign, bundleProgress, orderMode, shareUrl, deadline, addOn } = data;
 
     return (
         <FundraiserClient
@@ -401,6 +413,7 @@ export default async function FundraiserPage({ params }: { params: Promise<{ slu
             fundraiserId={fundraiserId}
             shareUrl={shareUrl}
             deadline={deadline}
+            addOn={addOn}
         />
     );
 }
