@@ -63,6 +63,8 @@ import { supporterAmountDue } from './fundraiserTax';
 // FR-SUPPORTER-PAYMENT-STATUS-1: the one rule for what a recorded payment
 // means and how a supporter's orders summarize. Equally pure.
 import { summarizeGroupPayment, type GroupPaymentSummary } from './supporterPayment';
+// FR-SUPPORTER-ADDON-UPSELL-1 (S1): the line role snapshot.
+import { ADD_ON_ITEM_ROLE, ITEM_ROLE_SELECT, MAIN_ITEM_ROLE, isAddOnItemRole, type OrderItemRole } from './campaignAddOns';
 
 /**
  * The Prisma `select` every coordinator surface uses for supporter orders.
@@ -101,6 +103,9 @@ export const SUPPORTER_ORDER_SELECT = {
             variant_size: true,
             item_name: true,
             bundle_id: true,
+            // FR-SUPPORTER-ADDON-UPSELL-1: the line's historical role ('main' | 'addon'),
+            // so coordinator progress gives an add-on 0 bundle units.
+            ...ITEM_ROLE_SELECT,
         },
     },
 } as const;
@@ -127,6 +132,7 @@ export interface SupporterOrderRow {
         variant_size?: string | null;
         item_name?: string | null;
         bundle_id?: string | null;
+        item_role?: string | null;
     }> | null;
 }
 
@@ -135,6 +141,8 @@ export interface SupporterOrderItem {
     variant_size: string | null;
     item_name: string | null;
     bundle_id: string | null;
+    /** FR-SUPPORTER-ADDON-UPSELL-1: 'addon' lines are money, not bundle-goal units. */
+    item_role: OrderItemRole;
 }
 
 /** What a coordinator surface may render. Note what is absent: no address, no
@@ -210,6 +218,7 @@ export function toSupporterOrder(
             variant_size: i?.variant_size ?? null,
             item_name: i?.item_name ?? null,
             bundle_id: i?.bundle_id ?? null,
+            item_role: isAddOnItemRole(i?.item_role) ? ADD_ON_ITEM_ROLE : MAIN_ITEM_ROLE,
         })),
     };
 }

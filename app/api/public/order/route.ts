@@ -28,6 +28,16 @@ import { toPublicPaymentMethods, offersOnlinePayment, type PublicPaymentMethod }
 // SUPPORTER-CONSENT-1: optional permission for future fundraiser email / texts from the organization.
 import { buildSupporterConsentRows, planSupporterConsent, readSupporterConsentIntent } from '@/lib/supporterConsentText';
 import { recordSupporterConsents } from '@/lib/supporterConsent';
+// FR-SUPPORTER-ADDON-UPSELL-1 (S1): the one authority for main vs add-on lines.
+import {
+    ADDON_CHANGED_MESSAGE,
+    assertCampaignAddOnUnchanged,
+    classifyFundraiserOrderLines,
+    isAddOnChanged,
+    loadCampaignAddOnAuthority,
+    loadOrderBundleFacts,
+    orderLinesNeedAddOnAuthority,
+} from '@/lib/campaignAddOns';
 
 /**
  * FR-LAUNCH-1E: sentinel used to abort the order transaction when the campaign
@@ -255,6 +265,36 @@ export async function POST(req: Request) {
             .filter((item: any) => item.bundleId && item.bundleId !== 'manual_upsell')
             .map((item: any) => item.bundleId);
 
+        // ── FR-SUPPORTER-ADDON-UPSELL-1 (S1): main lines vs the campaign's add-on ──
+        //
+        // Decided ONCE, by lib/campaignAddOns.ts, before the lineup check, pricing,
+        // inventory, any write or any email. A campaign order may not carry the
+        // tenant-wide 'manual_upsell' sentinel; an add-on-typed bundle must be THIS
+        // campaign's assigned add-on (409 if it changed — never substituted), may
+        // appear on one line, and needs at least one meal-bundle line beside it
+        // (Serves 5 or Serves 2 alike). Outside a campaign an add-on is never sold.
+        // Every other line is a main line and meets the existing checks below
+        // exactly as before. The client never supplies a line's role.
+        const lineBundleIds: Array<string | null> = items.map((item: any) =>
+            (typeof item?.bundleId === 'string' ? item.bundleId : null));
+        const bundleFacts = await loadOrderBundleFacts(prisma, businessId, bundleIds);
+        const addOnAuthority = campaign && orderLinesNeedAddOnAuthority(lineBundleIds, bundleFacts)
+            ? await loadCampaignAddOnAuthority(prisma, { campaignId: campaign.id, businessId })
+            : null;
+        const lineRoles = classifyFundraiserOrderLines({
+            lineBundleIds,
+            isCampaignOrder,
+            bundleFacts,
+            authorizedAddOn: addOnAuthority,
+        });
+        if (!lineRoles.ok) {
+            return NextResponse.json({ error: lineRoles.error, code: lineRoles.code }, { status: lineRoles.status });
+        }
+        const addOnBundleIdSet = new Set(lineRoles.addOnBundleIds);
+        // The campaign lineup (CB-5, FR-FLOW-3) governs MAIN lines only. The add-on is
+        // not a CampaignBundle and was authorized above.
+        const mainBundleIds = bundleIds.filter((id: string) => !addOnBundleIdSet.has(id));
+
         // CB-5: Campaign-level bundle eligibility enforcement.
         // Must run BEFORE buildBundlePriceMap, order creation, payment, or email.
         // Non-campaign orders skip this (no campaignId → no campaign → no gate).
@@ -266,7 +306,7 @@ export async function POST(req: Request) {
                 businessId,
                 business.timezone
             );
-            const eligibility = validateBundleEligibility(bundleMode, bundleIds);
+            const eligibility = validateBundleEligibility(bundleMode, mainBundleIds);
             if (!eligibility.ok) {
                 return NextResponse.json({ error: eligibility.error }, { status: eligibility.status });
             }
@@ -597,11 +637,20 @@ export async function POST(req: Request) {
                         const sellable = new Set(activeRows.map((r) => r.bundle_id));
                         const ordered = resolvedItems
                             .map((i: any) => i.bundleId)
-                            .filter((b: any) => b && b !== 'manual_upsell');
+                            // FR-SUPPORTER-ADDON-UPSELL-1: the add-on is not a lineup row; it is rechecked below.
+                            .filter((b: any) => b && b !== 'manual_upsell' && !addOnBundleIdSet.has(b));
                         if (ordered.some((b: string) => !sellable.has(b))) {
                             throw new BundleSelectionChangedError();
                         }
                     }
+
+                    // FR-SUPPORTER-ADDON-UPSELL-1: under the same lock, the add-on this basket
+                    // carries must still be the campaign's assigned, active, same-tenant add-on.
+                    await assertCampaignAddOnUnchanged(tx, {
+                        campaignId: campaign.id,
+                        businessId,
+                        expectedBundleIds: lineRoles.addOnBundleIds,
+                    });
                 }
 
                 // 3. Create Order
@@ -652,13 +701,20 @@ export async function POST(req: Request) {
                         submission_key: submissionKey,
                         submission_fingerprint: submissionFingerprint,
                         items: {
-                            create: resolvedItems.map((item: any) => ({
+                            create: resolvedItems.map((item: any, index: number) => ({
                                 bundle_id: (item.bundleId === 'manual_upsell' || !item.bundleId) ? null : item.bundleId,
                                 quantity: item.quantity,
                                 variant_size: resolveSoldVariantSize(bundleServingTierMap.get(item.bundleId), item.serving_tier),
-                                item_name: item.name,
+                                // FR-SUPPORTER-ADDON-UPSELL-1: an add-on line is named by its own
+                                // bundle row, never by the request.
+                                item_name: lineRoles.roles[index] === 'addon'
+                                    ? (bundleFacts.get(item.bundleId)?.name ?? null)
+                                    : item.name,
                                 unit_price: item.serverPrice,
-                                is_subscription: !!item.isSubscription
+                                is_subscription: !!item.isSubscription,
+                                // The server-decided historical role ('main' | 'addon'): 'addon'
+                                // counts in every money total and contributes 0 bundle-goal units.
+                                item_role: lineRoles.roles[index],
                             }))
                         }
                     } as any,
@@ -731,6 +787,12 @@ export async function POST(req: Request) {
                     error: 'This fundraiser\'s options just changed. Please refresh and place your order again.',
                     code: 'BUNDLE_SELECTION_CHANGED',
                 }, { status: 409 });
+            }
+
+            // FR-SUPPORTER-ADDON-UPSELL-1: the campaign's add-on changed while this order
+            // was in flight. Nothing was written; the supporter refreshes.
+            if (isAddOnChanged(txErr)) {
+                return NextResponse.json({ error: ADDON_CHANGED_MESSAGE, code: 'ADDON_CHANGED' }, { status: 409 });
             }
 
             // FR-LAUNCH-1E: unique violation on (business_id, submission_key) — a

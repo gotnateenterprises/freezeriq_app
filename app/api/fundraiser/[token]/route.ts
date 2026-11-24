@@ -44,8 +44,12 @@ export async function GET(
                     select: {
                         customer_name: true,
                         created_at: true,
-                        // Bundle-unit progress needs item-level data
+                        // Bundle-unit progress needs item-level data.
+                        // FR-SUPPORTER-ADDON-UPSELL-1: MAIN lines only — an add-on line
+                        // (item_role = 'addon') is never a bundle toward the goal, and the
+                        // public projection does not carry the role, so it is left out here.
                         items: {
+                            ...({ where: { item_role: 'main' } } as {}),
                             select: {
                                 quantity: true,
                                 variant_size: true,

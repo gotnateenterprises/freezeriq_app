@@ -6,6 +6,7 @@ import { getPaymentProvider } from '@/lib/payments';
 import { geocodeAddress, resolveDeliveryZone } from '@/lib/delivery/zones';
 import { resolveSoldVariantSize } from '@/lib/orderItemTier';
 import { buildBundlePriceMap, findInactiveBundleNames } from '@/lib/pricing';
+import { classifyFundraiserOrderLines, loadOrderBundleFacts } from '@/lib/campaignAddOns';
 
 export async function POST(req: Request) {
     try {
@@ -143,6 +144,20 @@ export async function POST(req: Request) {
             return NextResponse.json({
                 error: `${inactiveNames.join(', ')} ${inactiveNames.length === 1 ? 'is' : 'are'} no longer available. Please remove ${inactiveNames.length === 1 ? 'it' : 'them'} from your bag.`,
             }, { status: 400 });
+        }
+
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S1): a fundraiser add-on bundle (bundle_type =
+        // 'addon') is not a storefront product — it is sold only beside a meal bundle on
+        // its campaign's order. Refused here by the shared rule (lib/campaignAddOns.ts)
+        // before pricing or any order is created; meal bundles are unaffected.
+        const addOnRule = classifyFundraiserOrderLines({
+            lineBundleIds: items.map((item: any) => (typeof item?.bundleId === 'string' ? item.bundleId : null)),
+            isCampaignOrder: false,
+            bundleFacts: await loadOrderBundleFacts(prisma, business.id, bundleIds),
+            authorizedAddOn: null,
+        });
+        if (!addOnRule.ok) {
+            return NextResponse.json({ error: addOnRule.error, code: addOnRule.code }, { status: addOnRule.status });
         }
 
         const bundlePriceMap = await buildBundlePriceMap(business.id, bundleIds);

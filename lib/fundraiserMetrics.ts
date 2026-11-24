@@ -11,6 +11,7 @@
  */
 
 import { organizationShareAmount } from './fundraiserOrgShare';
+import { isAddOnItemRole } from './campaignAddOns';
 
 // ── Weight Map ───────────────────────────────────────────────
 
@@ -45,10 +46,20 @@ export interface OrderItemForMetrics {
     variant_size?: string | null;
     /** Fallback: Bundle.serving_tier if variant_size unavailable */
     serving_tier?: string | null;
+    /**
+     * FR-SUPPORTER-ADDON-UPSELL-1: OrderItem.item_role, the line's role at sale time. 'addon' lines
+     * contribute ZERO bundle-goal units. Every goal reader must pass it through (a static sweep test
+     * enforces that); a historical line without it is a main line, as the column default says.
+     */
+    item_role?: string | null;
 }
 
 /**
  * Computes weighted bundle units from an array of order items.
+ *
+ * FR-SUPPORTER-ADDON-UPSELL-1: an add-on line (item_role = 'addon') is real money but is not a bundle
+ * toward the goal, so it adds 0. The ROLE decides that — never a zero serving tier, a fake size or a
+ * zero multiplier, so Serves 5 = 1.0 and Serves 2 = 0.5 are untouched.
  *
  * @example
  *   items = [{ quantity: 3, variant_size: "serves_5" }, { quantity: 4, variant_size: "serves_2" }]
@@ -56,6 +67,7 @@ export interface OrderItemForMetrics {
  */
 export function computeBundleUnitsFromItems(items: OrderItemForMetrics[]): number {
     return items.reduce((sum, item) => {
+        if (isAddOnItemRole(item.item_role)) return sum;
         const weight = getBundleUnitWeight(item.variant_size || item.serving_tier);
         return sum + (item.quantity || 0) * weight;
     }, 0);

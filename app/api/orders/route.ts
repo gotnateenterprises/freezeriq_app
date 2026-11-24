@@ -6,6 +6,7 @@ import { resolveSoldVariantSize } from '@/lib/orderItemTier';
 import { toDbSafeOrderStatus, toDbOrderStatusReadCandidates, validateOrderStatusTransition, normalizeOrderStatus } from '@/lib/orderStatus';
 import { LOYALTY_ACCRUAL_ENABLED } from '@/lib/loyalty';
 import { orderDeletionRefusal, ORDER_DELETION_FACTS_SELECT, type DeletableOrderFacts } from '@/lib/orderDeletion';
+import { classifyFundraiserOrderLines, loadOrderBundleFacts } from '@/lib/campaignAddOns';
 
 
 export async function GET(req: NextRequest) {
@@ -162,6 +163,21 @@ export async function POST(req: NextRequest) {
         const invalidBundle = items.find((item: any) => !bundlePriceMap.has(item.bundle_id));
         if (invalidBundle) {
             return NextResponse.json({ error: 'Invalid bundle' }, { status: 400 });
+        }
+
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S1): a staff manual order is never linked to a
+        // campaign, so a fundraiser add-on bundle (bundle_type = 'addon') is never valid
+        // here — it is sold only beside a meal bundle on its campaign's own order. The
+        // shared rule (lib/campaignAddOns.ts) refuses it; meal bundles are unaffected,
+        // and every line keeps the default role 'main'.
+        const addOnRule = classifyFundraiserOrderLines({
+            lineBundleIds: items.map((item: any) => (typeof item?.bundle_id === 'string' ? item.bundle_id : null)),
+            isCampaignOrder: false,
+            bundleFacts: await loadOrderBundleFacts(prisma, session.user.businessId, bundleIds),
+            authorizedAddOn: null,
+        });
+        if (!addOnRule.ok) {
+            return NextResponse.json({ error: addOnRule.error, code: addOnRule.code }, { status: addOnRule.status });
         }
 
         // --- Server-side serving_tier authority ---

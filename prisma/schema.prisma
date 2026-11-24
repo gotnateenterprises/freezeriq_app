@@ -95,6 +95,8 @@ model Business {
   suppression_events     EmailSuppressionEvent[] @relation("BusinessSuppressionEvents")
   // SUPPORTER-CONSENT-1
   supporter_consents     SupporterContactConsent[] @relation("BusinessSupporterConsents")
+  // FR-SUPPORTER-ADDON-UPSELL-1
+  campaign_add_ons       CampaignAddOn[]           @relation("BusinessCampaignAddOns")
   // FR-RETENTION-3
   outreach_messages      OutreachMessage[]       @relation("BusinessOutreachMessages")
   delivery_attempts      EmailDeliveryAttempt[]  @relation("BusinessDeliveryAttempts")
@@ -332,6 +334,17 @@ model Bundle {
   // as a portable Prisma @@unique due to nullable partial-index semantics).
   family_id          String?
   // ─────────────────────────────────────────────────────────────────────────
+  // ── FR-SUPPORTER-ADDON-UPSELL-1 (S1): what the bundle IS ──────────────────
+  // 'meal'  = a normal meal bundle. Every bundle that existed before S1, and the
+  //           default for every new one.
+  // 'addon' = a fundraiser add-on: sold only as an optional extra beside at
+  //           least one meal bundle, on a campaign that assigns it through
+  //           campaign_add_ons. Never a family member, never a storefront product.
+  // Database CHECKs (raw SQL in the migration): the value is 'meal' or 'addon',
+  // and bundle_type = 'meal' OR family_id IS NULL. Never inferred from
+  // serving_tier. lib/campaignAddOns.ts is the one authority that reads it.
+  bundle_type        String             @default("meal")
+  // ─────────────────────────────────────────────────────────────────────────
   contents           BundleContent[]
   invoice_items      InvoiceItem[]
   business           Business?          @relation(fields: [business_id], references: [id])
@@ -339,8 +352,14 @@ model Bundle {
   order_items        OrderItem[]
   storefront_configs StorefrontConfig[]
   campaign_bundles   CampaignBundle[]
+  // FR-SUPPORTER-ADDON-UPSELL-1: campaigns offering this bundle as their add-on.
+  campaign_add_ons   CampaignAddOn[]
 
   @@index([family_id])
+  // FR-SUPPORTER-ADDON-UPSELL-1: composite parent key so campaign_add_ons can
+  // reference (business_id, bundle_id) and Postgres enforces same-tenant
+  // ownership. Cannot fail: (business_id, id) is unique because id is.
+  @@unique([business_id, id])
   @@map("bundles")
 }
 
@@ -432,6 +451,8 @@ model Customer {
   // direct_customer row) the permissions this supporter gave.
   supporter_consents_received SupporterContactConsent[] @relation("OrganizationSupporterConsents")
   supporter_consents_given    SupporterContactConsent[] @relation("SupporterOwnConsents")
+  // FR-SUPPORTER-ADDON-UPSELL-1: add-ons assigned to this organization's campaigns.
+  campaign_add_ons            CampaignAddOn[]           @relation("OrganizationCampaignAddOns")
 
   // FR-RETENTION-1: composite parent key so tenant-scoped children can reference
   // (business_id, customer_id) and have Postgres enforce same-tenant ownership.
@@ -541,6 +562,16 @@ model OrderItem {
   item_name       String?
   unit_price      Decimal?    @db.Decimal(10, 2)
   is_subscription Boolean     @default(false)
+  // ── FR-SUPPORTER-ADDON-UPSELL-1 (S1): the line's fundraiser role AT SALE ──
+  // 'main'  = a meal-bundle line. Counts toward the bundle goal (Serves 5 = 1,
+  //           Serves 2 = 0.5). Every line written before S1.
+  // 'addon' = the campaign's authorized add-on. Full price, in every money
+  //           total, and ZERO bundle-goal units.
+  // A durable historical snapshot decided by the server when the order is
+  // written (lib/campaignAddOns.ts) — never accepted from a client, and never
+  // re-derived from the bundle's current classification. CHECK in the migration.
+  item_role       String      @default("main")
+  // ─────────────────────────────────────────────────────────────────────────
   bundle          Bundle?     @relation(fields: [bundle_id], references: [id])
   order           Order?      @relation(fields: [order_id], references: [id])
 
@@ -862,6 +893,9 @@ model FundraiserCampaign {
   outreach_batches      OutreachBatch[]                @relation("CampaignOutreachBatches")
   // SUPPORTER-CONSENT-1: permissions collected on this campaign's order page.
   supporter_consents    SupporterContactConsent[]      @relation("CampaignSupporterConsents")
+  // FR-SUPPORTER-ADDON-UPSELL-1: the campaign's assigned add-on. At most ONE in
+  // V1 (unique on campaign_id); the list shape is what Prisma requires.
+  add_ons               CampaignAddOn[]
 
   // FR-FUNNEL-1: intentionally redundant with the primary key on `id`.
   // FundraiserCampaign has no business_id, so there is no [business_id, id] for
@@ -1737,6 +1771,42 @@ model SupporterContactConsent {
   @@index([business_id, customer_id, channel, destination, created_at], map: "supporter_contact_consents_lookup_idx")
   @@index([order_id], map: "supporter_contact_consents_order_idx")
   @@map("supporter_contact_consents")
+}
+
+// ── FR-SUPPORTER-ADDON-UPSELL-1 (S1): a campaign's optional supporter add-on ──
+// Which add-on bundle (bundle_type = 'addon') a campaign offers supporters
+// beside its meal bundles. Deliberately NOT a CampaignBundle row: the campaign's
+// main lineup — families, selection limit, reselection and its locks — never
+// sees it. The tenant assigns it (S2); lib/campaignAddOns.ts is the one reader.
+//
+// Tenancy is enforced BY POSTGRES through composite keys, the same pattern as
+// supporter_contact_consents and the fundraiser funnel tables:
+//   (customer_id, campaign_id) -> fundraiser_campaigns(customer_id, id)
+//   (business_id, customer_id) -> customers(business_id, id)
+//   (business_id, bundle_id)   -> bundles(business_id, id)
+// so the campaign, its organization, the tenant and the bundle must all agree.
+// V1 allows ONE add-on per campaign (unique on campaign_id); allowing several
+// later means dropping that one index, not a new model.
+model CampaignAddOn {
+  id          String   @id @default(uuid())
+  business_id String
+  /// The campaign's organization (FundraiserCampaign.customer_id).
+  customer_id String
+  campaign_id String
+  bundle_id   String
+  created_at  DateTime @default(now())
+  /// Who assigned it (a tenant user id), when known.
+  created_by  String?
+
+  business     Business           @relation("BusinessCampaignAddOns", fields: [business_id], references: [id], onDelete: Cascade)
+  organization Customer           @relation("OrganizationCampaignAddOns", fields: [business_id, customer_id], references: [business_id, id], onDelete: Cascade)
+  campaign     FundraiserCampaign @relation(fields: [customer_id, campaign_id], references: [customer_id, id], onDelete: Cascade)
+  // Restrict: an assigned add-on bundle cannot be deleted out from under a campaign.
+  bundle       Bundle             @relation(fields: [business_id, bundle_id], references: [business_id, id], onDelete: Restrict)
+
+  @@unique([campaign_id], map: "campaign_add_ons_one_per_campaign")
+  @@index([bundle_id], map: "campaign_add_ons_bundle_id_idx")
+  @@map("campaign_add_ons")
 }
 
 enum SupporterConsentChannel {

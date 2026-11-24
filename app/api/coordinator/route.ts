@@ -38,6 +38,17 @@ import { customerFacingBusinessName } from '@/lib/tenantBrand';
 import { resolveMaterialBundles, groupMaterialMenus } from '@/lib/coordinatorMaterialBundles';
 import { hasInvalidOrderQuantity } from '@/lib/orderQuantity';
 import { SUPPORTER_ORDER_SELECT, toSupporterOrder } from '@/lib/coordinatorSupporterOrders';
+// FR-SUPPORTER-ADDON-UPSELL-1 (S1): the same main-vs-add-on rules as the supporter order route.
+import {
+    ADDON_CHANGED_MESSAGE,
+    assertCampaignAddOnUnchanged,
+    classifyFundraiserOrderLines,
+    isAddOnChanged,
+    loadCampaignAddOnAuthority,
+    loadOrderBundleFacts,
+    orderLinesNeedAddOnAuthority,
+} from '@/lib/campaignAddOns';
+import { lockCampaignSelection } from '@/lib/campaignSelectionLock';
 import {
     CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT,
     assignedCoordinatorFirstName,
@@ -530,6 +541,34 @@ export async function POST(req: Request) {
             .map((item: any) => item.bundleId || item.id)
             .filter(Boolean);
 
+        // ── FR-SUPPORTER-ADDON-UPSELL-1 (S1): main lines vs the campaign's add-on ──
+        //
+        // A paper / manual order obeys the SAME rules as a supporter's own order
+        // (lib/campaignAddOns.ts): no 'manual_upsell' sentinel; an add-on-typed
+        // bundle only when it is this campaign's assigned add-on, on one line, and
+        // beside at least one meal bundle (Serves 5 or Serves 2 alike). What the
+        // paper form said is irrelevant — the server decides each line's role.
+        const lineBundleIds: Array<string | null> = items.map((item: any) => {
+            const id = item?.bundleId || item?.id;
+            return typeof id === 'string' ? id : null;
+        });
+        const bundleFacts = await loadOrderBundleFacts(prisma, businessId, bundleIds);
+        const addOnAuthority = orderLinesNeedAddOnAuthority(lineBundleIds, bundleFacts)
+            ? await loadCampaignAddOnAuthority(prisma, { campaignId: campaign.id, businessId })
+            : null;
+        const lineRoles = classifyFundraiserOrderLines({
+            lineBundleIds,
+            isCampaignOrder: true,
+            bundleFacts,
+            authorizedAddOn: addOnAuthority,
+        });
+        if (!lineRoles.ok) {
+            return NextResponse.json({ error: lineRoles.error, code: lineRoles.code }, { status: lineRoles.status });
+        }
+        const addOnBundleIdSet = new Set(lineRoles.addOnBundleIds);
+        // The campaign lineup governs MAIN lines only; the add-on was authorized above.
+        const mainBundleIds = bundleIds.filter((id: string) => !addOnBundleIdSet.has(id));
+
         // CB-5: Campaign-level bundle eligibility enforcement.
         // Must run BEFORE buildBundlePriceMap, order creation, or any side effect.
         // Derives bundle_selection_status from the server-trusted campaign object.
@@ -537,7 +576,7 @@ export async function POST(req: Request) {
             campaign,
             businessId
         );
-        const eligibility = validateBundleEligibility(bundleMode, bundleIds);
+        const eligibility = validateBundleEligibility(bundleMode, mainBundleIds);
         if (!eligibility.ok) {
             return NextResponse.json({ error: eligibility.error }, { status: eligibility.status });
         }
@@ -567,7 +606,7 @@ export async function POST(req: Request) {
         // Resolve each item's price from DB — reject if any bundle is missing
         let resolvedItems: any[];
         try {
-            resolvedItems = items.map((item: any) => {
+            resolvedItems = items.map((item: any, index: number) => {
                 const bundleId = item.bundleId || item.id;
                 const price = bundlePriceMap.get(bundleId);
                 const name = bundleNameMap.get(bundleId);
@@ -582,6 +621,8 @@ export async function POST(req: Request) {
                     serverPrice: price,
                     serverName: name || null,
                     bundleId,
+                    // FR-SUPPORTER-ADDON-UPSELL-1: server-decided, never from the request.
+                    itemRole: lineRoles.roles[index],
                 };
             });
         } catch (validationErr: any) {
@@ -614,44 +655,89 @@ export async function POST(req: Request) {
         const normalizedEmail = normalizeSupporterEmail(email);
 
         // 3. Create Order with server-validated prices
-        const order = await prisma.order.create({
-            data: {
-                external_id: `fundraiser-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                source: 'fundraiser',
-                customer_name: customerName,
-                participant_name: participantName,
-                status: 'fundraiser_hold',
-                total_amount: serverTotal,
-                // FR-TAX-CORRECTNESS-1: frozen alongside the total, so closeout
-                // sums what was actually charged instead of re-deriving it.
-                tax_amount: orderTax.taxAmount,
-                delivery_address: deliveryAddress,
-                business_id: businessId,
-                customer_id: campaign.customer_id,
-                campaign_id: campaign.id,
-                phone: phone || null,
-                email: normalizedEmail || null,
-                items: {
-                    create: resolvedItems.map((item: any) => ({
-                        bundle_id: item.bundleId,
-                        quantity: item.quantity,
-                        variant_size: resolveSoldVariantSize(bundleTierMap.get(item.bundleId), item.serving_tier),
-                        item_name: item.serverName || item.name || null,
-                        unit_price: item.serverPrice
-                    }))
+        const writeOrder = async (db: typeof prisma) => {
+            const created = await db.order.create({
+                data: {
+                    external_id: `fundraiser-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                    source: 'fundraiser',
+                    customer_name: customerName,
+                    participant_name: participantName,
+                    status: 'fundraiser_hold',
+                    total_amount: serverTotal,
+                    // FR-TAX-CORRECTNESS-1: frozen alongside the total, so closeout
+                    // sums what was actually charged instead of re-deriving it.
+                    tax_amount: orderTax.taxAmount,
+                    delivery_address: deliveryAddress,
+                    business_id: businessId,
+                    customer_id: campaign.customer_id,
+                    campaign_id: campaign.id,
+                    phone: phone || null,
+                    email: normalizedEmail || null,
+                    items: {
+                        create: resolvedItems.map((item: any) => ({
+                            bundle_id: item.bundleId,
+                            quantity: item.quantity,
+                            variant_size: resolveSoldVariantSize(bundleTierMap.get(item.bundleId), item.serving_tier),
+                            item_name: item.serverName || item.name || null,
+                            unit_price: item.serverPrice,
+                            // FR-SUPPORTER-ADDON-UPSELL-1: the historical role snapshot.
+                            ...({ item_role: item.itemRole } as {}),
+                        }))
+                    }
                 }
-            }
-        });
+            });
 
-        // 4. Update campaign total sales with server-validated total
-        await prisma.fundraiserCampaign.update({
-            where: { id: campaign.id },
-            data: {
-                total_sales: {
-                    increment: serverTotal
+            // 4. Update campaign total sales with server-validated total
+            await db.fundraiserCampaign.update({
+                where: { id: campaign.id },
+                data: {
+                    total_sales: {
+                        increment: serverTotal
+                    }
                 }
+            });
+            return created;
+        };
+
+        // FR-SUPPORTER-ADDON-UPSELL-1: an order carrying the add-on is written under
+        // the campaign lock, after rechecking — exactly as the supporter route does —
+        // that the campaign is still open and its add-on is still the one accepted
+        // above. An order without one takes the unchanged path.
+        if (lineRoles.addOnBundleIds.length > 0) {
+            let addOnOrder: any;
+            try {
+                addOnOrder = await prisma.$transaction(async (tx) => {
+                    await lockCampaignSelection(tx, campaign.id);
+                    const current = await tx.fundraiserCampaign.findUnique({
+                        where: { id: campaign.id },
+                        select: { closed_at: true, status: true },
+                    });
+                    if (!current || isCampaignClosed(current)) {
+                        throw Object.assign(new Error('CAMPAIGN_CLOSED'), { isCampaignClosedRecheck: true });
+                    }
+                    await assertCampaignAddOnUnchanged(tx, {
+                        campaignId: campaign.id,
+                        businessId,
+                        expectedBundleIds: lineRoles.addOnBundleIds,
+                    });
+                    return writeOrder(tx as typeof prisma);
+                });
+            } catch (txErr: any) {
+                if (isAddOnChanged(txErr)) {
+                    return NextResponse.json({ error: ADDON_CHANGED_MESSAGE, code: 'ADDON_CHANGED' }, { status: 409 });
+                }
+                if (txErr?.isCampaignClosedRecheck === true) {
+                    return NextResponse.json(
+                        { error: 'Campaign is closed. Contact the organizer to add a late order.' },
+                        { status: 400 }
+                    );
+                }
+                throw txErr;
             }
-        });
+            return NextResponse.json(addOnOrder);
+        }
+
+        const order = await writeOrder(prisma);
 
         return NextResponse.json(order);
 

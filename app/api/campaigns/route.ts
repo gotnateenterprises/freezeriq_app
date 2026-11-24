@@ -880,6 +880,8 @@ export async function GET(req: Request) {
                                 select: {
                                     quantity: true,
                                     variant_size: true,
+                                    // FR-SUPPORTER-ADDON-UPSELL-1: the line's goal role.
+                                    item_role: true,
                                     bundle: { select: { serving_tier: true } }
                                 }
                             }
@@ -957,6 +959,8 @@ export async function GET(req: Request) {
                                     quantity: Number(i.quantity) || 0,
                                     variant_size: i.variant_size,
                                     serving_tier: i.bundle?.serving_tier ?? null,
+                                    // FR-SUPPORTER-ADDON-UPSELL-1: an add-on line counts 0.
+                                    item_role: i.item_role,
                                 }))
                             ),
                             0

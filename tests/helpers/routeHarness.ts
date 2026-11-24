@@ -95,6 +95,10 @@ const MODELS = [
     // SUPPORTER-CONSENT-1: the public order route records supporter permission inside its
     // transaction, and the Previous Supporters authority reads it.
     'supporterContactConsent',
+    // FR-SUPPORTER-ADDON-UPSELL-1: the campaign add-on authority (lib/campaignAddOns.ts), read by
+    // every fundraiser order path when a line is an add-on; and the storefront config the
+    // storefront checkout route reads before its add-on refusal.
+    'campaignAddOn', 'storefrontConfig',
 ];
 
 const METHODS = [

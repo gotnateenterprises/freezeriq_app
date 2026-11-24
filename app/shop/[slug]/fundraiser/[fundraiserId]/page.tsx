@@ -234,7 +234,7 @@ async function getData(slug: string, fundraiserId: string) {
     let orderItems: any[] = [];
     if (orderIds.length > 0) {
         orderItems = await prisma.$queryRaw`
-            SELECT oi.order_id, oi.quantity, oi.variant_size,
+            SELECT oi.order_id, oi.quantity, oi.variant_size, oi.item_role,
                    b.serving_tier
             FROM order_items oi
             LEFT JOIN bundles b ON oi.bundle_id = b.id
@@ -242,7 +242,9 @@ async function getData(slug: string, fundraiserId: string) {
         `;
     }
 
-    // Group items by order for the shared metric utility
+    // Group items by order for the shared metric utility.
+    // FR-SUPPORTER-ADDON-UPSELL-1: item_role travels with each line so the shared
+    // utility gives an add-on line 0 bundle units.
     const ordersWithItems = orders.map((o: any) => ({
         total_amount: o.total_amount,
         items: orderItems
@@ -251,6 +253,7 @@ async function getData(slug: string, fundraiserId: string) {
                 quantity: Number(oi.quantity) || 0,
                 variant_size: oi.variant_size,
                 serving_tier: oi.serving_tier,
+                item_role: oi.item_role,
             })),
     }));
 
