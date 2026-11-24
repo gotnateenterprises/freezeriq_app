@@ -83,7 +83,10 @@ describe('FR-SHARE-COPY-1 addendum · the campaign\'s own percentage is used, ne
         const raisedBlock = metrics.slice(metrics.indexOf('const raisedAmount ='), metrics.indexOf('return {', metrics.indexOf('const raisedAmount =')));
         expect(raisedBlock).not.toMatch(/\b20\b/);
         expect(raisedBlock).not.toMatch(/ESTIMATED_FUNDRAISER_ORG_SHARE/);
-        expect(raisedBlock).toContain('organizationShareAmount(dollarSales, Number(orgSharePercent))');
+        // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S2): the campaign's own percentage now applies to meal
+        // sales (dollarSales − add-on sales; equal to dollarSales without an add-on) and the add-on's recorded
+        // share is added. Still the campaign's own value; still no hardcoded 20.
+        expect(raisedBlock).toContain('organizationShareAmount(dollarSales - addOnGross, Number(orgSharePercent))');
     });
 
     it('7. the portal passes THIS campaign\'s own org_share_percent, not a constant', () => {

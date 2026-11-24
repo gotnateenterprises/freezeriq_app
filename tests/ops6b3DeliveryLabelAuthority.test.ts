@@ -296,6 +296,8 @@ describe('PRESERVATION', () => {
             '20261119120000_supporter_consent_1',
             // FR-SUPPORTER-ADDON-UPSELL-1 S1 (owner-authorized, additive): bundle_type, item_role, campaign_add_ons.
             '20261123120000_supporter_addon_s1',
+            // FR-SUPPORTER-ADDON-UPSELL-1 S2 (owner-authorized, additive): add-on share tiers + earned add-on share.
+            '20261124120000_supporter_addon_s2',
         ]);
     });
 });

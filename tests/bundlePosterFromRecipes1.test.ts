@@ -714,8 +714,13 @@ describe('the bundle page and the files this task must not touch', () => {
     // BundleEditor.tsx byte-identical to Production; the follow-on task adds exactly one import and one
     // listener (with its comment) so a published poster shows in the editor and survives Save Bundle.
     // Removing exactly those lines must give back the Production file.
+    // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S2, owner-approved 2026-11-24): S2 adds the Meal /
+    // Fundraiser add-on choice to the editor. What this pin protects still holds as HISTORY — through S1
+    // (4f93b3a) the file was Production 29b1f27 plus only the approved image listener — and the listener is
+    // still present today. tests/supporterAddOnS2.test.ts pins what S2 changed.
     it('components/BundleEditor.tsx is Production 29b1f27 plus only the approved image listener', () => {
-        const src = read('components/BundleEditor.tsx').replace(/\r\n/g, '\n');
+        const current = read('components/BundleEditor.tsx').replace(/\r\n/g, '\n');
+        const src = require('child_process').execSync('git show 4f93b3a:components/BundleEditor.tsx', { cwd: ROOT, encoding: 'utf8' }).replace(/\r\n/g, '\n');
         const approved = [
             "import { useBundleImagePublished } from '@/lib/bundles/bundleImageEvents';\n",
             '\n    // BUNDLE-POSTER-USE-AS-IMAGE-1. "Use as Bundle Image" in the poster panel below has already SAVED\n'
@@ -726,6 +731,7 @@ describe('the bundle page and the files this task must not touch', () => {
         let base = src;
         for (const piece of approved) {
             expect(base.split(piece)).toHaveLength(2);
+            expect(current.split(piece)).toHaveLength(2);
             base = base.replace(piece, '');
         }
         expect(crypto.createHash('sha256').update(base).digest('hex')).toBe('1671ce8c9bcce5963c8e930107a372e261f13c8aef8a57a512e9f70f16cc178d');

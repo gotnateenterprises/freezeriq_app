@@ -245,7 +245,14 @@ describe('GUARDS-1A.1 · 8–10. the false-start rule and every live classificat
         const file = 'app/api/campaigns/[id]/closeout/route.ts';
         const then = execFileSync('git', ['--literal-pathspecs', 'show', `588c547713552c311f5fe17b4e2e7cd91494f089:${file}`],
             { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
-        expect([file, emit(read(file)) === emit(then)]).toEqual([file, true]);
+        // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S2, owner-approved 2026-11-24): S2 changes the closeout
+        // CODE — the meal share now applies to meal sales and the add-on's recorded, tiered share is added. The
+        // guarantee this pin made still holds as HISTORY: through S1 (4f93b3a) the code was identical to
+        // 588c547. tests/supporterAddOnS2.test.ts pins the S2 behaviour (and that a campaign without an
+        // add-on closes exactly as before).
+        const throughS1 = execFileSync('git', ['--literal-pathspecs', 'show', `4f93b3a:${file}`],
+            { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+        expect([file, emit(throughS1) === emit(then)]).toEqual([file, true]);
     });
 });
 

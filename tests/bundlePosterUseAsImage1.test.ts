@@ -533,8 +533,7 @@ describe('16 · files this task must not touch are byte-identical to Production 
         'app/api/public/tenant/[slug]/route.ts': '39b29aa51f384f1fe158f9bb52ca938d554c070dcf3daf030017b01d5a9c531d',
         'app/api/coordinator/bundle-selection/route.ts': '2607289a537443271e10d4589f8052783986d158263427ec8425b3f1d2c3d301',
         // the existing bundle write paths and media storage, reused not changed
-        'app/api/bundles/[id]/route.ts': '55aec66a7613e620cc9640831fdfa2743082c945042620a2a18fad846ae80814',
-        'app/api/bundles/route.ts': 'bc7f967232cd1869d0e3f6c63906d620428aa11bcc9c221c4d511e4ad60b5b22',
+        // (app/api/bundles/[id]/route.ts and app/api/bundles/route.ts — SUPERSEDED PINS, see below.)
         'app/api/bundles/upload-image/route.ts': 'b67695f29111eabcce9176fb35791d07cb6a5e19084bbc6c62138f80a8302f16',
         'lib/bundleUpdate.ts': '4199ce3916d75af1d3040a0aec15f58f6393455babd104f38f50707e565ef0e2',
         'lib/s3.ts': 'c15bbb9f6fe5cef32efc7bc53ee0ddab832fcf55dc503f25c4842c184d729bde',
@@ -564,12 +563,17 @@ describe('16 · files this task must not touch are byte-identical to Production 
     // FR-SUPPORTER-ADDON-UPSELL-1 S1 (owner-approved 2026-11-23) adds two more: the order page's
     // progress query and the public scoreboard route now carry each line's item_role (an add-on line
     // counts 0 bundle units), so their byte pins become history checks too.
+    // FR-SUPPORTER-ADDON-UPSELL-1 S2 (owner-approved 2026-11-24) adds two more: the bundle create and
+    // update routes now accept the Meal / Fundraiser add-on type (lib/bundleTypeRules.ts). The poster work
+    // still never touched them; tests/supporterAddOnS2.test.ts pins what S2 changed.
     it.each([
         'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx',
         'lib/generateFlyer.ts',
         'prisma/schema.prisma',
         'app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx',
         'app/api/fundraiser/[token]/route.ts',
+        'app/api/bundles/[id]/route.ts',
+        'app/api/bundles/route.ts',
     ])('%s was not changed by the poster releases (29b1f27..7c9c048)', (rel) => {
         const out = require('child_process').execSync(`git diff --name-only 29b1f27 7c9c048 -- "${rel}"`, { cwd: ROOT, encoding: 'utf8' });
         expect(out.trim()).toBe('');

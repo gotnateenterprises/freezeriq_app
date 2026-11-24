@@ -233,9 +233,13 @@ describe('GUARD 1 · the closeout route, executed', () => {
         const { status, body } = await close({ applyFoodTax: true });
         expect(status).toBe(200);
         expect(body).toMatchObject({ invoice_id: 'inv-new', invoice_status: 'DRAFT', invoice_required: true, settlement_total: 2065 });
+        // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 S2): the response also reports the meal share and the add-on's
+        // earned share separately. With no add-on they are the whole gross / whole share and zero — the money
+        // is exactly what it was.
         expect(body.financials).toEqual({
             gross_sales: 2065, org_share_percent: 20, organization_amount: 413, base_remit: 1652,
             tax_applied: true, tax_rate_percent: 1, tax_amount: 20.65, total_due: 1672.65,
+            main_gross_sales: 2065, main_organization_amount: 413, add_on_gross_sales: 0, add_on_organization_amount: 0,
         });
         const created = w.state.created[0];
         expect(created.status).toBe('DRAFT');

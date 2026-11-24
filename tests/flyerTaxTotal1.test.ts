@@ -318,7 +318,7 @@ describe('I · the tax note shows only when tax applies, with the campaign\'s ow
 describe('J · supporter checkout and the order page are untouched', () => {
     it.each([
         'lib/fundraiserTax.ts',
-        'lib/fundraiserCloseoutMath.ts',
+        // (lib/fundraiserCloseoutMath.ts — SUPERSEDED PIN (S2), see the history check below.)
         // (app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx — SUPERSEDED PIN, see the history check below.)
         'lib/pricing.ts',
         'lib/coordinatorMaterialBundles.ts',
@@ -339,6 +339,9 @@ describe('J · supporter checkout and the order page are untouched', () => {
         'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx',
         'prisma/schema.prisma',
         'app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx',
+        // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S2, owner-approved 2026-11-24): the closeout money
+        // model now adds the add-on's recorded, tiered share to the meal share; FLYER-TAX-TOTAL-1 never touched it.
+        'lib/fundraiserCloseoutMath.ts',
     ])('%s was not changed by FLYER-TAX-TOTAL-1 (c4e528b..b1af1d7)', (p) => {
         expect(git(`diff --name-only c4e528b b1af1d7 -- "${p}"`).trim()).toBe('');
     });

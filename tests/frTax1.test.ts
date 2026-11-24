@@ -533,7 +533,11 @@ describe('27-28. tracker and invoice remain truthful under the confirmed NET bas
         expect(math).not.toMatch(/grossSales \* rate \/ 100/);
         expect(math).not.toMatch(/grossSales \* FOOD_TAX_RATE_PERCENT \/ 100/);
         // The organization's share is still taken on PRE-TAX gross.
-        expect(math).toMatch(/grossSales \* orgSharePercent \/ 100/);
+        // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S2): the campaign percentage now applies to the MEAL part
+        // of pre-tax gross (mainGrossSales = grossSales − the add-on's sales; equal to grossSales without an
+        // add-on), and the add-on's recorded share is added. Still pre-tax; still no rate-times-base tax.
+        expect(math).toMatch(/mainGrossSales \* orgSharePercent \/ 100/);
+        expect(math).toMatch(/const mainGrossSales = roundCents\(grossSales - addOnGrossSales\);/);
     });
 
     it('28b. the confirmed base is recorded in code, not left as folklore', () => {

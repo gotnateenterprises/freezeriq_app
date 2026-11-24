@@ -414,7 +414,20 @@ describe('C. closeout modal wiring (app/fundraisers/page.tsx)', () => {
         expect(now).toContain(GUARDS_1_CHOICE);
         const start = '{/* Result state — success */}';
         const was = baseline.slice(baseline.indexOf(start), baseline.indexOf('{/* Result state — error */}')).trim();
-        const is = now.slice(now.indexOf(start), now.indexOf('{/* CLOSEOUT-BUNDLE-SUMMARY-1')).trim()
+        // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S2, owner-approved 2026-11-24): when a campaign sold its
+        // supporter add-on, the result also shows the meal share and the add-on's earned share. S2 wraps the
+        // ORIGINAL "Organization earned" line, byte-for-byte, as the no-add-on branch — so with S2's branch
+        // removed the section must still equal the baseline.
+        const S2_OPEN = '{(closeoutResult.financials.add_on_gross_sales ?? 0) > 0 ? (';
+        const stripS2 = (text: string) => {
+            const lines = text.split('\n');
+            const a = lines.findIndex((l) => l.trim() === S2_OPEN);
+            if (a < 0) return text;
+            const b = lines.findIndex((l, i) => i > a && l.trim() === ') : (');
+            const c = lines.findIndex((l, i) => i > b && l.trim() === ')}');
+            return [...lines.slice(0, a), ...lines.slice(b + 1, c), ...lines.slice(c + 1)].join('\n');
+        };
+        const is = stripS2(now.slice(now.indexOf(start), now.indexOf('{/* CLOSEOUT-BUNDLE-SUMMARY-1')).trim())
             .replace(GUARDS_1_CHOICE, GUARDS_1_RELEASED);
         expect(was.length).toBeGreaterThan(1000);
         expect(is).toBe(was);

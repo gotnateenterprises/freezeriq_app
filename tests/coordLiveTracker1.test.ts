@@ -296,7 +296,9 @@ describe('COORD-LIVE-TRACKER-1: metrics — reused, not redefined', () => {
         const src = read(PORTAL_PAGE);
         const matches = src.match(/computeFundraiserProgress\(/g) || [];
         expect(matches.length).toBe(1);
-        expect(src).toMatch(/const metrics = computeFundraiserProgress\(campaign\.bundle_goal, campaign\.total_sales, campaign\.orders \|\| \[\], campaign\.org_share_percent\)/);
+        // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S2): the one call site now spans lines and passes the
+        // add-on's recorded money as a 5th argument (null without an add-on). The first four are unchanged.
+        expect(src).toMatch(/const metrics = computeFundraiserProgress\(\s*campaign\.bundle_goal, campaign\.total_sales, campaign\.orders \|\| \[\], campaign\.org_share_percent,\s*campaign\.addOn \? \{ grossSales: campaign\.addOn\.grossSales, earnedShare: campaign\.addOn\.earnedShare \} : null,\s*\);/);
     });
 
     it('this phase introduces no second weighted-bundle or gross/raised calculation', () => {

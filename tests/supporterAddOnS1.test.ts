@@ -253,10 +253,14 @@ describe('1–5 · schema and migration: additive, defaults, database-enforced i
         for (const s of statements) {
             expect(s).toMatch(/^(ALTER TABLE "(bundles|order_items)" ADD COLUMN|CREATE TABLE "campaign_add_ons"|CREATE (UNIQUE )?INDEX "(campaign_add_ons_|bundles_business_id_id_key)|ALTER TABLE "(campaign_add_ons|bundles|order_items)" ADD CONSTRAINT)/);
         }
-        // It is the newest migration, and the only one this task adds.
+        // It directly follows SUPPORTER-CONSENT-1, and it is the only migration S1 adds.
+        // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S2): this said "the newest migration". S2 adds its own
+        // approved, additive 20261124120000_supporter_addon_s2 after it — named here explicitly, so any
+        // other later migration still fails this test.
         const dirs = fs.readdirSync(path.join(ROOT, 'prisma/migrations')).filter((d) => /^\d{14}_/.test(d)).sort();
-        expect(dirs[dirs.length - 1]).toBe('20261123120000_supporter_addon_s1');
-        expect(dirs[dirs.length - 2]).toBe('20261119120000_supporter_consent_1');
+        const s1 = dirs.indexOf('20261123120000_supporter_addon_s1');
+        expect(dirs[s1 - 1]).toBe('20261119120000_supporter_consent_1');
+        expect(dirs.slice(s1 + 1)).toEqual(['20261124120000_supporter_addon_s2']);
     });
 
     it('the add-on is NOT a CampaignBundle and serving_tier is not its classifier', () => {
@@ -718,7 +722,9 @@ describe('20–22, 25, 34 · goal units: the role decides; money still counts', 
         'lib/fundraiserMetrics.ts': { must: [/if \(isAddOnItemRole\(item\.item_role\)\) return sum;/], why: 'the rule itself' },
         'app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx': { must: [/oi\.item_role/, /item_role: oi\.item_role/], why: 'public progress (raw SQL)' },
         'app/api/campaigns/route.ts': { must: [/item_role: true/, /item_role: i\.item_role/], why: 'tenant CRM weighted_bundles_sold + health pace' },
-        'app/coordinator/portal/page.tsx': { must: [/computeFundraiserProgress\(campaign\.bundle_goal, campaign\.total_sales, campaign\.orders/], why: 'coordinator progress: orders come from SUPPORTER_ORDER_SELECT, which carries item_role' },
+        // SUPERSEDED PIN (S2): the call now spans lines (S2 passes the add-on's recorded money as a 5th
+        // argument), so the pattern allows whitespace after the parenthesis. Same three arguments first.
+        'app/coordinator/portal/page.tsx': { must: [/computeFundraiserProgress\(\s*campaign\.bundle_goal, campaign\.total_sales, campaign\.orders/], why: 'coordinator progress: orders come from SUPPORTER_ORDER_SELECT, which carries item_role' },
         'app/fundraiser/[token]/ScoreboardClient.tsx': { must: [/computeFundraiserProgress\(campaign/], why: 'scoreboard: the route returns main lines only' },
         'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx': { must: [/computeBundleUnitsFromItems\(/], why: 'thank-you count from the page\'s own meal lines; the add-on card is S4' },
         'lib/supporterBundleDetail.ts': { must: [/getBundleUnitWeight\(/], why: 'a meal bundle card\'s own goal credit; add-on display is S4' },
@@ -769,11 +775,21 @@ describe('boundaries · one authority, nothing else moved', () => {
         'lib/campaignOrderBundles.ts', 'lib/campaignBundleSelection.ts', 'lib/campaignBundleOverride.ts',
         'app/api/coordinator/bundle-selection/route.ts', 'lib/campaignSelectionLock.ts', 'lib/pricing.ts',
         'lib/serving_multipliers.ts', 'lib/kitchen_engine.ts', 'lib/fundraiserTax.ts', 'lib/fundraiserOrgShare.ts',
-        'lib/fundraiserCloseoutMath.ts', 'lib/orderItemTier.ts', 'lib/publicFundraiserPayload.ts',
-        'components/BundleEditor.tsx', 'app/api/campaigns/[id]/closeout/route.ts', 'lib/quickbooks/invoicePayload.ts',
+        'lib/orderItemTier.ts', 'lib/publicFundraiserPayload.ts', 'lib/quickbooks/invoicePayload.ts',
         'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx', 'lib/generateFlyer.ts', 'lib/email.ts',
     ])('%s is byte-identical to Production e9f0f4a', (rel) => {
         const out = execSync(`git diff --name-only e9f0f4a -- "${rel}"`, { cwd: ROOT, encoding: 'utf8' });
+        expect(out.trim()).toBe('');
+    });
+
+    // SUPERSEDED PINS (FR-SUPPORTER-ADDON-UPSELL-1 S2, owner-approved): S2 deliberately changes these three
+    // — the closeout money model gains the add-on's recorded share, and the Bundle Editor gains the
+    // Meal / Fundraiser add-on choice. What S1 promised still holds as history: S1 itself (e9f0f4a..4f93b3a)
+    // did not touch them. tests/supporterAddOnS2.test.ts pins what S2 changed.
+    it.each([
+        'lib/fundraiserCloseoutMath.ts', 'components/BundleEditor.tsx', 'app/api/campaigns/[id]/closeout/route.ts',
+    ])('%s was not changed by S1 (e9f0f4a..4f93b3a)', (rel) => {
+        const out = execSync(`git diff --name-only e9f0f4a 4f93b3a -- "${rel}"`, { cwd: ROOT, encoding: 'utf8' });
         expect(out.trim()).toBe('');
     });
 });

@@ -362,7 +362,8 @@ describe('this patch changed presentation only', () => {
         //       or row changes, no default, no backfill. Applying it to Production is gated on
         //       owner review and must precede the code built from it.
         // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 S1, owner-approved 2026-11-23): one more additive migration.
-        expect(migrations).toHaveLength(32);
+        // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 S2, owner-approved 2026-11-24): and one more additive migration.
+        expect(migrations).toHaveLength(33);
         expect(migrations[15]).toBe('20260823010000_fr_acceptance_2a2_human_followup');
         expect(migrations[16]).toBe('20260825000000_inv_d_settlement_truth');
         expect(migrations[17]).toBe('20260826000000_m18_outreach_batch_campaign_ownership');
@@ -385,6 +386,8 @@ describe('this patch changed presentation only', () => {
         // FR-SUPPORTER-ADDON-UPSELL-1 S1 (owner-approved 2026-11-23): bundles.bundle_type and
         // order_items.item_role (constant defaults, no backfill) and the new campaign_add_ons table.
         expect(migrations[31]).toBe('20261123120000_supporter_addon_s1');
+        // FR-SUPPORTER-ADDON-UPSELL-1 S2 (owner-approved 2026-11-24): the add-on share tiers and earned share.
+        expect(migrations[32]).toBe('20261124120000_supporter_addon_s2');
     });
 
     it('the acknowledgement and follow-up contracts are untouched', () => {

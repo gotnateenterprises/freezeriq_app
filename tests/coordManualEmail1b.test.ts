@@ -111,6 +111,9 @@ describe('1. schema and migration', () => {
             // FR-SUPPORTER-ADDON-UPSELL-1 S1: bundles.bundle_type, order_items.item_role (both with
             // constant defaults) and the campaign_add_ons table. Additive; approved by the owner 2026-11-23.
             '20261123120000_supporter_addon_s1',
+            // FR-SUPPORTER-ADDON-UPSELL-1 S2: the add-on share tiers and the per-order earned add-on share. Two
+            // new tables plus CHECKs; additive; authorized by the owner's S2 brief.
+            '20261124120000_supporter_addon_s2',
         ]);
     });
 });
