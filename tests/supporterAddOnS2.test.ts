@@ -378,7 +378,8 @@ describe('schema / migration · additive, relational, database-enforced', () => 
         // SUPERSEDED PIN (S3): S2's migration directly follows S1's, and only S3's approved one follows it.
         const i = dirs.indexOf('20261124120000_supporter_addon_s2');
         expect(dirs[i - 1]).toBe('20261123120000_supporter_addon_s1');
-        expect(dirs.slice(i + 1)).toEqual(['20261125120000_supporter_addon_s3']);
+        // SUPERSEDED PIN (S4, owner-approved 2026-11-24): then S4's approved share-display column.
+        expect(dirs.slice(i + 1)).toEqual(['20261125120000_supporter_addon_s3', '20261126120000_supporter_addon_s4']);
         const s1 = 'prisma/migrations/20261123120000_supporter_addon_s1/migration.sql';
         expect(R(s1)).toBe(atS1(s1));
     });
@@ -1056,14 +1057,17 @@ describe('boundaries · storefront, public supporter page, money and kitchen eng
     const unchangedFromS1 = [
         // 34 · the normal storefront
         'app/api/checkout/session/route.ts', 'app/api/public/tenant/[slug]/route.ts', 'lib/storefrontEligibility.ts', 'components/storefront/RoundOutRow.tsx',
-        // 35 · the public supporter page and scoreboard
-        'app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx', 'lib/publicFundraiserPayload.ts', 'app/api/fundraiser/[token]/route.ts',
+        // 35 · the public scoreboard. (The supporter page and its payload — SUPERSEDED PINS (S4): S4 is the
+        //  public add-on card; checked as history below.)
+        'app/api/fundraiser/[token]/route.ts',
         // money / kitchen / tax / status
         'lib/pricing.ts', 'lib/serving_multipliers.ts', 'lib/kitchen_engine.ts', 'lib/cost_engine.ts', 'lib/fundraiserTax.ts', 'lib/statusWorkflow.ts',
         'lib/fundraiserOrgShare.ts', 'lib/quickbooks/invoiceSend.ts',
         // (lib/quickbooks/invoicePayload.ts and app/invoices/page.tsx — SUPERSEDED PINS (S3): one stable
         //  "Fundraiser Organization Share" label; checked as history below.)
-        'app/api/orders/route.ts', 'lib/campaignAddOns.ts', 'lib/campaignSelectionLock.ts', 'lib/coordinatorSupporterOrders.ts',
+        'app/api/orders/route.ts', 'lib/campaignSelectionLock.ts', 'lib/coordinatorSupporterOrders.ts',
+        // (lib/campaignAddOns.ts — SUPERSEDED PIN (S4): one more select fragment, SHOW_SHARE_PERCENT_SELECT;
+        //  checked as history below.)
     ];
     it('these files are byte-identical to S1 (one git call, so a busy machine cannot flake it)', () => {
         const changed = execSync(`git diff --name-only ${S1_HEAD} -- ${unchangedFromS1.map((p) => `"${p}"`).join(' ')}`, { cwd: ROOT, encoding: 'utf8' })
@@ -1073,19 +1077,37 @@ describe('boundaries · storefront, public supporter page, money and kitchen eng
         for (const p of unchangedFromS1) expect(fs.existsSync(path.join(ROOT, p))).toBe(true);
     });
 
+    it('the S4-changed supporter page, payload and add-on rules were byte-identical to S1 through S3 (4f93b3a..b867ddf)', () => {
+        const changed = execSync(`git diff --name-only ${S1_HEAD} b867ddf -- "app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx" "lib/publicFundraiserPayload.ts" "lib/campaignAddOns.ts"`, { cwd: ROOT, encoding: 'utf8' }).trim();
+        expect(changed).toBe('');
+    });
+
     it('the S3-changed share labels were byte-identical to S1 through S2 (4f93b3a..e7c7f5d)', () => {
         const changed = execSync(`git diff --name-only ${S1_HEAD} e7c7f5d -- "lib/quickbooks/invoicePayload.ts" "app/invoices/page.tsx"`, { cwd: ROOT, encoding: 'utf8' }).trim();
         expect(changed).toBe('');
     });
 
-    it('35 · no public supporter surface reads the add-on yet (no card, no popup, no copy)', () => {
+    it('35 · no public supporter surface read the add-on through S3; S4 offers it through exactly the approved files', () => {
         const publicFiles = execSync('git ls-files -- "app/shop" "app/fundraiser" "components/fundraiser" "components/storefront" "app/api/public"', { cwd: ROOT, encoding: 'utf8' })
             .split('\n').filter((f) => /\.(ts|tsx)$/.test(f));
         expect(publicFiles.length).toBeGreaterThan(10);
+        // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S4, owner-approved 2026-11-24): S4 IS the public supporter
+        // card. Only the supporter page and its client read the add-on (through lib/publicCampaignAddOn.ts and
+        // lib/supporterAddOnOffer.ts); the storefront, the scoreboard and every other public file still do not.
+        const S4_PUBLIC_ADDON_READERS = new Set([
+            'app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx',
+            'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx',
+        ]);
         for (const f of publicFiles) {
             if (f === 'app/api/public/order/route.ts') continue; // the order WRITE path (rules + earnings only)
+            if (S4_PUBLIC_ADDON_READERS.has(f)) continue;
             const src = R(f);
             expect({ f, hit: /campaignAddOn|addOnShare|CampaignAddOn|Supporter Add-On/.test(src) }).toEqual({ f, hit: false });
+        }
+        // Through S3 none of them did.
+        for (const f of S4_PUBLIC_ADDON_READERS) {
+            const atS3 = execSync(`git show b867ddf:"${f}"`, { cwd: ROOT, encoding: 'utf8' });
+            expect({ f, hit: /campaignAddOn|addOnShare|CampaignAddOn|Supporter Add-On/.test(atS3) }).toEqual({ f, hit: false });
         }
         // The supporter order route gained ONE call — the earnings recorder — and nothing user-visible.
         const diff = execSync(`git diff ${S1_HEAD} -- app/api/public/order/route.ts`, { cwd: ROOT, encoding: 'utf8' });

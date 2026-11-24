@@ -257,9 +257,17 @@ describe('4. synced (sold) rows: OrderItem.variant_size snapshot still wins', ()
         // CALC-1: the snapshot's victory is proven on the tier channel.
         expect(body.servingTier).toBe('Serves 2');
         expect(body.servingTier).not.toBe('Serves 5');
-        // And the synced branch must not have queried bundle.findMany at all --
+        // And the synced branch must not have read any Bundle's TIER --
         // it never needs to, since it never re-derives from the Bundle table.
-        expect(mock.calls.filter(c => c.model === 'bundle' && c.method === 'findMany')).toHaveLength(0);
+        // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S4, owner-approved 2026-11-24): this said "no
+        // bundle.findMany at all". S4 reads each plan line's bundle TYPE and contents (never its tier) so an
+        // add-on's food is labelled "Add-On" instead of "Serves 5" (lib/planAddOnRows.ts). The guarantee is
+        // unchanged: no Bundle query on this path selects serving_tier, and the tier above is the snapshot's.
+        const bundleReads = mock.calls.filter(c => c.model === 'bundle' && c.method === 'findMany');
+        for (const c of bundleReads) {
+            expect(c.args?.select?.serving_tier).toBeUndefined();
+            expect(Object.keys(c.args?.select ?? {}).sort()).toEqual(['bundle_type', 'contents', 'id']);
+        }
     });
 
     it('a synced line with a genuinely legacy-null tier still falls to the documented family default (unchanged OPS-4 behavior)', async () => {

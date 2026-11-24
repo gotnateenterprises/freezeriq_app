@@ -462,7 +462,8 @@ describe('9 · schema and boundaries', () => {
             'ALTER TABLE "invoice_items" ADD CONSTRAINT "invoice_items_item_role_check"\n    CHECK ("item_role" IN (\'main\', \'addon\'))',
         ]);
         const dirs = fs.readdirSync(path.join(ROOT, 'prisma/migrations')).filter((d) => /^\d{14}_/.test(d)).sort();
-        expect(dirs.slice(-3)).toEqual(['20261123120000_supporter_addon_s1', '20261124120000_supporter_addon_s2', '20261125120000_supporter_addon_s3']);
+        // SUPERSEDED PIN (S4, owner-approved 2026-11-24): S4's approved share-display column follows S3's.
+        expect(dirs.slice(-4)).toEqual(['20261123120000_supporter_addon_s1', '20261124120000_supporter_addon_s2', '20261125120000_supporter_addon_s3', '20261126120000_supporter_addon_s4']);
         expect(R('prisma/schema.prisma')).toMatch(/model InvoiceItem \{[\s\S]*?item_role    String  @default\("main"\)/);
     });
     it('untouched by S3: public order route, supporter page, money/tax/kitchen engines, S1/S2 migrations', () => {
@@ -473,7 +474,17 @@ describe('9 · schema and boundaries', () => {
             'lib/campaignAddOns.ts', 'lib/campaignAddOnShare.ts', 'lib/quickbooks/invoiceSend.ts', 'app/api/coordinator/route.ts',
             'prisma/migrations/20261123120000_supporter_addon_s1/migration.sql', 'prisma/migrations/20261124120000_supporter_addon_s2/migration.sql',
         ];
-        const changed = execSync(`git diff --name-only ${S2_HEAD} -- ${files.map((f) => `"${f}"`).join(' ')}`, { cwd: ROOT, encoding: 'utf8' }).trim();
+        // SUPERSEDED PIN (S4, owner-approved 2026-11-24): S4 is the public supporter card, so the supporter page,
+        // its client and two add-on rule modules change in S4. S3 itself (S2_HEAD..b867ddf) changed none of these;
+        // the rest are still untouched today.
+        const changedInS3 = execSync(`git diff --name-only ${S2_HEAD} b867ddf -- ${files.map((f) => `"${f}"`).join(' ')}`, { cwd: ROOT, encoding: 'utf8' }).trim();
+        expect(changedInS3).toBe('');
+        const S4_APPROVED = new Set([
+            'app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx', 'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx',
+            'lib/campaignAddOns.ts', 'lib/campaignAddOnShare.ts',
+        ]);
+        const stillUntouched = files.filter((f) => !S4_APPROVED.has(f));
+        const changed = execSync(`git diff --name-only ${S2_HEAD} -- ${stillUntouched.map((f) => `"${f}"`).join(' ')}`, { cwd: ROOT, encoding: 'utf8' }).trim();
         expect(changed).toBe('');
         for (const f of files) expect(fs.existsSync(path.join(ROOT, f))).toBe(true);
     });
