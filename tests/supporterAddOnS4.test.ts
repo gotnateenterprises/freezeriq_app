@@ -857,7 +857,15 @@ describe('G. boundaries', () => {
         expect(changedByS4).toBe('');
         const changed = execSync(`git diff --name-only ${S3_HEAD} -- "app/api/coordinator" "components/coordinator" "app/coordinator"`, { cwd: ROOT, encoding: 'utf8' })
             .split('\n').map((s) => s.trim()).filter(Boolean).sort();
-        expect(changed).toEqual(['app/api/coordinator/route.ts', 'app/coordinator/portal/page.tsx', 'components/coordinator/AddOnShareCard.tsx']);
+        // SUPERSEDED PIN (FR-ADDON-LAUNCH-FLOW-1, owner-approved 2026-11-25): plus the coordinator SETUP step — the
+        // setup route and screen show the add-on offer and take the coordinator's answer, in a new section component.
+        // The manual add-on entry (coordinator route + portal page) is not touched by that release.
+        expect(changed).toEqual([
+            'app/api/coordinator/bundle-selection/route.ts', 'app/api/coordinator/route.ts', 'app/coordinator/portal/page.tsx',
+            'components/coordinator/AddOnOfferSection.tsx', 'components/coordinator/AddOnShareCard.tsx',
+            'components/coordinator/BundleSelectionStep.tsx',
+        ]);
+        expect(execSync('git diff --name-only 284b43f -- "app/api/coordinator/route.ts" "app/coordinator/portal/page.tsx" "components/coordinator/AddOnShareCard.tsx"', { cwd: ROOT, encoding: 'utf8' }).trim()).toBe('');
     });
 
     it('G7. (32) a public add-on line is described by the S3 rules exactly like a coordinator one', () => {
@@ -884,7 +892,8 @@ describe('G. boundaries', () => {
         expect(R('prisma/schema.prisma')).toMatch(/model CampaignAddOn \{[\s\S]*?show_share_percent Boolean @default\(false\)/);
         const dirs = fs.readdirSync(path.join(ROOT, 'prisma/migrations')).filter((d) => /^\d{14}_/.test(d)).sort();
         // SUPERSEDED PIN (B1/B2 remediation, owner-approved 2026-11-25): followed only by campaign_add_ons.removed_at.
-        expect(dirs.slice(-2)).toEqual(['20261126120000_supporter_addon_s4', '20261127120000_supporter_addon_b2_removed_at']);
+        // SUPERSEDED PIN (FR-ADDON-LAUNCH-FLOW-1 1B, owner-approved 2026-11-25): then the coordinator's add-on participation.
+        expect(dirs.slice(-3)).toEqual(['20261126120000_supporter_addon_s4', '20261127120000_supporter_addon_b2_removed_at', '20261128120000_supporter_addon_coordinator_choice']);
         const changed = execSync(`git diff --name-only ${S3_HEAD} -- "prisma/migrations/20261123120000_supporter_addon_s1" "prisma/migrations/20261124120000_supporter_addon_s2" "prisma/migrations/20261125120000_supporter_addon_s3"`, { cwd: ROOT, encoding: 'utf8' }).trim();
         expect(changed).toBe('');
     });

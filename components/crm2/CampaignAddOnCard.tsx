@@ -48,6 +48,11 @@ interface AddOnView {
         /** S4: show the share % on the supporter page (single-tier schedules only). */
         showSharePercent?: boolean;
         publicSupportPercent?: number | null;
+        /** FR-ADDON-LAUNCH-FLOW-1 (1B): the tenant's authorization and the coordinator's answer. */
+        offerMode?: 'included' | 'coordinator_choice';
+        coordinatorDecision?: 'accepted' | 'declined' | null;
+        coordinatorDecidedAt?: string | null;
+        offeredToSupporters?: boolean;
     };
     /** B2: a removed add-on — not offered — whose share schedule is kept and resumes when one is offered again. */
     removedAddOn?: null | {
@@ -80,6 +85,29 @@ const BTN = 'inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3.5
 const PRIMARY = 'inline-flex items-center justify-center gap-1.5 min-h-[44px] px-4 rounded-xl bg-indigo-600 text-xs font-black text-white hover:bg-indigo-700 transition-colors disabled:opacity-50';
 
 const money = (n: number) => `$${(Number(n) || 0).toFixed(2)}`;
+
+function shortDate(iso?: string | null): string | null {
+    if (!iso) return null;
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+/** FR-ADDON-LAUNCH-FLOW-1 (1B): where the coordinator's participation stands, in plain words. */
+export function coordinatorStatusLine(a: {
+    offerMode?: 'included' | 'coordinator_choice';
+    coordinatorDecision?: 'accepted' | 'declined' | null;
+    coordinatorDecidedAt?: string | null;
+}): string {
+    const when = shortDate(a.coordinatorDecidedAt);
+    const on = when ? ` on ${when}` : '';
+    if (a.offerMode === 'coordinator_choice') {
+        if (a.coordinatorDecision === 'accepted') return `The coordinator said yes${on} — supporters are offered it.`;
+        if (a.coordinatorDecision === 'declined') return `The coordinator said no thanks${on} — supporters aren't offered it.`;
+        return "Waiting for the coordinator's answer — supporters aren't offered it until they say yes.";
+    }
+    if (a.coordinatorDecision === 'declined') return `Included by you. The coordinator had said no thanks${on}.`;
+    return 'Supporters are offered it beside their meal bundles once ordering opens.';
+}
 
 let draftKey = 0;
 const toDraft = (tiers: TierRow[]): DraftTier[] =>
@@ -175,6 +203,23 @@ export function CampaignAddOnCard({ campaignId }: { campaignId: string }) {
     }
 
     const addOn = view.addOn;
+    const offerMode: 'included' | 'coordinator_choice' = addOn?.offerMode === 'coordinator_choice' ? 'coordinator_choice' : 'included';
+
+    // FR-ADDON-LAUNCH-FLOW-1 (1B): include it, or let the coordinator decide. Including one the coordinator
+    // declined is an explicit, confirmed override (owner decision D3); the server requires the same.
+    function chooseMode(next: 'included' | 'coordinator_choice') {
+        if (!addOn || next === offerMode) return;
+        if (next === 'included' && addOn.coordinatorDecision === 'declined') {
+            if (!window.confirm(`The coordinator chose not to offer ${addOn.name}. Include it in this fundraiser anyway? Supporters will be offered it.`)) return;
+            void send('PATCH', { offerMode: 'included', confirmOverrideDecline: true }, 'Add-on included in this fundraiser.');
+            return;
+        }
+        void send(
+            'PATCH',
+            { offerMode: next },
+            next === 'included' ? 'Add-on included in this fundraiser.' : 'The coordinator will decide during setup.',
+        );
+    }
     // The lock state for each draft row comes from the SAVED schedule: a row is locked only if the saved
     // tier with that start has been reached. New rows are always editable.
     const savedLock = new Map((addOn?.tiers ?? []).map((t) => [t.startingQuantity, t.lock]));
@@ -206,6 +251,43 @@ export function CampaignAddOnCard({ campaignId }: { campaignId: string }) {
                                 This bundle is turned off, so it can&apos;t be added to orders right now.
                             </p>
                         )}
+                        {/* FR-ADDON-LAUNCH-FLOW-1 (1B): who decides whether supporters are offered it. */}
+                        <div data-addon-offer-mode={offerMode} className="mt-2 space-y-1.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3">
+                            <p className="text-xs font-black text-slate-700 dark:text-slate-200">How it&apos;s offered</p>
+                            {editable ? (
+                                <div role="radiogroup" aria-label="How the add-on is offered" className="space-y-1">
+                                    <label className="flex items-start gap-2 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name={`addon-mode-${campaignId}`}
+                                            className="mt-0.5"
+                                            checked={offerMode === 'included'}
+                                            disabled={saving}
+                                            onChange={() => chooseMode('included')}
+                                        />
+                                        <span>Include it in this fundraiser</span>
+                                    </label>
+                                    <label className="flex items-start gap-2 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name={`addon-mode-${campaignId}`}
+                                            className="mt-0.5"
+                                            checked={offerMode === 'coordinator_choice'}
+                                            disabled={saving}
+                                            onChange={() => chooseMode('coordinator_choice')}
+                                        />
+                                        <span>Let the coordinator decide during setup</span>
+                                    </label>
+                                </div>
+                            ) : (
+                                <p className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                                    {offerMode === 'coordinator_choice' ? 'The coordinator decides during setup' : 'Included in this fundraiser'}
+                                </p>
+                            )}
+                            <p data-addon-coordinator-status="true" className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                                {coordinatorStatusLine(addOn)}
+                            </p>
+                        </div>
                     </div>
                 ) : (
                     <div className="space-y-1">

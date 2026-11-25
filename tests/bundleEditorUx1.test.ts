@@ -321,7 +321,13 @@ describe('E · scope: presentation only', () => {
     const diff = (paths: string) => execSync(`git diff --name-only ${RC} -- ${paths}`, { cwd: ROOT, encoding: 'utf8' }).trim();
 
     it('no API, schema or migration change; pricing, kitchen, inventory and campaign code untouched', () => {
-        expect(diff('app/api lib/bundleUpdate.ts lib/bundleTypeRules.ts prisma')).toBe('');
-        expect(diff('lib/pricing.ts lib/serving_multipliers.ts lib/kitchen_engine.ts lib/campaignAddOns.ts lib/campaignAddOnEarnings.ts lib/campaignAddOnShare.ts lib/ingestion')).toBe('');
+        // SUPERSEDED PIN (FR-ADDON-LAUNCH-FLOW-1 + INQUIRY-REPLY-EXTRA-1, owner-approved 2026-11-25): a LATER release
+        // changes add-on, coordinator and inquiry code. This cleanup's own guarantee is checked against its commit
+        // (284b43f on a419087): it changed none of these.
+        const own = (paths: string) => execSync(`git diff --name-only ${RC} 284b43f -- ${paths}`, { cwd: ROOT, encoding: 'utf8' }).trim();
+        expect(own('app/api lib/bundleUpdate.ts lib/bundleTypeRules.ts prisma')).toBe('');
+        expect(own('lib/pricing.ts lib/serving_multipliers.ts lib/kitchen_engine.ts lib/campaignAddOns.ts lib/campaignAddOnEarnings.ts lib/campaignAddOnShare.ts lib/ingestion')).toBe('');
+        // And the later release still leaves the bundle write paths, pricing, kitchen and ingestion alone.
+        expect(diff('app/api/bundles lib/bundleUpdate.ts lib/bundleTypeRules.ts lib/pricing.ts lib/serving_multipliers.ts lib/kitchen_engine.ts lib/campaignAddOnShare.ts lib/ingestion')).toBe('');
     });
 });

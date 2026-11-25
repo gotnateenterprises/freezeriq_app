@@ -6,7 +6,8 @@
  * looks exactly as it did before S4 — unless EVERY condition holds:
  *
  *   1. the campaign is orderable (the caller passes the page's own ordering decision);
- *   2. an assignment row exists for this campaign, in this tenant, and is not removed (B2);
+ *   2. an assignment row exists for this campaign, in this tenant, is not removed (B2), and is offered to
+ *      supporters — included by the tenant, or accepted by the coordinator (FR-ADDON-LAUNCH-FLOW-1 1B);
  *   3. its bundle is this tenant's, active, and typed 'addon';
  *   4. its price is a real amount above $0;
  *   5. it has at least one meal with a real name.
@@ -23,7 +24,7 @@
  * Never breaks the page: any failure is logged and treated as "no add-on".
  */
 
-import { ADD_ON_BUNDLE_TYPE, BUNDLE_TYPE_SELECT, REMOVED_AT_SELECT, SHOW_SHARE_PERCENT_SELECT, isOfferedAddOnRow, normalizeBundleType } from './campaignAddOns';
+import { ADD_ON_BUNDLE_TYPE, BUNDLE_TYPE_SELECT, OFFER_STATE_SELECT, SHOW_SHARE_PERCENT_SELECT, isSupporterOfferedAddOnRow, normalizeBundleType } from './campaignAddOns';
 import { normalizeStoredTiers, publicAddOnSupportPercent } from './campaignAddOnShare';
 import { PUBLIC_SUPPORTER_RECIPE_FIELDS, toPublicSupporterAddOn, type PublicSupporterAddOn } from './publicFundraiserPayload';
 import { publicText } from './supporterBundleDetail';
@@ -42,7 +43,7 @@ export async function loadPublicCampaignAddOn(
                 business_id: true,
                 bundle_id: true,
                 ...SHOW_SHARE_PERCENT_SELECT,
-                ...REMOVED_AT_SELECT,
+                ...OFFER_STATE_SELECT,
                 bundle: {
                     select: {
                         id: true,
@@ -65,7 +66,8 @@ export async function loadPublicCampaignAddOn(
         });
         if (!row || row.business_id !== params.businessId) return null;
         // B2: a removed add-on keeps its row and schedule, but supporters are not offered it.
-        if (!isOfferedAddOnRow(row)) return null;
+        // 1B: nor an add-on the coordinator has not accepted (coordinator_choice without a yes, or declined).
+        if (!isSupporterOfferedAddOnRow(row)) return null;
         const bundle = row.bundle;
         if (!bundle || bundle.id !== row.bundle_id || bundle.business_id !== params.businessId) return null;
         if (bundle.is_active !== true || normalizeBundleType(bundle.bundle_type) !== ADD_ON_BUNDLE_TYPE) return null;

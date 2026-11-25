@@ -35,9 +35,19 @@ import {
     BUNDLE_TYPE_SELECT,
     REMOVED_AT_SELECT,
     SHOW_SHARE_PERCENT_SELECT,
+    OFFER_STATE_SELECT,
+    OFFER_STATE_WITH_DECIDED_AT_SELECT,
+    ADDON_OFFER_COORDINATOR_CHOICE,
+    ADDON_OFFER_INCLUDED,
+    COORDINATOR_ADDON_DECLINED,
     isOfferedAddOnRow,
+    isSupporterOfferedAddOnRow,
     loadCampaignAddOnAuthority,
+    normalizeAddOnOfferMode,
     normalizeBundleType,
+    normalizeCoordinatorAddOnDecision,
+    type AddOnOfferMode,
+    type CoordinatorAddOnDecision,
 } from './campaignAddOns';
 import {
     defaultShareTiers,
@@ -225,7 +235,10 @@ export type AddOnAdminCode =
     | 'NO_ADDON_ASSIGNED'
     | 'INVALID_SHARE_TIERS'
     | 'SHARE_TIER_LOCKED'
-    | 'ADDON_HISTORY_WITHOUT_SCHEDULE';
+    | 'ADDON_HISTORY_WITHOUT_SCHEDULE'
+    // FR-ADDON-LAUNCH-FLOW-1 (1B): the tenant's offer-mode choice.
+    | 'INVALID_OFFER_MODE'
+    | 'ADDON_DECLINED_CONFIRM_REQUIRED';
 
 export type AddOnAdminResult =
     | { ok: true; changed: boolean }
@@ -303,9 +316,18 @@ export async function assignCampaignAddOn(
         const offered = isOfferedAddOnRow(existing);
         if (offered && existing.bundle_id === bundle.id) return { ok: true, changed: false };
         // Replace or resume: only the bundle and the offered state change — never the schedule.
+        // FR-ADDON-LAUNCH-FLOW-1 (1B, owner decision D5): a coordinator answered about a SPECIFIC product, so a
+        // DIFFERENT bundle clears their answer — in coordinator-choice mode it is then not offered to supporters
+        // until they answer again. Resuming the same bundle keeps it. offer_mode (the tenant's authorization),
+        // the schedule, locked tiers, tier positions and recorded earnings are untouched either way.
+        const bundleChanged = existing.bundle_id !== bundle.id;
         await tx.campaignAddOn.update({
             where: { id: existing.id },
-            data: { bundle_id: bundle.id, removed_at: null } as {},
+            data: {
+                bundle_id: bundle.id,
+                removed_at: null,
+                ...(bundleChanged ? { coordinator_decision: null, coordinator_decided_at: null } : {}),
+            } as {},
         });
         return { ok: true, changed: true };
     }
@@ -422,6 +444,240 @@ export async function updateCampaignAddOnShareDisplay(
     return { ok: true, changed: true };
 }
 
+// ── FR-ADDON-LAUNCH-FLOW-1 (1B): who decides whether supporters are offered it ─────────────────────────
+
+function isoOrNull(value: unknown): string | null {
+    if (value instanceof Date) return value.toISOString();
+    return typeof value === 'string' && value ? value : null;
+}
+
+export const ADDON_DECLINED_CONFIRM_MESSAGE =
+    'The coordinator chose not to offer this add-on. Confirm that you want to include it anyway.';
+
+/**
+ * The TENANT's authorization (owner decisions D1–D5). The caller holds the campaign lock and has rechecked that
+ * the campaign is open (runLockedWrite in app/api/campaigns/[id]/add-on).
+ *   included → coordinator_choice   the coordinator's answer is cleared: the add-on stops being offered to
+ *                                   supporters until the coordinator accepts it.
+ *   coordinator_choice → included   the tenant includes it directly. If the coordinator DECLINED, this needs
+ *                                   `confirmOverrideDecline` (D3: a safe, explicit override); the decline stays
+ *                                   recorded so the CRM can say what happened.
+ * Never touches the bundle, the schedule, tier positions or recorded earnings.
+ */
+export async function setCampaignAddOnOfferMode(
+    tx: any,
+    params: { campaignId: string; businessId: string; offerMode: unknown; confirmOverrideDecline?: unknown },
+): Promise<AddOnAdminResult> {
+    if (params.offerMode !== ADDON_OFFER_INCLUDED && params.offerMode !== ADDON_OFFER_COORDINATOR_CHOICE) {
+        return {
+            ok: false, status: 400, code: 'INVALID_OFFER_MODE',
+            error: 'Choose whether to include the add-on or let the coordinator decide.',
+        };
+    }
+    const row = await tx.campaignAddOn.findUnique({
+        where: { campaign_id: params.campaignId },
+        select: { id: true, business_id: true, ...OFFER_STATE_SELECT },
+    });
+    if (!row || row.business_id !== params.businessId || !isOfferedAddOnRow(row)) {
+        return { ok: false, status: 409, code: 'NO_ADDON_ASSIGNED', error: 'Choose a supporter add-on for this fundraiser first.' };
+    }
+    const current = normalizeAddOnOfferMode((row as any).offer_mode);
+    if (current === params.offerMode) return { ok: true, changed: false };
+    if (params.offerMode === ADDON_OFFER_COORDINATOR_CHOICE) {
+        await tx.campaignAddOn.update({
+            where: { id: row.id },
+            data: { offer_mode: ADDON_OFFER_COORDINATOR_CHOICE, coordinator_decision: null, coordinator_decided_at: null } as {},
+        });
+        return { ok: true, changed: true };
+    }
+    const decision = normalizeCoordinatorAddOnDecision((row as any).coordinator_decision);
+    if (decision === COORDINATOR_ADDON_DECLINED && params.confirmOverrideDecline !== true) {
+        return { ok: false, status: 409, code: 'ADDON_DECLINED_CONFIRM_REQUIRED', error: ADDON_DECLINED_CONFIRM_MESSAGE };
+    }
+    await tx.campaignAddOn.update({ where: { id: row.id }, data: { offer_mode: ADDON_OFFER_INCLUDED } as {} });
+    return { ok: true, changed: true };
+}
+
+/** What the coordinator sees about the campaign's add-on during setup (and what the invitation names). */
+export interface CoordinatorSetupAddOnOffer {
+    bundleId: string;
+    name: string;
+    description: string | null;
+    imageUrl: string | null;
+    /** The bundle's own price — the same basis as the meal cards on the setup screen (owner decision D7). */
+    price: number;
+    /** Recipe names, in the bundle's saved order. */
+    meals: string[];
+    /** Plain words, e.g. "Your organization earns 10% on this add-on." */
+    shareSummary: string;
+    shareTiers: Array<{ rangeLabel: string; percent: number }>;
+    /** False when every tier is 0% — then no copy may say the organization earns more from it. */
+    earnsShare: boolean;
+    /** 'included': informational only. 'coordinator_choice': the coordinator must answer. */
+    mode: AddOnOfferMode;
+    /** The coordinator's current answer (coordinator_choice only; null in included mode). */
+    decision: CoordinatorAddOnDecision | null;
+}
+
+/** Names that are real text (the same rule the supporter page uses). */
+function realText(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const t = value.trim();
+    if (!t || /^(null|undefined)$/i.test(t)) return null;
+    return t;
+}
+
+/**
+ * The campaign's CONFIGURED add-on as the coordinator setup screen and the setup invitation present it, or
+ * null — in which case neither says anything about an add-on. Configured = not removed (B2), this tenant's
+ * active add-on-typed bundle, priced above $0, with at least one named recipe and a usable schedule: exactly
+ * the conditions under which a supporter could be offered it once it is included or accepted.
+ *
+ * An include-list projection: no tier rows beyond range + percent, no ids beyond the bundle id the
+ * coordinator's answer is checked against, nothing about other bundles. Read-only.
+ */
+export async function loadCoordinatorSetupAddOnOffer(
+    db: any,
+    params: { campaignId: string; businessId: string },
+): Promise<CoordinatorSetupAddOnOffer | null> {
+    const row = await db.campaignAddOn.findUnique({
+        where: { campaign_id: params.campaignId },
+        select: {
+            business_id: true,
+            bundle_id: true,
+            ...OFFER_STATE_SELECT,
+            bundle: {
+                select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                    image_url: true,
+                    price: true,
+                    is_active: true,
+                    business_id: true,
+                    ...BUNDLE_TYPE_SELECT,
+                    contents: {
+                        select: { recipe: { select: { name: true } } },
+                        orderBy: { position: { sort: 'asc', nulls: 'last' } },
+                    },
+                },
+            },
+            share_tiers: { select: { starting_quantity: true, percent: true }, orderBy: { starting_quantity: 'asc' } },
+        },
+    });
+    if (!row || row.business_id !== params.businessId || !isOfferedAddOnRow(row)) return null;
+    const b = row.bundle;
+    if (!b || b.id !== row.bundle_id || b.business_id !== params.businessId) return null;
+    if (b.is_active !== true || normalizeBundleType(b.bundle_type) !== ADD_ON_BUNDLE_TYPE) return null;
+    const price = Number(b.price);
+    if (!Number.isFinite(price) || !(price > 0)) return null;
+    const name = realText(b.name);
+    if (!name) return null;
+    const meals = (Array.isArray(b.contents) ? b.contents : [])
+        .map((c: any) => realText(c?.recipe?.name))
+        .filter((n: string | null): n is string => n !== null);
+    if (meals.length === 0) return null;
+    const tiers = normalizeStoredTiers(row.share_tiers);
+    if (!isUsableSchedule(tiers)) return null;
+    const positionsReached = await countCampaignAddOnPositionsAllocated(db, params.campaignId);
+    const mode = normalizeAddOnOfferMode((row as any).offer_mode);
+    return {
+        bundleId: b.id,
+        name,
+        description: realText(b.description),
+        imageUrl: realText(b.image_url),
+        price,
+        meals,
+        shareSummary: describeShareScheduleForCoordinator(tiers),
+        shareTiers: describeShareTierRanges(tiers, positionsReached).map((t) => ({ rangeLabel: t.rangeLabel, percent: t.percent })),
+        earnsShare: tiers.some((t) => Number(t.percent) > 0),
+        mode,
+        decision: mode === ADDON_OFFER_COORDINATOR_CHOICE ? normalizeCoordinatorAddOnDecision((row as any).coordinator_decision) : null,
+    };
+}
+
+export type CoordinatorAddOnDecisionResult =
+    | { ok: true; recorded: boolean; decision: CoordinatorAddOnDecision | null }
+    | { ok: false; status: 400 | 409; code: string; error: string };
+
+export const ADDON_OFFER_CHANGED_MESSAGE =
+    'Your organizer just changed the optional add-on offer. Please review it again and confirm your setup.';
+export const ADDON_DECISION_REQUIRED_MESSAGE =
+    'Choose whether to include the optional add-on offer in your fundraiser.';
+
+/**
+ * The COORDINATOR's answer, written INSIDE the setup submission's transaction after lockCampaignSelection
+ * (app/api/coordinator/bundle-selection POST). The coordinator's only add-on write, ever:
+ *   - included mode or no configured add-on: nothing to answer — any answer sent is ignored (recorded: false);
+ *     but an answer naming a bundle while the add-on is gone or replaced is a stale page → 409.
+ *   - coordinator_choice: an answer is REQUIRED, and must name the bundle currently configured (the one the
+ *     coordinator was shown), else 409 ADDON_OFFER_CHANGED and the whole setup rolls back.
+ * Writes only coordinator_decision + coordinator_decided_at. Never the bundle, mode, schedule, price,
+ * show-share toggle, removal, tier positions or earnings.
+ */
+export async function recordCoordinatorAddOnDecision(
+    tx: any,
+    params: { campaignId: string; businessId: string; submitted: unknown },
+): Promise<CoordinatorAddOnDecisionResult> {
+    const submitted = params.submitted;
+    let bundleId: string | null = null;
+    let decision: CoordinatorAddOnDecision | null = null;
+    /** The offer mode the coordinator's page was showing — a mismatch means the tenant changed it since. */
+    let seenMode: AddOnOfferMode | null = null;
+    if (submitted !== undefined && submitted !== null) {
+        if (typeof submitted !== 'object' || Array.isArray(submitted)) {
+            return { ok: false, status: 400, code: 'INVALID_ADDON_DECISION', error: ADDON_DECISION_REQUIRED_MESSAGE };
+        }
+        const raw = submitted as Record<string, unknown>;
+        bundleId = typeof raw.bundleId === 'string' && raw.bundleId.trim() ? raw.bundleId.trim() : null;
+        decision = normalizeCoordinatorAddOnDecision(raw.decision);
+        seenMode = raw.mode === ADDON_OFFER_COORDINATOR_CHOICE
+            ? ADDON_OFFER_COORDINATOR_CHOICE
+            : raw.mode === ADDON_OFFER_INCLUDED ? ADDON_OFFER_INCLUDED : null;
+        if (!bundleId || (raw.decision !== undefined && raw.decision !== null && decision === null)) {
+            return { ok: false, status: 400, code: 'INVALID_ADDON_DECISION', error: ADDON_DECISION_REQUIRED_MESSAGE };
+        }
+    }
+
+    const offer = await loadCoordinatorSetupAddOnOffer(tx, { campaignId: params.campaignId, businessId: params.businessId });
+
+    if (!offer || offer.mode !== ADDON_OFFER_COORDINATOR_CHOICE) {
+        // Nothing for the coordinator to decide. A page that showed a DIFFERENT (or a now-removed) add-on is stale.
+        if (bundleId && (!offer || offer.bundleId !== bundleId || (seenMode !== null && seenMode !== offer.mode))) {
+            return { ok: false, status: 409, code: 'ADDON_OFFER_CHANGED', error: ADDON_OFFER_CHANGED_MESSAGE };
+        }
+        return { ok: true, recorded: false, decision: null };
+    }
+
+    // coordinator_choice. A page that never showed this offer (no add-on, another bundle, or the informational
+    // 'included' version) is stale: it reloads and shows the Yes / No choice.
+    if (!bundleId || offer.bundleId !== bundleId || seenMode !== ADDON_OFFER_COORDINATOR_CHOICE) {
+        return { ok: false, status: 409, code: 'ADDON_OFFER_CHANGED', error: ADDON_OFFER_CHANGED_MESSAGE };
+    }
+    if (!decision) {
+        return { ok: false, status: 400, code: 'ADDON_DECISION_REQUIRED', error: ADDON_DECISION_REQUIRED_MESSAGE };
+    }
+    if (offer.bundleId !== bundleId) {
+        return { ok: false, status: 409, code: 'ADDON_OFFER_CHANGED', error: ADDON_OFFER_CHANGED_MESSAGE };
+    }
+    if (offer.decision === decision) return { ok: true, recorded: false, decision };
+
+    const updated = await tx.campaignAddOn.updateMany({
+        where: {
+            campaign_id: params.campaignId,
+            business_id: params.businessId,
+            bundle_id: bundleId,
+            removed_at: null,
+            offer_mode: ADDON_OFFER_COORDINATOR_CHOICE,
+        } as {},
+        data: { coordinator_decision: decision, coordinator_decided_at: new Date() } as {},
+    });
+    if ((Number(updated?.count) || 0) !== 1) {
+        return { ok: false, status: 409, code: 'ADDON_OFFER_CHANGED', error: ADDON_OFFER_CHANGED_MESSAGE };
+    }
+    return { ok: true, recorded: true, decision };
+}
+
 // ── The coordinator's view (read-only) ───────────────────────────────────────
 
 export interface CoordinatorAddOnView {
@@ -456,13 +712,15 @@ export async function loadCoordinatorAddOnView(
         where: { campaign_id: params.campaignId },
         select: {
             business_id: true,
-            ...REMOVED_AT_SELECT,
+            ...OFFER_STATE_SELECT,
             bundle: { select: { id: true, name: true, price: true, is_active: true, business_id: true, ...BUNDLE_TYPE_SELECT } },
             share_tiers: { select: { starting_quantity: true, percent: true }, orderBy: { starting_quantity: 'asc' } },
         },
     });
     if (!assignment || assignment.business_id !== params.businessId) return null;
-    if (!isOfferedAddOnRow(assignment)) return null;
+    // 1B: the panel's add-on card and its offline-order stepper appear only for an add-on supporters are
+    // offered (included, or accepted by the coordinator) — the same rule as every order path.
+    if (!isSupporterOfferedAddOnRow(assignment)) return null;
     const b = assignment.bundle;
     if (!b || b.business_id !== params.businessId || b.is_active !== true) return null;
     if (normalizeBundleType(b.bundle_type) !== ADD_ON_BUNDLE_TYPE) return null;
@@ -553,6 +811,13 @@ export interface CampaignAddOnAdminView {
         showSharePercent: boolean;
         /** S4: what the supporter page shows right now — the percent, or null (toggle off, or a tiered schedule). */
         publicSupportPercent: number | null;
+        /** 1B: the tenant's authorization — 'included', or 'coordinator_choice' (the coordinator decides). */
+        offerMode: AddOnOfferMode;
+        /** 1B: the coordinator's answer (null = none yet). Kept after a tenant override, for the record. */
+        coordinatorDecision: CoordinatorAddOnDecision | null;
+        coordinatorDecidedAt: string | null;
+        /** 1B: whether supporters are offered it right now (included, or accepted) — and the bundle is sellable. */
+        offeredToSupporters: boolean;
     };
     /**
      * B2: the campaign's add-on was REMOVED (not offered now) — its share schedule is kept, read-only here,
@@ -590,7 +855,7 @@ export async function loadCampaignAddOnAdminView(
                 business_id: true,
                 bundle_id: true,
                 ...SHOW_SHARE_PERCENT_SELECT,
-                ...REMOVED_AT_SELECT,
+                ...OFFER_STATE_WITH_DECIDED_AT_SELECT,
                 bundle: { select: { id: true, name: true, price: true, is_active: true, business_id: true, ...BUNDLE_TYPE_SELECT } },
                 share_tiers: { select: { starting_quantity: true, percent: true }, orderBy: { starting_quantity: 'asc' } },
             },
@@ -619,6 +884,11 @@ export async function loadCampaignAddOnAdminView(
                 next: nextAddOnRate(tiers, positionsReached),
                 showSharePercent: (assignment as any).show_share_percent === true,
                 publicSupportPercent: publicAddOnSupportPercent(tiers, (assignment as any).show_share_percent),
+                offerMode: normalizeAddOnOfferMode((assignment as any).offer_mode),
+                coordinatorDecision: normalizeCoordinatorAddOnDecision((assignment as any).coordinator_decision),
+                coordinatorDecidedAt: isoOrNull((assignment as any).coordinator_decided_at),
+                offeredToSupporters: isSupporterOfferedAddOnRow(assignment)
+                    && b.is_active === true && normalizeBundleType(b.bundle_type) === ADD_ON_BUNDLE_TYPE && b.business_id === businessId,
             };
         } else {
             const removedAt = (assignment as any).removed_at;

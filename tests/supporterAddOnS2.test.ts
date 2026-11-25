@@ -397,7 +397,8 @@ describe('schema / migration · additive, relational, database-enforced', () => 
         expect(dirs[i - 1]).toBe('20261123120000_supporter_addon_s1');
         // SUPERSEDED PIN (S4, owner-approved 2026-11-24): then S4's approved share-display column.
         // SUPERSEDED PIN (B2 remediation, owner-approved 2026-11-25): then campaign_add_ons.removed_at.
-        expect(dirs.slice(i + 1)).toEqual(['20261125120000_supporter_addon_s3', '20261126120000_supporter_addon_s4', '20261127120000_supporter_addon_b2_removed_at']);
+        // SUPERSEDED PIN (FR-ADDON-LAUNCH-FLOW-1 1B, owner-approved 2026-11-25): then the coordinator's add-on participation.
+        expect(dirs.slice(i + 1)).toEqual(['20261125120000_supporter_addon_s3', '20261126120000_supporter_addon_s4', '20261127120000_supporter_addon_b2_removed_at', '20261128120000_supporter_addon_coordinator_choice']);
         const s1 = 'prisma/migrations/20261123120000_supporter_addon_s1/migration.sql';
         expect(R(s1)).toBe(atS1(s1));
     });
@@ -548,7 +549,9 @@ describe('campaign add-on assignment · the tenant route', () => {
         const replaced = await addOnRoute('PUT', CAMP_A, { bundleId: B.ADDON2.id });
         expect(replaced.status).toBe(200);
         // SUPERSEDED PIN (B2 remediation, owner-approved 2026-11-25): a replace also (re-)offers the row.
-        expect(mock.firstCall('campaignAddOn.update')!.args.data).toEqual({ bundle_id: B.ADDON2.id, removed_at: null });
+        // SUPERSEDED PIN (FR-ADDON-LAUNCH-FLOW-1 1B, owner decision D5): a DIFFERENT bundle also clears the coordinator's
+        // answer (they answered about a specific product). The schedule is still kept — no tier write, no create.
+        expect(mock.firstCall('campaignAddOn.update')!.args.data).toEqual({ bundle_id: B.ADDON2.id, removed_at: null, coordinator_decision: null, coordinator_decided_at: null });
         expect(mock.callsTo('campaignAddOn.create')).toHaveLength(0);
         expect(replaced.body.addOn.tiers.map((t: any) => t.percent)).toEqual([10, 15]);
         const removed = await addOnRoute('DELETE', CAMP_A);

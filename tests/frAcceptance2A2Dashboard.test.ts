@@ -366,7 +366,8 @@ describe('this patch changed presentation only', () => {
         // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 S3 (owner-approved 2026-11-24): invoice_items.item_role (constant default + CHECK)): one more.
         // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 S4 (owner-approved 2026-11-24): campaign_add_ons.show_share_percent (constant default).): one more.
         // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 B1/B2 remediation (owner-approved 2026-11-25): campaign_add_ons.removed_at (nullable)): one more.
-        expect(migrations).toHaveLength(36);
+        // REVISED (FR-ADDON-LAUNCH-FLOW-1 1B (owner-approved 2026-11-25): the coordinator's add-on participation, additive): one more.
+        expect(migrations).toHaveLength(37);
         expect(migrations[15]).toBe('20260823010000_fr_acceptance_2a2_human_followup');
         expect(migrations[16]).toBe('20260825000000_inv_d_settlement_truth');
         expect(migrations[17]).toBe('20260826000000_m18_outreach_batch_campaign_ownership');
@@ -397,6 +398,9 @@ describe('this patch changed presentation only', () => {
         expect(migrations[34]).toBe('20261126120000_supporter_addon_s4');
         // FR-SUPPORTER-ADDON-UPSELL-1 B1/B2 remediation (owner-approved 2026-11-25): campaign_add_ons.removed_at (nullable).
         expect(migrations[35]).toBe('20261127120000_supporter_addon_b2_removed_at');
+        // FR-ADDON-LAUNCH-FLOW-1 1B (owner-approved 2026-11-25): campaign_add_ons.offer_mode / coordinator_decision /
+        // coordinator_decided_at — three additive columns with CHECKs; existing rows read 'included'.
+        expect(migrations[36]).toBe('20261128120000_supporter_addon_coordinator_choice');
     });
 
     it('the acknowledgement and follow-up contracts are untouched', () => {

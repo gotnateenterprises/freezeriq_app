@@ -30,7 +30,20 @@ export async function POST(req: Request) {
         // processing template if no custom content provided
         if (!finalHtml || !finalSubject) {
             const templateGen = EMAIL_TEMPLATES[template as keyof typeof EMAIL_TEMPLATES];
-            if (templateGen) {
+            if (template === 'lead_intro') {
+                // INQUIRY-REPLY-EXTRA-1: the inquiry reply has ONE rendering authority
+                // (lib/inquiryReply.ts), shared with the automatic acknowledgement and the
+                // Respond dialog — same tenant brand, same optional tenant section.
+                const { prisma } = await import('@/lib/db');
+                const { renderInquiryReply } = await import('@/lib/inquiryReply');
+                const generated = await renderInquiryReply(prisma, {
+                    businessId: session.user.businessId,
+                    contactName: customerName,
+                    organizationName,
+                });
+                if (!finalSubject) finalSubject = generated.subject;
+                if (!finalHtml) finalHtml = generated.html;
+            } else if (templateGen) {
                 // FR-ACCEPTANCE-1C: render the stock body as THIS tenant.
                 //
                 // Read from Business, which is the same row getTenantSender uses

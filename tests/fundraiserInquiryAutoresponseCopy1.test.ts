@@ -146,6 +146,9 @@ describe('FUNDRAISER-INQUIRY-AUTORESPONSE-COPY-1 — no tenant-specific hardcodi
         expect(src).toMatch(/attemptInquiryAcknowledgement/);
         // No new query was added on its behalf — it still selects exactly the
         // same inquiry fields it always has for this template.
-        expect(src).toMatch(/lead_intro\(/);
+        // SUPERSEDED PIN (INQUIRY-REPLY-EXTRA-1, owner-approved 2026-11-25): it renders lead_intro through the ONE
+        // shared authority (lib/inquiryReply.ts), which the manual and generic paths use too.
+        expect(src).toMatch(/renderInquiryReply\(/);
+        expect(stripComments(read('lib/inquiryReply.ts'))).toMatch(/EMAIL_TEMPLATES\.lead_intro\(/);
     });
 });

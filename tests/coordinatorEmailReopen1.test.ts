@@ -393,11 +393,20 @@ describe('F · one-send / claim semantics are unchanged', () => {
     const lf = (s: string) => s.replace(/\r\n/g, '\n');
 
     it('the coordinator-email route is byte-identical to Production 1885e17', () => {
-        expect(lf(read(ROUTE))).toBe(lf(git(`show 1885e17:"${ROUTE}"`)));
+        // SUPERSEDED PIN (FR-ADDON-LAUNCH-FLOW-1, owner-approved 2026-11-25): a later release names the campaign's
+        // authorized add-on in the invitation. The claim / one-send logic is unchanged: identical up to 284b43f, and
+        // the later diff adds only the add-on lookup and one template argument.
+        expect(lf(git(`show 284b43f:"${ROUTE}"`))).toBe(lf(git(`show 1885e17:"${ROUTE}"`)));
+        const now = lf(read(ROUTE));
+        for (const s of ['setup_email_claimed_at: new Date()', 'setup_email_sent_at', 'alreadySent: true', 'unresolved', 'uncertain']) {
+            expect(now.split(s).length).toBe(lf(git(`show 1885e17:"${ROUTE}"`)).split(s).length);
+        }
     });
 
     it('the launch dialog, schema and migrations are untouched', () => {
-        expect(lf(read('components/crm2/LaunchFundraiserDialog.tsx'))).toBe(lf(git('show 1885e17:"components/crm2/LaunchFundraiserDialog.tsx"')));
+        // SUPERSEDED PIN (FR-ADDON-LAUNCH-FLOW-1, owner-approved 2026-11-25): a later release adds the optional add-on
+        // step to the launch dialog's success screen; unchanged up to 284b43f, and its send path is still this route.
+        expect(lf(git('show 284b43f:"components/crm2/LaunchFundraiserDialog.tsx"'))).toBe(lf(git('show 1885e17:"components/crm2/LaunchFundraiserDialog.tsx"')));
         // SUPERSEDED PIN (SUPPORTER-CONSENT-1, owner-approved 2026-11-19): a later release adds an
         // additive table, so the schema/migration guarantee is checked against THIS release's own
         // commit (c4e528b, on 1885e17): it changed nothing under prisma/.

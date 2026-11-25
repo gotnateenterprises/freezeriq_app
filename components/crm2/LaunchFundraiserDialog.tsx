@@ -17,6 +17,8 @@ import { AWAITING_COORDINATOR_SETUP_LABEL } from '@/lib/campaignDisplayStage';
 // Both modules are pure (no server imports), so they are safe in this client component.
 import { CONFIRMED_TIME_REQUIRED_ERROR } from '@/lib/fundraiserLaunch';
 import { DELIVERY_TIME_MAX } from '@/lib/coordinatorSetup';
+// ADDON-LAUNCH-FLOW-1A: the existing Supporter Add-On card, reused as the launch flow's Step 2.
+import { CampaignAddOnCard } from '@/components/crm2/CampaignAddOnCard';
 
 interface CoordinatorCandidate {
     orgContactId: string;
@@ -399,6 +401,28 @@ export function LaunchFundraiserDialog({
                             public storefront until the coordinator finishes setup.
                         </p>
 
+                        {/* ADDON-LAUNCH-FLOW-1A — Step 2: the optional supporter add-on, set up BEFORE the
+                            invitation goes out, because the invitation describes it. The card is the
+                            existing Campaign drawer card and API (administrator-only, campaign lock,
+                            eligibility, share tiers) — nothing about it is re-implemented here. Leaving it
+                            at None offers meal bundles only, exactly as before. */}
+                        <div data-launch-step="addon" className="space-y-2">
+                            <p className="text-xs font-black uppercase tracking-wide text-slate-500">
+                                Step 2 of 3 · Optional supporter add-on
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                                Want supporters to be offered an add-on (like sides &amp; desserts) beside their
+                                meal bundles? Choose it here before you send the setup email, and decide whether
+                                to include it or let the coordinator decide. Leave it at None to offer meal
+                                bundles only.
+                            </p>
+                            <CampaignAddOnCard key={result.campaignId} campaignId={result.campaignId} />
+                        </div>
+
+                        <p className="text-xs font-black uppercase tracking-wide text-slate-500">
+                            Step 3 of 3 · Send the setup email
+                        </p>
+
                         {/* FR-ACCEPTANCE-2A — the normal way to hand off.
                             Copying a link and pasting it into another inbox still works and
                             stays below, but it should not be the only route. Nothing is sent
@@ -516,6 +540,11 @@ export function LaunchFundraiserDialog({
                         <div>
                             <h2 className="text-lg font-black">Launch Fundraiser</h2>
                             <p className="text-sm text-slate-500">{ctx.organization.name}</p>
+                            {/* ADDON-LAUNCH-FLOW-1A: the launch is three steps — details and meal options
+                                here, then the optional add-on, then the setup email. */}
+                            <p className="mt-1 text-xs font-black uppercase tracking-wide text-slate-400">
+                                Step 1 of 3 · Fundraiser details &amp; meal options
+                            </p>
                         </div>
 
                         <div className="grid gap-4 sm:grid-cols-2">

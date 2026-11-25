@@ -51,6 +51,12 @@ import {
   readStoredPaymentMethods,
   type StoredPaymentMethods,
 } from '@/lib/supporterPaymentMethods';
+// FR-ADDON-LAUNCH-FLOW-1 (owner-approved 2026-11-25): the campaign's optional add-on as the coordinator sees it
+// during setup, and the coordinator's ONE add-on write — accept or decline, when the tenant asked them to decide.
+import {
+  loadCoordinatorSetupAddOnOffer,
+  recordCoordinatorAddOnDecision,
+} from '@/lib/campaignAddOnEarnings';
 
 // ── Concurrency config ───────────────────────────────────────────────────────
 
@@ -186,6 +192,15 @@ export async function GET(req: Request): Promise<NextResponse> {
       },
       // True once a supporter has ordered: bundle choices are then locked.
       ordersStarted: liveOrders > 0,
+      // FR-ADDON-LAUNCH-FLOW-1: the campaign's optional add-on, or null (then the setup screen says nothing about
+      // one). Its real name, image, price, meals and earning schedule; whether the coordinator decides
+      // ('coordinator_choice') or the tenant included it ('included'); and the coordinator's current answer.
+      // Display only — the POST re-decides everything under the campaign lock.
+      addOnOffer: await loadCoordinatorSetupAddOnOffer(prisma, { campaignId: campaign.id, businessId: campaign.businessId })
+        .catch((e: unknown) => {
+          console.error('[bundle-selection GET] add-on offer lookup failed; showing setup without it:', e);
+          return null;
+        }),
     };
 
     return NextResponse.json(response);
@@ -338,7 +353,8 @@ export async function POST(req: Request): Promise<NextResponse> {
           campaign.id,
           campaign.businessId,
           familyIds,
-          setupValues
+          setupValues,
+          rawBody.addOn
         );
         return result;
       } catch (err: unknown) {
@@ -411,7 +427,12 @@ async function runActivationTransaction(
    * that submits only familyIds keeps working and leaves the logistics columns
    * exactly as they were.
    */
-  setupValues: SetupWriteValues | null
+  setupValues: SetupWriteValues | null,
+  /**
+   * FR-ADDON-LAUNCH-FLOW-1: { bundleId, mode, decision } — the add-on offer the coordinator's page showed and
+   * their answer. Undefined from a page that showed no add-on (and from every pre-existing client).
+   */
+  addOnSubmission?: unknown
 ): Promise<NextResponse> {
   return await prisma.$transaction(
     async (tx) => {
@@ -753,6 +774,26 @@ async function runActivationTransaction(
         });
       }
 
+      // ── Step 10b (FR-ADDON-LAUNCH-FLOW-1): the coordinator's add-on answer ──
+      //
+      // After EVERY check above and before ANY write below, so a refusal here leaves nothing behind — setup is
+      // one decision and never goes live carrying half of it. Under the campaign lock taken in Step 0, which
+      // the tenant's add-on writes and every order path also take: the offer cannot change between this check
+      // and the commit. When the tenant asked the coordinator to decide, an explicit answer naming the add-on
+      // the page showed is REQUIRED (400 / 409 ADDON_OFFER_CHANGED → the page reloads the offer). Writes only
+      // the answer; never the bundle, the tenant's mode, prices, the share schedule, tier positions or earnings.
+      const addOnDecision = await recordCoordinatorAddOnDecision(tx, {
+        campaignId,
+        businessId,
+        submitted: addOnSubmission,
+      });
+      if (!addOnDecision.ok) {
+        return NextResponse.json(
+          { error: addOnDecision.error, code: addOnDecision.code },
+          { status: addOnDecision.status }
+        );
+      }
+
       // ── Step 11: Delete stale active rows (defensive cleanup only) ─────────
       // Candidate rows are NOT deleted — they must remain preserved.
 
@@ -829,6 +870,8 @@ async function runActivationTransaction(
             activatedBundleIds,
             selectionLimit,
             selectedAt: now.toISOString(),
+            // FR-ADDON-LAUNCH-FLOW-1: the coordinator's add-on answer in this submission, when one was asked.
+            ...(addOnDecision.decision ? { addOnDecision: addOnDecision.decision } : {}),
           },
         },
       });

@@ -60,11 +60,61 @@ export const SHOW_SHARE_PERCENT_SELECT = { show_share_percent: true } as {};
  */
 export const REMOVED_AT_SELECT = { removed_at: true } as {};
 
-/** True when the campaign_add_ons row is present and NOT removed (i.e. the add-on is currently offered). */
+/**
+ * True when the campaign_add_ons row is present and NOT removed — the add-on is CONFIGURED (the tenant's
+ * program is live: its schedule can be edited, earnings are recorded against it). Whether SUPPORTERS are
+ * offered it is the narrower isSupporterOfferedAddOnRow below (FR-ADDON-LAUNCH-FLOW-1 1B).
+ */
 export function isOfferedAddOnRow(row: unknown): boolean {
     if (!row || typeof row !== 'object') return false;
     const removedAt = (row as { removed_at?: unknown }).removed_at;
     return removedAt === null || removedAt === undefined;
+}
+
+// ── FR-ADDON-LAUNCH-FLOW-1 (1B): the coordinator's participation ──────────────────────────────────────
+//
+// Two separate facts, owned by two different people (the B2 removal state is NOT reused — a coordinator must
+// never be able to undo a tenant's removal, and the tenant must be able to configure tiers before the
+// coordinator answers):
+//   offer_mode            the TENANT's authorization: 'included' (default) | 'coordinator_choice'
+//   coordinator_decision  the COORDINATOR's answer:   null | 'accepted' | 'declined'
+// Supporters (supporter page, every order path, flyer/packet/tracker, the coordinator's offline orders and
+// panel) are offered the add-on only when it is configured AND (included OR accepted).
+
+export type AddOnOfferMode = 'included' | 'coordinator_choice';
+export type CoordinatorAddOnDecision = 'accepted' | 'declined';
+export const ADDON_OFFER_INCLUDED: AddOnOfferMode = 'included';
+export const ADDON_OFFER_COORDINATOR_CHOICE: AddOnOfferMode = 'coordinator_choice';
+export const COORDINATOR_ADDON_ACCEPTED: CoordinatorAddOnDecision = 'accepted';
+export const COORDINATOR_ADDON_DECLINED: CoordinatorAddOnDecision = 'declined';
+
+/**
+ * Everything the "offered to supporters" decision reads. Spread it (as with REMOVED_AT_SELECT) so the code
+ * type-checks against a Prisma client generated before the 1B migration.
+ */
+export const OFFER_STATE_SELECT = { removed_at: true, offer_mode: true, coordinator_decision: true } as {};
+/** OFFER_STATE_SELECT plus when the coordinator answered — for the tenant's and the coordinator's views. */
+export const OFFER_STATE_WITH_DECIDED_AT_SELECT = {
+    removed_at: true, offer_mode: true, coordinator_decision: true, coordinator_decided_at: true,
+} as {};
+
+/** Only the exact value 'coordinator_choice' asks the coordinator; the column defaults to 'included'. */
+export function normalizeAddOnOfferMode(value: unknown): AddOnOfferMode {
+    return value === ADDON_OFFER_COORDINATOR_CHOICE ? ADDON_OFFER_COORDINATOR_CHOICE : ADDON_OFFER_INCLUDED;
+}
+
+export function normalizeCoordinatorAddOnDecision(value: unknown): CoordinatorAddOnDecision | null {
+    if (value === COORDINATOR_ADDON_ACCEPTED) return COORDINATOR_ADDON_ACCEPTED;
+    if (value === COORDINATOR_ADDON_DECLINED) return COORDINATOR_ADDON_DECLINED;
+    return null;
+}
+
+/** True when SUPPORTERS may be offered (and sold) this row's add-on: configured AND (included OR accepted). */
+export function isSupporterOfferedAddOnRow(row: unknown): boolean {
+    if (!isOfferedAddOnRow(row)) return false;
+    const r = row as { offer_mode?: unknown; coordinator_decision?: unknown };
+    if (normalizeAddOnOfferMode(r.offer_mode) === ADDON_OFFER_INCLUDED) return true;
+    return normalizeCoordinatorAddOnDecision(r.coordinator_decision) === COORDINATOR_ADDON_ACCEPTED;
 }
 
 /** A stored classification. Only the exact value 'addon' is an add-on; the column defaults to 'meal'. */
@@ -124,8 +174,8 @@ export interface CampaignAddOnAuthority {
 
 /**
  * The campaign's CURRENTLY authorized add-on, or null. Authorized means: an assignment row for this
- * campaign in this tenant that is not removed (B2), pointing at a bundle of this tenant that is active and
- * typed 'addon'.
+ * campaign in this tenant that is not removed (B2) and is offered to supporters (1B: included by the tenant,
+ * or accepted by the coordinator), pointing at a bundle of this tenant that is active and typed 'addon'.
  * (Postgres already guarantees the tenant agreement through composite keys; it is re-checked here so a
  * caller can never be handed another tenant's bundle.)
  */
@@ -138,13 +188,14 @@ export async function loadCampaignAddOnAuthority(
         select: {
             business_id: true,
             bundle_id: true,
-            ...REMOVED_AT_SELECT,
+            ...OFFER_STATE_SELECT,
             bundle: { select: { id: true, name: true, business_id: true, is_active: true, bundle_type: true } },
         },
     });
     if (!row || row.business_id !== params.businessId) return null;
     // B2: a removed add-on keeps its row (and schedule) but is not offered — no order may carry it.
-    if (!isOfferedAddOnRow(row)) return null;
+    // 1B: nor one the coordinator has not accepted (coordinator_choice awaiting an answer, or declined).
+    if (!isSupporterOfferedAddOnRow(row)) return null;
     const bundle = row.bundle;
     if (!bundle || bundle.id !== row.bundle_id || bundle.business_id !== params.businessId) return null;
     if (bundle.is_active !== true || bundle.bundle_type !== ADD_ON_BUNDLE_TYPE) return null;

@@ -35,6 +35,8 @@ import {
 } from '@/lib/campaignCoordinatorContact';
 import { getTenantSender } from '@/lib/email';
 import { checkCoordinatorSetupReadiness } from '@/lib/campaignOperationalDetails';
+// FR-ADDON-LAUNCH-FLOW-1: the campaign's optional add-on, as the coordinator setup screen presents it.
+import { loadCoordinatorSetupAddOnOffer } from '@/lib/campaignAddOnEarnings';
 
 interface ResolvedInvitation {
     to: string;
@@ -163,6 +165,18 @@ async function resolveInvitation(
     // of passing the raw (possibly blank) name straight to the template.
     const coordinatorName = assigned.name ?? '';
 
+    // FR-ADDON-LAUNCH-FLOW-1: the invitation names the add-on ONLY when the tenant set one up for this
+    // fundraiser — from the same authoritative loader the setup screen uses, at render time — and never one
+    // the coordinator has already declined. Name only: no price, no percentage (owner decision D11). A lookup
+    // failure sends the invitation without it rather than not at all.
+    const addOnOffer = await loadCoordinatorSetupAddOnOffer(prisma, { campaignId, businessId }).catch((e: unknown) => {
+        console.error('[coordinator-email] add-on lookup failed; the invitation omits it:', e);
+        return null;
+    });
+    const invitationAddOn = addOnOffer && !(addOnOffer.mode === 'coordinator_choice' && addOnOffer.decision === 'declined')
+        ? { name: addOnOffer.name, mode: addOnOffer.mode, earnsShare: addOnOffer.earnsShare }
+        : null;
+
     const rendered = coordinatorSetupTemplate(
         coordinatorName,
         organizationName,
@@ -174,7 +188,8 @@ async function resolveInvitation(
                 site: brand.websiteUrl ?? undefined,
                 siteLabel: brand.websiteLabel ?? undefined,
             }
-            : undefined
+            : undefined,
+        invitationAddOn
     );
 
     return {

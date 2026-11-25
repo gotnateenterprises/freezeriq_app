@@ -464,7 +464,8 @@ describe('9 · schema and boundaries', () => {
         const dirs = fs.readdirSync(path.join(ROOT, 'prisma/migrations')).filter((d) => /^\d{14}_/.test(d)).sort();
         // SUPERSEDED PIN (S4, owner-approved 2026-11-24): S4's approved share-display column follows S3's.
         // SUPERSEDED PIN (B1/B2 remediation, owner-approved 2026-11-25): then the additive campaign_add_ons.removed_at.
-        expect(dirs.slice(-5)).toEqual(['20261123120000_supporter_addon_s1', '20261124120000_supporter_addon_s2', '20261125120000_supporter_addon_s3', '20261126120000_supporter_addon_s4', '20261127120000_supporter_addon_b2_removed_at']);
+        // SUPERSEDED PIN (FR-ADDON-LAUNCH-FLOW-1 1B, owner-approved 2026-11-25): then the coordinator's add-on participation.
+        expect(dirs.slice(-6)).toEqual(['20261123120000_supporter_addon_s1', '20261124120000_supporter_addon_s2', '20261125120000_supporter_addon_s3', '20261126120000_supporter_addon_s4', '20261127120000_supporter_addon_b2_removed_at', '20261128120000_supporter_addon_coordinator_choice']);
         expect(R('prisma/schema.prisma')).toMatch(/model InvoiceItem \{[\s\S]*?item_role    String  @default\("main"\)/);
     });
     it('untouched by S3: public order route, supporter page, money/tax/kitchen engines, S1/S2 migrations', () => {

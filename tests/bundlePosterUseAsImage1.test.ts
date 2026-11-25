@@ -531,7 +531,7 @@ describe('16 · files this task must not touch are byte-identical to Production 
         'app/shop/[slug]/StorefrontClient.tsx': '06260aa32966b03396c59e7ad4cc24a3395dad5687b20659eee19696f8a84adc',
         'components/storefront/BundleCard.tsx': '4834775f4fd4070ca57f846812a3547a5fea4eb836df2d2e1891352268e3d9b8',
         'app/api/public/tenant/[slug]/route.ts': '39b29aa51f384f1fe158f9bb52ca938d554c070dcf3daf030017b01d5a9c531d',
-        'app/api/coordinator/bundle-selection/route.ts': '2607289a537443271e10d4589f8052783986d158263427ec8425b3f1d2c3d301',
+        // (app/api/coordinator/bundle-selection/route.ts — SUPERSEDED PIN (FR-ADDON-LAUNCH-FLOW-1), see below.)
         // the existing bundle write paths and media storage, reused not changed
         // (app/api/bundles/[id]/route.ts and app/api/bundles/route.ts — SUPERSEDED PINS, see below.)
         'app/api/bundles/upload-image/route.ts': 'b67695f29111eabcce9176fb35791d07cb6a5e19084bbc6c62138f80a8302f16',
@@ -579,6 +579,9 @@ describe('16 · files this task must not touch are byte-identical to Production 
         // proven in tests/supporterAddOnS4.test.ts D6). The poster work never touched them.
         'lib/publicFundraiserPayload.ts',
         'components/fundraiser/SupporterBundleDetail.tsx',
+        // FR-ADDON-LAUNCH-FLOW-1 (owner-approved 2026-11-25) adds one more: the coordinator's setup route now shows the
+        // campaign's optional add-on and records the coordinator's answer. The poster work never touched it.
+        'app/api/coordinator/bundle-selection/route.ts',
     ])('%s was not changed by the poster releases (29b1f27..7c9c048)', (rel) => {
         const out = require('child_process').execSync(`git diff --name-only 29b1f27 7c9c048 -- "${rel}"`, { cwd: ROOT, encoding: 'utf8' });
         expect(out.trim()).toBe('');

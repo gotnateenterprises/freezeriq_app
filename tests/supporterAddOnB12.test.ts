@@ -635,10 +635,12 @@ describe('B2 · removing an add-on keeps the campaign\'s share schedule', () => 
         expect(await bundleTypeChangeRefusal(db(new Date()), { bundleId: B.ADDON.id, from: 'addon', to: 'meal', familyId: null })).toBeNull();
         expect([isOfferedAddOnRow({ removed_at: null }), isOfferedAddOnRow({ removed_at: new Date() }), isOfferedAddOnRow(null)]).toEqual([true, false, false]);
         // every reader of the assignment selects removed_at (an unselected column would read as "offered")
+        // SUPERSEDED PIN (FR-ADDON-LAUNCH-FLOW-1 1B, owner-approved 2026-11-25): readers may select removed_at through
+        // OFFER_STATE_SELECT / OFFER_STATE_WITH_DECIDED_AT_SELECT, which both include it (pinned in addonLaunchFlow1).
         for (const f of ['lib/campaignAddOns.ts', 'lib/publicCampaignAddOn.ts', 'lib/campaignAddOnEarnings.ts']) {
             const src = R(f);
             const finds = src.split('campaignAddOn.findUnique(').length - 1;
-            const selects = src.split('...REMOVED_AT_SELECT').length - 1;
+            const selects = (src.match(/\.\.\.(REMOVED_AT_SELECT|OFFER_STATE_SELECT|OFFER_STATE_WITH_DECIDED_AT_SELECT)\b/g) || []).length;
             expect({ f, ok: finds > 0 && selects >= finds }).toEqual({ f, ok: true });
         }
     });
@@ -739,9 +741,11 @@ describe('migration and scope', () => {
         expect(code.split(';').map((s) => s.trim()).filter(Boolean)).toEqual(['ALTER TABLE "campaign_add_ons" ADD COLUMN "removed_at" TIMESTAMP(3)']);
         expect(R('prisma/schema.prisma')).toMatch(/model CampaignAddOn \{[\s\S]*?removed_at DateTime\?\n[\s\S]*?@@map\("campaign_add_ons"\)/);
         const dirs = fs.readdirSync(path.join(ROOT, 'prisma/migrations')).filter((d) => /^\d{14}_/.test(d)).sort();
-        expect(dirs.slice(-5)).toEqual([
+        // SUPERSEDED PIN (FR-ADDON-LAUNCH-FLOW-1 1B, owner-approved 2026-11-25): followed only by the approved, additive
+        // coordinator-participation migration.
+        expect(dirs.slice(-6)).toEqual([
             '20261123120000_supporter_addon_s1', '20261124120000_supporter_addon_s2', '20261125120000_supporter_addon_s3',
-            '20261126120000_supporter_addon_s4', '20261127120000_supporter_addon_b2_removed_at',
+            '20261126120000_supporter_addon_s4', '20261127120000_supporter_addon_b2_removed_at', '20261128120000_supporter_addon_coordinator_choice',
         ]);
         // Every migration that existed at dd928f0 is unchanged (modified or deleted); the B2 file is the only addition.
         const touched = execSync('git diff --name-only --diff-filter=MDR dd928f0 -- prisma/migrations', { cwd: ROOT, encoding: 'utf8' }).trim();

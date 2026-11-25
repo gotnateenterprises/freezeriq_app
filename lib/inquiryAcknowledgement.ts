@@ -38,8 +38,7 @@
  */
 
 import { prisma } from '@/lib/db';
-import { EMAIL_TEMPLATES } from '@/lib/emailTemplates';
-import { resolveTenantBrand } from '@/lib/tenantBrand';
+import { renderInquiryReply } from '@/lib/inquiryReply';
 import { getTenantSender } from '@/lib/email';
 
 /**
@@ -173,30 +172,18 @@ export async function attemptInquiryAcknowledgement(
             return { outcome: 'skipped_in_progress', sentAt: null };
         }
 
-        // ── Brand ───────────────────────────────────────────────────────────
+        // ── Brand + the tenant's optional section ───────────────────────────
         //
-        // The same authority FR-ACCEPTANCE-2A established: display_name falling
-        // back to name, custom_domain falling back to the canonical storefront.
-        // Never TenantBranding, whose business_name defaults to a literal.
-        const business = await prisma.business.findUnique({
-            where: { id: businessId },
-            select: { name: true, display_name: true, custom_domain: true, contact_email: true, slug: true },
+        // INQUIRY-REPLY-EXTRA-1: rendered by the ONE authority every inquiry-reply
+        // path shares (lib/inquiryReply.ts) — the same brand rule FR-ACCEPTANCE-2A
+        // established (display_name falling back to name, custom_domain falling
+        // back to the canonical storefront; never TenantBranding), plus the
+        // tenant's optional section when they have turned one on.
+        const { subject, html } = await renderInquiryReply(prisma, {
+            businessId,
+            contactName: inquiry.contact_name,
+            organizationName: inquiry.organization_name,
         });
-        const base = process.env.NEXTAUTH_URL?.replace(/\/+$/, '');
-        const brand = business ? resolveTenantBrand(business, base) : null;
-
-        const { subject, html } = EMAIL_TEMPLATES.lead_intro(
-            inquiry.contact_name,
-            inquiry.organization_name,
-            brand
-                ? {
-                      name: brand.name,
-                      email: business?.contact_email ?? undefined,
-                      site: brand.websiteUrl ?? undefined,
-                      siteLabel: brand.websiteLabel ?? undefined,
-                  }
-                : undefined
-        );
 
         const { createResendClient } = await import('@/lib/emailSafety');
         const resend = createResendClient(process.env.RESEND_API_KEY);

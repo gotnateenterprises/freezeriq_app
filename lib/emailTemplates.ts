@@ -132,6 +132,30 @@ function signature(tenant?: TemplateTenant): string {
     return `<p>Warmly,</p>\n            <p>${lines.join('<br>')}</p>`;
 }
 
+/**
+ * INQUIRY-REPLY-EXTRA-1 — the tenant's optional section (lib/inquiryReplyExtra.ts), as markup.
+ *
+ * Heading in the template's own <h3>; the body's blank-line-separated paragraphs as <p>, a single line
+ * break as <br>. EVERY character of tenant text is escaped — a tenant typing "<b>" sees "<b>" in the email.
+ * Returns '' when there is no section, which keeps the built-in reply byte-for-byte unchanged.
+ */
+export interface InquiryReplyTemplateSection {
+    heading: string;
+    body: string;
+}
+
+function inquiryReplySectionHtml(section?: InquiryReplyTemplateSection | null): string {
+    if (!section) return '';
+    const heading = String(section.heading ?? '').trim();
+    const paragraphs = String(section.body ?? '')
+        .split(/\n[ \t]*\n/)
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0)
+        .map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`);
+    if (!heading || paragraphs.length === 0) return '';
+    return `<h3>${escapeHtml(heading)}</h3>\n            ${paragraphs.join('\n            ')}\n\n            `;
+}
+
 export const EMAIL_TEMPLATES = {
     /**
      * The reply to a brand-new fundraiser inquiry.
@@ -151,7 +175,12 @@ export const EMAIL_TEMPLATES = {
      * named — they are true platform-wide operational facts, confirmed against
      * the live product (see the test file's header), not a guess.
      */
-    'lead_intro': (name: string, orgName?: string, tenant?: TemplateTenant) => {
+    /*
+     * INQUIRY-REPLY-EXTRA-1: `extraSection` is the tenant's optional section (owner decisions D8–D10), placed
+     * immediately before "Ready to get a date on the calendar?" so the reply request stays the last thing
+     * read. Absent → the body is byte-for-byte the built-in reply above.
+     */
+    'lead_intro': (name: string, orgName?: string, tenant?: TemplateTenant, extraSection?: InquiryReplyTemplateSection | null) => {
         const org = escapeHtml(orgName || 'your organization');
         // FR-ACCEPTANCE-2A.2 — greet by first name.
         //
@@ -186,7 +215,7 @@ export const EMAIL_TEMPLATES = {
                 <li><strong>We prepare everything for pickup day.</strong> Final orders are due two weeks before delivery. Your organization keeps its agreed fundraising percentage, and we'll invoice the remaining balance shortly after the order deadline, with payment due upon receipt. Then we prepare, freeze, pack, and deliver the meals to your organization for distribution.</li>
             </ol>
 
-            <h3>Ready to get a date on the calendar?</h3>
+            ${inquiryReplySectionHtml(extraSection)}<h3>Ready to get a date on the calendar?</h3>
             <p>Just hit <strong>reply</strong> and send us:</p>
             <ol>
                 <li><strong>Your preferred delivery date and time</strong></li>
@@ -235,12 +264,41 @@ export const EMAIL_TEMPLATES = {
  * tracking rewrites hrefs through a redirect host, which would carry the
  * fragment into a query string and into that host's logs. That must be off.
  */
+/**
+ * FR-ADDON-LAUNCH-FLOW-1 — the campaign's optional add-on as the setup invitation may name it (from
+ * lib/campaignAddOnEarnings.loadCoordinatorSetupAddOnOffer, at send time). Only the NAME is printed — never a
+ * price or a percentage (owner decision D11): an inbox copy cannot update when a not-yet-reached tier changes,
+ * and the setup screen shows the current figures at the moment the coordinator decides.
+ */
+export interface CoordinatorInvitationAddOn {
+    name: string;
+    /** 'coordinator_choice': the coordinator decides during setup. 'included': the tenant included it. */
+    mode: 'included' | 'coordinator_choice';
+    /** False when every tier of its schedule is 0% — then the email claims no extra earnings. */
+    earnsShare: boolean;
+}
+
 export const coordinatorSetupTemplate = (
     coordinatorName: string,
     orgName: string,
     setupUrl: string,
-    tenant?: TemplateTenant
-) => ({
+    tenant?: TemplateTenant,
+    /** FR-ADDON-LAUNCH-FLOW-1: absent/null → the invitation is unchanged apart from the first-name greeting. */
+    addOn?: CoordinatorInvitationAddOn | null
+) => {
+    // FR-ADDON-LAUNCH-FLOW-1 (owner decision D12): greet the ASSIGNED coordinator by first name, like the
+    // inquiry reply. The recipient is still chosen server-side from the assignment (coordinator-email route);
+    // a blank or unreadable name falls back to "there".
+    const greetingName = firstNameOf(coordinatorName) || 'there';
+    const choosing = addOn?.mode === 'coordinator_choice';
+    const addOnName = addOn ? escapeHtml(addOn.name) : '';
+    const decideStep = choosing
+        ? `\n            <li><strong>Decide on an optional fundraising opportunity</strong> — You can also choose to offer our <strong>${addOnName}</strong>, giving supporters the opportunity to complete their meals${addOn!.earnsShare ? ' while helping your organization earn even more' : ''}. It's completely optional, and add-on sales do not count toward your regular meal bundle goal. You'll be able to review the offer, pricing and organization earnings before making your decision.</li>`
+        : '';
+    const includedNote = addOn && !choosing
+        ? `\n\n        <p><strong>Also on your fundraiser: ${addOnName}.</strong> Your supporters will be able to add it to any order that includes a meal bundle${addOn.earnsShare ? ', helping your organization earn even more' : ''}. Add-on sales do not count toward your regular meal bundle goal. You'll see the price${addOn.earnsShare ? ' and what your organization earns' : ''} while you set up.</p>`
+        : '';
+    return {
     // FR-ACCEPTANCE-2A.1: the organization name leads.
     //
     // "Your ${orgName} fundraiser…" reads fine for "Oak Ridge PTO" and badly for
@@ -252,14 +310,14 @@ export const coordinatorSetupTemplate = (
     // the first character rather than the literal "Your ".
     subject: safeSubject(`${orgName} fundraiser is ready to set up`),
     html: `
-        <p>Hi ${escapeHtml(coordinatorName || 'there')}!</p>
+        <p>Hi ${escapeHtml(greetingName)}!</p>
         <p>Good news — the fundraiser for <strong>${escapeHtml(orgName)}</strong> is set up on our end and ready for you to finish.</p>
 
-        <p>There are two things to do, and they take a few minutes:</p>
+        <p>There are ${choosing ? 'three' : 'two'} things to do, and they take a few minutes:</p>
         <ol>
-            <li><strong>Choose your meal bundles</strong> — pick the options your families will be able to order.</li>
+            <li><strong>Choose your meal bundles</strong> — pick the options your families will be able to order.</li>${decideStep}
             <li><strong>Confirm the remaining details</strong> — pickup time, location, and how your supporters will pay.</li>
-        </ol>
+        </ol>${includedNote}
 
         <p>Once that is done you will have your coordinator panel, where you can share the fundraiser and watch orders arrive as they come in.</p>
 
@@ -271,4 +329,5 @@ export const coordinatorSetupTemplate = (
 
         ${signature(tenant)}
     `,
-});
+    };
+};

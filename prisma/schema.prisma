@@ -1820,6 +1820,15 @@ model CampaignAddOn {
   /// and its tier positions survive, and offering an add-on again (the same bundle or a replacement)
   /// resumes the same schedule. Every reader treats a removed row as "no add-on offered".
   removed_at DateTime?
+  /// FR-ADDON-LAUNCH-FLOW-1 (1B, owner-approved 2026-11-25): the TENANT's authorization for this add-on —
+  /// 'included' (default; every pre-existing row) or 'coordinator_choice' (the coordinator decides during
+  /// setup). CHECK-constrained in the migration. Supporters are offered the add-on only when it is not removed
+  /// AND (offer_mode = 'included' OR coordinator_decision = 'accepted') — lib/campaignAddOns.isSupporterOfferedAddOnRow.
+  offer_mode String @default("included")
+  /// The COORDINATOR's answer in coordinator_choice mode: null (none yet), 'accepted' or 'declined'.
+  /// Written only by the coordinator's setup submission; cleared when the tenant asks again or replaces the bundle.
+  coordinator_decision String?
+  coordinator_decided_at DateTime?
 
   business     Business           @relation("BusinessCampaignAddOns", fields: [business_id], references: [id], onDelete: Cascade)
   organization Customer           @relation("OrganizationCampaignAddOns", fields: [business_id, customer_id], references: [business_id, id], onDelete: Cascade)

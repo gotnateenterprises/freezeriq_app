@@ -121,6 +121,10 @@ export function CampaignContextDrawer({
         closed_at: c.closed_at ?? null,
         bundle_selection_status: (c as any).bundle_selection_status ?? null,
     }).awaitingCoordinatorSetup;
+    // ADDON-LAUNCH-FLOW-1A: while the fundraiser still awaits its coordinator and the setup email has not gone
+    // out, the Supporter Add-On card comes BEFORE the setup-email card — the add-on (and whether the coordinator
+    // decides on it) is part of what the invitation describes, so it is set up first.
+    const addOnBeforeInvitation = !c.is_placeholder && awaitingCoordinatorSetup && !c.coordinator_invite_sent_at;
 
     return (
         <div
@@ -212,6 +216,10 @@ export function CampaignContextDrawer({
                         after the launch dialog has closed. Review & send go through the SAME
                         route the launch dialog uses; its claim is the one-invitation guard.
                         Not offered on a closed (completed / awaiting-payment) fundraiser. */}
+                    {addOnBeforeInvitation && (
+                        <CampaignAddOnCard key={`${c.id}-before-invite`} campaignId={c.id} />
+                    )}
+
                     {!c.is_placeholder && sections.lifecycle !== 'completed' && (
                         <CoordinatorSetupEmailCard
                             key={c.id}
@@ -269,7 +277,7 @@ export function CampaignContextDrawer({
                     {/* ── FR-SUPPORTER-ADDON-UPSELL-1 (S2): the fundraiser's Supporter Add-On and
                         what the organization earns on it. Tenant-only; read-only once closed out
                         or for a non-administrator. Never shown to supporters in S2. */}
-                    {!c.is_placeholder && (
+                    {!c.is_placeholder && !addOnBeforeInvitation && (
                         <CampaignAddOnCard key={c.id} campaignId={c.id} />
                     )}
 

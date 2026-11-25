@@ -12,6 +12,10 @@
  *           tiers start above it.
  *   PATCH   { showSharePercent: boolean }  (S4) whether the supporter page may state the share %. Display
  *           only; shown only while the schedule has one tier (lib/campaignAddOnShare.publicAddOnSupportPercent).
+ *   PATCH   { offerMode: 'included' | 'coordinator_choice', confirmOverrideDecline?: true }  (FR-ADDON-LAUNCH-FLOW-1
+ *           1B) include the add-on, or let the coordinator decide during setup. Including one the coordinator
+ *           declined needs confirmOverrideDecline (owner decision D3). Supporters are offered it only while it
+ *           is included or accepted (lib/campaignAddOns.isSupporterOfferedAddOnRow).
  *
  * ACCESS: session-authenticated, tenant-scoped. Every WRITE is a financial-terms change, so it needs an
  * ADMIN or super-admin — the same gate as the campaign's organization share
@@ -37,6 +41,7 @@ import {
     assignCampaignAddOn,
     loadCampaignAddOnAdminView,
     removeCampaignAddOn,
+    setCampaignAddOnOfferMode,
     updateCampaignAddOnShareDisplay,
     updateCampaignAddOnShareTiers,
     type AddOnAdminResult,
@@ -225,6 +230,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         }
         const parsed = await readJson(req);
         if (!parsed.ok) return parsed.response;
+        // FR-ADDON-LAUNCH-FLOW-1 (1B): who decides — the tenant's authorization travels alone, under the same
+        // administrator gate, campaign lock and closed-recheck as every other add-on write.
+        if (parsed.body && typeof parsed.body === 'object' && 'offerMode' in parsed.body && !('tiers' in parsed.body)) {
+            return await runLockedWrite(loaded, (tx) => setCampaignAddOnOfferMode(tx, {
+                campaignId: loaded.campaign.id,
+                businessId: loaded.businessId,
+                offerMode: parsed.body.offerMode,
+                confirmOverrideDecline: parsed.body.confirmOverrideDecline,
+            }));
+        }
         // S4: the share-display toggle travels alone; a body with tiers is a schedule edit, exactly as before.
         if (parsed.body && typeof parsed.body === 'object' && 'showSharePercent' in parsed.body && !('tiers' in parsed.body)) {
             const show = parsed.body.showSharePercent;

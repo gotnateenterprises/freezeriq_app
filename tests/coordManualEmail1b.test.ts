@@ -120,6 +120,9 @@ describe('1. schema and migration', () => {
             '20261126120000_supporter_addon_s4',
             // FR-SUPPORTER-ADDON-UPSELL-1 B1/B2 remediation (owner-approved 2026-11-25): campaign_add_ons.removed_at (nullable).
             '20261127120000_supporter_addon_b2_removed_at',
+            // FR-ADDON-LAUNCH-FLOW-1 1B (owner-approved 2026-11-25): campaign_add_ons.offer_mode (constant default + CHECK),
+            // coordinator_decision (nullable + CHECK), coordinator_decided_at (nullable). Additive.
+            '20261128120000_supporter_addon_coordinator_choice',
         ]);
     });
 });

@@ -13,6 +13,8 @@ import {
 import { buildCoordinatorAccessUrl } from '@/lib/fundraiserUrls';
 import { DEFAULT_BUNDLE_GOAL } from '@/lib/fundraiserMetrics';
 import { createWizardSubmission, type WizardSubmission } from '@/lib/fundraiserWizardSubmit';
+// ADDON-LAUNCH-FLOW-1A: the existing Supporter Add-On card, offered in the launch kit.
+import { CampaignAddOnCard } from '@/components/crm2/CampaignAddOnCard';
 
 type Prefill = { customerId?: string; orgName?: string; goal?: number };
 
@@ -867,6 +869,22 @@ export function StartFundraiserWizard({ prefill, rebooking, onClose }: {
                             <b className="text-sm text-emerald-800 dark:text-emerald-200">🎉 Fundraiser created — launch kit ready</b>
                             <p className="mt-0.5 text-xs text-emerald-700 dark:text-emerald-300">Everything below was generated automatically.</p>
                         </div>
+
+                        {/* ADDON-LAUNCH-FLOW-1A — the optional supporter add-on, on the direct and rebooking
+                            paths too (both create the fundraiser here). The existing Campaign drawer card and
+                            API, unchanged; set it up before the coordinator's setup email is sent from the
+                            Campaign drawer. None = meal bundles only, exactly as before. */}
+                        {kit.campaign?.id && (
+                            <div data-launch-step="addon" className="space-y-2">
+                                <p className="text-xs font-black uppercase tracking-wide text-slate-500">Optional supporter add-on</p>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                    Choose an add-on (like sides &amp; desserts) before the coordinator&apos;s setup email
+                                    goes out, and decide whether to include it or let the coordinator decide. Leave it at
+                                    None to offer meal bundles only.
+                                </p>
+                                <CampaignAddOnCard key={kit.campaign.id} campaignId={kit.campaign.id} />
+                            </div>
+                        )}
 
                         {/* 2×2 kit cards (handoff lines 420-425 + render comment lines 533-534) */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

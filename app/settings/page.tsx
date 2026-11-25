@@ -32,6 +32,7 @@ import CustomerImporter from '@/components/CustomerImporter';
 import FundraiserImporter from '@/components/FundraiserImporter';
 import { Database as DatabaseIcon } from 'lucide-react';
 import FundraiserTaxSettings from '@/components/settings/FundraiserTaxSettings';
+import FundraiserInquiryReplySettings from '@/components/settings/FundraiserInquiryReplySettings';
 import QuickBooksConnectionCard from '@/components/settings/QuickBooksConnectionCard';
 import QuickBooksInvoiceSettingsCard from '@/components/settings/QuickBooksInvoiceSettingsCard';
 
@@ -627,8 +628,17 @@ export default function SettingsPage() {
             </div>
 
             <div className="space-y-8">
+                {/* INQUIRY-REPLY-EXTRA-1: Settings → Fundraisers. The fundraiser settings,
+                    grouped under one heading. */}
+                <section id="fundraisers" aria-labelledby="settings-fundraisers-heading">
+                    <h2 id="settings-fundraisers-heading" className="text-xl font-bold text-slate-800 dark:text-white">
+                        Fundraisers
+                    </h2>
                 {/* FR-TAX-1B: the tenant's default food/grocery tax rate. */}
                 <FundraiserTaxSettings />
+                {/* INQUIRY-REPLY-EXTRA-1: the tenant's optional section in the inquiry reply. */}
+                <FundraiserInquiryReplySettings />
+                </section>
                 <DataManagementSection />
                 <div className="bg-white dark:bg-slate-800 bg-adaptive rounded-xl shadow-sm border border-rose-100 dark:border-rose-900/30 p-8">
                     <h3 className="text-lg font-bold text-rose-600 dark:text-rose-500 mb-2 flex items-center gap-2">

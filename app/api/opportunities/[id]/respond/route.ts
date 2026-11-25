@@ -37,8 +37,9 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { auth } from '@/auth';
 import { createResendClient } from '@/lib/emailSafety';
-import { EMAIL_TEMPLATES, safeSubject } from '@/lib/emailTemplates';
+import { safeSubject } from '@/lib/emailTemplates';
 import { resolveTenantBrand } from '@/lib/tenantBrand';
+import { renderInquiryReply } from '@/lib/inquiryReply';
 import { htmlToEditableText, editableTextToEmailHtml } from '@/lib/plainTextEmail';
 
 /** Bounds for what the owner may edit. Generous for prose, closed for abuse. */
@@ -61,26 +62,14 @@ async function loadTarget(opportunityId: string, businessId: string) {
     });
 }
 
-/** The canonical draft, rendered by the shared generator with this tenant's brand. */
+/**
+ * The canonical draft, rendered by the shared generator with this tenant's brand.
+ * INQUIRY-REPLY-EXTRA-1: through lib/inquiryReply.ts — the same authority the automatic
+ * acknowledgement uses — so the tenant's optional section appears in the draft too, where
+ * the owner can still edit any word of it before sending (unchanged FR-REBOOK-1A contract).
+ */
 async function renderDraft(businessId: string, contactName: string, organizationName: string) {
-    const business = await prisma.business.findUnique({
-        where: { id: businessId },
-        select: { name: true, display_name: true, custom_domain: true, contact_email: true, slug: true },
-    });
-    const base = process.env.NEXTAUTH_URL?.replace(/\/+$/, '');
-    const brand = business ? resolveTenantBrand(business, base) : null;
-    return EMAIL_TEMPLATES.lead_intro(
-        contactName,
-        organizationName,
-        business && brand
-            ? {
-                name: brand.name,
-                email: business.contact_email ?? undefined,
-                site: brand.websiteUrl ?? undefined,
-                siteLabel: brand.websiteLabel ?? undefined,
-            }
-            : undefined,
-    );
+    return renderInquiryReply(prisma, { businessId, contactName, organizationName });
 }
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {

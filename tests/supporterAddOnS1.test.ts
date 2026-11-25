@@ -263,7 +263,8 @@ describe('1–5 · schema and migration: additive, defaults, database-enforced i
         // REVISED (S3): and S3's own approved, additive migration after S2.
         // REVISED (S4, owner-approved 2026-11-24): and S4's approved, additive share-display column after S3.
         // REVISED (B1/B2 remediation, owner-approved 2026-11-25): and the approved, additive campaign_add_ons.removed_at.
-        expect(dirs.slice(s1 + 1)).toEqual(['20261124120000_supporter_addon_s2', '20261125120000_supporter_addon_s3', '20261126120000_supporter_addon_s4', '20261127120000_supporter_addon_b2_removed_at']);
+        // REVISED (FR-ADDON-LAUNCH-FLOW-1 1B, owner-approved 2026-11-25): and the approved, additive coordinator participation.
+        expect(dirs.slice(s1 + 1)).toEqual(['20261124120000_supporter_addon_s2', '20261125120000_supporter_addon_s3', '20261126120000_supporter_addon_s4', '20261127120000_supporter_addon_b2_removed_at', '20261128120000_supporter_addon_coordinator_choice']);
     });
 
     it('the add-on is NOT a CampaignBundle and serving_tier is not its classifier', () => {
@@ -776,7 +777,9 @@ describe('boundaries · one authority, nothing else moved', () => {
 
     it.each([
         'lib/campaignOrderBundles.ts', 'lib/campaignBundleSelection.ts', 'lib/campaignBundleOverride.ts',
-        'app/api/coordinator/bundle-selection/route.ts', 'lib/campaignSelectionLock.ts', 'lib/pricing.ts',
+        // (app/api/coordinator/bundle-selection/route.ts — SUPERSEDED PIN (FR-ADDON-LAUNCH-FLOW-1, owner-approved
+        //  2026-11-25): the coordinator's setup now shows the add-on offer and records an answer; checked below.)
+        'lib/campaignSelectionLock.ts', 'lib/pricing.ts',
         'lib/serving_multipliers.ts', 'lib/kitchen_engine.ts', 'lib/fundraiserTax.ts', 'lib/fundraiserOrgShare.ts',
         'lib/orderItemTier.ts',
         // (lib/publicFundraiserPayload.ts and FundraiserClient.tsx — SUPERSEDED PINS (S4): the public supporter
@@ -784,6 +787,14 @@ describe('boundaries · one authority, nothing else moved', () => {
     ])('%s is byte-identical to Production e9f0f4a', (rel) => {
         const out = execSync(`git diff --name-only e9f0f4a -- "${rel}"`, { cwd: ROOT, encoding: 'utf8' });
         expect(out.trim()).toBe('');
+    });
+
+    it('SUPERSEDED PIN (FR-ADDON-LAUNCH-FLOW-1): the setup route changed only at the approved release, after 284b43f', () => {
+        // Untouched by every add-on phase up to and including the Bundle Editor cleanup.
+        expect(execSync('git diff --name-only e9f0f4a 284b43f -- "app/api/coordinator/bundle-selection/route.ts"', { cwd: ROOT, encoding: 'utf8' }).trim()).toBe('');
+        // The approved change keeps the lock first and the order path's own gate untouched.
+        const src = fs.readFileSync(path.join(ROOT, 'app/api/coordinator/bundle-selection/route.ts'), 'utf8');
+        expect(src.indexOf('await lockCampaignSelection(tx, campaignId);')).toBeLessThan(src.indexOf('recordCoordinatorAddOnDecision(tx'));
     });
 
     // SUPERSEDED PINS (FR-SUPPORTER-ADDON-UPSELL-1 S2, owner-approved): S2 deliberately changes these three

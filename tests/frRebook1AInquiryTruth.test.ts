@@ -305,7 +305,11 @@ describe('FR-REBOOK-1A · server authority and email truth', () => {
         // the file would pass with a hardcoded literal returned above it.
         const fn = route.slice(route.indexOf('async function renderDraft'));
         const body = fn.slice(0, fn.indexOf('\n}'));
-        expect(body).toContain('return EMAIL_TEMPLATES.lead_intro(');
+        // SUPERSEDED PIN (INQUIRY-REPLY-EXTRA-1, owner-approved 2026-11-25): through the ONE shared rendering authority,
+        // which returns the canonical generator — still no second copy to drift.
+        expect(body).toContain('return renderInquiryReply(');
+        const shared = require('fs').readFileSync(require('path').join(process.cwd(), 'lib/inquiryReply.ts'), 'utf8');
+        expect(shared).toContain('return EMAIL_TEMPLATES.lead_intro(');
         expect(body).not.toMatch(/return \{\s*subject:/);
         expect((body.match(/return /g) || []).length).toBe(1);
     });

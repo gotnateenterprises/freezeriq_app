@@ -28,6 +28,12 @@ import {
     paymentMethodsFormFromStored,
     paymentMethodsInputFromForm,
 } from '@/lib/supporterPaymentMethods';
+// FR-ADDON-LAUNCH-FLOW-1: the optional add-on, separate from the meal bundle choice.
+import {
+    AddOnOfferSection,
+    type CoordinatorAddOnAnswer,
+    type CoordinatorAddOnOffer,
+} from '@/components/coordinator/AddOnOfferSection';
 import {
     Loader2,
     CheckCircle2,
@@ -138,6 +144,9 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
         paymentMethods: emptyPaymentMethodsForm(),
     });
     const [lockedInfo, setLockedInfo] = useState<CoordinatorLockedInfo | null>(null);
+    // FR-ADDON-LAUNCH-FLOW-1: the campaign's optional add-on (null = none) and the coordinator's answer.
+    const [addOnOffer, setAddOnOffer] = useState<CoordinatorAddOnOffer | null>(null);
+    const [addOnAnswer, setAddOnAnswer] = useState<CoordinatorAddOnAnswer | null>(null);
     // COORDINATOR-PAYMENT-METHOD-UX-1: the legacy campaign-wide link field is shown
     // only to a campaign that already had one (decided once, on load).
     const [hadPaymentLink, setHadPaymentLink] = useState(false);
@@ -208,6 +217,10 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
                 setHadPaymentLink(Boolean(extra.setup.paymentLink));
             }
             if (extra.locked) setLockedInfo(extra.locked);
+            // FR-ADDON-LAUNCH-FLOW-1: the current offer and any answer already given (a reopened setup).
+            const offer = ((data as unknown as { addOnOffer?: CoordinatorAddOnOffer | null }).addOnOffer) ?? null;
+            setAddOnOffer(offer);
+            setAddOnAnswer(offer && offer.mode === 'coordinator_choice' ? offer.decision : null);
 
             const isAlreadySelected = data.campaign.selectionStatus === 'selected';
 
@@ -273,6 +286,8 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
 
         const limit = data.campaign.selectionLimit;
         if (state.selectedFamilyIds.length !== limit) return;
+        // FR-ADDON-LAUNCH-FLOW-1: when the organizer asked, the add-on needs an explicit Yes or No.
+        if (addOnOffer?.mode === 'coordinator_choice' && !addOnAnswer) return;
 
         // Snapshot the coordinator's submitted IDs before any async work.
         // Used by the 409 branch to determine whether the server's committed
@@ -300,6 +315,17 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
                     // COORDINATOR-PAYMENT-METHOD-UX-1: only the SELECTED methods, each
                     // with its own fields — a deselected method sends nothing at all.
                     paymentMethods: paymentMethodsInputFromForm(setupFields.paymentMethods),
+                    // FR-ADDON-LAUNCH-FLOW-1: the add-on offer this page showed and the answer — never a
+                    // price, a percentage or a different bundle. Absent when the page showed no add-on.
+                    ...(addOnOffer
+                        ? {
+                            addOn: {
+                                bundleId: addOnOffer.bundleId,
+                                mode: addOnOffer.mode,
+                                decision: addOnOffer.mode === 'coordinator_choice' ? addOnAnswer : null,
+                            },
+                        }
+                        : {}),
                 }),
             });
 
@@ -316,6 +342,27 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
                 // This request just now turned setup on — the one case that is
                 // genuinely "fresh" rather than "server already had this."
                 onSelectionComplete(true);
+                return;
+            }
+
+            if (body?.code === 'ADDON_OFFER_CHANGED' || body?.code === 'ADDON_DECISION_REQUIRED') {
+                // FR-ADDON-LAUNCH-FLOW-1: the organizer changed the add-on offer while this page was open (or
+                // it needs an answer). Nothing was saved. Reload ONLY the offer — the coordinator's bundle
+                // picks and logistics stay exactly as they typed them — and ask again.
+                try {
+                    const fresh = await fetch(apiPath);
+                    const freshData = fresh.ok ? await fresh.json().catch(() => null) : null;
+                    const offer = (freshData?.addOnOffer as CoordinatorAddOnOffer | null | undefined) ?? null;
+                    setAddOnOffer(offer);
+                    setAddOnAnswer(offer && offer.mode === 'coordinator_choice' ? offer.decision : null);
+                } catch {
+                    // Keep the current offer on screen; the message below still explains.
+                }
+                setState((prev) => ({
+                    ...prev,
+                    submitting: false,
+                    error: body?.error || 'The optional add-on offer changed. Please review it and confirm again.',
+                }));
                 return;
             }
 
@@ -449,7 +496,9 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
     const { campaign, candidateFamilies } = state.data;
     const limit = campaign.selectionLimit;
     const selectedCount = state.selectedFamilyIds.length;
-    const readyToSubmit = selectedCount === limit;
+    // FR-ADDON-LAUNCH-FLOW-1: when the organizer asked the coordinator to decide, an answer is required.
+    const addOnAnswerNeeded = addOnOffer?.mode === 'coordinator_choice' && !addOnAnswer;
+    const readyToSubmit = selectedCount === limit && !addOnAnswerNeeded;
 
     // ── Completed summary ─────────────────────────────────────────────────
 
@@ -474,6 +523,14 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
                     Your fundraiser bundles are ready. Supporters can now order either serving size from each
                     selected family.
                 </p>
+                {/* FR-ADDON-LAUNCH-FLOW-1: what happens with the optional add-on, in one line. */}
+                {addOnOffer && (addOnOffer.mode === 'included' || addOnAnswer) && (
+                    <p data-addon-outcome={addOnOffer.mode === 'included' ? 'included' : addOnAnswer ?? ''} className="text-xs font-semibold text-emerald-800">
+                        {addOnOffer.mode === 'included' || addOnAnswer === 'accepted'
+                            ? `Supporters will also be offered the optional ${addOnOffer.name}.`
+                            : 'You chose to offer meal bundles only.'}
+                    </p>
+                )}
                 {selectedNames.length > 0 && (
                     <ul className="space-y-1.5" aria-label="Selected bundle families">
                         {selectedNames.map((name) => (
@@ -579,6 +636,19 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
                 )}
             </div>
 
+            {/* FR-ADDON-LAUNCH-FLOW-1: the optional add-on — a separate section, after the meal choice. */}
+            {addOnOffer && (
+                <AddOnOfferSection
+                    offer={addOnOffer}
+                    answer={addOnAnswer}
+                    onAnswer={(next) => {
+                        setAddOnAnswer(next);
+                        setState((prev) => ({ ...prev, error: null }));
+                    }}
+                    disabled={state.submitting}
+                />
+            )}
+
             {/* Per-submission error */}
             {state.error && (
                 <div
@@ -646,8 +716,14 @@ export function BundleSelectionStep({ onSelectionComplete }: BundleSelectionStep
                     </button>
                     {!readyToSubmit && !state.submitting && (
                         <p className="text-center text-xs text-indigo-500 font-medium" aria-live="polite">
-                            Select {limit - selectedCount} more{' '}
-                            {limit - selectedCount === 1 ? 'family' : 'families'} to continue
+                            {selectedCount < limit ? (
+                                <>
+                                    Select {limit - selectedCount} more{' '}
+                                    {limit - selectedCount === 1 ? 'family' : 'families'} to continue
+                                </>
+                            ) : (
+                                'Choose Yes or No for the optional add-on to continue'
+                            )}
                         </p>
                     )}
                 </div>
