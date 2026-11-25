@@ -657,9 +657,6 @@ export async function recordCoordinatorAddOnDecision(
     if (!decision) {
         return { ok: false, status: 400, code: 'ADDON_DECISION_REQUIRED', error: ADDON_DECISION_REQUIRED_MESSAGE };
     }
-    if (offer.bundleId !== bundleId) {
-        return { ok: false, status: 409, code: 'ADDON_OFFER_CHANGED', error: ADDON_OFFER_CHANGED_MESSAGE };
-    }
     if (offer.decision === decision) return { ok: true, recorded: false, decision };
 
     const updated = await tx.campaignAddOn.updateMany({
