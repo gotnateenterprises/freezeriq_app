@@ -751,7 +751,12 @@ describe('migration and scope', () => {
         const touched = execSync('git diff --name-only --diff-filter=MDR dd928f0 -- prisma/migrations', { cwd: ROOT, encoding: 'utf8' }).trim();
         expect(touched).toBe('');
         const added = execSync('git diff --name-only --diff-filter=A dd928f0 -- prisma/migrations', { cwd: ROOT, encoding: 'utf8' }).trim();
-        expect(added).toBe('prisma/migrations/20261127120000_supporter_addon_b2_removed_at/migration.sql');
+        // SUPERSEDED PIN (FR-ADDON-LAUNCH-FLOW-1 1B, owner-approved 2026-11-25): plus the approved, additive
+        // coordinator-participation migration — named here, so any other addition still fails.
+        expect(added.split('\n').map((s) => s.trim()).filter(Boolean)).toEqual([
+            'prisma/migrations/20261127120000_supporter_addon_b2_removed_at/migration.sql',
+            'prisma/migrations/20261128120000_supporter_addon_coordinator_choice/migration.sql',
+        ]);
     });
 
     it('the protected order routes, closeout, invoice and QuickBooks code are untouched by the remediation', () => {
