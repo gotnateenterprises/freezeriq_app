@@ -1815,6 +1815,11 @@ model CampaignAddOn {
   /// S4: the tenant's choice to show this add-on's share % on the supporter page. Only ever shown while the
   /// share schedule has exactly one tier (a tiered schedule never shows a percentage). Off by default.
   show_share_percent Boolean @default(false)
+  /// B2 remediation (owner-approved 2026-11-25): null = offered on the campaign; a timestamp = removed then.
+  /// Removing an add-on DISABLES it and keeps this row — so the campaign's share schedule, its locked tiers
+  /// and its tier positions survive, and offering an add-on again (the same bundle or a replacement)
+  /// resumes the same schedule. Every reader treats a removed row as "no add-on offered".
+  removed_at DateTime?
 
   business     Business           @relation("BusinessCampaignAddOns", fields: [business_id], references: [id], onDelete: Cascade)
   organization Customer           @relation("OrganizationCampaignAddOns", fields: [business_id, customer_id], references: [business_id, id], onDelete: Cascade)

@@ -53,6 +53,19 @@ export const BUNDLE_TYPE_SELECT = { bundle_type: true } as {};
 export const ITEM_ROLE_SELECT = { item_role: true } as {};
 /** S4: campaign_add_ons.show_share_percent — the tenant's per-fundraiser "show the share %" choice. */
 export const SHOW_SHARE_PERCENT_SELECT = { show_share_percent: true } as {};
+/**
+ * B2 remediation: campaign_add_ons.removed_at — null while the add-on is offered, a timestamp once the tenant
+ * removed it. A removed row is KEPT (with its share schedule) so offering an add-on again resumes it; every
+ * reader of "the campaign's add-on" must treat a removed row exactly like no row.
+ */
+export const REMOVED_AT_SELECT = { removed_at: true } as {};
+
+/** True when the campaign_add_ons row is present and NOT removed (i.e. the add-on is currently offered). */
+export function isOfferedAddOnRow(row: unknown): boolean {
+    if (!row || typeof row !== 'object') return false;
+    const removedAt = (row as { removed_at?: unknown }).removed_at;
+    return removedAt === null || removedAt === undefined;
+}
 
 /** A stored classification. Only the exact value 'addon' is an add-on; the column defaults to 'meal'. */
 export function normalizeBundleType(value: unknown): BundleType {
@@ -111,7 +124,8 @@ export interface CampaignAddOnAuthority {
 
 /**
  * The campaign's CURRENTLY authorized add-on, or null. Authorized means: an assignment row for this
- * campaign in this tenant, pointing at a bundle of this tenant that is active and typed 'addon'.
+ * campaign in this tenant that is not removed (B2), pointing at a bundle of this tenant that is active and
+ * typed 'addon'.
  * (Postgres already guarantees the tenant agreement through composite keys; it is re-checked here so a
  * caller can never be handed another tenant's bundle.)
  */
@@ -124,10 +138,13 @@ export async function loadCampaignAddOnAuthority(
         select: {
             business_id: true,
             bundle_id: true,
+            ...REMOVED_AT_SELECT,
             bundle: { select: { id: true, name: true, business_id: true, is_active: true, bundle_type: true } },
         },
     });
     if (!row || row.business_id !== params.businessId) return null;
+    // B2: a removed add-on keeps its row (and schedule) but is not offered — no order may carry it.
+    if (!isOfferedAddOnRow(row)) return null;
     const bundle = row.bundle;
     if (!bundle || bundle.id !== row.bundle_id || bundle.business_id !== params.businessId) return null;
     if (bundle.is_active !== true || bundle.bundle_type !== ADD_ON_BUNDLE_TYPE) return null;

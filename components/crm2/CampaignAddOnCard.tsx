@@ -49,7 +49,18 @@ interface AddOnView {
         showSharePercent?: boolean;
         publicSupportPercent?: number | null;
     };
+    /** B2: a removed add-on — not offered — whose share schedule is kept and resumes when one is offered again. */
+    removedAddOn?: null | {
+        name: string;
+        removedAt: string | null;
+        tiers: TierRow[];
+        next: { nextUnit: number; percent: number; nextTierStart: number | null; nextTierPercent: number | null };
+    };
+    /** ACTIVE add-ons sold (non-canceled orders). */
     unitsSold: number;
+    /** B1: lifetime tier positions (canceled orders keep theirs) — drives locks; never shown as sales. */
+    tierPositionsReached?: number;
+    tierProgressNote?: string | null;
     grossSales: number;
     earnedShare: number;
     eligibleBundles: Array<{ id: string; name: string; price: number }>;
@@ -127,6 +138,9 @@ export function CampaignAddOnCard({ campaignId }: { campaignId: string }) {
     }
 
     const unitsSold = view?.unitsSold ?? 0;
+    // B1: tier locks and the next position follow the campaign's LIFETIME tier positions (canceled orders keep
+    // theirs), which can be higher than the active quantity sold. Older servers without it: the sold count.
+    const positionsReached = Math.max(unitsSold, view?.tierPositionsReached ?? unitsSold);
     const editable = Boolean(view && view.canManage && !view.closed);
 
     // The draft, parsed by the SAME rule the server applies, so ranges and problems show as you type.
@@ -134,8 +148,8 @@ export function CampaignAddOnCard({ campaignId }: { campaignId: string }) {
         draft.map((d) => ({ startingQuantity: d.start, percent: d.percent })),
     ), [draft]);
     const draftRows = useMemo(
-        () => (parsedDraft.ok ? describeShareTierRanges(parsedDraft.tiers, unitsSold) : null),
-        [parsedDraft, unitsSold],
+        () => (parsedDraft.ok ? describeShareTierRanges(parsedDraft.tiers, positionsReached) : null),
+        [parsedDraft, positionsReached],
     );
     const savedKey = view?.addOn ? JSON.stringify(view.addOn.tiers.map((t) => [t.startingQuantity, t.percent])) : '';
     const draftKeyStr = parsedDraft.ok ? JSON.stringify(parsedDraft.tiers.map((t) => [t.startingQuantity, t.percent])) : 'invalid';
@@ -182,6 +196,11 @@ export function CampaignAddOnCard({ campaignId }: { campaignId: string }) {
                             {unitsSold} add-on{unitsSold === 1 ? '' : 's'} sold
                             {view.earnedShare > 0 && <> · {money(view.earnedShare)} earned for the organization</>}
                         </p>
+                        {view.tierProgressNote && (
+                            <p data-addon-tier-progress="true" className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                                {view.tierProgressNote}
+                            </p>
+                        )}
                         {!addOn.sellable && (
                             <p className="text-xs font-bold text-amber-700 dark:text-amber-400">
                                 This bundle is turned off, so it can&apos;t be added to orders right now.
@@ -189,7 +208,36 @@ export function CampaignAddOnCard({ campaignId }: { campaignId: string }) {
                         )}
                     </div>
                 ) : (
-                    <p className="text-sm font-bold text-slate-600 dark:text-slate-300">No add-on</p>
+                    <div className="space-y-1">
+                        <p className="text-sm font-bold text-slate-600 dark:text-slate-300">No add-on</p>
+                        {view.removedAddOn && (
+                            <div data-addon-removed="true" className="space-y-1">
+                                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 break-words">
+                                    {view.removedAddOn.name} was removed. Its organization share schedule and tier progress are kept,
+                                    and they resume when you offer an add-on on this fundraiser again.
+                                </p>
+                                {(unitsSold > 0 || view.earnedShare > 0) && (
+                                    <p className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                                        {unitsSold} add-on{unitsSold === 1 ? '' : 's'} sold
+                                        {view.earnedShare > 0 && <> · {money(view.earnedShare)} earned for the organization</>}
+                                    </p>
+                                )}
+                                {view.tierProgressNote && (
+                                    <p data-addon-tier-progress="true" className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                                        {view.tierProgressNote}
+                                    </p>
+                                )}
+                                <ul className="space-y-0.5" aria-label="Kept add-on share schedule">
+                                    {view.removedAddOn.tiers.map((t) => (
+                                        <li key={t.startingQuantity} className="text-xs font-bold text-slate-600 dark:text-slate-300 tabular-nums">
+                                            {t.rangeLabel} → {formatPercent(t.percent)}
+                                            {t.lock !== 'editable' && <span className="ml-1 text-[10px] font-black uppercase tracking-wide text-slate-400">Locked</span>}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                    </div>
                 )}
 
                 {/* Choose / change / remove */}
@@ -215,7 +263,15 @@ export function CampaignAddOnCard({ campaignId }: { campaignId: string }) {
                             type="button"
                             className={PRIMARY}
                             disabled={saving || !choice}
-                            onClick={() => send('PUT', { bundleId: choice }, addOn ? 'Add-on changed.' : 'Add-on offered on this fundraiser.')}
+                            onClick={() => send(
+                                'PUT',
+                                { bundleId: choice },
+                                addOn
+                                    ? 'Add-on changed. Its share schedule continues.'
+                                    : view.removedAddOn
+                                        ? 'Add-on offered again. Its share schedule resumes where it left off.'
+                                        : 'Add-on offered on this fundraiser.',
+                            )}
                         >
                             {addOn ? 'Change add-on' : 'Offer add-on'}
                         </button>
@@ -225,8 +281,8 @@ export function CampaignAddOnCard({ campaignId }: { campaignId: string }) {
                                 className={BTN}
                                 disabled={saving}
                                 onClick={() => {
-                                    if (!window.confirm(`Remove ${addOn.name} from this fundraiser? Orders already placed keep their add-on and what it earned.`)) return;
-                                    send('DELETE', undefined, 'Add-on removed.');
+                                    if (!window.confirm(`Remove ${addOn.name} from this fundraiser? Supporters won't be offered it. Orders already placed keep their add-on and what it earned, and the share schedule is kept for when you offer an add-on again.`)) return;
+                                    send('DELETE', undefined, 'Add-on removed. Its share schedule is kept.');
                                 }}
                             >
                                 <Trash2 size={13} aria-hidden="true" /> Remove
@@ -316,7 +372,7 @@ export function CampaignAddOnCard({ campaignId }: { campaignId: string }) {
                                     disabled={saving || draft.length >= 10}
                                     onClick={() => setDraft((p) => {
                                         const starts = p.map((x) => Number(x.start)).filter((n) => Number.isInteger(n));
-                                        const next = Math.max(unitsSold + 1, (starts.length ? Math.max(...starts) : 0) + 10);
+                                        const next = Math.max(positionsReached + 1, (starts.length ? Math.max(...starts) : 0) + 10);
                                         return [...p, { key: ++draftKey, start: String(next), percent: p[p.length - 1]?.percent ?? String(view.mealSharePercent) }];
                                     })}
                                 >

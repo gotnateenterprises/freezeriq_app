@@ -57,7 +57,8 @@ export function bundleDeletionRefusal(counts: BundleReferenceCounts): string | n
     if (counts.invoiceItems > 0) uses.push(plural(counts.invoiceItems, 'invoice line', 'invoice lines'));
     if (counts.campaignBundles > 0) uses.push(plural(counts.campaignBundles, 'fundraiser menu', 'fundraiser menus'));
     if ((counts.campaignAddOns ?? 0) > 0) {
-        uses.push(plural(counts.campaignAddOns ?? 0, 'fundraiser as its supporter add-on', 'fundraisers as their supporter add-on'));
+        // B2: a removed add-on keeps its record (and the database keeps pinning the bundle), so say so.
+        uses.push(plural(counts.campaignAddOns ?? 0, 'fundraiser\'s supporter add-on (current or removed)', 'fundraisers\' supporter add-ons (current or removed)'));
     }
     if (uses.length === 0) return null;
 

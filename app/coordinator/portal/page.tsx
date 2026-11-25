@@ -733,9 +733,12 @@ export default function CoordinatorPortal() {
     // money raised instead of gross sales relabeled.
     // FR-SUPPORTER-ADDON-UPSELL-1 (S2): add-on sales earn the add-on's own (tiered) share, recorded at
     // sale; the campaign percentage applies to meal sales only. Without an add-on this is unchanged.
+    // B2 remediation: the server's addOnMoney is the add-on money recorded on active orders whether or not an
+    // add-on is offered right now, so this figure stays exact after an add-on is removed or turned off.
     const metrics = computeFundraiserProgress(
         campaign.bundle_goal, campaign.total_sales, campaign.orders || [], campaign.org_share_percent,
-        campaign.addOn ? { grossSales: campaign.addOn.grossSales, earnedShare: campaign.addOn.earnedShare } : null,
+        campaign.addOnMoney
+            ?? (campaign.addOn ? { grossSales: campaign.addOn.grossSales, earnedShare: campaign.addOn.earnedShare } : null),
     );
     const addOnCard = campaign.addOn ? <AddOnShareCard addOn={campaign.addOn} /> : null;
     const progress = metrics.progressPercent;

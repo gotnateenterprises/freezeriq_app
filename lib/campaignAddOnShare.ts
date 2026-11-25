@@ -154,8 +154,9 @@ export function shareAmountCents(quantity: number, unitPrice: number, percent: n
 }
 
 /**
- * Split ONE add-on order line across the schedule, marginally. `soldBefore` is the campaign's cumulative
- * add-on units already sold before this line, so the line occupies units soldBefore+1 … soldBefore+qty.
+ * Split ONE add-on order line across the schedule, marginally. `soldBefore` is the campaign's LIFETIME tier
+ * positions already allocated before this line (B1: canceled orders keep theirs, so a position is never
+ * handed out twice), so the line occupies positions soldBefore+1 … soldBefore+qty.
  * Every tier the line touches becomes its own slice at its own rate.
  */
 export function splitAddOnLineIntoSlices(input: {
@@ -191,34 +192,41 @@ export function splitAddOnLineIntoSlices(input: {
 }
 
 /**
- * May the schedule change from `current` to `next` with `unitsSold` add-ons already sold?
- * Every tier starting at or below unitsSold must survive unchanged (same start, same percent), and no new
- * tier may start at or below unitsSold. Tiers above it are free to add, edit or remove.
+ * May the schedule change from `current` to `next` once the campaign's tier progress has reached add-on
+ * `positionsReached`?
+ *
+ * B1 remediation: `positionsReached` is the LIFETIME count of tier positions allocated on the campaign
+ * (lib/campaignAddOnEarnings.countCampaignAddOnPositionsAllocated) — canceled orders included, because a
+ * canceled order keeps its recorded positions and a restore brings them back. So a cancellation can never
+ * unlock a tier that was reached. It is NOT the active quantity sold, and the wording never calls it that.
+ *
+ * Every tier starting at or below positionsReached must survive unchanged (same start, same percent), and no
+ * new tier may start at or below it. Tiers above it are free to add, edit or remove.
  */
 export function validateShareScheduleEdit(input: {
     current: ShareTier[];
     next: ShareTier[];
-    unitsSold: number;
+    positionsReached: number;
 }): ShareScheduleResult {
-    const sold = Math.max(0, Math.floor(Number(input.unitsSold) || 0));
+    const reached = Math.max(0, Math.floor(Number(input.positionsReached) || 0));
     const nextByStart = new Map(input.next.map((t) => [t.startingQuantity, t]));
     const currentByStart = new Map(input.current.map((t) => [t.startingQuantity, t]));
 
     for (const t of input.current) {
-        if (t.startingQuantity > sold) continue;
+        if (t.startingQuantity > reached) continue;
         const kept = nextByStart.get(t.startingQuantity);
         if (!kept || kept.percent !== t.percent) {
             return {
                 ok: false, status: 409, code: 'SHARE_TIER_LOCKED',
-                error: `${sold} add-on${sold === 1 ? ' has' : 's have'} already sold, so the tier starting at add-on ${t.startingQuantity} (${formatPercent(t.percent)}) is locked. Add a new tier starting at add-on ${sold + 1} or later instead.`,
+                error: `Tier progress has reached add-on #${reached}, so the tier starting at add-on ${t.startingQuantity} (${formatPercent(t.percent)}) is locked. Add a new tier starting at add-on ${reached + 1} or later instead.`,
             };
         }
     }
     for (const t of input.next) {
-        if (t.startingQuantity <= sold && !currentByStart.has(t.startingQuantity)) {
+        if (t.startingQuantity <= reached && !currentByStart.has(t.startingQuantity)) {
             return {
                 ok: false, status: 409, code: 'SHARE_TIER_LOCKED',
-                error: `${sold} add-on${sold === 1 ? ' has' : 's have'} already sold. A new tier has to start at add-on ${sold + 1} or later.`,
+                error: `Tier progress has reached add-on #${reached}. A new tier has to start at add-on ${reached + 1} or later.`,
             };
         }
     }
@@ -240,15 +248,19 @@ export interface ShareTierRow extends ShareTier {
     /** "1–10 sold", "11+ sold", "11 sold" — plain language, never "starting quantity". */
     rangeLabel: string;
     /**
-     * locked          — every unit in this tier has already sold.
-     * locked_for_sold — some units have sold under it; it cannot be changed.
+     * locked          — tier progress has passed every position in this tier.
+     * locked_for_sold — tier progress is inside this tier; it cannot be changed.
      * editable        — not reached yet.
      */
     lock: ShareTierLock;
 }
 
-export function describeShareTierRanges(tiers: ShareTier[], unitsSold: number): ShareTierRow[] {
-    const sold = Math.max(0, Math.floor(Number(unitsSold) || 0));
+/**
+ * The schedule as plain ranges with lock states. `positionsReached` is the campaign's LIFETIME tier
+ * positions allocated (B1: canceled orders keep theirs), never the active quantity sold.
+ */
+export function describeShareTierRanges(tiers: ShareTier[], positionsReached: number): ShareTierRow[] {
+    const sold = Math.max(0, Math.floor(Number(positionsReached) || 0));
     return tiers.map((t, i) => {
         const endQuantity = i + 1 < tiers.length ? tiers[i + 1].startingQuantity - 1 : null;
         const rangeLabel = endQuantity === null
@@ -263,14 +275,17 @@ export function describeShareTierRanges(tiers: ShareTier[], unitsSold: number): 
     });
 }
 
-/** The rate the NEXT add-on sold will earn, and where the next change happens (null when none). */
-export function nextAddOnRate(tiers: ShareTier[], unitsSold: number): {
+/**
+ * The rate the NEXT add-on sold will earn, and where the next change happens (null when none). The next
+ * add-on takes tier position `positionsReached + 1` (B1: positions are never re-used, even after a cancel).
+ */
+export function nextAddOnRate(tiers: ShareTier[], positionsReached: number): {
     nextUnit: number;
     percent: number;
     nextTierStart: number | null;
     nextTierPercent: number | null;
 } {
-    const nextUnit = Math.max(0, Math.floor(Number(unitsSold) || 0)) + 1;
+    const nextUnit = Math.max(0, Math.floor(Number(positionsReached) || 0)) + 1;
     const upcoming = tiers.find((t) => t.startingQuantity > nextUnit) ?? null;
     return {
         nextUnit,
@@ -278,6 +293,22 @@ export function nextAddOnRate(tiers: ShareTier[], unitsSold: number): {
         nextTierStart: upcoming ? upcoming.startingQuantity : null,
         nextTierPercent: upcoming ? upcoming.percent : null,
     };
+}
+
+/**
+ * B1 transparency: when cancellations make the ACTIVE add-on quantity sold differ from the campaign's tier
+ * progress, say so in plain words — without ever calling the allocated positions sales. Null when the two
+ * agree (no cancelled add-ons), so nothing extra is shown in the common case. Every allocated position
+ * belongs to exactly one order (positions are never re-used), so the difference is the add-ons on
+ * cancelled orders.
+ */
+export function describeTierProgressGap(input: { activeSold: number; positionsReached: number }): string | null {
+    const active = Math.max(0, Math.floor(Number(input.activeSold) || 0));
+    const reached = Math.max(0, Math.floor(Number(input.positionsReached) || 0));
+    if (reached <= active) return null;
+    const held = reached - active;
+    const one = held === 1;
+    return `Tier progress is at add-on #${reached}: ${held} add-on${one ? '' : 's'} on canceled orders keep${one ? 's its' : ' their'} tier position${one ? '' : 's'}, so the next add-on sold is #${reached + 1}.`;
 }
 
 /**

@@ -94,7 +94,9 @@ export async function bundleTypeChangeRefusal(
         return null;
     }
 
-    const assigned = await db.campaignAddOn.count({ where: { bundle_id: params.bundleId } });
+    // B2: only an add-on currently OFFERED blocks the change. A removed add-on keeps its campaign_add_ons row
+    // (so the campaign's share schedule survives), but it is no longer this bundle's job on that fundraiser.
+    const assigned = await db.campaignAddOn.count({ where: { bundle_id: params.bundleId, removed_at: null } as {} });
     if (assigned > 0) {
         return 'This bundle is a fundraiser\'s supporter add-on. Remove it under that fundraiser\'s Supporter Add-On before making it a meal bundle.';
     }
