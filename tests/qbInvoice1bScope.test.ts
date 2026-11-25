@@ -196,7 +196,8 @@ describe('QB-INVOICE-1B · the migration is additive', () => {
         // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 S3 (owner-approved 2026-11-24): invoice_items.item_role (constant default + CHECK)): one more.
         // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 S4 (owner-approved 2026-11-24): campaign_add_ons.show_share_percent (constant default).): one more.
         // REVISED (FR-SUPPORTER-ADDON-UPSELL-1 B1/B2 remediation (owner-approved 2026-11-25): campaign_add_ons.removed_at (nullable)): one more.
-        expect(dirs).toHaveLength(36);
+        // REVISED (FR-ADDON-LAUNCH-FLOW-1 1B (owner-approved 2026-11-25): the coordinator's add-on participation, additive): one more.
+        expect(dirs).toHaveLength(37);
         expect(dirs[25]).toBe('20260913120000_qb_invoice_1b_quickbooks_links');
         expect(dirs[26]).toBe('20260915170000_qb_invoice_1c_invoice_send');
         expect(dirs[27]).toBe('20260923010000_qb_invoice_cancel_1_voided');
@@ -208,6 +209,7 @@ describe('QB-INVOICE-1B · the migration is additive', () => {
         expect(dirs[33]).toBe('20261125120000_supporter_addon_s3');
         expect(dirs[34]).toBe('20261126120000_supporter_addon_s4');
         expect(dirs[35]).toBe('20261127120000_supporter_addon_b2_removed_at');
+        expect(dirs[36]).toBe('20261128120000_supporter_addon_coordinator_choice');
         const sql = R(MIGRATION).split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
         expect(sql).not.toMatch(/\bDROP\b|\bRENAME\b|ALTER\s+COLUMN|\bUPDATE\s+"|\bDELETE\s+FROM|\bINSERT\s+INTO|\bTRUNCATE\b/i);
         // Every ALTER TABLE adds a constraint to a NEW table; the only statement on an existing table is one unique index.
