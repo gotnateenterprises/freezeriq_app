@@ -3,11 +3,13 @@
  *
  *   GET     the add-on, its share schedule (as plain ranges with lock states), add-ons sold, the share
  *           already earned, the meal share for reference, and the add-on bundles that can be chosen.
- *   PUT     { bundleId }  assign (first time: one tier, unit 1+ at the campaign's CURRENT meal share) or
- *           replace (the schedule is kept).
- *   DELETE  remove the add-on and its schedule. Money already earned stays on its orders.
- *   PATCH   { tiers: [{ startingQuantity, percent }] }  the share schedule. Tiers the campaign's sold
- *           add-ons have reached are locked; new tiers start above the units already sold.
+ *   PUT     { bundleId }  offer an add-on: first time ever, one tier, position 1+ at the campaign's CURRENT
+ *           meal share; otherwise replace or resume (B2) — the campaign's schedule is always kept.
+ *   DELETE  stop offering the add-on (B2: campaign_add_ons.removed_at). Nothing is deleted: the schedule,
+ *           locked tiers and tier positions are kept and resume on the next PUT. Money earned stays.
+ *   PATCH   { tiers: [{ startingQuantity, percent }] }  the share schedule. Tiers the campaign's tier
+ *           progress has reached (LIFETIME positions, cancelled orders included — B1) are locked; new
+ *           tiers start above it.
  *   PATCH   { showSharePercent: boolean }  (S4) whether the supporter page may state the share %. Display
  *           only; shown only while the schedule has one tier (lib/campaignAddOnShare.publicAddOnSupportPercent).
  *

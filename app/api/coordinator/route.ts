@@ -50,7 +50,7 @@ import {
 } from '@/lib/campaignAddOns';
 import { lockCampaignSelection } from '@/lib/campaignSelectionLock';
 // FR-SUPPORTER-ADDON-UPSELL-1 (S2): the add-on share a paper order earns, and the read-only add-on view.
-import { loadCoordinatorAddOnView, recordAddOnShareEarnings } from '@/lib/campaignAddOnEarnings';
+import { loadCampaignAddOnMoney, loadCoordinatorAddOnView, recordAddOnShareEarnings } from '@/lib/campaignAddOnEarnings';
 import {
     CAMPAIGN_COORDINATOR_ASSIGNMENT_SELECT,
     assignedCoordinatorFirstName,
@@ -456,10 +456,23 @@ export async function GET(req: Request) {
         } catch (addOnErr) {
             console.error('Coordinator add-on view error (non-blocking):', addOnErr);
         }
+        // B2 remediation (owner-approved 2026-11-25): the add-on money ALREADY recorded on this campaign's
+        // active orders, independent of whether an add-on is offered right now — so "raised for your
+        // organization" keeps counting add-on sales at the share they actually earned after an add-on is
+        // removed or its bundle turned off (instead of the meal % on add-on revenue). Null without add-on sales.
+        let addOnMoney: { grossSales: number; earnedShare: number } | null = null;
+        try {
+            const money = await loadCampaignAddOnMoney(prisma, campaign.id);
+            addOnMoney = money.unitsSold > 0 ? { grossSales: money.grossSales, earnedShare: money.earnedShare } : null;
+        } catch (moneyErr) {
+            console.error('Coordinator add-on money error (non-blocking):', moneyErr);
+            addOnMoney = addOn ? { grossSales: addOn.grossSales, earnedShare: addOn.earnedShare } : null;
+        }
 
         return NextResponse.json({
             ...campaignResponse,
             addOn,
+            addOnMoney,
             // COORDINATOR-PAYMENT-METHOD-UX-1: re-validated on read, so the panel
             // summary and the Payment Settings form see exactly what supporters do.
             payment_methods: readStoredPaymentMethods(campaignResponse.payment_methods ?? null),
@@ -873,22 +886,47 @@ export async function DELETE(req: Request) {
             );
         }
 
-        // 2. Atomic cancel: only succeeds if ALL guards pass
-        const result = await prisma.order.updateMany({
-            where: {
-                id: orderId,
-                campaign_id: campaign.id,   // Campaign isolation
-                // Every CAMPAIGN order — the public supporter route and the
-                // coordinator's + Add Order route both write 'fundraiser'. (This
-                // said 'Coordinator-entered only', which was never true.)
-                source: 'fundraiser',
-                canceled_at: null            // Not already canceled
-            },
-            data: {
-                canceled_at: new Date(),
-                canceled_by: 'coordinator'
+        // 2. Atomic cancel: only succeeds if ALL guards pass.
+        //    FR-SUPPORTER-ADDON-UPSELL-1 B1/B2 remediation (owner-approved 2026-11-25): under the campaign
+        //    selection lock — the lock every order and closeout takes first — with "still open?" re-checked
+        //    INSIDE it, so a cancel can never land after closeout has already counted the order. The order's
+        //    recorded add-on share slices are untouched: they keep their tier positions (never re-used) and
+        //    simply stop counting in active totals while the order is canceled.
+        const result = await prisma.$transaction(async (tx) => {
+            await lockCampaignSelection(tx, campaign.id);
+            const current = await tx.fundraiserCampaign.findUnique({
+                where: { id: campaign.id },
+                select: { closed_at: true, status: true },
+            });
+            if (!current || isCampaignClosed(current)) {
+                throw Object.assign(new Error('CAMPAIGN_CLOSED'), { isCampaignClosedRecheck: true });
             }
+            return tx.order.updateMany({
+                where: {
+                    id: orderId,
+                    campaign_id: campaign.id,   // Campaign isolation
+                    // Every CAMPAIGN order — the public supporter route and the
+                    // coordinator's + Add Order route both write 'fundraiser'. (This
+                    // said 'Coordinator-entered only', which was never true.)
+                    source: 'fundraiser',
+                    canceled_at: null            // Not already canceled
+                },
+                data: {
+                    canceled_at: new Date(),
+                    canceled_by: 'coordinator'
+                }
+            });
+        }).catch((txErr: any) => {
+            if (txErr?.isCampaignClosedRecheck === true) return null;
+            throw txErr;
         });
+
+        if (result === null) {
+            return NextResponse.json(
+                { error: 'Campaign is closed. Order changes are no longer permitted.' },
+                { status: 400 }
+            );
+        }
 
         if (result.count === 0) {
             return NextResponse.json(
@@ -1071,19 +1109,43 @@ export async function PATCH(req: Request) {
 
         // 2. Atomic restore: only succeeds if order is canceled AND belongs to campaign
         //    source guard mirrors DELETE — every campaign order (both order routes
-        //    write 'fundraiser'), not only coordinator-entered ones as this once said
-        const result = await prisma.order.updateMany({
-            where: {
-                id: orderId,
-                campaign_id: campaign.id,
-                source: 'fundraiser',           // Every campaign order (see DELETE)
-                NOT: { canceled_at: null }
-            },
-            data: {
-                canceled_at: null,
-                canceled_by: null
+        //    write 'fundraiser'), not only coordinator-entered ones as this once said.
+        //    B1/B2 remediation: under the campaign selection lock with "still open?" re-checked inside it
+        //    (see DELETE). A restore re-activates the order's ORIGINAL add-on share slices exactly as they
+        //    were recorded: no new tier positions, no new earnings rows — and a second restore matches
+        //    nothing (the order is no longer canceled), so it can never count them twice.
+        const result = await prisma.$transaction(async (tx) => {
+            await lockCampaignSelection(tx, campaign.id);
+            const current = await tx.fundraiserCampaign.findUnique({
+                where: { id: campaign.id },
+                select: { closed_at: true, status: true },
+            });
+            if (!current || isCampaignClosed(current)) {
+                throw Object.assign(new Error('CAMPAIGN_CLOSED'), { isCampaignClosedRecheck: true });
             }
+            return tx.order.updateMany({
+                where: {
+                    id: orderId,
+                    campaign_id: campaign.id,
+                    source: 'fundraiser',           // Every campaign order (see DELETE)
+                    NOT: { canceled_at: null }
+                },
+                data: {
+                    canceled_at: null,
+                    canceled_by: null
+                }
+            });
+        }).catch((txErr: any) => {
+            if (txErr?.isCampaignClosedRecheck === true) return null;
+            throw txErr;
         });
+
+        if (result === null) {
+            return NextResponse.json(
+                { error: 'Campaign is closed. Order changes are no longer permitted.' },
+                { status: 400 }
+            );
+        }
 
         if (result.count === 0) {
             return NextResponse.json(
