@@ -106,32 +106,41 @@ describe('A. add-on share accounting — characterization (reported to the owner
         expect(slices.reduce((n, s) => n + s.shareAmount, 0)).toBe(10);
     });
 
-    it('A2. units are numbered from the count of NON-canceled add-ons: after a cancel, the next order re-uses the canceled units', () => {
-        // order A took units 1–3; A is canceled, so "sold before" for order C is 0 again (countCampaignAddOnUnitsSold
-        // excludes canceled orders) and C is numbered 1–3 too. Restoring A does not renumber either order.
-        const a = splitAddOnLineIntoSlices({ tiers: TIERS, soldBefore: 0, quantity: 3, unitPrice: 25 });
-        const c = splitAddOnLineIntoSlices({ tiers: TIERS, soldBefore: 0, quantity: 3, unitPrice: 25 });
-        expect(a[0].firstUnit).toBe(1);
-        expect(c[0].firstUnit).toBe(1);
-        expect(R('lib/campaignAddOnEarnings.ts')).toMatch(/order: \{\s*campaign_id: campaignId,\s*canceled_at: null,/);
-        // the coordinator's cancel and restore only flip canceled_at — no recompute, no campaign lock
+    // SUPERSEDED (B1/B2 remediation, owner-approved 2026-11-25): A2 and A3 characterized the two S5 release
+    // blockers. The defects are fixed; these now pin the FIXED behaviour, and tests/supporterAddOnB12.test.ts
+    // carries the full acceptance matrix.
+    it('A2. (B1 fixed) tier positions are permanent: the next order starts after every recorded position, canceled orders included', () => {
+        // order A took positions 1–3 and B 4–5; A is canceled — C still starts at 6, never re-using 1–3.
+        const c = splitAddOnLineIntoSlices({ tiers: TIERS, soldBefore: 5, quantity: 3, unitPrice: 25 });
+        expect(c.map((s) => [s.firstUnit, s.quantity])).toEqual([[6, 3]]);
+        const earnings = R('lib/campaignAddOnEarnings.ts');
+        const recorder = earnings.slice(earnings.indexOf('export async function recordAddOnShareEarnings'), earnings.indexOf('// ── The tenant\'s add-on writes'));
+        expect(recorder).toMatch(/let soldBefore = await countCampaignAddOnPositionsAllocated\(tx, params\.campaignId\);/);
+        expect(recorder).not.toMatch(/countCampaignAddOnUnitsSold/);
+        // restore re-activates the original slices only: no recompute, no new earnings — under the campaign lock.
         const coord = R('app/api/coordinator/route.ts');
         const restore = coord.slice(coord.indexOf('// 2. Atomic restore'), coord.indexOf('Restore Coordinator Order Error'));
         expect(restore).toMatch(/data: \{\s*canceled_at: null,\s*canceled_by: null\s*\}/);
-        expect(restore).not.toMatch(/AddOnShare|recordAddOnShareEarnings|lockCampaignSelection/);
+        expect(restore).toMatch(/lockCampaignSelection\(tx, campaign\.id\)/);
+        expect(restore).not.toMatch(/AddOnShare|recordAddOnShareEarnings/);
     });
 
-    it('A3. re-assigning after a removal starts a fresh single tier at the meal share, and units already sold lock it', () => {
+    it('A3. (B2 fixed) removing an add-on keeps the schedule; the meal share is inherited only by a genuinely new program', () => {
         const fresh = defaultShareTiers('20.00');
         expect(fresh).toEqual([{ startingQuantity: 1, percent: 20 }]);
-        const edit = validateShareScheduleEdit({ current: fresh, next: [{ startingQuantity: 1, percent: 10 }], unitsSold: 12 });
+        const earnings = R('lib/campaignAddOnEarnings.ts');
+        const remove = earnings.slice(earnings.indexOf('export async function removeCampaignAddOn'), earnings.indexOf('export async function updateCampaignAddOnShareTiers'));
+        expect(remove).toMatch(/updateMany\(/);
+        expect(remove).not.toMatch(/deleteMany|\.delete\(/);
+        const edit = validateShareScheduleEdit({ current: fresh, next: [{ startingQuantity: 1, percent: 10 }], positionsReached: 12 });
         expect(edit).toMatchObject({ ok: false, status: 409, code: 'SHARE_TIER_LOCKED' });
     });
 });
 
 describe('S5 scope', () => {
     it('S5 changes exactly the packet tracker and its pass-through (plus tests); S1–S4 migrations untouched', () => {
-        const changed = execSync(`git diff --name-only ${S4_HEAD} -- . ":(exclude)tests"`, { cwd: ROOT, encoding: 'utf8' })
+        // SUPERSEDED PIN (B1/B2 remediation): S5's own commits (S4_HEAD..dd928f0), not the working tree.
+        const changed = execSync(`git diff --name-only ${S4_HEAD} dd928f0 -- . ":(exclude)tests"`, { cwd: ROOT, encoding: 'utf8' })
             .split('\n').map((s) => s.trim()).filter(Boolean);
         expect(changed.sort()).toEqual(['lib/generateFullPacket.ts', 'lib/generateTracker.ts']);
     });

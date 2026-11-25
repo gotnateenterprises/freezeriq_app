@@ -821,8 +821,13 @@ describe('G. boundaries', () => {
             'lib/orderLineDisplay.ts', 'lib/email.ts',
         ].filter((f) => fs.existsSync(path.join(ROOT, f)));
         expect(files.length).toBeGreaterThanOrEqual(17);
-        const changed = execSync(`git diff --name-only ${S3_HEAD} -- ${files.map((f) => `"${f}"`).join(' ')}`, { cwd: ROOT, encoding: 'utf8' }).trim();
-        expect(changed).toBe('');
+        // SUPERSEDED PIN (B1/B2 remediation, owner-approved 2026-11-25): S4 itself (S3_HEAD..30ef6da) changed none
+        // of these; since then, only the coordinator route changed (cancel/restore lock + addOnMoney) — named here.
+        const changedByS4 = execSync(`git diff --name-only ${S3_HEAD} 30ef6da -- ${files.map((f) => `"${f}"`).join(' ')}`, { cwd: ROOT, encoding: 'utf8' }).trim();
+        expect(changedByS4).toBe('');
+        const changed = execSync(`git diff --name-only ${S3_HEAD} -- ${files.map((f) => `"${f}"`).join(' ')}`, { cwd: ROOT, encoding: 'utf8' })
+            .split('\n').map((s) => s.trim()).filter(Boolean);
+        expect(changed).toEqual(['app/api/coordinator/route.ts']);
     });
 
     it('G4. (30) the ordinary storefront still never lists an add-on: the legacy lineup still requires show_on_storefront', () => {
@@ -845,8 +850,14 @@ describe('G. boundaries', () => {
     });
 
     it('G6. (31) the coordinator\'s manual add-on entry is untouched (same route and form as S3)', () => {
-        const changed = execSync(`git diff --name-only ${S3_HEAD} -- "app/api/coordinator" "components/coordinator" "app/coordinator"`, { cwd: ROOT, encoding: 'utf8' }).trim();
-        expect(changed).toBe('');
+        // SUPERSEDED PIN (B1/B2 remediation, owner-approved 2026-11-25): S4 itself changed nothing here; since then only
+        // the approved remediation files — cancel/restore lock + addOnMoney (route), the exact "raised" figure
+        // (portal page), and the tier-progress line (read-only card). The manual add-on entry form is untouched.
+        const changedByS4 = execSync(`git diff --name-only ${S3_HEAD} 30ef6da -- "app/api/coordinator" "components/coordinator" "app/coordinator"`, { cwd: ROOT, encoding: 'utf8' }).trim();
+        expect(changedByS4).toBe('');
+        const changed = execSync(`git diff --name-only ${S3_HEAD} -- "app/api/coordinator" "components/coordinator" "app/coordinator"`, { cwd: ROOT, encoding: 'utf8' })
+            .split('\n').map((s) => s.trim()).filter(Boolean).sort();
+        expect(changed).toEqual(['app/api/coordinator/route.ts', 'app/coordinator/portal/page.tsx', 'components/coordinator/AddOnShareCard.tsx']);
     });
 
     it('G7. (32) a public add-on line is described by the S3 rules exactly like a coordinator one', () => {
@@ -872,7 +883,8 @@ describe('G. boundaries', () => {
         expect(statements).toEqual(['ALTER TABLE "campaign_add_ons" ADD COLUMN     "show_share_percent" BOOLEAN NOT NULL DEFAULT false']);
         expect(R('prisma/schema.prisma')).toMatch(/model CampaignAddOn \{[\s\S]*?show_share_percent Boolean @default\(false\)/);
         const dirs = fs.readdirSync(path.join(ROOT, 'prisma/migrations')).filter((d) => /^\d{14}_/.test(d)).sort();
-        expect(dirs[dirs.length - 1]).toBe('20261126120000_supporter_addon_s4');
+        // SUPERSEDED PIN (B1/B2 remediation, owner-approved 2026-11-25): followed only by campaign_add_ons.removed_at.
+        expect(dirs.slice(-2)).toEqual(['20261126120000_supporter_addon_s4', '20261127120000_supporter_addon_b2_removed_at']);
         const changed = execSync(`git diff --name-only ${S3_HEAD} -- "prisma/migrations/20261123120000_supporter_addon_s1" "prisma/migrations/20261124120000_supporter_addon_s2" "prisma/migrations/20261125120000_supporter_addon_s3"`, { cwd: ROOT, encoding: 'utf8' }).trim();
         expect(changed).toBe('');
     });

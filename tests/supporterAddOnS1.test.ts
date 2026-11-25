@@ -262,7 +262,8 @@ describe('1–5 · schema and migration: additive, defaults, database-enforced i
         expect(dirs[s1 - 1]).toBe('20261119120000_supporter_consent_1');
         // REVISED (S3): and S3's own approved, additive migration after S2.
         // REVISED (S4, owner-approved 2026-11-24): and S4's approved, additive share-display column after S3.
-        expect(dirs.slice(s1 + 1)).toEqual(['20261124120000_supporter_addon_s2', '20261125120000_supporter_addon_s3', '20261126120000_supporter_addon_s4']);
+        // REVISED (B1/B2 remediation, owner-approved 2026-11-25): and the approved, additive campaign_add_ons.removed_at.
+        expect(dirs.slice(s1 + 1)).toEqual(['20261124120000_supporter_addon_s2', '20261125120000_supporter_addon_s3', '20261126120000_supporter_addon_s4', '20261127120000_supporter_addon_b2_removed_at']);
     });
 
     it('the add-on is NOT a CampaignBundle and serving_tier is not its classifier', () => {

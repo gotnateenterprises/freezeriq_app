@@ -179,7 +179,15 @@ function useWorld(extra: Record<string, any> = {}) {
                 W.tiers = W.tiers.filter((t) => !gone.some((g) => g.id === t.campaign_add_on_id));
                 return { count: gone.length };
             },
-            'campaignAddOn.count': (args: any) => W.assignments.filter((x) => x.bundle_id === args?.where?.bundle_id).length,
+            // B2 remediation: remove is a soft remove (removed_at), and only OFFERED rows block a retype.
+            'campaignAddOn.updateMany': (args: any) => {
+                const hit = W.assignments.filter((x) => x.campaign_id === args.where.campaign_id && x.business_id === args.where.business_id
+                    && (args.where.removed_at !== null || x.removed_at === null || x.removed_at === undefined));
+                for (const a of hit) Object.assign(a, args.data);
+                return { count: hit.length };
+            },
+            'campaignAddOn.count': (args: any) => W.assignments.filter((x) => x.bundle_id === args?.where?.bundle_id
+                && (args?.where?.removed_at !== null || x.removed_at === null || x.removed_at === undefined)).length,
             'campaignAddOnShareTier.deleteMany': (args: any) => {
                 const before = W.tiers.length;
                 W.tiers = W.tiers.filter((t) => !(t.campaign_add_on_id === args.where.campaign_add_on_id && args.where.starting_quantity.in.includes(t.starting_quantity)));
@@ -232,6 +240,15 @@ function useWorld(extra: Record<string, any> = {}) {
                 for (const s of args.data) W.slices.push({ ...s, percent: Number(s.percent), unit_price: Number(s.unit_price), share_amount: Number(s.share_amount) });
                 return { count: args.data.length };
             },
+            // B1 remediation: lifetime tier positions read EVERY recorded slice on the campaign (canceled orders too).
+            'orderItemAddOnShare.findMany': (args: any) => W.slices
+                .filter((s) => {
+                    const it = W.items.find((i) => i.id === s.order_item_id);
+                    const o = it ? W.orders.find((x) => x.id === it.order_id) : null;
+                    return Boolean(o) && o!.campaign_id === args?.where?.order_item?.order?.campaign_id;
+                })
+                .map((s) => ({ first_unit: s.first_unit, quantity: s.quantity })),
+            'orderItemAddOnShare.count': (args: any) => W.slices.filter((s) => (args?.where?.order_item_id?.in ?? []).includes(s.order_item_id)).length,
             'coordinatorSession.findUnique': () => ({
                 id: 'session-ao2', campaign_id: (global as any).__ao2CoordinatorCampaign ?? CAMP_A,
                 expires_at: new Date(Date.now() + 3_600_000), revoked_at: null,
@@ -379,7 +396,8 @@ describe('schema / migration · additive, relational, database-enforced', () => 
         const i = dirs.indexOf('20261124120000_supporter_addon_s2');
         expect(dirs[i - 1]).toBe('20261123120000_supporter_addon_s1');
         // SUPERSEDED PIN (S4, owner-approved 2026-11-24): then S4's approved share-display column.
-        expect(dirs.slice(i + 1)).toEqual(['20261125120000_supporter_addon_s3', '20261126120000_supporter_addon_s4']);
+        // SUPERSEDED PIN (B2 remediation, owner-approved 2026-11-25): then campaign_add_ons.removed_at.
+        expect(dirs.slice(i + 1)).toEqual(['20261125120000_supporter_addon_s3', '20261126120000_supporter_addon_s4', '20261127120000_supporter_addon_b2_removed_at']);
         const s1 = 'prisma/migrations/20261123120000_supporter_addon_s1/migration.sql';
         expect(R(s1)).toBe(atS1(s1));
     });
@@ -458,19 +476,19 @@ describe('the schedule · parse, marginal resolution, slicing, locking (pure)', 
     it('16/17/18 · locking: tiers reached by sold add-ons are frozen; future tiers are free', () => {
         const current = T([1, 10], [11, 15]);
         // 7 sold: tier 1 is in use.
-        expect(validateShareScheduleEdit({ current, next: T([1, 5], [11, 15]), unitsSold: 7 })).toMatchObject({ ok: false, status: 409, code: 'SHARE_TIER_LOCKED' });
-        expect(validateShareScheduleEdit({ current, next: T([1, 10], [11, 20]), unitsSold: 7 })).toMatchObject({ ok: true });
-        expect(validateShareScheduleEdit({ current, next: T([1, 10], [8, 12], [11, 15]), unitsSold: 7 })).toMatchObject({ ok: true });
-        expect(validateShareScheduleEdit({ current, next: T([1, 10], [5, 12], [11, 15]), unitsSold: 7 })).toMatchObject({ ok: false, code: 'SHARE_TIER_LOCKED' });
-        expect(validateShareScheduleEdit({ current, next: T([1, 10]), unitsSold: 7 })).toMatchObject({ ok: true });
+        expect(validateShareScheduleEdit({ current, next: T([1, 5], [11, 15]), positionsReached: 7 })).toMatchObject({ ok: false, status: 409, code: 'SHARE_TIER_LOCKED' });
+        expect(validateShareScheduleEdit({ current, next: T([1, 10], [11, 20]), positionsReached: 7 })).toMatchObject({ ok: true });
+        expect(validateShareScheduleEdit({ current, next: T([1, 10], [8, 12], [11, 15]), positionsReached: 7 })).toMatchObject({ ok: true });
+        expect(validateShareScheduleEdit({ current, next: T([1, 10], [5, 12], [11, 15]), positionsReached: 7 })).toMatchObject({ ok: false, code: 'SHARE_TIER_LOCKED' });
+        expect(validateShareScheduleEdit({ current, next: T([1, 10]), positionsReached: 7 })).toMatchObject({ ok: true });
         // 14 sold: 1–10 AND 11+ are both in use; 21+ may be added.
-        expect(validateShareScheduleEdit({ current, next: T([1, 10], [11, 12]), unitsSold: 14 })).toMatchObject({ ok: false, code: 'SHARE_TIER_LOCKED' });
-        expect(validateShareScheduleEdit({ current, next: T([1, 10]), unitsSold: 14 })).toMatchObject({ ok: false, code: 'SHARE_TIER_LOCKED' });
-        expect(validateShareScheduleEdit({ current, next: T([1, 10], [11, 15], [21, 20]), unitsSold: 14 })).toMatchObject({ ok: true });
-        expect(validateShareScheduleEdit({ current, next: T([1, 10], [11, 15], [15, 20]), unitsSold: 14 })).toMatchObject({ ok: true });
-        expect(validateShareScheduleEdit({ current, next: T([1, 10], [11, 15], [14, 20]), unitsSold: 14 })).toMatchObject({ ok: false });
+        expect(validateShareScheduleEdit({ current, next: T([1, 10], [11, 12]), positionsReached: 14 })).toMatchObject({ ok: false, code: 'SHARE_TIER_LOCKED' });
+        expect(validateShareScheduleEdit({ current, next: T([1, 10]), positionsReached: 14 })).toMatchObject({ ok: false, code: 'SHARE_TIER_LOCKED' });
+        expect(validateShareScheduleEdit({ current, next: T([1, 10], [11, 15], [21, 20]), positionsReached: 14 })).toMatchObject({ ok: true });
+        expect(validateShareScheduleEdit({ current, next: T([1, 10], [11, 15], [15, 20]), positionsReached: 14 })).toMatchObject({ ok: true });
+        expect(validateShareScheduleEdit({ current, next: T([1, 10], [11, 15], [14, 20]), positionsReached: 14 })).toMatchObject({ ok: false });
         // Nothing sold: everything is editable.
-        expect(validateShareScheduleEdit({ current, next: T([1, 5]), unitsSold: 0 })).toMatchObject({ ok: true });
+        expect(validateShareScheduleEdit({ current, next: T([1, 5]), positionsReached: 0 })).toMatchObject({ ok: true });
     });
 
     it('ranges, lock labels, the next rate and the coordinator sentence are plain language', () => {
@@ -525,17 +543,23 @@ describe('campaign add-on assignment · the tenant route', () => {
         expect(slicesOf(b.body.id)).toEqual([{ first_unit: 1, quantity: 2, percent: 15, share_amount: 7.5 }]);
     });
 
-    it('replace keeps the schedule; remove deletes it (earned history stays on the orders)', async () => {
+    it('replace keeps the schedule; remove DISABLES the add-on and keeps the schedule (earned history stays on the orders)', async () => {
         seedAssignment(CAMP_A, B.ADDON.id, [[1, 10], [11, 15]]);
         const replaced = await addOnRoute('PUT', CAMP_A, { bundleId: B.ADDON2.id });
         expect(replaced.status).toBe(200);
-        expect(mock.firstCall('campaignAddOn.update')!.args.data).toEqual({ bundle_id: B.ADDON2.id });
+        // SUPERSEDED PIN (B2 remediation, owner-approved 2026-11-25): a replace also (re-)offers the row.
+        expect(mock.firstCall('campaignAddOn.update')!.args.data).toEqual({ bundle_id: B.ADDON2.id, removed_at: null });
         expect(mock.callsTo('campaignAddOn.create')).toHaveLength(0);
         expect(replaced.body.addOn.tiers.map((t: any) => t.percent)).toEqual([10, 15]);
         const removed = await addOnRoute('DELETE', CAMP_A);
         expect(removed.status).toBe(200);
         expect(removed.body.addOn).toBeNull();
-        expect(W.tiers).toHaveLength(0);
+        // SUPERSEDED PIN (B2): nothing is deleted — the row is marked removed and its schedule is kept.
+        expect(mock.callsTo('campaignAddOn.deleteMany')).toHaveLength(0);
+        expect(W.assignments).toHaveLength(1);
+        expect(W.assignments[0].removed_at).toBeInstanceOf(Date);
+        expect(W.tiers.map((t) => [t.starting_quantity, t.percent])).toEqual([[1, 10], [11, 15]]);
+        expect(removed.body.removedAddOn.tiers.map((t: any) => [t.rangeLabel, t.percent])).toEqual([['1–10 sold', 10], ['11+ sold', 15]]);
     });
 
     it('only an eligible add-on can be assigned: typed addon, active, priced, with recipes, same tenant', async () => {
@@ -588,7 +612,8 @@ describe('campaign add-on assignment · the tenant route', () => {
             ['edit percent', 'PATCH', { tiers: [{ startingQuantity: 1, percent: 12 }] }, 'campaignAddOnShareTier.updateMany'],
             ['add future tier', 'PATCH', { tiers: [{ startingQuantity: 1, percent: 12 }, { startingQuantity: 11, percent: 15 }] }, 'campaignAddOnShareTier.create'],
             ['remove future tier', 'PATCH', { tiers: [{ startingQuantity: 1, percent: 12 }] }, 'campaignAddOnShareTier.deleteMany'],
-            ['remove', 'DELETE', undefined, 'campaignAddOn.deleteMany'],
+            // SUPERSEDED PIN (B2 remediation): remove is the soft remove (removed_at), not a delete.
+            ['remove', 'DELETE', undefined, 'campaignAddOn.updateMany'],
         ];
         for (const [label, method, body, writeKey] of ops) {
             useWorld();
@@ -629,6 +654,9 @@ describe('campaign add-on assignment · the tenant route', () => {
         seedAssignment(CAMP_A, B.ADDON.id, [[1, 10], [11, 15]]);
         W.orders.push({ id: 'o-seed', campaign_id: CAMP_A, canceled_at: null, total_amount: 300, tax_amount: 0 });
         W.items.push({ id: 'i-seed', order_id: 'o-seed', bundle_id: B.ADDON.id, quantity: 12, unit_price: 25, item_role: 'addon', variant_size: 'serves_5', item_name: B.ADDON.name });
+        // B1 remediation: tier progress comes from the RECORDED positions, which every sold add-on line has.
+        W.slices.push({ order_item_id: 'i-seed', first_unit: 1, quantity: 10, percent: 10, unit_price: 25, share_amount: 25 });
+        W.slices.push({ order_item_id: 'i-seed', first_unit: 11, quantity: 2, percent: 15, unit_price: 25, share_amount: 7.5 });
         const r = await addOnRoute('PATCH', CAMP_A, { tiers: [{ startingQuantity: 1, percent: 10 }, { startingQuantity: 11, percent: 18 }, { startingQuantity: 40, percent: 20 }] });
         expect(r).toMatchObject({ status: 409, body: { code: 'SHARE_TIER_LOCKED' } });
         expect(mock.callsTo('campaignAddOnShareTier.create')).toHaveLength(0);
@@ -659,7 +687,8 @@ describe('earned share · recorded once, in the order transaction, by the campai
         const r = await addOnRoute('PATCH', CAMP_A, { tiers: [{ startingQuantity: 1, percent: 10 }, { startingQuantity: 11, percent: 15 }, { startingQuantity: 13, percent: 20 }] });
         expect(r.status).toBe(200);
         expect(JSON.stringify(W.slices)).toBe(recorded);
-        expect(mock.calls.filter((c) => c.model === 'orderItemAddOnShare' && c.method !== 'createMany')).toHaveLength(0);
+        // B1 remediation: recorded slices are READ (tier progress) but never rewritten — createMany is the only write.
+        expect(mock.calls.filter((c) => c.model === 'orderItemAddOnShare' && !['createMany', 'findMany', 'count'].includes(c.method))).toHaveLength(0);
         const next = await coordinatorOrder([line(B.S5), line(B.ADDON, 1)]);
         expect(slicesOf(next.body.id)).toEqual([{ first_unit: 13, quantity: 1, percent: 20, share_amount: 5 }]);
     });
@@ -669,7 +698,8 @@ describe('earned share · recorded once, in the order transaction, by the campai
         W.tiers = W.tiers.filter((t) => t.starting_quantity === 1);
         const reduce = await addOnRoute('PATCH', CAMP_A, { tiers: [{ startingQuantity: 1, percent: 5 }] });
         expect(reduce).toMatchObject({ status: 409, body: { code: 'SHARE_TIER_LOCKED' } });
-        expect(reduce.body.error).toMatch(/7 add-ons have already sold/);
+        // SUPERSEDED PIN (B1 remediation): the lock names tier progress, never "sold" (positions are not active sales).
+        expect(reduce.body.error).toMatch(/Tier progress has reached add-on #7/);
         const add = await addOnRoute('PATCH', CAMP_A, { tiers: [{ startingQuantity: 1, percent: 10 }, { startingQuantity: 11, percent: 15 }] });
         expect(add.status).toBe(200);
         expect(add.body.addOn.tiers.map((t: any) => [t.rangeLabel, t.lock])).toEqual([['1–10 sold', 'locked_for_sold'], ['11+ sold', 'editable']]);
@@ -711,12 +741,13 @@ describe('earned share · recorded once, in the order transaction, by the campai
         await supporterOrder(CAMP_A, [line(B.S5), line(B.ADDON, 2)]);
         const lock = lockIndex(CAMP_A);
         const insert = firstIndex((c) => c.model === 'order' && c.method === 'create');
-        const count = firstIndex((c) => c.model === 'orderItem' && c.method === 'aggregate');
+        // SUPERSEDED PIN (B1 remediation): the next position comes from the campaign's RECORDED positions.
+        const count = firstIndex((c) => c.model === 'orderItemAddOnShare' && c.method === 'findMany');
         const record = firstIndex((c) => c.model === 'orderItemAddOnShare' && c.method === 'createMany');
         expect(lock).toBeGreaterThan(-1);
         expect(lock < insert && insert < count && count < record).toBe(true);
-        // It counted everything BEFORE this order, never this order itself.
-        expect(mock.callsTo('orderItem.aggregate')[0].args.where.order.id).toEqual({ not: W.orders[0].id });
+        // Every recorded position on the campaign — canceled orders INCLUDED (no canceled_at filter).
+        expect(mock.callsTo('orderItemAddOnShare.findMany')[0].args.where).toEqual({ order_item: { order: { campaign_id: CAMP_A } } });
         useWorld();
         await coordinatorOrder([line(B.S5), line(B.ADDON, 2)]);
         const cLock = lockIndex(CAMP_A);
@@ -737,6 +768,7 @@ describe('earned share · recorded once, in the order transaction, by the campai
         expect(r.status).toBe(200);
         expect(mock.callsTo('orderItemAddOnShare.createMany')).toHaveLength(0);
         expect(mock.callsTo('orderItem.aggregate')).toHaveLength(0);
+        expect(mock.callsTo('orderItemAddOnShare.findMany')).toHaveLength(0);
         expect(lockIndex(CAMP_A)).toBe(-1);
     });
 });
@@ -773,6 +805,8 @@ describe('coordinator · manual / paper orders and the read-only add-on display'
             shareSummary: 'Your organization earns 10% on the first 10 add-ons and 15% beginning with add-on 11.',
             shareTiers: [{ rangeLabel: '1–10 sold', percent: 10 }, { rangeLabel: '11+ sold', percent: 15 }],
             unitsSold: 4, grossSales: 100, earnedShare: 10,
+            // B1 remediation: lifetime tier positions beside the active quantity; no note while they agree.
+            tierPositionsReached: 4, tierProgressNote: null,
         });
         // The portal GET carries it as `addOn`; the portal renders it with no input and no write path.
         const route = R('app/api/coordinator/route.ts');
@@ -1001,7 +1035,7 @@ describe('Bundle Editor · Meal bundle / Fundraiser add-on, enforced on the serv
         const { DELETE } = await import('@/app/api/bundles/[id]/route');
         const del = await readJson(await DELETE(new Request(`http://localhost/api/bundles/${B.ADDON.id}`, { method: 'DELETE' }), { params: Promise.resolve({ id: B.ADDON.id }) }));
         expect(del).toMatchObject({ status: 409, body: { code: 'BUNDLE_IN_USE' } });
-        expect(del.body.error).toBe('This bundle can\'t be deleted because it is used by 1 fundraiser as its supporter add-on. Turn off "Active" to retire it instead.');
+        expect(del.body.error).toBe('This bundle can\'t be deleted because it is used by 1 fundraiser\'s supporter add-on (current or removed). Turn off "Active" to retire it instead.');
         expect(mock.callsTo('bundle.delete')).toHaveLength(0);
         expect(bundleDeletionRefusal({ orderItems: 0, invoiceItems: 0, campaignBundles: 0 })).toBeNull();
     });

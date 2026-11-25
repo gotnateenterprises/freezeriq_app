@@ -463,7 +463,8 @@ describe('9 · schema and boundaries', () => {
         ]);
         const dirs = fs.readdirSync(path.join(ROOT, 'prisma/migrations')).filter((d) => /^\d{14}_/.test(d)).sort();
         // SUPERSEDED PIN (S4, owner-approved 2026-11-24): S4's approved share-display column follows S3's.
-        expect(dirs.slice(-4)).toEqual(['20261123120000_supporter_addon_s1', '20261124120000_supporter_addon_s2', '20261125120000_supporter_addon_s3', '20261126120000_supporter_addon_s4']);
+        // SUPERSEDED PIN (B1/B2 remediation, owner-approved 2026-11-25): then the additive campaign_add_ons.removed_at.
+        expect(dirs.slice(-5)).toEqual(['20261123120000_supporter_addon_s1', '20261124120000_supporter_addon_s2', '20261125120000_supporter_addon_s3', '20261126120000_supporter_addon_s4', '20261127120000_supporter_addon_b2_removed_at']);
         expect(R('prisma/schema.prisma')).toMatch(/model InvoiceItem \{[\s\S]*?item_role    String  @default\("main"\)/);
     });
     it('untouched by S3: public order route, supporter page, money/tax/kitchen engines, S1/S2 migrations', () => {
@@ -483,7 +484,10 @@ describe('9 · schema and boundaries', () => {
             'app/shop/[slug]/fundraiser/[fundraiserId]/page.tsx', 'app/shop/[slug]/fundraiser/[fundraiserId]/FundraiserClient.tsx',
             'lib/campaignAddOns.ts', 'lib/campaignAddOnShare.ts',
         ]);
-        const stillUntouched = files.filter((f) => !S4_APPROVED.has(f));
+        // SUPERSEDED PIN (B1/B2 remediation, owner-approved 2026-11-25): the coordinator route's cancel/restore now take
+        // the campaign lock, and its GET returns the recorded add-on money (addOnMoney). Named here, nothing else.
+        const B12_APPROVED = new Set(['app/api/coordinator/route.ts']);
+        const stillUntouched = files.filter((f) => !S4_APPROVED.has(f) && !B12_APPROVED.has(f));
         const changed = execSync(`git diff --name-only ${S2_HEAD} -- ${stillUntouched.map((f) => `"${f}"`).join(' ')}`, { cwd: ROOT, encoding: 'utf8' }).trim();
         expect(changed).toBe('');
         for (const f of files) expect(fs.existsSync(path.join(ROOT, f))).toBe(true);
