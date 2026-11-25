@@ -47,6 +47,9 @@ describe('P. the coordinator packet\'s printable tracker', () => {
         expect(ws.getCell('A11').value).toBe('Weeknight Favorites ($125.00)');
         expect(ws.getCell('A12').value).toBe('Add-on: Sides & Dessert Bundle ($26.88) — only with a meal bundle');
         expect(ws.getCell('E13').value).toBe('Add-On Qty');
+        // The new header is styled like the template's own "Amount" header beside it (bold), not left plain.
+        expect(ws.getCell('D13').font?.bold).toBe(true);
+        expect(ws.getCell('E13').style).toEqual(ws.getCell('D13').style);
         expect([ws.getCell('A13').value, ws.getCell('B13').value, ws.getCell('C13').value, ws.getCell('D13').value]).toEqual(['#', 'Customer Name', 'Bundle', 'Amount']);
         expect(ws.getColumn(5).width).toBe(12);
         expect(ws.pageSetup).toMatchObject({ fitToPage: true, fitToWidth: 1, fitToHeight: 0 });
