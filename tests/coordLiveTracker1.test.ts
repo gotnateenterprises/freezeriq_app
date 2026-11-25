@@ -298,7 +298,10 @@ describe('COORD-LIVE-TRACKER-1: metrics — reused, not redefined', () => {
         expect(matches.length).toBe(1);
         // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 S2): the one call site now spans lines and passes the
         // add-on's recorded money as a 5th argument (null without an add-on). The first four are unchanged.
-        expect(src).toMatch(/const metrics = computeFundraiserProgress\(\s*campaign\.bundle_goal, campaign\.total_sales, campaign\.orders \|\| \[\], campaign\.org_share_percent,\s*campaign\.addOn \? \{ grossSales: campaign\.addOn\.grossSales, earnedShare: campaign\.addOn\.earnedShare \} : null,\s*\);/);
+        // SUPERSEDED PIN (FR-SUPPORTER-ADDON-UPSELL-1 B1/B2 remediation, owner-approved 2026-11-25): the 5th argument
+        // prefers the server's addOnMoney (recorded add-on money on active orders, offered or not), falling back to the
+        // S2 expression. Still exactly one call site; the first four arguments are unchanged.
+        expect(src).toMatch(/const metrics = computeFundraiserProgress\(\s*campaign\.bundle_goal, campaign\.total_sales, campaign\.orders \|\| \[\], campaign\.org_share_percent,\s*campaign\.addOnMoney\s*\?\? \(campaign\.addOn \? \{ grossSales: campaign\.addOn\.grossSales, earnedShare: campaign\.addOn\.earnedShare \} : null\),\s*\);/);
     });
 
     it('this phase introduces no second weighted-bundle or gross/raised calculation', () => {

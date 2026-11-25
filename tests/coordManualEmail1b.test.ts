@@ -118,6 +118,8 @@ describe('1. schema and migration', () => {
             '20261125120000_supporter_addon_s3',
             // FR-SUPPORTER-ADDON-UPSELL-1 S4 (owner-approved 2026-11-24): campaign_add_ons.show_share_percent (constant default).
             '20261126120000_supporter_addon_s4',
+            // FR-SUPPORTER-ADDON-UPSELL-1 B1/B2 remediation (owner-approved 2026-11-25): campaign_add_ons.removed_at (nullable).
+            '20261127120000_supporter_addon_b2_removed_at',
         ]);
     });
 });

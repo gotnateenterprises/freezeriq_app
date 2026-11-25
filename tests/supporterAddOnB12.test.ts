@@ -743,8 +743,11 @@ describe('migration and scope', () => {
             '20261123120000_supporter_addon_s1', '20261124120000_supporter_addon_s2', '20261125120000_supporter_addon_s3',
             '20261126120000_supporter_addon_s4', '20261127120000_supporter_addon_b2_removed_at',
         ]);
-        const committed = execSync('git diff --name-only dd928f0 -- prisma/migrations', { cwd: ROOT, encoding: 'utf8' }).trim();
-        expect(committed).toBe('');
+        // Every migration that existed at dd928f0 is unchanged (modified or deleted); the B2 file is the only addition.
+        const touched = execSync('git diff --name-only --diff-filter=MDR dd928f0 -- prisma/migrations', { cwd: ROOT, encoding: 'utf8' }).trim();
+        expect(touched).toBe('');
+        const added = execSync('git diff --name-only --diff-filter=A dd928f0 -- prisma/migrations', { cwd: ROOT, encoding: 'utf8' }).trim();
+        expect(added).toBe('prisma/migrations/20261127120000_supporter_addon_b2_removed_at/migration.sql');
     });
 
     it('the protected order routes, closeout, invoice and QuickBooks code are untouched by the remediation', () => {
