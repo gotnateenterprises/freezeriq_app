@@ -165,6 +165,8 @@ export async function generateFullPacket(input: PacketInput): Promise<Buffer> {
             name: m.baseName,
             price: (m.familyPrice ?? m.couplePrice)!,
         })),
+        // FR-SUPPORTER-ADDON-UPSELL-1 (S5): the same add-on (and supporter price) the flyer above prints.
+        addOn: input.addOn ?? null,
     };
     const trackerArrayBuffer = await generateTracker(trackerInput);
     const trackerBuffer = Buffer.from(trackerArrayBuffer);

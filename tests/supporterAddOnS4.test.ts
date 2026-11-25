@@ -1119,6 +1119,8 @@ describe('K. S3 gap re-audit', () => {
         const block = src.slice(src.indexOf('const trackerMenus = groupMaterialMenus('), src.indexOf('const trackerArrayBuffer'));
         expect(block).toMatch(/input\.bundles\.map/);
         expect(block).not.toMatch(/order|item_role|variant_size/i);
-        expect(execSync(`git diff --name-only ${S3_HEAD} -- "lib/generateFullPacket.ts" "lib/generateTracker.ts"`, { cwd: ROOT, encoding: 'utf8' }).trim()).toBe('');
+        // SUPERSEDED PIN (S5, 2026-11-24): S5 resolves this gap narrowly — with an add-on the tracker lists it and adds an
+        // "Add-On Qty" column (tests/supporterAddOnS5.test.ts P1–P4). Through S4 (b867ddf..30ef6da) neither file changed.
+        expect(execSync(`git diff --name-only ${S3_HEAD} 30ef6da -- "lib/generateFullPacket.ts" "lib/generateTracker.ts"`, { cwd: ROOT, encoding: 'utf8' }).trim()).toBe('');
     });
 });
