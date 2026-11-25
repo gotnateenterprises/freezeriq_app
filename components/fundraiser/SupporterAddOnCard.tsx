@@ -22,8 +22,12 @@ import type React from 'react';
 import { publicImageUrl } from '@/lib/supporterBundleDetail';
 import { addOnDisplayName } from '@/lib/orderLineDisplay';
 import {
+    ADD_ON_OFFER_EYEBROW,
+    ADD_ON_OFFER_FOOTER,
     ADD_ON_OFFER_HEADING,
+    ADD_ON_OFFER_LEAD,
     addOnOfferBody,
+    addOnOfferCta,
     addOnPriceText,
     addOnSupportLine,
 } from '@/lib/supporterAddOnOffer';
@@ -110,12 +114,15 @@ export function SupporterAddOnCard({
                     </span>
                 )}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: 'inline-block', borderRadius: 99, padding: '.18rem .55rem', fontSize: '.6rem', fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', background: '#f6ede2', color: '#6b4d3f' }}>
-                        Add-on
+                    <span style={{ display: 'inline-block', borderRadius: 99, padding: '.18rem .55rem', fontSize: '.6rem', fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', background: '#f6ede2', color: primaryColor, overflowWrap: 'anywhere' }}>
+                        {ADD_ON_OFFER_EYEBROW}
                     </span>
-                    <h3 id="fr-addon-offer-title" style={{ fontFamily: SERIF, fontWeight: 400, fontSize: '1rem', lineHeight: 1.25, margin: '.3rem 0 0', color: '#3b2a2f', overflowWrap: 'anywhere' }}>
+                    <h3 id="fr-addon-offer-title" style={{ fontFamily: SERIF, fontWeight: 400, fontSize: '1.08rem', lineHeight: 1.25, margin: '.3rem 0 0', color: '#3b2a2f', overflowWrap: 'anywhere' }}>
                         {ADD_ON_OFFER_HEADING}
                     </h3>
+                    <p style={{ margin: '.3rem 0 0', fontSize: '.76rem', lineHeight: 1.45, fontWeight: 700, color: '#5d463d', overflowWrap: 'anywhere' }}>
+                        {ADD_ON_OFFER_LEAD}
+                    </p>
                     <p style={{ margin: '.25rem 0 0', fontSize: '.74rem', lineHeight: 1.45, color: '#5d463d', overflowWrap: 'anywhere' }}>
                         {addOnOfferBody(addOn.name, organizationName)}
                     </p>
@@ -132,7 +139,7 @@ export function SupporterAddOnCard({
                     onClick={onAdd}
                     style={{ flex: '1 1 100%', minWidth: 0, minHeight: 44, background: primaryColor, color: '#fff', border: 0, borderRadius: 12, padding: '.6rem .8rem', fontSize: '.8rem', fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit', overflowWrap: 'anywhere' }}
                 >
-                    Add to my order · {price}
+                    {addOnOfferCta(addOn.price)}
                 </button>
                 <button
                     type="button"
@@ -150,6 +157,9 @@ export function SupporterAddOnCard({
                     No thanks
                 </button>
             </div>
+            <p style={{ margin: '.15rem 0 0', fontSize: '.66rem', color: '#9a8075', overflowWrap: 'anywhere' }}>
+                {ADD_ON_OFFER_FOOTER}
+            </p>
         </section>
     );
 }

@@ -8,10 +8,11 @@
  *
  *   QUALIFYING    the basket holds at least one MAIN meal-bundle line. Serving size is never consulted:
  *                 a Serves 5 line and a Serves 2 line qualify equally (owner decision D11).
- *   FULL CARD     a qualifying basket, the add-on not in it, and the supporter has never acted on the offer
- *                 (or used the quiet link to reopen it). Quantity changes never re-open or re-emphasise it.
- *   QUIET LINK    after "No thanks", after removing the add-on, or after the add-on was removed with the
- *                 last meal. Never re-opens by itself during the page session.
+ *   FULL CARD     presented automatically ONCE per ordering session: when the first qualifying meal goes in
+ *                 and the supporter has not acted on the offer yet (or when they reopen it from the quiet
+ *                 link). Quantity changes never re-open or re-emphasise it.
+ *   QUIET LINK    after "No thanks", after removing the add-on, after the add-on was removed with the last
+ *                 meal, or after the basket emptied while the card was showing. Never re-opens by itself.
  *   IN ORDER      an ordinary order line with − / + / ✕ — no special cap.
  *   LAST MEAL     removing the last main line takes the add-on out of the basket too, with a quiet,
  *                 announced explanation. (The server refuses an add-on-only order regardless.)
@@ -23,7 +24,12 @@
  * route; lib/fundraiserTax.ts; lib/fundraiserMetrics.ts; lib/campaignAddOns.ts). Pure and React-free.
  */
 
-export type AddOnOfferInteraction = 'none' | 'declined' | 'added' | 'removed';
+/**
+ * 'shown' — the offer was presented automatically and the basket emptied before the supporter chose. The
+ * owner's rule (2026-11-24): present it automatically ONCE per ordering session; after that only the quiet
+ * link offers it again.
+ */
+export type AddOnOfferInteraction = 'none' | 'shown' | 'declined' | 'added' | 'removed';
 
 export interface AddOnOfferState {
     /** Add-on units in the basket (0 = not in the order). */
@@ -92,17 +98,25 @@ export function reduceAddOnOffer(state: AddOnOfferState, event: AddOnOfferEvent)
             return { ...state, reopened: true };
         case 'mainLinesChanged': {
             const count = Math.max(0, Math.floor(Number(event.mainLineCount) || 0));
-            if (count === 0 && state.quantity > 0) {
-                return {
-                    ...state,
-                    quantity: 0,
-                    interaction: 'removed',
-                    reopened: false,
-                    notice: addOnRemovedWithLastMealMessage(event.addOnName),
-                };
+            if (count === 0) {
+                if (state.quantity > 0) {
+                    return {
+                        ...state,
+                        quantity: 0,
+                        interaction: 'removed',
+                        reopened: false,
+                        notice: addOnRemovedWithLastMealMessage(event.addOnName),
+                    };
+                }
+                // The basket held a meal, so the card was presented; the supporter emptied it without choosing.
+                // That was its ONE automatic showing this session — from now on only the quiet link offers it.
+                if (state.interaction === 'none') return { ...state, interaction: 'shown', reopened: false };
+                // A card re-opened from the quiet link does not come back by itself either.
+                if (state.reopened) return { ...state, reopened: false };
+                return state;
             }
             // A meal is back in the basket: the explanation has done its job.
-            if (count > 0 && state.notice) return { ...state, notice: null };
+            if (state.notice) return { ...state, notice: null };
             return state;
         }
         case 'serverRejected':
@@ -137,15 +151,30 @@ export function addOnQuantityInOrder(state: AddOnOfferState, context: { hasAddOn
 }
 
 // ── Copy ─────────────────────────────────────────────────────────────────────
-// Benefit-led and truthful: never "free", "bonus", "discount", "full bundle", "Family Size" or "Serves 5".
+// The owner's approved wording (2026-11-24). The bundle name, price and organization always come from the
+// campaign's configuration — never hard-coded. Truthful: never "free", "bonus", "discount", "full bundle",
+// "Family Size" or "Serves 5".
 
-export const ADD_ON_OFFER_HEADING = 'Complete your meals';
+/** The eyebrow above the heading (shown in capitals by the card's style). */
+export const ADD_ON_OFFER_EYEBROW = 'Exclusive add-on offer';
+
+export const ADD_ON_OFFER_HEADING = 'Make your meals even more delicious!';
+
+export const ADD_ON_OFFER_LEAD = 'Great meals deserve delicious sides and a little something sweet!';
 
 export function addOnOfferBody(addOnName: string, organizationName: string | null | undefined): string {
     const name = (addOnName ?? '').trim() || 'add-on';
     const org = (organizationName ?? '').trim() || 'this fundraiser';
-    return `Add our ${name} to round out your freezer meals and help ${org} raise even more.`;
+    return `With your meal bundle purchase, you unlock the opportunity to add our ${name} — making mealtime even easier while helping ${org} raise even more.`;
 }
+
+/** The card's primary button. */
+export function addOnOfferCta(price: unknown): string {
+    return `Yes! Add to My Order · ${addOnPriceText(price)}`;
+}
+
+/** The line under the card's actions. */
+export const ADD_ON_OFFER_FOOTER = 'Available exclusively with a meal bundle purchase.';
 
 /**
  * The optional percentage line — only when the page was given a single-tier percent (the tenant's toggle

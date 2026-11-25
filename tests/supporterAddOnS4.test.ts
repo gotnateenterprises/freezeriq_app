@@ -28,7 +28,11 @@ import { mountComponent, findAll, textOf } from './helpers/hookRuntime';
 import { createPrismaMock, jsonRequest, readJson, type PrismaMock } from './helpers/routeHarness';
 import {
     ADD_ON_NO_LONGER_AVAILABLE_MESSAGE,
+    ADD_ON_OFFER_EYEBROW,
+    ADD_ON_OFFER_FOOTER,
     ADD_ON_OFFER_HEADING,
+    ADD_ON_OFFER_LEAD,
+    addOnOfferCta,
     INITIAL_ADD_ON_OFFER,
     addOnOfferBody,
     addOnOfferView,
@@ -140,7 +144,7 @@ const orderHeading = (tree: any) => textOf(findAll(tree, (el) => el.type === 'b'
 const inputByLabel = (tree: any, label: string) => findAll(tree, (el) => el.type === 'input' && el.props['aria-label'] === label)[0];
 const addMeal = (m: M, b: any) => click(m, byLabel(m.tree, `Add ${b.name} to your order`));
 const removeMeal = (m: M, b: any) => click(m, byLabel(m.tree, `Remove ${b.name}`));
-const addOnFromCard = (m: M) => click(m, btn(cardOf(m.tree), /^Add to my order/)[0]);
+const addOnFromCard = (m: M) => click(m, btn(cardOf(m.tree), /^Yes! Add to My Order/)[0]);
 const html = (tree: any) => renderToStaticMarkup(tree).replace(/<!-- -->/g, '');
 const lastBody = () => JSON.parse(fetchMock.mock.calls[fetchMock.mock.calls.length - 1][1].body);
 async function fillContactAndSubmit(m: M) {
@@ -195,10 +199,16 @@ describe('A. the offer state machine (lib/supporterAddOnOffer.ts)', () => {
         expect([view(s, 1), s.notice]).toEqual(['quiet', null]);
     });
 
-    it('A6. never interacted: meals out and back in → the full card may appear again', () => {
+    it('A6. presented automatically ONCE per session: meals out and back in without a choice → the quiet link only', () => {
         const s = run([meals(1), meals(0), meals(1)]);
-        expect(view(s, 1)).toBe('card');
+        expect(s.interaction).toBe('shown');
+        expect(view(s, 1)).toBe('quiet');
         expect(s.notice).toBeNull();
+        // quantity changes while it is first showing do not use up the presentation
+        expect(view(run([meals(1), meals(2), meals(1)]), 1)).toBe('card');
+        // a card re-opened from the quiet link does not come back by itself after the basket empties
+        const r = run([meals(1), { type: 'decline' }, { type: 'reopen' }, meals(0), meals(1)]);
+        expect(view(r, 1)).toBe('quiet');
     });
 
     it('A7. a 409 ADDON_CHANGED hides the offer for the session; add / reopen are ignored after it', () => {
@@ -215,9 +225,16 @@ describe('A. the offer state machine (lib/supporterAddOnOffer.ts)', () => {
         expect(addOnQuantityInOrder(s, { hasAddOn: true, mainLineCount: 1 })).toBe(4);
     });
 
-    it('A9. copy is benefit-led and truthful — the brief\'s wording, no forbidden words', () => {
-        expect(ADD_ON_OFFER_HEADING).toBe('Complete your meals');
-        expect(addOnOfferBody(ADDON_NAME, ORG)).toBe(`Add our Sides & Dessert Bundle to round out your freezer meals and help ${ORG} raise even more.`);
+    it('A9. copy is the owner\'s approved wording (2026-11-24), filled from the campaign; no forbidden words', () => {
+        expect(ADD_ON_OFFER_EYEBROW).toBe('Exclusive add-on offer');
+        expect(ADD_ON_OFFER_HEADING).toBe('Make your meals even more delicious!');
+        expect(ADD_ON_OFFER_LEAD).toBe('Great meals deserve delicious sides and a little something sweet!');
+        expect(addOnOfferBody(ADDON_NAME, ORG)).toBe(`With your meal bundle purchase, you unlock the opportunity to add our Sides & Dessert Bundle — making mealtime even easier while helping ${ORG} raise even more.`);
+        expect(addOnOfferBody('Holiday Pie Box', 'Pine Ridge Band (fixture)')).toBe('With your meal bundle purchase, you unlock the opportunity to add our Holiday Pie Box — making mealtime even easier while helping Pine Ridge Band (fixture) raise even more.');
+        expect(addOnOfferCta(25)).toBe('Yes! Add to My Order · $25.00');
+        expect(addOnOfferCta('31.5')).toBe('Yes! Add to My Order · $31.50');
+        expect(ADD_ON_OFFER_FOOTER).toBe('Available exclusively with a meal bundle purchase.');
+        for (const c of [ADD_ON_OFFER_EYEBROW, ADD_ON_OFFER_HEADING, ADD_ON_OFFER_LEAD, ADD_ON_OFFER_FOOTER, addOnOfferCta(25)]) expect(c).not.toMatch(FORBIDDEN_WORDS);
         expect(addOnSupportLine(ORG, 10)).toBe(`Your purchase also helps ${ORG} earn 10% on this add-on.`);
         expect(addOnSupportLine(ORG, 12.5)).toBe(`Your purchase also helps ${ORG} earn 12.5% on this add-on.`);
         for (const v of [null, undefined, 0, -5, NaN, '10']) expect(addOnSupportLine(ORG, v)).toBeNull();
@@ -392,9 +409,12 @@ describe('C. the inline card in "Your order"', () => {
         expect(card).not.toBeNull();
         expect(card.type).toBe('section');
         const t = textOf(card);
-        expect(t).toContain('Complete your meals');
-        expect(t).toContain(`Add our ${ADDON_NAME} to round out your freezer meals and help ${ORG} raise even more.`);
-        expect(btn(card, /^Add to my order · \$25\.00$/)).toHaveLength(1);
+        expect(t).toContain('Exclusive add-on offer');
+        expect(t).toContain('Make your meals even more delicious!');
+        expect(t).toContain('Great meals deserve delicious sides and a little something sweet!');
+        expect(t).toContain(`With your meal bundle purchase, you unlock the opportunity to add our ${ADDON_NAME} — making mealtime even easier while helping ${ORG} raise even more.`);
+        expect(t).toContain('Available exclusively with a meal bundle purchase.');
+        expect(btn(card, /^Yes! Add to My Order · \$25\.00$/)).toHaveLength(1);
         expect(btn(card, /^See what’s included$/)).toHaveLength(1);
         expect(btn(card, /^No thanks$/)).toHaveLength(1);
         const page = html(m.tree);
@@ -417,7 +437,7 @@ describe('C. the inline card in "Your order"', () => {
         const card = cardOf(m.tree);
         const h3 = findAll(card, (el) => el.type === 'h3')[0];
         expect(card.props['aria-labelledby']).toBe(h3.props.id);
-        expect(textOf(h3)).toBe('Complete your meals');
+        expect(textOf(h3)).toBe('Make your meals even more delicious!');
     });
 
     it('C6. (11, 12) "No thanks" collapses to a quiet link; quantity changes and more meals never re-open it', () => {
@@ -515,9 +535,12 @@ describe('C. the inline card in "Your order"', () => {
         expect(quietOf(d.tree)).not.toBeNull();
     });
 
-    it('C13. a supporter who never touched the offer sees the full card again after re-adding a meal', () => {
+    it('C13. the card is presented automatically only once per session: meal out and back in → the quiet link, which still works', () => {
         const m = mount();
         addMeal(m, bundleS5); removeMeal(m, bundleS5); addMeal(m, bundleS2);
+        expect(cardOf(m.tree)).toBeNull();
+        expect(quietOf(m.tree)).not.toBeNull();
+        click(m, btn(quietOf(m.tree), /Show add-on/)[0]);
         expect(cardOf(m.tree)).not.toBeNull();
     });
 
@@ -536,6 +559,20 @@ describe('C. the inline card in "Your order"', () => {
         expect(textOf(cardOf(m.tree))).not.toMatch(FORBIDDEN_WORDS);
         click(m, btn(cardOf(m.tree), /^No thanks$/)[0]);
         expect(textOf(quietOf(m.tree))).not.toMatch(FORBIDDEN_WORDS);
+    });
+
+    it('C17. the bundle name, price, image and organization come from the campaign — nothing is hard-coded', () => {
+        const other = { ...ADDON, id: 'b-pie', name: 'Holiday Pie Box (fixture)', price: 31.5, image_url: IMG('pie') };
+        const m = mount({ addOn: other, campaign: { organization_name: 'Pine Ridge Band (fixture)' } });
+        addMeal(m, bundleS2);
+        const card = cardOf(m.tree);
+        const t = textOf(card);
+        expect(t).toContain('add our Holiday Pie Box (fixture) — making mealtime even easier while helping Pine Ridge Band (fixture) raise even more.');
+        expect(btn(card, /^Yes! Add to My Order · \$31\.50$/)).toHaveLength(1);
+        expect(findAll(card, (el) => el.type === 'img')[0].props.src).toBe(IMG('pie'));
+        expect(t).not.toMatch(/Sides & Dessert|\$25\.00|Willow Creek/);
+        const src = (R(CARD_PATH) + R('lib/supporterAddOnOffer.ts')).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');   // code, not comments
+        expect(src).not.toMatch(/Sides & Dessert|\$25|Willow Creek|Robotics/);
     });
 
     it('C16. it is inline: no pop-up / dialog opens when the first meal is added', () => {
