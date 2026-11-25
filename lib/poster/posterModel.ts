@@ -5,7 +5,8 @@
  *   - the meals are the bundle's own linked recipes, in the bundle's own order;
  *   - each photo is that recipe's saved image_url (or nothing — never a substitute);
  *   - "Serves 5" / "Serves 2" comes from the bundle's serving tier through the existing strict
- *     authority (bundleSizeLabel), and is omitted when the tier is not recognised;
+ *     authority (bundleSizeLabel), and is omitted when the tier is not recognised — and always for a
+ *     fundraiser add-on, which has no serving size (posterSizeLabel);
  *   - the badge appears only when the bundle's NAME already says Keto / Comfort Food / Family
  *     Friendly / Gluten-Free; no other dietary wording is ever produced;
  *   - the supporting line is the bundle's own description, only when it is short enough to print.
@@ -14,6 +15,7 @@
  */
 
 import { bundleDisplayName, bundleSizeLabel } from '@/lib/bundleSummary';
+import { ADD_ON_BUNDLE_TYPE, normalizeBundleType } from '@/lib/campaignAddOns';
 import type { PosterTheme } from '@/lib/poster/posterThemes';
 
 /** The template has balanced layouts for one to six meals. */
@@ -48,6 +50,8 @@ export interface PosterBundleRow {
     id: string;
     name: string;
     serving_tier: string | null;
+    /** FR-SUPPORTER-ADDON-UPSELL-1: 'addon' for a fundraiser add-on (no serving size on its poster). */
+    bundle_type?: string | null;
     description: string | null;
     contents: { position: number | null; recipe: { id: string; name: string; image_url: string | null } | null }[];
 }
@@ -154,8 +158,18 @@ export interface PosterModelOptions {
     showBadge?: boolean;
 }
 
+/**
+ * The poster's serving-size line. A meal bundle keeps its "Serves 5" / "Serves 2" exactly as before. A
+ * fundraiser add-on has NO serving size: it is stored with the internal 'family' tier only for kitchen
+ * compatibility, and must never be presented as "Serves 5" (FR-SUPPORTER-ADDON-UPSELL-1).
+ */
+export function posterSizeLabel(servingTier: string | null | undefined, bundleType: unknown): PosterModel['sizeLabel'] {
+    if (normalizeBundleType(bundleType) === ADD_ON_BUNDLE_TYPE) return null;
+    return bundleSizeLabel(servingTier) as PosterModel['sizeLabel'];
+}
+
 export function buildPosterModel(bundle: PosterBundleRow, opts: PosterModelOptions): PosterModel {
-    const sizeLabel = bundleSizeLabel(bundle.serving_tier) as PosterModel['sizeLabel'];
+    const sizeLabel = posterSizeLabel(bundle.serving_tier, bundle.bundle_type);
     const recipes = orderedRecipes(bundle.contents);
     const shown = recipes.slice(0, POSTER_MAX_MEALS);
     return {

@@ -194,16 +194,16 @@ export default function BundlePosterPanel(props: BundlePosterPanelProps) {
                 : null;
 
     return (
-        <section className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4" aria-labelledby="bundle-poster-heading">
+        <section className="@container bg-white dark:bg-slate-800 p-4 sm:p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4" aria-labelledby="bundle-poster-heading">
             <div>
-                <h2 id="bundle-poster-heading" className="text-lg font-bold text-slate-900 dark:text-slate-100">Bundle Poster</h2>
+                <h2 id="bundle-poster-heading" className="text-lg font-bold text-slate-900 dark:text-slate-100">Bundle Poster Studio</h2>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
                     A portrait poster made from this bundle&apos;s own recipes and their saved photos
                     {props.sizeLabel ? ` (${props.sizeLabel})` : ''}. It uses the bundle as last saved — save any changes first.
                 </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 @lg:grid-cols-2 gap-4">
                 <div className="space-y-1">
                     <label htmlFor="bundle-poster-theme" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">Season / Theme</label>
                     <select

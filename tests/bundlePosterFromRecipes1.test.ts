@@ -663,9 +663,11 @@ describe('the Bundle Poster panel', () => {
 describe('the bundle page and the files this task must not touch', () => {
     it('the page adds the panel under the editor for saved bundles only', () => {
         const src = read('app/bundles/[id]/page.tsx').replace(/\r\n/g, '\n');
-        expect(src).toContain("if (!poster) return <BundleEditor initialData={bundle} allRecipes={allRecipes} knownTiers={knownTiers} />;");
-        expect(src).toContain('<BundlePosterPanel {...poster} />');
-        expect(src.indexOf('<BundleEditor initialData={bundle} allRecipes={allRecipes} knownTiers={knownTiers} />\n')).toBeLessThan(src.indexOf('<BundlePosterPanel'));
+        // SUPERSEDED PIN (BUNDLE-EDITOR-UX-1, owner-approved 2026-11-25): the panel is no longer stacked under the
+        // editor; the page hands it to the editor's right column, and still only for a saved bundle.
+        expect(src).toContain('posterStudio={poster ? <BundlePosterPanel {...poster} /> : undefined}');
+        expect(src).toContain('let poster: BundlePosterPanelProps | null = null;');
+        expect(src.indexOf("if (id !== 'new') {")).toBeLessThan(src.indexOf('poster = {'));
     });
 
     it('fonts ship with the route and carry their licences', () => {

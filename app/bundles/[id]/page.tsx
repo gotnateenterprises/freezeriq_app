@@ -2,8 +2,7 @@ import BundleEditor from '@/components/BundleEditor';
 import BundlePosterPanel, { type BundlePosterPanelProps } from '@/components/bundles/BundlePosterPanel';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/db';
-import { bundleSizeLabel } from '@/lib/bundleSummary';
-import { posterBadge, posterPhotoHosts, posterPhotoSource, POSTER_MAX_MEALS } from '@/lib/poster/posterModel';
+import { posterBadge, posterPhotoHosts, posterPhotoSource, posterSizeLabel, POSTER_MAX_MEALS } from '@/lib/poster/posterModel';
 import { defaultPosterTheme } from '@/lib/poster/posterThemes';
 
 export const dynamic = 'force-dynamic';
@@ -60,7 +59,8 @@ export default async function BundleDetailPage({ params }: { params: Promise<{ i
         poster = {
             bundleId: rawBundle.id,
             bundleName: rawBundle.name,
-            sizeLabel: bundleSizeLabel(rawBundle.serving_tier),
+            // A fundraiser add-on has no serving size, so its poster never says Serves 5 (posterSizeLabel).
+            sizeLabel: posterSizeLabel(rawBundle.serving_tier, (rawBundle as any).bundle_type),
             mealCount: shown.length,
             photoCount: shown.filter((c) => posterPhotoSource(c.recipe.image_url, hosts).url).length,
             defaultTheme: defaultPosterTheme(rawBundle.name),
@@ -85,13 +85,14 @@ export default async function BundleDetailPage({ params }: { params: Promise<{ i
     });
     const knownTiers = bundles.map(b => b.serving_tier).filter(Boolean) as string[];
 
-    if (!poster) return <BundleEditor initialData={bundle} allRecipes={allRecipes} knownTiers={knownTiers} />;
+    // BUNDLE-EDITOR-UX-1: the Poster Studio sits in the editor's right column ("Create Bundle Poster" scrolls to
+    // it). A new bundle has none yet — the editor shows a save-first card in its place.
     return (
-        <div className="space-y-8 pb-12">
-            <BundleEditor initialData={bundle} allRecipes={allRecipes} knownTiers={knownTiers} />
-            <div className="max-w-4xl mx-auto">
-                <BundlePosterPanel {...poster} />
-            </div>
-        </div>
+        <BundleEditor
+            initialData={bundle}
+            allRecipes={allRecipes}
+            knownTiers={knownTiers}
+            posterStudio={poster ? <BundlePosterPanel {...poster} /> : undefined}
+        />
     );
 }

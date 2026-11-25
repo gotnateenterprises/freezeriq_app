@@ -25,6 +25,7 @@
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import type { PosterBundleRow } from '@/lib/poster/posterModel';
+import { ADD_ON_BUNDLE_TYPE, BUNDLE_TYPE_SELECT, normalizeBundleType } from '@/lib/campaignAddOns';
 import type { PosterThemeId } from '@/lib/poster/posterThemes';
 
 /** A poster lives in one browser tab; half a day is plenty to look at it and decide. */
@@ -40,6 +41,9 @@ export const POSTER_BUNDLE_SELECT = {
     id: true,
     name: true,
     serving_tier: true,
+    // FR-SUPPORTER-ADDON-UPSELL-1: an add-on's poster prints no serving size (posterModel.posterSizeLabel).
+    // Spread (typed {}) so this still compiles against a Prisma client generated before bundle_type existed.
+    ...BUNDLE_TYPE_SELECT,
     description: true,
     contents: {
         orderBy: { position: 'asc' as const },
@@ -83,7 +87,10 @@ export function posterBundleFingerprint(bundle: PosterBundleRow): string {
     const contents = [...bundle.contents]
         .map((c) => [c.position ?? null, c.recipe?.id ?? null, c.recipe?.name ?? null, c.recipe?.image_url ?? null])
         .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-    return sha256Hex(JSON.stringify([bundle.id, bundle.name, bundle.serving_tier ?? null, bundle.description ?? null, contents]));
+    // An add-on's poster differs (no serving size), so its type is part of what a receipt vouches for. Meal
+    // bundles hash exactly as before, so their fingerprints are unchanged.
+    const addOn = normalizeBundleType(bundle.bundle_type) === ADD_ON_BUNDLE_TYPE ? [ADD_ON_BUNDLE_TYPE] : [];
+    return sha256Hex(JSON.stringify([bundle.id, bundle.name, bundle.serving_tier ?? null, bundle.description ?? null, contents, ...addOn]));
 }
 
 /** The signing secret, or null when the deployment has none (then nothing can be published). */

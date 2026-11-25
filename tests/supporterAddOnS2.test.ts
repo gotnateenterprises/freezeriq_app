@@ -1057,7 +1057,10 @@ describe('Bundle Editor · Meal bundle / Fundraiser add-on, enforced on the serv
         expect(ed).toContain("{ value: 'addon', label: 'Fundraiser add-on'");
         expect(ed).toContain("bundle_type: initialData.bundle_type === 'addon' ? 'addon' : 'meal',");
         expect(ed).toContain('{!isNew && !isAddOn && (');
-        expect(ed).toMatch(/\{isAddOn \? \(\s*<p[^>]*>\s*One size — a fundraiser add-on has no Serves 2 version\./);
+        // SUPERSEDED PIN (BUNDLE-EDITOR-UX-1, owner-approved 2026-11-25): the add-on's serving-size block is now
+        // hidden outright (the type card already says "It has one size"); the picker renders for meals only.
+        expect(ed).toMatch(/\{!isAddOn && \(\s*<div>\s*<label className=\{LABEL\}>Serving Size Tier<\/label>/);
+        expect(ed).toContain('It has one size and is never');
         expect(ed).toMatch(/\{isAddOn \? \(\s*<p[^>]*>\s*Not on the storefront/);
         expect(ed).not.toMatch(/serving_tier', ['"](none|zero|0)['"]/);
         const list = R('app/bundles/page.tsx');
