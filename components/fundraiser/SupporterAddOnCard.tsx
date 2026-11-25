@@ -75,7 +75,7 @@ export function SupporterAddOnCard({
                     className="fr-addon-quiet"
                     onClick={onReopen}
                     aria-expanded={false}
-                    style={{ background: 'none', border: 0, padding: '.6rem 0', minHeight: 44, color: primaryColor, fontSize: '.74rem', fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', textDecoration: 'underline', textUnderlineOffset: 3, overflowWrap: 'anywhere' }}
+                    style={{ background: 'none', border: 0, padding: '.6rem 0', minHeight: 44, color: '#7a6258', fontSize: '.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', textDecoration: 'underline', textDecorationColor: '#d8c3b5', textUnderlineOffset: 3, overflowWrap: 'anywhere' }}
                 >
                     + Show add-on: {addOn.name} · {price}
                 </button>

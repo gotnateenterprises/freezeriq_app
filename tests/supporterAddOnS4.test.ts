@@ -425,7 +425,12 @@ describe('C. the inline card in "Your order"', () => {
         addMeal(m, bundleS5);
         click(m, btn(cardOf(m.tree), /^No thanks$/)[0]);
         expect(cardOf(m.tree)).toBeNull();
-        expect(textOf(btn(quietOf(m.tree), /Show add-on/)[0])).toBe(`+ Show add-on: ${ADDON_NAME} · $25.00`);
+        const quietLink = btn(quietOf(m.tree), /Show add-on/)[0];
+        expect(textOf(quietLink)).toBe(`+ Show add-on: ${ADDON_NAME} · $25.00`);
+        // quiet: muted text, never the page's accent colour or a filled button
+        expect(quietLink.props.style.color).not.toBe(PRIMARY);
+        expect(quietLink.props.style.background).toBe('none');
+        expect(quietLink.props.style.fontWeight).toBeLessThan(700);
         click(m, byLabel(m.tree, `Increase ${S5_NAME} quantity`));
         click(m, byLabel(m.tree, `Decrease ${S5_NAME} quantity`));
         addMeal(m, bundleS2);
