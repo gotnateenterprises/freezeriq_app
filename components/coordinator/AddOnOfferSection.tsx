@@ -43,16 +43,16 @@ function money(n: number): string {
 
 export function addOnOfferHeading(offer: Pick<CoordinatorAddOnOffer, 'mode' | 'earnsShare'>): string {
     if (offer.mode === 'included') return 'An optional add-on is included in your fundraiser';
-    return offer.earnsShare ? 'Help your organization earn even more!' : 'An optional add-on for your supporters';
+    return offer.earnsShare ? 'Help your organization earn even more!' : 'A tasty bonus for your supporters';
 }
 
 export function addOnOfferIntro(offer: Pick<CoordinatorAddOnOffer, 'mode' | 'earnsShare' | 'name'>): string {
     if (offer.mode === 'included') {
-        return `Your organizer has included ${offer.name}. Supporters can add it to any order that includes a meal bundle.`;
+        return `Your organizer has included ${offer.name}, a fun extra your supporters can add to their freezer meal order.`;
     }
     return offer.earnsShare
-        ? `Give your supporters the option to complete their freezer meals with ${offer.name} while raising additional money for your organization.`
-        : `Give your supporters the option to complete their freezer meals with ${offer.name}.`;
+        ? `Offer our ${offer.name}, a fun extra your supporters can add to their freezer meal order. It gives them a little something more to enjoy, and every one sold raises even more for your organization.`
+        : `Offer our ${offer.name}, a fun extra your supporters can add to their freezer meal order. It gives them a little something more to enjoy.`;
 }
 
 export function AddOnOfferSection({
@@ -124,11 +124,11 @@ export function AddOnOfferSection({
                         )}
                     </div>
                     <ul className="space-y-0.5 text-[11px] font-medium text-slate-500">
-                        <li>Supporters can add it only to an order that includes a meal bundle.</li>
-                        <li>
+                        <li>Supporters can add it to any order that includes a meal bundle.</li>
+                        <li data-addon-goal-note="true">
                             {offer.earnsShare
-                                ? 'Add-on sales raise additional money for your organization but don’t count toward your meal bundle goal.'
-                                : 'Add-on sales don’t count toward your meal bundle goal.'}
+                                ? 'Add-ons earn money for your organization, but they won’t show up in your Bundles Sold count or on your fundraiser scoreboard.'
+                                : 'Add-ons won’t show up in your Bundles Sold count or on your fundraiser scoreboard.'}
                         </li>
                     </ul>
                 </div>

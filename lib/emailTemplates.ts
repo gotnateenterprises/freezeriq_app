@@ -293,10 +293,10 @@ export const coordinatorSetupTemplate = (
     const choosing = addOn?.mode === 'coordinator_choice';
     const addOnName = addOn ? escapeHtml(addOn.name) : '';
     const decideStep = choosing
-        ? `\n            <li><strong>Decide on an optional fundraising opportunity</strong> — You can also choose to offer our <strong>${addOnName}</strong>, giving supporters the opportunity to complete their meals${addOn!.earnsShare ? ' while helping your organization earn even more' : ''}. It's completely optional, and add-on sales do not count toward your regular meal bundle goal. You'll be able to review the offer, pricing and organization earnings before making your decision.</li>`
+        ? `\n            <li><strong>Add a tasty bonus to your fundraiser (optional)</strong> — You can also choose to offer our <strong>${addOnName}</strong>, a fun extra your supporters can add to their freezer meal order. It gives them a little something more to enjoy${addOn!.earnsShare ? ', and every one sold helps your organization earn even more' : ''}. You'll see the full offer${addOn!.earnsShare ? ', the price and your organization\'s earnings' : ' and the price'} before you decide.</li>`
         : '';
     const includedNote = addOn && !choosing
-        ? `\n\n        <p><strong>Also on your fundraiser: ${addOnName}.</strong> Your supporters will be able to add it to any order that includes a meal bundle${addOn.earnsShare ? ', helping your organization earn even more' : ''}. Add-on sales do not count toward your regular meal bundle goal. You'll see the price${addOn.earnsShare ? ' and what your organization earns' : ''} while you set up.</p>`
+        ? `\n\n        <p><strong>Also on your fundraiser: a tasty bonus.</strong> Your supporters can add our <strong>${addOnName}</strong> to their freezer meal order, a fun extra that gives them a little something more to enjoy${addOn.earnsShare ? ', and every one sold helps your organization earn even more' : ''}. You'll see the price${addOn.earnsShare ? ' and your organization\'s earnings' : ''} while you set up.</p>`
         : '';
     return {
     // FR-ACCEPTANCE-2A.1: the organization name leads.
