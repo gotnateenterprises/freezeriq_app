@@ -566,10 +566,16 @@ describe('F · the setup invitation', () => {
         // Owner copy revision 3 (2026-11-27): the closing paragraph of every invitation.
         const OLD_CLOSING = '<p>Once that is done you will have your coordinator panel, where you can share the fundraiser and watch orders arrive as they come in.</p>';
         const NEW_CLOSING = '<p>Once that is done, you will have your Live Coordinator Panel, where you can immediately begin sharing your fundraiser and watch the orders arrive as they come in.</p>';
+        // Owner copy revision 4 (2026-11-27): the opening line of every invitation.
+        const OLD_OPENING = '<p>Good news — the fundraiser for <strong>Maple Grove PTO</strong> is set up on our end and ready for you to finish.</p>';
+        const NEW_OPENING = '<p>Good news — your fundraiser for <strong>Maple Grove PTO</strong> is set up on our end and ready for you to finish!</p>';
         expect(before.html).toContain(OLD_CLOSING);
-        expect(now.html).toBe(before.html.replace('<p>Hi Jordan Fixture!</p>', '<p>Hi Jordan!</p>').replace(OLD_CLOSING, NEW_CLOSING));
+        expect(before.html).toContain(OLD_OPENING);
+        expect(now.html).toBe(before.html.replace('<p>Hi Jordan Fixture!</p>', '<p>Hi Jordan!</p>').replace(OLD_CLOSING, NEW_CLOSING).replace(OLD_OPENING, NEW_OPENING));
         for (const addOn of [{ name: 'Pie', mode: 'coordinator_choice' as const, earnsShare: true }, { name: 'Pie', mode: 'included' as const, earnsShare: true }]) {
-            expect(coordinatorSetupTemplate('Jordan', 'Maple Grove PTO', URL, TENANT, addOn).html).toContain(NEW_CLOSING);
+            const html = coordinatorSetupTemplate('Jordan', 'Maple Grove PTO', URL, TENANT, addOn).html;
+            expect(html).toContain(NEW_CLOSING);
+            expect(html).toContain(NEW_OPENING);
         }
         expect(coordinatorSetupTemplate('', 'Maple Grove PTO', URL, TENANT, null).html).toContain('<p>Hi there!</p>');
         expect(coordinatorSetupTemplate('   ', 'Maple Grove PTO', URL, TENANT).html).toContain('<p>Hi there!</p>');

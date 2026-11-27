@@ -311,7 +311,7 @@ export const coordinatorSetupTemplate = (
     subject: safeSubject(`${orgName} fundraiser is ready to set up`),
     html: `
         <p>Hi ${escapeHtml(greetingName)}!</p>
-        <p>Good news — the fundraiser for <strong>${escapeHtml(orgName)}</strong> is set up on our end and ready for you to finish.</p>
+        <p>Good news — your fundraiser for <strong>${escapeHtml(orgName)}</strong> is set up on our end and ready for you to finish!</p>
 
         <p>There are ${choosing ? 'three things to do, and they only take a couple minutes' : 'two things to do, and they take a few minutes'}:</p>
         <ol>
