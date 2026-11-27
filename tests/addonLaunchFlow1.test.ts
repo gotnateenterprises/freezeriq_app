@@ -566,7 +566,7 @@ describe('F · the setup invitation', () => {
         // Owner copy revision 3 (2026-11-27): the closing paragraph of every invitation.
         const OLD_CLOSING = '<p>Once that is done you will have your coordinator panel, where you can share the fundraiser and watch orders arrive as they come in.</p>';
         // Owner copy revision 5 (2026-11-27): "gain access to".
-        const NEW_CLOSING = '<p>Once that is done, you will gain access to your Live Coordinator Panel, where you can immediately begin sharing your fundraiser and watch the orders arrive as they come in.</p>';
+        const NEW_CLOSING = '<p>Once that is done, you will gain instant access to your Live Coordinator Panel, where you can immediately begin sharing your fundraiser and watch the orders arrive as they come in.</p>';
         // Owner copy revision 4 (2026-11-27): the opening line of every invitation.
         const OLD_OPENING = '<p>Good news — the fundraiser for <strong>Maple Grove PTO</strong> is set up on our end and ready for you to finish.</p>';
         const NEW_OPENING = '<p>Good news — your fundraiser for <strong>Maple Grove PTO</strong> is set up on our end and ready for you to finish!</p>';
