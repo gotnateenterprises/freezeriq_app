@@ -293,7 +293,7 @@ export const coordinatorSetupTemplate = (
     const choosing = addOn?.mode === 'coordinator_choice';
     const addOnName = addOn ? escapeHtml(addOn.name) : '';
     const decideStep = choosing
-        ? `\n            <li><strong>Add a tasty bonus to your fundraiser (optional)</strong> — You can also choose to offer our <strong>${addOnName}</strong>, a fun extra your supporters can add to their freezer meal order. It gives them a little something more to enjoy${addOn!.earnsShare ? ', and every one sold helps your organization earn even more' : ''}. You'll see the full offer${addOn!.earnsShare ? ', the price and your organization\'s earnings' : ' and the price'} before you decide.</li>`
+        ? `\n            <li><strong>*NEW* Add an optional ${addOnName} menu</strong> — a fun extra your supporters can add to their freezer meal order. It gives them a little something more to enjoy with their meals${addOn!.earnsShare ? ', and every one sold helps your organization earn even more' : ''}. See the full offer${addOn!.earnsShare ? ', price and organization earnings' : ' and price'} before you decide.</li>`
         : '';
     const includedNote = addOn && !choosing
         ? `\n\n        <p><strong>Also on your fundraiser: a tasty bonus.</strong> Your supporters can add our <strong>${addOnName}</strong> to their freezer meal order, a fun extra that gives them a little something more to enjoy${addOn.earnsShare ? ', and every one sold helps your organization earn even more' : ''}. You'll see the price${addOn.earnsShare ? ' and your organization\'s earnings' : ''} while you set up.</p>`
@@ -313,7 +313,7 @@ export const coordinatorSetupTemplate = (
         <p>Hi ${escapeHtml(greetingName)}!</p>
         <p>Good news — the fundraiser for <strong>${escapeHtml(orgName)}</strong> is set up on our end and ready for you to finish.</p>
 
-        <p>There are ${choosing ? 'three' : 'two'} things to do, and they take a few minutes:</p>
+        <p>There are ${choosing ? 'three things to do, and they only take a couple minutes' : 'two things to do, and they take a few minutes'}:</p>
         <ol>
             <li><strong>Choose your meal bundles</strong> — pick the options your families will be able to order.</li>${decideStep}
             <li><strong>Confirm the remaining details</strong> — pickup time, location, and how your supporters will pay.</li>

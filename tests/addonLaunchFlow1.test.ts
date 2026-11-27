@@ -553,7 +553,7 @@ describe('F · the setup invitation', () => {
         return mod.exports.coordinatorSetupTemplate;
     };
     const addOnPart = (html: string) => {
-        const a = html.indexOf('Add a tasty bonus');
+        const a = html.indexOf('*NEW* Add an optional');
         const b = html.indexOf('Also on your fundraiser');
         const at = a >= 0 ? a : b;
         return at < 0 ? '' : html.slice(at, html.indexOf('</li>', at) >= 0 && a >= 0 ? html.indexOf('</li>', at) : html.indexOf('</p>', at));
@@ -570,19 +570,20 @@ describe('F · the setup invitation', () => {
 
     it('F2. coordinator decides: three steps, the approved wording with the real name, no figures', () => {
         const { html } = coordinatorSetupTemplate('Jordan Fixture', 'Maple Grove PTO', URL, TENANT, { name: 'Sides & Dessert Bundle', mode: 'coordinator_choice', earnsShare: true });
-        expect(html).toContain('<p>There are three things to do, and they take a few minutes:</p>');
-        // Owner copy revision 2026-11-27: upbeat; the goal / "completely optional" explanation lives on the setup screen.
-        expect(html).toContain('<li><strong>Add a tasty bonus to your fundraiser (optional)</strong> — You can also choose to offer our <strong>Sides &amp; Dessert Bundle</strong>, a fun extra your supporters can add to their freezer meal order. It gives them a little something more to enjoy, and every one sold helps your organization earn even more. You\'ll see the full offer, the price and your organization\'s earnings before you decide.</li>');
+        // Owner copy revisions 2026-11-27: upbeat; "*NEW*" step; the goal / "completely optional" explanation lives on
+        // the setup screen.
+        expect(html).toContain('<p>There are three things to do, and they only take a couple minutes:</p>');
+        expect(html).toContain('<li><strong>*NEW* Add an optional Sides &amp; Dessert Bundle menu</strong> — a fun extra your supporters can add to their freezer meal order. It gives them a little something more to enjoy with their meals, and every one sold helps your organization earn even more. See the full offer, price and organization earnings before you decide.</li>');
         const li = html.indexOf('<li><strong>Choose your meal bundles');
-        expect(li).toBeLessThan(html.indexOf('Add a tasty bonus'));
-        expect(html.indexOf('Add a tasty bonus')).toBeLessThan(html.indexOf('<li><strong>Confirm the remaining details'));
+        expect(li).toBeLessThan(html.indexOf('*NEW* Add an optional'));
+        expect(html.indexOf('*NEW* Add an optional')).toBeLessThan(html.indexOf('<li><strong>Confirm the remaining details'));
         expect(addOnPart(html)).not.toMatch(/\$|%|\d/);
         expect(html).not.toMatch(/meal bundle goal|completely optional|complete their meals/);
     });
 
     it('F3. 0% schedule: no claim that the organization earns more', () => {
         const choice = coordinatorSetupTemplate('Jordan', 'Maple Grove PTO', URL, TENANT, { name: 'Pie Add-On', mode: 'coordinator_choice', earnsShare: false }).html;
-        expect(choice).toContain('a fun extra your supporters can add to their freezer meal order. It gives them a little something more to enjoy. You\'ll see the full offer and the price before you decide.</li>');
+        expect(choice).toContain('— a fun extra your supporters can add to their freezer meal order. It gives them a little something more to enjoy with their meals. See the full offer and price before you decide.</li>');
         expect(choice).not.toMatch(/earn even more|earnings/);
         const inc = coordinatorSetupTemplate('Jordan', 'Maple Grove PTO', URL, TENANT, { name: 'Pie Add-On', mode: 'included', earnsShare: false }).html;
         expect(inc).toContain('a fun extra that gives them a little something more to enjoy. You\'ll see the price while you set up.</p>');
