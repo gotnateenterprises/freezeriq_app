@@ -319,7 +319,7 @@ export const coordinatorSetupTemplate = (
             <li><strong>Confirm the remaining details</strong> — pickup time, location, and how your supporters will pay.</li>
         </ol>${includedNote}
 
-        <p>Once that is done you will have your coordinator panel, where you can share the fundraiser and watch orders arrive as they come in.</p>
+        <p>Once that is done, you will have your Live Coordinator Panel, where you can immediately begin sharing your fundraiser and watch the orders arrive as they come in.</p>
 
         <p style="margin: 28px 0;">
             <a href="${escapeHtml(setupUrl)}" style="background:#4f46e5;color:#ffffff;padding:14px 24px;border-radius:10px;font-weight:bold;text-decoration:none;display:inline-block;">Select Bundles &amp; Set Up Fundraiser</a>

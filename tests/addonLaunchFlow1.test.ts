@@ -559,11 +559,18 @@ describe('F · the setup invitation', () => {
         return at < 0 ? '' : html.slice(at, html.indexOf('</li>', at) >= 0 && a >= 0 ? html.indexOf('</li>', at) : html.indexOf('</p>', at));
     };
 
-    it('F1. no add-on: identical to the base invitation except the greeting now uses the FIRST name (D12)', () => {
+    it('F1. no add-on: identical to the base invitation except the FIRST-name greeting (D12) and the owner\'s closing line', () => {
         const before = baseline()('Jordan Fixture', 'Maple Grove PTO', URL, TENANT);
         const now = coordinatorSetupTemplate('Jordan Fixture', 'Maple Grove PTO', URL, TENANT);
         expect(now.subject).toBe(before.subject);
-        expect(now.html).toBe(before.html.replace('<p>Hi Jordan Fixture!</p>', '<p>Hi Jordan!</p>'));
+        // Owner copy revision 3 (2026-11-27): the closing paragraph of every invitation.
+        const OLD_CLOSING = '<p>Once that is done you will have your coordinator panel, where you can share the fundraiser and watch orders arrive as they come in.</p>';
+        const NEW_CLOSING = '<p>Once that is done, you will have your Live Coordinator Panel, where you can immediately begin sharing your fundraiser and watch the orders arrive as they come in.</p>';
+        expect(before.html).toContain(OLD_CLOSING);
+        expect(now.html).toBe(before.html.replace('<p>Hi Jordan Fixture!</p>', '<p>Hi Jordan!</p>').replace(OLD_CLOSING, NEW_CLOSING));
+        for (const addOn of [{ name: 'Pie', mode: 'coordinator_choice' as const, earnsShare: true }, { name: 'Pie', mode: 'included' as const, earnsShare: true }]) {
+            expect(coordinatorSetupTemplate('Jordan', 'Maple Grove PTO', URL, TENANT, addOn).html).toContain(NEW_CLOSING);
+        }
         expect(coordinatorSetupTemplate('', 'Maple Grove PTO', URL, TENANT, null).html).toContain('<p>Hi there!</p>');
         expect(coordinatorSetupTemplate('   ', 'Maple Grove PTO', URL, TENANT).html).toContain('<p>Hi there!</p>');
     });
